@@ -1,7 +1,7 @@
 //! Theme: colour tokens, scheme resolution, GTK CSS, and the thin widgets built on them.
 //!
 //! The pure parts (`tokens`, `schemes`, `baseline`, `resolve`, `css`, `dark`, `prefs`, `app_theme`,
-//! `style`, `icons`, `empty_state`, `loading`, `cover`) have unit tests and no GTK calls. `apply`,
+//! `style`, `icons`) have unit tests and no GTK calls. `apply`,
 //! `components` and the widget functions of the other modules are the GTK layer.
 //!
 //! `startup` is the single call `main.rs` makes before the first window is presented (T-49a-058).
@@ -30,11 +30,8 @@ pub mod app_theme;
 pub mod apply;
 pub mod baseline;
 pub mod components;
-pub mod cover;
 pub mod dark;
-pub mod empty_state;
 pub mod icons;
-pub mod loading;
 pub mod motion;
 pub mod prefs;
 pub mod resolve;

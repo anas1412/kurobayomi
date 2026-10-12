@@ -32,7 +32,7 @@ use super::route::search_listing;
 use crate::widgets::view_options::{Item as MenuItem, Pick, Section, ViewOptions};
 use super::sources::LOCAL_SOURCE_ID;
 use super::sources_page::{SourcesNav, SourcesPage};
-use super::view::{CoverLoader, list_row, source_row, spinner_row};
+use super::view::{CoverLoader, list_row, source_row};
 use crate::widgets::context_menu::{self, Item};
 
 /// `sources`: the installed-sources tab of one kind.
@@ -82,10 +82,7 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
     root.append(&sort);
 
     if let Some(message) = &snapshot.error {
-        let retry = gtk::Button::with_label(&tr(MsgKey::action_retry));
-        let on_retry = Rc::clone(&nav.retry);
-        retry.connect_clicked(move |_| on_retry());
-        root.append(&super::look::empty_state("dialog-warning-symbolic", message, Some(&retry)).0);
+        root.append(&super::look::error_state(message, Some(Rc::clone(&nav.retry))));
         return root;
     }
     if snapshot.sources.is_empty() {
@@ -208,11 +205,7 @@ fn stub_page(listing: &ListingDeps, on_back: Rc<dyn Fn()>) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&stub_header(&listing.source_name, on_back));
     let label = stub_source_label(&listing.source_name, &listing.source_lang, listing.source_id);
-    let message = gtk::Label::new(Some(&trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&label))])));
-    message.set_wrap(true);
-    message.set_vexpand(true);
-    message.set_valign(gtk::Align::Center);
-    root.append(&message);
+    root.append(&super::look::empty_state("dialog-warning-symbolic", &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&label))]), None).0);
     root
 }
 
@@ -246,9 +239,9 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
 
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
-    search.set_margin_start(12);
-    search.set_margin_end(12);
-    search.set_margin_top(6);
+    search.set_margin_start(16);
+    search.set_margin_end(16);
+    search.set_margin_top(8);
     let search_bar = gtk::Revealer::new();
     search_bar.set_child(Some(&search));
     let search_active = Rc::new(Cell::new(false));
@@ -310,8 +303,8 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
 
     // the shared top row of a page (`ui::pill_row`), as the library's categories and the download queue's actions
     let chips = crate::ui::pill_row();
-    chips.set_margin_start(12);
-    chips.set_margin_end(12);
+    chips.set_margin_start(16);
+    chips.set_margin_end(16);
     let mut labels = vec![tr(MsgKey::popular)];
     if supports_latest {
         labels.push(tr(MsgKey::latest));
@@ -343,7 +336,7 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
     let mut filter_chip = None;
     if filters.has_filters() {
         // the filter sheet is the popover of this button (no separate window)
-        let chip = gtk::MenuButton::builder().label(tr(MsgKey::action_filter)).build();
+        let chip = crate::ui::quiet_menu(gtk::MenuButton::builder().label(tr(MsgKey::action_filter)).build());
         let (target, entry, closer) = (listing_view.clone(), search.clone(), chip.downgrade());
         let sheet = FilterSheetView::new(
             Rc::clone(&filters),
@@ -522,9 +515,9 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     entry.set_placeholder_text(Some(&tr(MsgKey::action_global_search_hint)));
     entry.set_hexpand(true);
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    top.set_margin_start(12);
-    top.set_margin_end(12);
-    top.set_margin_top(6);
+    top.set_margin_start(16);
+    top.set_margin_end(16);
+    top.set_margin_top(8);
     top.append(&entry);
     body.append(&top);
     // Escape clears the typed query first; with none, it goes on and leaves the page
@@ -535,8 +528,8 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     let progress = gtk::ProgressBar::new();
     progress.set_visible(false);
     let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).valign(gtk::Align::Start).build();
-    column.set_margin_start(12);
-    column.set_margin_end(12);
+    column.set_margin_start(16);
+    column.set_margin_end(16);
     let view = Rc::new(SearchView { column, progress, chips: Cell::new(nav.chips), nav, last: RefCell::new(None), typed: Rc::default() });
     let search = Rc::clone(&view);
     entry.connect_activate(move |entry| (search.nav.search)(entry.text().as_str()));
@@ -649,7 +642,13 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>
     header.append(&go);
     section.append(&header);
     match &row.state {
-        SearchState::Loading => section.append(&spinner_row()),
+        SearchState::Loading => {
+            let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+            spinner.set_halign(gtk::Align::Center);
+            spinner.set_margin_top(16);
+            spinner.set_margin_bottom(16);
+            section.append(&spinner);
+        }
         SearchState::Error(message) => {
             let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             line.append(&gtk::Image::from_icon_name("dialog-error-symbolic"));

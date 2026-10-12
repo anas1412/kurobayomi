@@ -2,19 +2,6 @@
 
 use kuro_platform::links::URL_HELP_UPCOMING;
 
-/// Row height of an upcoming entry, in pixels.
-pub const ROW_HEIGHT: i32 = 96;
-/// Vertical padding of a row, so the cover is the row height less twice this.
-pub const ROW_PADDING: i32 = 8;
-/// Width over height of a book cover (`ItemCover.Book`).
-const BOOK_RATIO: f64 = 2.0 / 3.0;
-
-/// The size of the cover of a row: the full height inside the padding, at the book ratio.
-pub fn cover_size() -> (i32, i32) {
-    let height = ROW_HEIGHT - 2 * ROW_PADDING;
-    ((f64::from(height) * BOOK_RATIO).round() as i32, height)
-}
-
 /// The content width from which the calendar and the list sit side by side.
 pub const TWO_PANEL_MIN_WIDTH: i32 = 720;
 /// The calendar grid stops growing above this width, when it is in the medium band.
@@ -74,16 +61,8 @@ mod tests {
     }
 
     #[test]
-    fn rows_are_96_px_and_help_points_at_the_upcoming_guide() {
-        assert_eq!(ROW_HEIGHT, 96);
+    fn help_points_at_the_upcoming_guide() {
         assert_eq!(help_url(), "https://aniyomi.org/docs/faq/updates/upcoming");
-    }
-
-    #[test]
-    fn the_cover_is_a_book_inside_the_row_padding() {
-        let (width, height) = cover_size();
-        assert_eq!(height, 80);
-        assert_eq!(width, 53, "two thirds of the height, rounded");
     }
 
     #[test]

@@ -39,11 +39,7 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
     bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
     bar.set_title_widget(Some(&gtk::Label::builder().label(&deps.source_name).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).build()));
 
-    let back = gtk::Button::from_icon_name("go-previous-symbolic");
-    back.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
-    let on_back = Rc::clone(&deps.on_back);
-    back.connect_clicked(move |_| on_back());
-    bar.pack_start(&back);
+    bar.pack_start(&back_button(Rc::clone(&deps.on_back)));
 
     let overflow = overflow_menu(&deps);
     bar.pack_end(&overflow);
@@ -67,12 +63,16 @@ pub fn stub_header(title: &str, on_back: Rc<dyn Fn()>) -> gtk::HeaderBar {
     let bar = crate::ui::header_bar();
     bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
     bar.set_title_widget(Some(&gtk::Label::builder().label(title).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).build()));
-    let back = gtk::Button::from_icon_name("go-previous-symbolic");
-    back.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
-    back.connect_clicked(move |_| on_back());
-    bar.pack_start(&back);
+    bar.pack_start(&back_button(on_back));
     crate::ui::no_sticky_focus(&bar);
     bar
+}
+
+/// The Back button of both headers: the translated tooltip, which is also its accessible name.
+fn back_button(on_back: Rc<dyn Fn()>) -> gtk::Button {
+    let back = crate::ui::icon_button("go-previous-symbolic", &tr(MsgKey::action_webview_back));
+    back.connect_clicked(move |_| on_back());
+    back
 }
 
 /// The display-mode button and its popover of two radio items. Choosing one stores it, updates the icon and calls
@@ -114,23 +114,15 @@ fn display_menu(deps: &HeaderDeps) -> (gtk::MenuButton, Vec<gtk::CheckButton>) {
 }
 
 fn overflow_menu(deps: &HeaderDeps) -> gtk::MenuButton {
-    let button = gtk::MenuButton::new();
-    button.set_icon_name("view-more-symbolic");
+    let items = overflow_items(deps.is_local, deps.configurable);
+    let labels: Vec<String> = items.iter().map(|item| overflow_label(*item)).collect();
+    let on_overflow = Rc::clone(&deps.on_overflow);
+    let button = crate::ui::menu_button("view-more-symbolic", &labels, move |label| {
+        if let Some(item) = items.iter().find(|item| overflow_label(**item) == label) {
+            on_overflow(*item);
+        }
+    });
     button.set_tooltip_text(Some(&tr(MsgKey::action_menu_overflow_description)));
-    let popover = gtk::Popover::new();
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    for item in overflow_items(deps.is_local, deps.configurable) {
-        let entry = gtk::Button::with_label(&overflow_label(item));
-        entry.add_css_class("flat");
-        let (on_overflow, popover) = (Rc::clone(&deps.on_overflow), popover.clone());
-        entry.connect_clicked(move |_| {
-            popover.popdown();
-            on_overflow(item);
-        });
-        column.append(&entry);
-    }
-    popover.set_child(Some(&column));
-    button.set_popover(Some(&popover));
     button
 }
 

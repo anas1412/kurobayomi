@@ -10,7 +10,7 @@ use kuro_domain::library::page::LibraryItem;
 use kuro_images::art::ArtRef;
 use kuro_prefs::library::LibraryDisplayMode;
 
-use crate::library::layout::{self, CardModel, CoverKind, TitlePlace, SPACE_XS, SPACE_S};
+use crate::library::layout::{self, CardModel, TitlePlace, SPACE_XS, SPACE_S};
 
 /// The widgets of one card. `continue_button` is present when the card shows one.
 pub struct Card {
@@ -26,33 +26,9 @@ pub struct Extras<'a> {
     pub season_parent: bool,
 }
 
-/// The cover: the stored image when it can be drawn, else the initials tile. Always `width` x `height`.
+/// The cover of a card: the shared cover (`look::cover`), `width` x `height`.
 fn cover(model: &CardModel, art: Option<&ArtRef>, width: i32, height: i32) -> gtk::Widget {
-    let remote_loader = crate::entry_core::cover_view::service().is_some();
-    match layout::cover_kind(art.and_then(|a| a.url.as_deref()), remote_loader) {
-        CoverKind::File(url) => crate::local_flow::cover::cover_widget(Some(&url), width, height).upcast(),
-        CoverKind::Remote(_) => {
-            let view = crate::entry_core::cover_view::CoverView::new(width, height);
-            if let Some(art) = art {
-                view.load(art.clone());
-            }
-            view.frame.upcast()
-        }
-        CoverKind::Initials => initials_tile(&model.initials, width, height),
-    }
-}
-
-/// The placeholder: the title's initials on a tile in the theme's selected colour.
-pub fn initials_tile(text: &str, width: i32, height: i32) -> gtk::Widget {
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("kb-cover-initials-text");
-    label.set_vexpand(true);
-    label.set_valign(Align::Center);
-    let tile = gtk::Box::new(O::Vertical, 0);
-    tile.add_css_class("kb-cover-initials");
-    tile.set_size_request(width, height);
-    tile.append(&label);
-    tile.upcast()
+    crate::browse::look::cover(&model.title, art, width, height)
 }
 
 fn badge(text: &str, tooltip: Option<&str>, accent: bool) -> gtk::Label {
@@ -147,7 +123,6 @@ pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_
     let root = gtk::Box::new(O::Vertical, SPACE_S);
     root.set_size_request(width, -1);
     root.set_halign(Align::Center);
-    root.add_css_class("kb-card");
     if selected {
         root.add_css_class("kb-card-selected");
     }
@@ -173,7 +148,6 @@ pub fn build_list(item: &LibraryItem, selected: bool, show_continue: bool, row_h
     root.set_size_request(-1, row_height.round() as i32);
     root.set_margin_start(layout::SPACE_L);
     root.set_margin_end(layout::SPACE_L);
-    root.add_css_class("kb-card");
     if selected {
         root.add_css_class("kb-card-selected");
         // a selected row of the list view also takes the selected-row tint (T-49b-029)

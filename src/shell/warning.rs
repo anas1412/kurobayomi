@@ -1,11 +1,11 @@
-//! The warning banner (Kotlin `WarningBanner`, T-36a-069): error colour, 16 px padding, centred body text. The WebView
+//! The warning banner (Kotlin `WarningBanner`, T-36a-069): the shared banner in the error tint, centred body text. The WebView
 //! Cloudflare notice (T-36a-050) uses it.
 
 /// The theme's `bodyMedium` text style class, applied to the banner text.
 pub const BODY_MEDIUM: &str = "kuro-body-medium";
 
-/// The CSS class of the banner. Its colours and 16 px padding are in `theme/style.css`.
-pub const CLASS: &str = "kuro-warning-banner";
+/// The CSS classes of the banner: the shared banner and its error tint, in `theme/style.css`.
+pub const CLASS: [&str; 2] = ["kb-banner", "kb-banner-error"];
 
 /// The banner for `text`. The text wraps at the width of its parent, so a narrow window never scrolls sideways.
 pub fn widget(text: &str) -> gtk::Label {
@@ -14,7 +14,7 @@ pub fn widget(text: &str) -> gtk::Label {
         .wrap(true)
         .justify(gtk::Justification::Center)
         .hexpand(true)
-        .css_classes([CLASS, BODY_MEDIUM])
+        .css_classes([CLASS[0], CLASS[1], BODY_MEDIUM])
         .build()
 }
 

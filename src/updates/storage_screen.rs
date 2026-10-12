@@ -5,16 +5,16 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
+use std::time::Duration;
 
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, DrawingArea, DropDown, Label, ListBox, Orientation as O, Overlay, Picture, StringList};
+use gtk::{Align, Box as GBox, DrawingArea, DropDown, Label, ListBox, Orientation as O, Overlay, StringList};
 use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
 use crate::updates::copy;
 use crate::updates::history_dialog::{ConfirmCopy, show as show_confirm};
 use crate::updates::history::NOT_FOUND_TOAST_MS;
-use crate::updates::screen_toast::ScreenToast;
 use crate::updates::storage::{self, CategoryOption, DeleteOutcome, PageState, Selection, StorageRow, StorageSnapshot};
 
 /// Stroke of the donut arcs, in pixels.
@@ -48,7 +48,6 @@ pub struct StorageScreen {
     list: ListBox,
     scanning: GBox,
     helper: Label,
-    toast: ScreenToast,
     /// Answers whether the entry's source is installed and deletes its downloads when it is (the download manager is
     /// the caller's). Set by the caller; without it a confirmed delete reports the missing source.
     on_delete: RefCell<Option<Box<dyn Fn(&StorageRow) -> DeleteOutcome>>>,
@@ -91,7 +90,7 @@ impl StorageScreen {
 
             let scanning = GBox::new(O::Horizontal, 8);
             scanning.set_halign(Align::Center);
-            scanning.append(&gtk::Spinner::builder().spinning(true).build());
+            scanning.append(&crate::ui::loading(crate::ui::LoadSize::Inline));
             scanning.append(&Label::new(Some(copy::STORAGE_SCANNING)));
 
             let list = crate::ui::boxed_list();
@@ -110,8 +109,6 @@ impl StorageScreen {
             split.append(&left);
             split.append(&right);
             root.append(&split);
-            let toast = ScreenToast::new();
-            root.append(toast.widget());
             let weak_tick = weak.clone();
             split.add_tick_callback(move |widget, _| {
                 if let Some(screen) = weak_tick.upgrade() {
@@ -138,13 +135,12 @@ impl StorageScreen {
                 list,
                 scanning,
                 helper,
-                toast,
                 on_delete: RefCell::default(),
             }
         })
     }
 
-    /// The page widget: the column, with the toast at its foot.
+    /// The page widget: the column.
     pub fn widget(&self) -> &GBox {
         &self.root
     }
@@ -219,7 +215,6 @@ impl StorageScreen {
             self.list.remove(&child);
         }
         for row in &snapshot.rows {
-            let cover = Picture::new();
             let delete = Rc::new({
                 let weak = Rc::downgrade(self);
                 let row = row.clone();
@@ -229,7 +224,7 @@ impl StorageScreen {
                     }
                 }
             });
-            self.list.append(&crate::updates::storage_row::storage_row(row, self.kind, &cover, delete));
+            self.list.append(&crate::updates::storage_row::storage_row(row, self.kind, delete));
         }
     }
 
@@ -273,7 +268,7 @@ impl StorageScreen {
                     None => DeleteOutcome::SourceMissing,
                 };
                 if outcome == DeleteOutcome::SourceMissing {
-                    screen.toast.show(copy::STORAGE_SOURCE_MISSING, NOT_FOUND_TOAST_MS);
+                    crate::toast::notify_for(copy::STORAGE_SOURCE_MISSING, Duration::from_millis(NOT_FOUND_TOAST_MS));
                 }
             },
             || {},

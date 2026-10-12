@@ -17,8 +17,8 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, ListBoxRow, Orientation as O};
 use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
-use kuro_images::art::{ArtKind, ArtRef};
 
+use crate::browse::look;
 use crate::data;
 use crate::updates::download_host;
 use crate::misc::diet_defaults as diet;
@@ -276,35 +276,14 @@ impl UpcomingPage {
     /// One entry row: the book cover (initials until an image draws) and the title (two lines at most); activating
     /// the row (click, Enter or Space) opens the entry by id.
     fn item(&self, entry: &Entry) -> ListBoxRow {
-        let (cover_width, cover_height) = layout::cover_size();
-        let line = GBox::new(O::Horizontal, 12);
-        line.set_size_request(-1, layout::ROW_HEIGHT - 2 * layout::ROW_PADDING);
-        line.set_margin_start(crate::ui::ROW_PAD_H);
-        line.set_margin_end(crate::ui::ROW_PAD_H);
-        line.set_margin_top(layout::ROW_PADDING);
-        line.set_margin_bottom(layout::ROW_PADDING);
-        let art = ArtRef {
-            owner: self.kind,
-            entry_id: entry.id,
-            source_id: entry.source_id,
-            kind: ArtKind::Cover,
-            url: entry.cover_url.clone(),
-            favorite: true,
-            last_modified: entry.cover_last_modified,
-        };
-        line.append(&crate::browse::look::row_cover(&entry.title, Some(&art), cover_width, cover_height));
-        let title = Label::builder()
-            .label(&entry.title)
-            .xalign(0.0)
-            .wrap(true)
-            .lines(2)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .hexpand(true)
-            .valign(Align::Center)
-            .css_classes(["heading"])
-            .build();
-        line.append(&title);
-        let row = ListBoxRow::builder().child(&line).build();
+        let art = look::cover_art(self.kind, entry.id, entry.source_id, entry.cover_url.clone(), true, entry.cover_last_modified);
+        let cover = look::row_cover(&entry.title, Some(&art), look::MEDIUM.width, look::MEDIUM.height);
+        let row = look::list_row(Some(cover), &entry.title, None, None);
+        // a long title keeps its two lines
+        if let Some(title) = crate::updates::row_texts(&row).first_child().and_downcast::<Label>() {
+            title.set_wrap(true);
+            title.set_lines(2);
+        }
         let (open, id) = (Rc::clone(&self.env.open), entry.id);
         crate::widgets::row_activate::on_activate(&row, move |_| open(id));
         row
@@ -461,8 +440,9 @@ mod tests {
             assert!(list.has_css_class("boxed-list"));
             let row = list.row_at_index(0).expect("an entry row");
             let line = row.child().expect("the row line");
-            assert_eq!(line.height_request() + 2 * layout::ROW_PADDING, 96, "rows are 96 px");
-            assert!(line.first_child().is_some_and(|c| c.has_css_class("kb-row-cover") && c.has_css_class("kb-cover-initials")), "no stored cover: the initials");
+            let cover = line.first_child().expect("the cover leads the row");
+            assert_eq!(cover.size_request(), (look::MEDIUM.width, look::MEDIUM.height), "the medium row cover");
+            assert!(cover.has_css_class("kb-row-cover") && cover.has_css_class("kb-cover-initials"), "no stored cover: the initials");
         });
     }
 

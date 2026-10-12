@@ -33,11 +33,18 @@ pub fn runs(text: &str, spans: &[Span]) -> Vec<(i32, i32, &'static str)> {
     out
 }
 
+/// Whether the theme on screen is a dark one: the dark preference (which Light and Dark mode set), or a `-dark` name.
+fn dark_theme() -> bool {
+    gtk::Settings::default().is_some_and(|s| crate::theme::dark::gtk_fallback_dark(s.is_gtk_application_prefer_dark_theme(), s.gtk_theme_name().as_deref().unwrap_or_default()))
+}
+
+/// The tag of a rule colour, drawn in the colour for the theme's brightness.
 fn tag(buffer: &gtk::TextBuffer, color: &str) -> gtk::TextTag {
+    let shown = if dark_theme() { color } else { highlight::color::for_light(color) };
     buffer
         .tag_table()
         .lookup(color)
-        .unwrap_or_else(|| buffer.create_tag(Some(color), &[("foreground", &color)]).expect("a new tag"))
+        .unwrap_or_else(|| buffer.create_tag(Some(color), &[("foreground", &shown)]).expect("a new tag"))
 }
 
 fn paint(buffer: &gtk::TextBuffer) {

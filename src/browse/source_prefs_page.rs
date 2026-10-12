@@ -18,7 +18,6 @@ use tokio::sync::watch;
 
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
 use super::glue::{follow_ready, keep_alive};
-use super::view::spinner_row;
 
 /// The entry a stored list value stands for. A value that matches none shows nothing.
 pub fn list_label(entries: &[String], values: &[String], stored: &str) -> Option<String> {
@@ -97,11 +96,9 @@ impl SourcePrefsPage {
         let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
         let stack = gtk::Stack::new();
-        stack.add_named(&spinner_row(), Some("loading"));
+        stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("loading"));
         stack.add_named(&scroller, Some("list"));
-        let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
-        empty.set_valign(gtk::Align::Center);
-        empty.set_vexpand(true);
+        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
         stack.add_named(&empty, Some("empty"));
         stack.set_vexpand(true);
         stack.set_visible_child_name("loading");

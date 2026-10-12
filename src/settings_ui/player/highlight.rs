@@ -14,7 +14,8 @@ use fancy_regex::Regex;
 /// Longer texts are not highlighted.
 pub const MAX_CHARS: usize = 15_000;
 
-/// The GitHub-like palette of the Kotlin app (`githubTheme`).
+/// The GitHub-like palette of the Kotlin app (`githubTheme`), made for a dark background. [`color::for_light`] gives
+/// each colour its twin for a light one.
 pub mod color {
     pub const KEYWORD: &str = "#FF7B72";
     pub const LITERAL: &str = "#79C0FF";
@@ -23,6 +24,20 @@ pub mod color {
     pub const DEFINITION: &str = "#D2A8FF";
     pub const KEY: &str = "#7EE787";
     pub const VALUE: &str = "#D29922";
+
+    /// The twin of `color` on a light background (GitHub's light palette); a colour outside the set comes back as it is.
+    pub fn for_light(color: &str) -> &str {
+        match color {
+            KEYWORD => "#CF222E",
+            LITERAL => "#0550AE",
+            COMMENT => "#6E7781",
+            STRING => "#0A3069",
+            DEFINITION => "#8250DF",
+            KEY => "#116329",
+            VALUE => "#953800",
+            other => other,
+        }
+    }
 }
 
 /// How a rule colours its matches.

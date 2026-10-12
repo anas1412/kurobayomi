@@ -312,9 +312,8 @@ pub enum UpdateScope {
     Category,
 }
 
-// Decision (T-37a-062, supersedes T-26a-113): the library's toasts go through `crate::library::toast`, which shows each
-// message for 4 s (U-1.8) on the library page. The shared layer (`crate::toast`) keeps 2 s and 3.5 s and shows the
-// message only when no library page is on screen.
+// Decision (T-37a-062, supersedes T-26a-113): the library's toasts go through the shared layer (`crate::toast::notify_for`)
+// for `crate::library::TOAST_TIME` (4 s, U-1.8).
 
 /// The toast an update request shows: "Updating library" or "Updating category", or the already-running notice
 /// when an update is in progress (T2-UPD-01, T2-UPD-02).

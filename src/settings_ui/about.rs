@@ -215,7 +215,11 @@ pub fn check_row() -> PreferenceItem {
     if !check_available() {
         return text(app_update::CHECK_ROW_TITLE, None, false);
     }
-    let spinner: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| gtk::Spinner::builder().visible(false).build().upcast());
+    let spinner: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
+        let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+        spinner.set_visible(false);
+        spinner.upcast()
+    });
     tap_item(app_update::CHECK_ROW_TITLE, None, true, Some(spinner), None, Rc::new(check_tapped))
 }
 

@@ -203,7 +203,7 @@ fn update_library(button: &gtk::Button, kind: Kind) {
 
 /// Puts a spinner on the button until the library pass of `kind` is no longer running.
 fn spin_until_done(button: &gtk::Button, kind: Kind) {
-    button.set_child(Some(&gtk::Spinner::builder().spinning(true).build()));
+    button.set_child(Some(&crate::ui::loading(crate::ui::LoadSize::Inline)));
     let weak = button.downgrade();
     glib::timeout_add_local(Duration::from_millis(500), move || {
         let Some(button) = weak.upgrade() else { return glib::ControlFlow::Break };

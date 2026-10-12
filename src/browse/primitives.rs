@@ -2,9 +2,6 @@
 
 use kuro_i18n::{MsgKey, tr};
 
-/// Padding above and below a spinner row, and the spinner's size (D§13).
-pub const SPINNER_PADDING_PX: i32 = 16;
-pub const SPINNER_SIZE_PX: i32 = 16;
 /// An empty state shows at most this many action buttons.
 pub const EMPTY_ACTION_LIMIT: usize = 3;
 
@@ -82,7 +79,7 @@ pub enum ToastAction {
     Retry,
 }
 
-/// A toast in the bottom centre of the window. It always has a dismiss button.
+/// A toast for the shared toast layer: its message, an optional action and how long it stays.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToastSpec {
     pub message: String,
@@ -145,10 +142,5 @@ mod tests {
     #[test]
     fn the_default_toast_lasts_three_seconds() {
         assert_eq!(DEFAULT_TOAST, ToastDuration::Seconds(3));
-    }
-
-    #[test]
-    fn spinner_metrics_match_the_design_sheet() {
-        assert_eq!((SPINNER_PADDING_PX, SPINNER_SIZE_PX), (16, 16));
     }
 }

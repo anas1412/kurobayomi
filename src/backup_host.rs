@@ -88,11 +88,10 @@ pub fn attach(app: &gtk::Application, win: &gtk::ApplicationWindow) -> gtk::Widg
     let label = gtk::Label::builder().xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
     let cancel = gtk::Button::builder().label(tr(MsgKey::action_cancel)).css_classes(["flat"]).build();
     cancel.set_action_name(Some(&format!("app.{CANCEL_ACTION}")));
-    let bar = gtk::Box::builder().spacing(12).margin_start(12).margin_end(12).margin_top(6).margin_bottom(6).build();
-    bar.append(&gtk::Spinner::builder().spinning(true).build());
+    let bar = gtk::Box::builder().spacing(12).css_classes(["kb-banner"]).build();
+    bar.append(&crate::ui::loading(crate::ui::LoadSize::Inline));
     bar.append(&label);
     bar.append(&cancel);
-    bar.add_css_class("toolbar");
     let banner = gtk::Revealer::builder().child(&bar).transition_type(gtk::RevealerTransitionType::SlideDown).build();
 
     let action = gio::SimpleAction::new(CANCEL_ACTION, None);

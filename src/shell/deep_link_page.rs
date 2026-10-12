@@ -81,41 +81,40 @@ pub fn transition(kind: Kind, previous: &State, next: &State) -> Option<Nav> {
     if previous == next { None } else { navigation(kind, next) }
 }
 
-/// The page widget for a state: the title, the spinner or the error with its buttons. The buttons run `on_retry` and
-/// `on_search_instead`. Navigation is not done here (see [`transition`]).
+/// The page widget for a state: the title with the page spinner while it works, the empty state when nothing was found,
+/// or the error state with its buttons. The buttons run `on_retry` and `on_search_instead`. Navigation is not done here
+/// (see [`transition`]).
 pub fn widget(state: &State, on_retry: impl Fn() + 'static, on_search_instead: impl Fn() + 'static) -> gtk::Box {
+    use kuro_i18n::{tr, MsgKey};
     let shown = view(state);
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    column.set_halign(gtk::Align::Center);
-    column.set_valign(gtk::Align::Center);
-    column.set_margin_start(16);
-    column.set_margin_end(16);
-    let title = gtk::Label::builder().label(shown.title.as_str()).css_classes(["title-2"]).build();
-    column.append(&title);
-    if let Some(message) = &shown.message {
-        let label = gtk::Label::builder().label(message.as_str()).wrap(true).justify(gtk::Justification::Center).build();
-        column.append(&label);
-    }
-    if shown.spinner {
-        let spinner = gtk::Spinner::new();
-        spinner.start();
-        column.append(&spinner);
-    }
     if shown.retry || shown.search_instead {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.set_halign(gtk::Align::Center);
+        let mut buttons = Vec::new();
         if shown.retry {
-            let retry = gtk::Button::with_label("Retry");
+            let retry = gtk::Button::with_label(&tr(MsgKey::action_retry));
             retry.connect_clicked(move |_| on_retry());
-            row.append(&retry);
+            buttons.push(retry);
         }
         if shown.search_instead {
             let search = gtk::Button::with_label("Search instead");
             search.connect_clicked(move |_| on_search_instead());
-            row.append(&search);
+            buttons.push(search);
         }
-        column.append(&row);
+        let message = match &shown.message {
+            Some(reason) => format!("{}\n{reason}", shown.title),
+            None => shown.title.clone(),
+        };
+        return crate::browse::look::empty_state_with("dialog-error-symbolic", &message, &buttons).0;
     }
+    if !shown.spinner {
+        return crate::browse::look::empty_state("system-search-symbolic", &shown.title, None).0;
+    }
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    column.set_halign(gtk::Align::Center);
+    column.set_valign(gtk::Align::Center);
+    column.append(&gtk::Label::builder().label(shown.title.as_str()).css_classes(["kb-empty-title"]).build());
+    let spinner = crate::ui::loading(crate::ui::LoadSize::Page);
+    spinner.set_vexpand(false);
+    column.append(&spinner);
     column
 }
 

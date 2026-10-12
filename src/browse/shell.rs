@@ -5,7 +5,6 @@
 //! The header has the Anime | Manga switch at the start, the search entry in the middle and the filter and the menu at
 //! the end. Enter in the search entry runs a global search of the visible kind, and so does re-selecting the tab.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk::glib;
@@ -37,11 +36,7 @@ const SOURCE_PAGES: [BrowsePage; 2] = [BrowsePage::AnimeSources, BrowsePage::Man
 struct Inner {
     stack: gtk::Stack,
     search: gtk::SearchEntry,
-    kinds: [gtk::ToggleButton; 2],
     deps: ShellDeps,
-    ready: Cell<bool>,
-    /// Set while the switch is moved to match the page, so its handler does not select again.
-    syncing: Cell<bool>,
 }
 
 /// The tab shell. `root` is the whole page, header included; `end` stays empty because the header is in `root`.
@@ -49,22 +44,6 @@ pub struct BrowseShell {
     pub root: gtk::Box,
     pub end: Vec<gtk::Widget>,
     inner: Rc<Inner>,
-}
-
-/// A row of linked toggle buttons that act as one switch.
-fn switch(labels: &[String]) -> (gtk::Box, Vec<gtk::ToggleButton>) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    row.add_css_class("linked");
-    let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
-    for label in labels {
-        let button = gtk::ToggleButton::with_label(label);
-        if let Some(first) = buttons.first() {
-            button.set_group(Some(first));
-        }
-        row.append(&button);
-        buttons.push(button);
-    }
-    (row, buttons)
 }
 
 impl BrowseShell {
@@ -75,48 +54,17 @@ impl BrowseShell {
         let mut pages = deps.pages.iter().map(|(page, widget)| (*page, widget.clone())).collect::<Vec<_>>();
         pages.sort_by_key(|(page, _)| page.index());
         for (page, widget) in &pages {
-            stack.add_titled(widget, Some(&page.index().to_string()), &page.title());
+            let title = tr(if page.kind() == Kind::Manga { MsgKey::label_manga } else { MsgKey::label_anime });
+            stack.add_titled(widget, Some(&page.index().to_string()), &title);
         }
 
-        let (kind_row, kinds) = switch(&[tr(MsgKey::label_anime), tr(MsgKey::label_manga)]);
-        let search = gtk::SearchEntry::new();
-        search.set_width_chars(28);
-
-        let header = crate::ui::header_bar();
-        header.set_decoration_layout(Some(&crate::ui::decoration(false)));
-        header.pack_start(&kind_row);
-        header.set_title_widget(Some(&search));
-
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&header);
-        root.append(&stack);
-
-        let inner = Rc::new(Inner {
-            stack,
-            search,
-            kinds: [kinds[0].clone(), kinds[1].clone()],
-            deps,
-            ready: Cell::new(false),
-            syncing: Cell::new(false),
-        });
+        let inner = Rc::new(Inner { stack, search: gtk::SearchEntry::new(), deps });
+        // the shared header row: the Anime | Manga switch at the start, the search entry in the middle, the actions at the end
+        let mut end: Vec<gtk::Widget> = vec![inner.search.clone().upcast(), gtk::StackSwitcher::builder().stack(&inner.stack).build().upcast()];
+        end.extend(inner.header_actions());
+        let root = crate::ui::page("", &inner.stack, end, false);
         keep_alive(&root, &inner);
-        let end = inner.header_actions();
-        for widget in end.iter().rev() {
-            header.pack_end(widget);
-        }
-        crate::ui::no_sticky_focus(&header);
 
-        for button in &inner.kinds {
-            let weak = Rc::downgrade(&inner);
-            button.connect_toggled(move |button| {
-                if let Some(inner) = weak.upgrade()
-                    && button.is_active()
-                    && !inner.syncing.get()
-                {
-                    inner.select(inner.switched());
-                }
-            });
-        }
         let weak = Rc::downgrade(&inner);
         inner.stack.connect_visible_child_name_notify(move |_| {
             if let Some(inner) = weak.upgrade() {
@@ -139,7 +87,6 @@ impl BrowseShell {
             _ => glib::Propagation::Proceed,
         });
         root.add_controller(keys);
-        inner.ready.set(true);
         inner.page_changed();
         Self { root, end: Vec::new(), inner }
     }
@@ -157,11 +104,6 @@ impl Inner {
             .and_then(|name| name.parse::<usize>().ok())
             .and_then(|index| BrowsePage::ALL.get(index).copied())
             .unwrap_or(BrowsePage::AnimeSources)
-    }
-
-    /// The page the switch points at.
-    fn switched(&self) -> BrowsePage {
-        SOURCE_PAGES[usize::from(self.kinds[1].is_active())]
     }
 
     /// One key of the tab. True when it was ours.
@@ -195,15 +137,8 @@ impl Inner {
         self.stack.set_visible_child_name(&page.index().to_string());
     }
 
-    /// Follows the page now showing: the switch and the entry's hint.
+    /// Follows the page now showing: the entry's hint.
     fn page_changed(&self) {
-        if !self.ready.get() {
-            return;
-        }
-        let page = self.visible();
-        self.syncing.set(true);
-        self.kinds[usize::from(page.kind() == Kind::Manga)].set_active(true);
-        self.syncing.set(false);
         self.search.set_placeholder_text(Some(&tr(MsgKey::action_global_search_hint)));
     }
 
@@ -272,6 +207,13 @@ pub(crate) mod tests {
         }
     }
 
+    /// The two buttons of the Anime | Manga switch in the header, anime first.
+    fn switch_buttons(shell: &BrowseShell) -> Vec<gtk::ToggleButton> {
+        let mut all = Vec::new();
+        walk(shell.root.upcast_ref(), &mut all);
+        all.iter().filter_map(|w| w.downcast_ref::<gtk::ToggleButton>().filter(|b| b.parent().is_some_and(|p| p.is::<gtk::StackSwitcher>())).cloned()).collect()
+    }
+
     /// The tab has the two source pages and nothing else: no extensions, no migrate, one search in the header.
     fn the_tab_has_only_the_two_source_pages_and_one_header_search() {
         let (shell, _log) = shell();
@@ -311,13 +253,13 @@ pub(crate) mod tests {
         let ctrl = ModifierType::CONTROL_MASK;
         assert!(shell.inner.key(Key::_2, ctrl));
         assert_eq!(shell.visible(), BrowsePage::MangaSources, "Ctrl+2 is the manga sources");
-        assert!(shell.inner.kinds[1].is_active(), "the switch follows the page");
+        assert!(switch_buttons(&shell)[1].is_active(), "the switch follows the page");
         assert!(shell.inner.key(Key::_1, ctrl));
         assert_eq!(shell.visible(), BrowsePage::AnimeSources);
-        assert!(shell.inner.kinds[0].is_active());
+        assert!(switch_buttons(&shell)[0].is_active());
         assert!(!shell.inner.key(Key::_3, ctrl), "there is no third page to pick");
         assert_eq!(shell.visible(), BrowsePage::AnimeSources);
-        shell.inner.kinds[1].set_active(true);
+        switch_buttons(&shell)[1].set_active(true);
         assert_eq!(shell.visible(), BrowsePage::MangaSources, "the switch picks the page");
     }
 

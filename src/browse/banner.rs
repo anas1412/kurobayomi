@@ -55,6 +55,7 @@ impl InfoBanner {
             }
         });
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.add_css_class("kb-banner");
         row.append(&label);
         row.append(&button);
         let revealer = gtk::Revealer::new();

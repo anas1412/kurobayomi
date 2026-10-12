@@ -291,7 +291,6 @@ pub fn build(tabs: &gtk::Stack) -> GBox {
 
     let b = GBox::new(O::Vertical, 0);
     b.set_size_request(rail::WIDTH, -1);
-    b.add_css_class("kb-sidebar");
     b.append(&header);
     b.append(&gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build());
     b.append(&gtk::Separator::new(O::Horizontal));

@@ -133,19 +133,17 @@ pub fn header(
     titles.append(&title);
     titles.append(&subtitle);
 
-    let widget = gtk::HeaderBar::new();
+    let widget = crate::ui::header_bar();
+    widget.set_decoration_layout(Some(&crate::ui::decoration(false)));
     widget.set_title_widget(Some(&titles));
     let close_button = gtk::Button::from_icon_name("window-close-symbolic");
     close_button.connect_clicked(move |_| close());
     widget.pack_start(&close_button);
 
-    let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
-    back_button.set_tooltip_text(Some(&back_label()));
-    back_button.update_property(&[gtk::accessible::Property::Label(&back_label())]);
+    let back_button = crate::ui::icon_button("go-previous-symbolic", &back_label());
     back_button.set_sensitive(false);
     back_button.connect_clicked(move |_| back());
-    let forward_button = gtk::Button::from_icon_name("go-next-symbolic");
-    forward_button.set_tooltip_text(Some(&tr(MsgKey::action_webview_forward)));
+    let forward_button = crate::ui::icon_button("go-next-symbolic", &tr(MsgKey::action_webview_forward));
     forward_button.set_sensitive(false);
     forward_button.connect_clicked(move |_| forward());
     widget.pack_end(&overflow_menu(overflow));
@@ -173,22 +171,15 @@ pub fn header(
 }
 
 fn overflow_menu(overflow: impl Fn(Overflow) + 'static) -> gtk::MenuButton {
-    let popover_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let popover = gtk::Popover::new();
+    let labels: Vec<String> = OVERFLOW.iter().map(|item| item.label()).collect();
     let overflow = Rc::new(overflow);
-    for item in OVERFLOW {
-        let button = gtk::Button::with_label(&item.label());
-        button.add_css_class("flat");
-        let overflow = overflow.clone();
-        let popover = popover.clone();
-        button.connect_clicked(move |_| {
-            popover.popdown();
-            overflow(item);
-        });
-        popover_box.append(&button);
-    }
-    popover.set_child(Some(&popover_box));
-    crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).build())
+    let button = crate::ui::menu_button("view-more-symbolic", &labels, move |label| {
+        if let Some(item) = OVERFLOW.iter().find(|item| item.label() == label) {
+            overflow(*item);
+        }
+    });
+    button.set_tooltip_text(None);
+    button
 }
 
 impl Header {

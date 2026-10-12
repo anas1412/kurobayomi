@@ -5,18 +5,12 @@
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, GestureClick, Label, ListBoxRow, Orientation as O};
+use gtk::{Align, Box as GBox, Button, GestureClick, ListBoxRow, Orientation as O};
 
-use crate::library::layout::{SPACE_M, SPACE_S};
+use crate::browse::look::list_row;
 use crate::widgets::context_menu::Item;
 use kuro_domain::dates::item_row_text;
 use kuro_i18n::{MsgKey, tr};
-
-/// The row is at least this high (T-42a-014).
-pub const ROW_MIN_HEIGHT: i32 = 96;
-/// Cover size of the row: the book aspect (2:3) of the library cards, filling the row's height inside its margins.
-pub const COVER_HEIGHT: i32 = ROW_MIN_HEIGHT - 2 * SPACE_S;
-pub const COVER_WIDTH: i32 = COVER_HEIGHT * 2 / 3;
 
 /// The right-click item that opens the entry's page (no catalogue key yet, as in `updates::copy`).
 pub const OPEN_DETAILS: &str = "Open details";
@@ -37,20 +31,10 @@ pub struct RowActions {
     pub add_to_library: Rc<dyn Fn()>,
 }
 
-/// One history row. `in_library` decides whether the favorite button is shown. `cover` is the row's cover widget
-/// (`browse::look::row_cover`); the row sizes it.
+/// One history row (`look::list_row`). `in_library` decides whether the favorite button is shown. `cover` is the row's
+/// cover widget (`look::row_cover` at `look::MEDIUM`); a press on it opens the entry.
 pub fn history_row(title: &str, subtitle: &str, cover: &impl IsA<gtk::Widget>, in_library: bool, actions: RowActions) -> ListBoxRow {
-    let row = ListBoxRow::new();
-    row.set_size_request(-1, ROW_MIN_HEIGHT);
-    let line = GBox::new(O::Horizontal, SPACE_M);
-    line.set_margin_top(SPACE_S);
-    line.set_margin_bottom(SPACE_S);
-    line.set_margin_start(SPACE_M);
-    line.set_margin_end(SPACE_S);
-
     let cover = cover.as_ref();
-    cover.set_size_request(COVER_WIDTH, COVER_HEIGHT);
-    cover.set_valign(Align::Center);
     let open = GestureClick::new();
     let open_entry = actions.open_entry.clone();
     open.connect_pressed(move |gesture, _, _, _| {
@@ -59,17 +43,8 @@ pub fn history_row(title: &str, subtitle: &str, cover: &impl IsA<gtk::Widget>, i
         open_entry();
     });
     cover.add_controller(open);
-    line.append(cover);
 
-    let texts = GBox::new(O::Vertical, 2);
-    texts.set_hexpand(true);
-    texts.set_valign(Align::Center);
-    let title_label = Label::builder().label(title).xalign(0.0).wrap(true).lines(2).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["heading"]).build();
-    let subtitle_label = Label::builder().label(subtitle).xalign(0.0).css_classes(["dim-label"]).build();
-    texts.append(&title_label);
-    texts.append(&subtitle_label);
-    line.append(&texts);
-
+    let buttons = GBox::new(O::Horizontal, 4);
     if !in_library {
         let favorite = Button::from_icon_name("starred-symbolic");
         favorite.set_tooltip_text(Some(&tr(MsgKey::add_to_library)));
@@ -77,7 +52,7 @@ pub fn history_row(title: &str, subtitle: &str, cover: &impl IsA<gtk::Widget>, i
         favorite.add_css_class("flat");
         let add = actions.add_to_library.clone();
         favorite.connect_clicked(move |_| add());
-        line.append(&favorite);
+        buttons.append(&favorite);
     }
     let delete = Button::from_icon_name("user-trash-symbolic");
     delete.set_tooltip_text(Some(&tr(MsgKey::action_remove)));
@@ -85,9 +60,14 @@ pub fn history_row(title: &str, subtitle: &str, cover: &impl IsA<gtk::Widget>, i
     delete.add_css_class("flat");
     let remove = actions.remove.clone();
     delete.connect_clicked(move |_| remove());
-    line.append(&delete);
+    buttons.append(&delete);
 
-    row.set_child(Some(&line));
+    let row = list_row(Some(cover.clone()), title, Some(subtitle), Some(buttons.upcast()));
+    // a long title keeps its two lines
+    if let Some(title) = crate::updates::row_texts(&row).first_child().and_downcast::<gtk::Label>() {
+        title.set_wrap(true);
+        title.set_lines(2);
+    }
     let resume = actions.resume.clone();
     crate::widgets::row_activate::on_activate(&row, move |_| resume());
     crate::widgets::context_menu::attach(&row, move |_, _| menu(&actions));
@@ -132,16 +112,15 @@ mod tests {
     }
 
     #[test]
-    fn t_42a_014_the_row_is_at_least_96_px_and_its_cover_fills_that_height_at_the_book_aspect() {
+    fn t_42a_014_the_row_leads_with_its_cover_which_the_row_does_not_resize() {
         crate::testing::with_display(|| {
             let none: Rc<dyn Fn()> = Rc::new(|| {});
             let actions = RowActions { open_entry: none.clone(), resume: none.clone(), remove: none.clone(), add_to_library: none };
-            let cover = gtk::Picture::new();
+            let cover = crate::browse::look::row_cover("Title", None, crate::browse::look::MEDIUM.width, crate::browse::look::MEDIUM.height);
             let row = history_row("Title", "Ch. 1", &cover, false, actions);
-            assert_eq!(row.size_request().1, 96);
-            assert_eq!(cover.size_request(), (COVER_WIDTH, COVER_HEIGHT));
-            assert_eq!(COVER_HEIGHT + 2 * SPACE_S, 96, "the cover plus the row margins is the minimum height");
-            assert_eq!(COVER_WIDTH * 3, COVER_HEIGHT * 2 - COVER_HEIGHT * 2 % 3, "2:3");
+            let line = row.child().expect("the row line");
+            assert_eq!(line.first_child().as_ref(), Some(&cover), "the cover leads the row");
+            assert_eq!(cover.size_request(), (53, 80), "the medium row cover");
         });
     }
 

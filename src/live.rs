@@ -11,7 +11,7 @@ use kuro_domain::category::model::Category;
 use kuro_platform::kind::Kind;
 
 use crate::data;
-use crate::screens::{dialog_then_named, list_row};
+use crate::screens::dialog_then_named;
 use crate::ui::{boxed_list, column, icon_button, scrolled, screen, DialogButton, Role};
 use crate::watch::bind_watch;
 
@@ -137,8 +137,11 @@ impl CategoryList {
             drag.set_actions(gtk::gdk::DragAction::MOVE);
             drag.connect_prepare(move |_, _, _| Some(gtk::gdk::ContentProvider::for_value(&id.to_value())));
             handle.add_controller(drag);
-            let subtitle = if c.hidden { "Hidden" } else { "" };
-            let row = list_row(Some(handle.upcast()), &name, subtitle, vec![edit.upcast(), hide.upcast(), del.upcast()]);
+            let actions = GBox::new(O::Horizontal, 4);
+            for button in [edit.upcast_ref::<gtk::Widget>(), hide.upcast_ref(), del.upcast_ref()] {
+                actions.append(button);
+            }
+            let row = crate::browse::look::list_row(Some(handle.upcast()), &name, c.hidden.then_some("Hidden"), Some(actions.upcast()));
             // Dropping a dragged category onto a row moves it before that row, through the category service.
             let drop = gtk::DropTarget::new(<i64 as gtk::glib::prelude::StaticType>::static_type(), gtk::gdk::DragAction::MOVE);
             drop.connect_drop(move |_, value, _, _| {

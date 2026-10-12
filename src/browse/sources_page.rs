@@ -15,7 +15,7 @@ use tokio::sync::watch;
 use super::glue::{follow_ready, keep_alive};
 use super::icons::{IconCache, SourceIcon};
 use super::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, language_line, section_title, shows_latest, source_list};
-use super::view::{list_row, loading_sources_row, source_row_with};
+use super::view::{list_row, source_row_with};
 use crate::widgets::context_menu::Item;
 
 /// The installed sources and the preferences that shape the list, as one snapshot of the models.
@@ -75,7 +75,7 @@ impl SourcesPage {
         let scroller = crate::ui::scrolled(&column);
         let empty = sources_empty();
         let stack = gtk::Stack::new();
-        stack.add_named(&loading_sources_row(), Some("spinner"));
+        stack.add_named(&loading_sources(), Some("spinner"));
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&scroller, Some("list"));
         let inner = Rc::new(Inner {
@@ -207,6 +207,18 @@ impl Inner {
 }
 
 /// The right-click menu of a source row: Open (its Popular listing), and Open website when the source has a site.
+/// The loading state of a Sources tab: the page spinner with its "Loading sources…" line under it.
+fn loading_sources() -> gtk::Box {
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    page.set_halign(gtk::Align::Center);
+    page.set_valign(gtk::Align::Center);
+    let spinner = crate::ui::loading(crate::ui::LoadSize::Page);
+    spinner.set_vexpand(false);
+    page.append(&spinner);
+    page.append(&gtk::Label::new(Some(super::texts::LOADING_SOURCES)));
+    page
+}
+
 fn row_menu(nav: &SourcesNav, id: i64, home: Option<String>) -> Vec<Item> {
     let open = Rc::clone(&nav.open_listing);
     let mut items = vec![Item::new(super::texts::OPEN, 0, move || open(id, BrowseQuery::Popular))];

@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use gtk::prelude::*;
-use gtk::{Align, Spinner, Stack, StackTransitionType, Widget, glib};
+use gtk::{Stack, StackTransitionType, Widget, glib};
 use kuro_core::sources::SourceGate;
 use tokio::sync::watch;
 
@@ -51,7 +51,7 @@ pub fn when_sources_ready(gate: &SourceGate, content: &impl IsA<Widget>) -> Widg
     if initial(*ready.borrow_and_update()) == Shown::Content {
         return content;
     }
-    let spinner = Spinner::builder().halign(Align::Center).valign(Align::Center).spinning(true).build();
+    let spinner = crate::ui::loading(crate::ui::LoadSize::Page);
     let stack = Stack::builder()
         .transition_type(StackTransitionType::Crossfade)
         .transition_duration(CROSSFADE_MS)

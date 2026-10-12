@@ -38,15 +38,6 @@ impl BannerKind {
         })
     }
 
-    /// The colour role: secondary, tertiary, primary. Used as a CSS class on the banner.
-    pub fn css_class(self) -> &'static str {
-        match self {
-            Self::Indexing => "kuro-banner-secondary",
-            Self::DownloadedOnly => "kuro-banner-tertiary",
-            Self::Incognito => "kuro-banner-primary",
-        }
-    }
-
     fn on(self, state: BannerState) -> bool {
         match self {
             Self::Indexing => state.indexing,
@@ -69,7 +60,7 @@ impl Banners {
         let revealers = BannerKind::ALL
             .into_iter()
             .map(|kind| {
-                let label = gtk::Label::builder().label(kind.text()).css_classes([kind.css_class()]).hexpand(true).build();
+                let label = gtk::Label::builder().label(kind.text()).css_classes(["kb-banner"]).hexpand(true).build();
                 let revealer = gtk::Revealer::builder().transition_type(gtk::RevealerTransitionType::SlideDown).child(&label).build();
                 widget.append(&revealer);
                 (kind, revealer)
@@ -119,12 +110,5 @@ mod tests {
         assert_eq!(BannerKind::Indexing.text(), tr(MsgKey::download_notifier_cache_renewal));
         assert_eq!(BannerKind::DownloadedOnly.text(), tr(MsgKey::label_downloaded_only));
         assert_eq!(BannerKind::Incognito.text(), tr(MsgKey::pref_incognito_mode));
-    }
-
-    #[test]
-    fn each_banner_has_its_colour_role() {
-        assert_eq!(BannerKind::Indexing.css_class(), "kuro-banner-secondary");
-        assert_eq!(BannerKind::DownloadedOnly.css_class(), "kuro-banner-tertiary");
-        assert_eq!(BannerKind::Incognito.css_class(), "kuro-banner-primary");
     }
 }

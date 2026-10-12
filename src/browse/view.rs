@@ -1,90 +1,39 @@
 //! Thin GTK widgets for the browse primitives. Every rule they show comes from the pure modules next to this file.
 
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Image, Label, Orientation as O, Spinner};
+use gtk::{Align, Box as GBox, Button, Image, Label, Orientation as O};
 use kuro_prefs::library::LibraryDisplayMode;
 use kuro_i18n::tr;
 
 use std::path::Path;
 use std::rc::Rc;
 
-use super::grid::{CELL_MARGIN_PX, LIST_COVER_PX, badge_visible, cell_alpha};
+use super::grid::{CELL_MARGIN_PX, badge_visible, cell_alpha};
 use super::icons::{ICON_HEIGHT_PX, IconRef, SourceIcon, fallback_glyph, fetch_icon, http_get, icon_cache_root, icon_ref, load_icon, placeholder_rgba};
 use super::listing::ListItem;
-use super::primitives::{EmptyAction, SPINNER_PADDING_PX, SPINNER_SIZE_PX, ToastAction, ToastDuration, ToastSpec};
+use super::primitives::EmptyAction;
 
-/// A centred spinner row with the padding of the design sheet.
-pub fn spinner_row() -> GBox {
-    let row = GBox::new(O::Vertical, 0);
-    row.set_halign(Align::Center);
-    row.set_margin_top(SPINNER_PADDING_PX);
-    row.set_margin_bottom(SPINNER_PADDING_PX);
-    let spinner = Spinner::new();
-    spinner.set_size_request(SPINNER_SIZE_PX, SPINNER_SIZE_PX);
-    spinner.set_spinning(true);
-    row.append(&spinner);
-    row
-}
-
-/// The spinner row of a Sources tab with its "Loading sources…" line under the spinner.
-pub fn loading_sources_row() -> GBox {
-    let row = spinner_row();
-    row.set_spacing(12);
-    row.append(&Label::new(Some(super::texts::LOADING_SOURCES)));
-    row
-}
-
-/// A centred message with its action buttons, in the order given. `on_action` runs for the button pressed.
+/// A centred message with its action buttons, in the order given: `look::empty_state_with` with the buttons of
+/// `EmptyAction` (icon and words, so a person who does not know the icon still reads what the button does).
+/// `on_action` runs for the button pressed.
 pub fn empty_state(message: &str, actions: &[EmptyAction], on_action: impl Fn(EmptyAction) + Clone + 'static) -> GBox {
-    let column = GBox::new(O::Vertical, 12);
-    column.set_halign(Align::Center);
-    column.set_valign(Align::Center);
-    column.set_vexpand(true);
-    column.append(&Label::new(Some(message)));
-    let row = GBox::new(O::Horizontal, 8);
-    row.set_halign(Align::Center);
-    for action in actions.iter().copied().take(super::primitives::EMPTY_ACTION_LIMIT) {
-        // icon and words: a person who does not know the icon still reads what the button does
-        let content = GBox::new(O::Horizontal, 6);
-        content.append(&Image::from_icon_name(action.icon()));
-        content.append(&Label::new(Some(&action.label())));
-        let button = Button::new();
-        button.set_child(Some(&content));
-        button.set_tooltip_text(Some(&action.label()));
-        let callback = on_action.clone();
-        button.connect_clicked(move |_| callback(action));
-        row.append(&button);
-    }
-    column.append(&row);
-    column
-}
-
-/// The bottom toast bar: the message, an optional retry action, and a dismiss button. It hides itself only when the
-/// duration is not indefinite; the caller runs the timer.
-pub fn toast_bar(spec: &ToastSpec, on_retry: impl Fn() + 'static, on_dismiss: impl Fn() + 'static) -> GBox {
-    let bar = GBox::new(O::Horizontal, 8);
-    bar.set_halign(Align::Center);
-    bar.set_valign(Align::End);
-    bar.add_css_class("toast");
-    bar.append(&Label::new(Some(&spec.message)));
-    if spec.action == Some(ToastAction::Retry) {
-        let retry = Button::with_label(&tr(kuro_i18n::MsgKey::action_retry));
-        retry.connect_clicked(move |_| on_retry());
-        bar.append(&retry);
-    }
-    let dismiss = Button::from_icon_name("window-close-symbolic");
-    dismiss.set_tooltip_text(Some(&tr(kuro_i18n::MsgKey::action_cancel)));
-    dismiss.connect_clicked(move |_| on_dismiss());
-    bar.append(&dismiss);
-    bar
-}
-
-/// Whether a toast needs a timer, and for how long.
-pub fn toast_timeout_ms(spec: &ToastSpec) -> Option<u32> {
-    match spec.duration {
-        ToastDuration::Seconds(s) => Some(s * 1000),
-        ToastDuration::Indefinite => None,
-    }
+    let buttons: Vec<Button> = actions
+        .iter()
+        .copied()
+        .take(super::primitives::EMPTY_ACTION_LIMIT)
+        .map(|action| {
+            let content = GBox::new(O::Horizontal, 6);
+            content.append(&Image::from_icon_name(action.icon()));
+            content.append(&Label::new(Some(&action.label())));
+            let button = Button::new();
+            button.set_child(Some(&content));
+            button.set_tooltip_text(Some(&action.label()));
+            let callback = on_action.clone();
+            button.connect_clicked(move |_| callback(action));
+            button
+        })
+        .collect();
+    super::look::empty_state_with("dialog-error-symbolic", message, &buttons).0
 }
 
 /// The icon of a row, 40 px square. A built-in glyph is tinted with the error colour for a stub or an untrusted
@@ -186,32 +135,16 @@ pub fn source_row_with(
     failing: bool,
     action: Option<&gtk::Widget>,
 ) -> GBox {
-    // a row of a boxed list (`look`): the list draws the frame, the row keeps the 12 px inset of the other lists
-    let row = GBox::new(O::Horizontal, 12);
-    row.set_margin_start(12);
-    row.set_margin_end(8);
-    row.set_margin_top(8);
-    row.set_margin_bottom(8);
-    if let Some(path) = picture {
-        row.append(&repo_picture(path));
+    // the shared row of `look`; the notes of a stub or a failing source go under the language in its text column
+    let cover: gtk::Widget = if let Some(path) = picture {
+        repo_picture(path).upcast()
     } else if icon == SourceIcon::Letter && icon_file.is_none() {
-        row.append(&super::look::row_cover(name, None, ICON_HEIGHT_PX, ICON_HEIGHT_PX));
+        super::look::row_cover(name, None, ICON_HEIGHT_PX, ICON_HEIGHT_PX)
     } else {
-        row.append(&icon_image(icon, icon_file));
-    }
-    let text = GBox::new(O::Vertical, 2);
-    text.set_hexpand(true);
-    text.set_valign(Align::Center);
-    let title = Label::new(Some(name));
-    title.set_xalign(0.0);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    text.append(&title);
-    if let Some(language) = language {
-        let lang = Label::new(Some(language));
-        lang.set_xalign(0.0);
-        lang.add_css_class("dim-label");
-        text.append(&lang);
-    }
+        icon_image(icon, icon_file).upcast()
+    };
+    let row = row_line(super::look::list_row(Some(cover.clone()), name, language, action.cloned()));
+    let text = cover.next_sibling().and_downcast::<GBox>().expect("the row's text column follows the icon");
     if stub {
         let note = Label::new(Some(&tr(kuro_i18n::MsgKey::not_installed)));
         note.set_xalign(0.0);
@@ -224,11 +157,14 @@ pub fn source_row_with(
         note.add_css_class("error");
         text.append(&note);
     }
-    row.append(&text);
-    if let Some(action) = action {
-        row.append(action);
-    }
     row
+}
+
+/// The line of a `look::list_row`, taken out of its row so a caller can wrap it in its own `list_row` (activation, menu).
+fn row_line(row: gtk::ListBoxRow) -> GBox {
+    let line = row.child().and_downcast::<GBox>().expect("a list row's line is a Box");
+    row.set_child(None::<&gtk::Widget>);
+    line
 }
 
 /// What a cover load calls when it has the picture.
@@ -406,24 +342,13 @@ pub fn grid_cell_lines(
     cell
 }
 
-/// A list row: a square cover, the title on one line, and the In library badge at the end for favourites.
+/// A list row: a small cover, the title on one line, and the In library badge at the end for favourites.
 pub fn list_cell(item: Option<&ListItem>, load: &CoverLoader, guard: &CoverGuard) -> GBox {
-    let row = GBox::new(O::Horizontal, 12);
-    row.set_margin_start(12);
-    row.set_margin_end(12);
-    row.set_margin_top(8);
-    row.set_margin_bottom(8);
-    let Some(item) = item else { return row };
-    row.append(&cover_widget(item, LIST_COVER_PX, LIST_COVER_PX, load, guard));
-    let title = Label::new(Some(&item.title));
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    row.append(&title);
-    if badge_visible(item.favorite) {
-        row.append(&super::look::badge(&tr(kuro_i18n::MsgKey::in_library), true));
-    }
-    row
+    let Some(item) = item else { return GBox::new(O::Horizontal, 12) };
+    let size = super::look::SMALL;
+    let cover = cover_widget(item, size.width, size.height, load, guard);
+    let badge = badge_visible(item.favorite).then(|| super::look::badge(&tr(kuro_i18n::MsgKey::in_library), true).upcast::<gtk::Widget>());
+    row_line(super::look::list_row(Some(cover.upcast()), &item.title, None, badge))
 }
 
 /// A boxed-list row around `child`: activating the row (a click, Enter or Space, through `widgets::row_activate`) runs

@@ -41,8 +41,6 @@ pub mod uri;
 #[allow(dead_code)]
 pub mod deep_link_page;
 #[allow(dead_code)]
-pub mod empty;
-#[allow(dead_code)]
 pub mod entry_route;
 pub mod lifecycle;
 #[allow(dead_code)]

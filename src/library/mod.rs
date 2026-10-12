@@ -25,6 +25,9 @@
 //!   (`kuro_domain::library::order::tracker_mean`).
 #![allow(dead_code)] // some pure helpers are tested but not called yet
 
+/// How long a Library toast stays on the shared toast layer (U-1.8).
+pub const TOAST_TIME: std::time::Duration = std::time::Duration::from_secs(4);
+
 pub mod actions;
 pub mod cells;
 pub mod download_facts;
@@ -39,7 +42,6 @@ pub mod delete_dialog;
 pub mod layout;
 pub mod load;
 pub mod query;
-pub mod toast;
 pub mod trackers;
 #[cfg(test)]
 mod t2;

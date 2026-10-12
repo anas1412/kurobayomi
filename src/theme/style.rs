@@ -16,7 +16,6 @@ pub mod class {
     pub const HEADER: &str = "kb-header";
     pub const ACTIVE: &str = "kb-active";
     pub const PILL: &str = "kb-pill";
-    pub const COVER_PLACEHOLDER: &str = "kb-cover-placeholder";
     pub const PLAYER_RIPPLE: &str = "kb-player-ripple";
     pub const TAB_PILL: &str = "kb-tab-pill";
     pub const HIT_TARGET: &str = "kb-hit-target";
@@ -303,12 +302,8 @@ mod base_css_tests {
             (".reader-scrim", "background-color: rgba(0, 0, 0, 0.5);"),
             (".reader-text-light", "color: #ffffff;"),
             (".kuro-backdrop-fade", "linear-gradient(to bottom, alpha(@theme_bg_color, 0) 0%, alpha(@theme_bg_color, 1) 100%);"),
-            (".kuro-warning-banner", "background-color: @kuro_error; color: @kuro_on_error; padding: 16px;"),
-            (".kuro-banner-secondary", "background-color: @kuro_secondary; color: @kuro_on_secondary; padding: 4px 16px;"),
-            (".kuro-banner-tertiary", "background-color: @kuro_tertiary; color: @kuro_on_tertiary; padding: 4px 16px;"),
-            (".kuro-banner-primary", "background-color: @kuro_primary; color: @kuro_on_primary; padding: 4px 16px;"),
-            (".chapter-primary", "color: @kuro_primary;"),
-            (".episode-tertiary", "color: @kuro_tertiary;"),
+            (".kb-banner", "background-color: alpha(@theme_selected_bg_color, 0.18); color: @theme_fg_color; padding: 4px 16px;"),
+            (".kb-banner.kb-banner-error", "background-color: alpha(@error_color, 0.18); padding: 16px;"),
             (".kuro-cal-day:focus-visible", "outline: 2px solid @theme_selected_bg_color;"),
             (".kuro-cal-dot", "background-color: @theme_selected_bg_color;"),
         ];

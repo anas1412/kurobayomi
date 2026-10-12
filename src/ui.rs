@@ -353,6 +353,69 @@ pub fn chevron() -> gtk::Image {
     gtk::Image::builder().icon_name("go-next-symbolic").css_classes(["dim-label"]).build()
 }
 
+/// The title of a list row: one weight (bold `heading`), one ellipsize. Every row builder uses it.
+pub fn row_title(text: &str) -> Label {
+    Label::builder().label(text).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["heading"]).build()
+}
+
+/// The two spinner sizes of the app: inside a button or a row, and as the state of a whole page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadSize {
+    Inline,
+    Page,
+}
+
+/// A spinning spinner. `Inline` is 16 px, for a button or a row. `Page` is 32 px and centred, filling its parent: the
+/// "loading" state of a page.
+pub fn loading(size: LoadSize) -> gtk::Spinner {
+    let px = match size {
+        LoadSize::Inline => 16,
+        LoadSize::Page => 32,
+    };
+    let spinner = gtk::Spinner::builder().spinning(true).width_request(px).height_request(px).build();
+    if size == LoadSize::Page {
+        spinner.set_halign(Align::Center);
+        spinner.set_valign(Align::Center);
+        spinner.set_hexpand(true);
+        spinner.set_vexpand(true);
+    }
+    spinner
+}
+
+/// The bar of a page in selection mode, under its header: Cancel, the count, Select all. `count` is the caller's label
+/// (it sets the text as the selection changes); this gives it the look.
+pub fn selection_header(count: &Label, on_cancel: impl Fn() + 'static, on_select_all: impl Fn() + 'static) -> GBox {
+    use kuro_i18n::{tr, MsgKey};
+    let bar = GBox::new(O::Horizontal, 8);
+    bar.set_margin_start(16);
+    bar.set_margin_end(16);
+    bar.set_margin_top(8);
+    bar.set_margin_bottom(4);
+    let cancel = Button::with_label(&tr(MsgKey::action_cancel));
+    cancel.connect_clicked(move |_| on_cancel());
+    count.set_hexpand(true);
+    count.set_xalign(0.0);
+    count.add_css_class("heading");
+    let all = Button::with_label(&tr(MsgKey::action_select_all));
+    all.connect_clicked(move |_| on_select_all());
+    bar.append(&cancel);
+    bar.append(count);
+    bar.append(&all);
+    no_sticky_focus(&bar);
+    bar
+}
+
+/// The bottom bar of a page in selection mode: the bulk-action `buttons` in a `gtk::ActionBar` inside a Revealer, hidden
+/// at first (`set_reveal_child(true)` while something is selected).
+pub fn action_bar(buttons: &[Button]) -> gtk::Revealer {
+    let bar = gtk::ActionBar::new();
+    for b in buttons {
+        bar.pack_start(b);
+    }
+    no_sticky_focus(&bar);
+    gtk::Revealer::builder().child(&bar).transition_type(gtk::RevealerTransitionType::SlideUp).build()
+}
+
 /// An empty state in the Library's look (docs/design/main-window.md): a large dim icon over the message. A caller with
 /// one matching action appends its button to the returned box.
 pub fn status(icon: &str, text: &str) -> GBox {

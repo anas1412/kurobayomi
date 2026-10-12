@@ -210,7 +210,8 @@ pub fn show(slot: &DialogSlot, anchor: &impl IsA<gtk::Widget>, facts: Facts, sav
     }
     let error = gtk::Label::builder().visible(false).wrap(true).xalign(0.0).max_width_chars(50).css_classes(["error"]).build();
     body.append(&error);
-    let spinner = gtk::Spinner::builder().visible(false).halign(gtk::Align::Center).valign(gtk::Align::Center).width_request(48).height_request(48).build();
+    let spinner = crate::ui::loading(crate::ui::LoadSize::Page);
+    spinner.set_visible(false);
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&body));
     overlay.add_overlay(&spinner);

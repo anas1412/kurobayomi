@@ -15,7 +15,6 @@ use kuro_prefs::pref::Pref;
 
 use super::glue::keep_alive;
 use super::names::{case_insensitive_cmp, compare_languages, localized_display_name};
-use super::view::spinner_row;
 
 /// One source of a language group.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,20 +103,13 @@ fn write(pref: &Pref<BTreeSet<String>>, set: BTreeSet<String>) {
     }
 }
 
-fn empty_label(text: &str) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.set_valign(gtk::Align::Center);
-    label.set_vexpand(true);
-    label
-}
-
 /// A stack of spinner, empty message and list. The page shows the spinner until its models arrive.
 fn page_stack(empty_text: &str) -> (gtk::Stack, gtk::Box) {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
     let stack = gtk::Stack::new();
-    stack.add_named(&spinner_row(), Some("loading"));
-    stack.add_named(&empty_label(empty_text), Some("empty"));
+    stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("loading"));
+    stack.add_named(&super::look::empty_state("view-list-symbolic", empty_text, None).0, Some("empty"));
     stack.add_named(&scroller, Some("list"));
     stack.set_vexpand(true);
     stack.set_visible_child_name("loading");

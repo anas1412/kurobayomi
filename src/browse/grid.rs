@@ -8,9 +8,8 @@ pub const GRID_SPACING_PX: i32 = 4;
 /// 4 px apart and the content 8 px from the edge (B§2.7).
 pub const CELL_MARGIN_PX: i32 = GRID_SPACING_PX / 2;
 pub const CONTAINER_MARGIN_PX: i32 = GRID_PADDING_PX - CELL_MARGIN_PX;
-/// Cover size of a grid cell (2:3) and of a list row (square).
+/// Cover width of a grid cell (2:3); a list row's cover is `look::SMALL`.
 pub const COVER_WIDTH_PX: i32 = 136;
-pub const LIST_COVER_PX: i32 = 40;
 /// Alpha of a favourite's cover; non-favourites are drawn at full strength (B§2.7, D§13).
 pub const FAVORITE_ALPHA: f64 = 0.34;
 /// Items per page and the first load's size (B§4.3).

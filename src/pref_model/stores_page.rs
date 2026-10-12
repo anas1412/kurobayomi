@@ -191,8 +191,7 @@ pub fn build<T: Keyed + Send + 'static>(
     subscribe: impl FnOnce(Box<dyn Fn(Vec<T>)>),
 ) -> (Built, StoresPage<T>) {
     let stack = gtk::Stack::new();
-    let spinner_page = gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
-    stack.add_named(&spinner_page, Some("loading"));
+    stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("loading"));
     stack.add_named(&crate::ui::status("dialog-information-symbolic", &texts.empty), Some("empty"));
     let list = crate::ui::boxed_list();
     let column = crate::ui::column();
@@ -209,7 +208,8 @@ pub fn build<T: Keyed + Send + 'static>(
 
     let refresh = crate::ui::icon_button("view-refresh-symbolic", &texts.refresh);
     refresh.set_sensitive(false);
-    let spinner = gtk::Spinner::builder().spinning(true).visible(false).build();
+    let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+    spinner.set_visible(false);
 
     let inner = Rc::new(Inner {
         ops,

@@ -276,7 +276,7 @@ fn nav(kind: Kind, db: Arc<Db>) -> Nav {
                 };
                 let done = remove_from_library(&paths, &db, kind, &plan.unfavorite);
                 if let Some(text) = crate::library::actions::partial_failure_toast(done, plan.unfavorite.len()) {
-                    crate::library::toast::notify(text);
+                    crate::toast::notify_for(&text, crate::library::TOAST_TIME);
                 }
                 if !plan.delete_downloads.is_empty() {
                     let sink = DELETE_DOWNLOADS_SINK.with(|s| s.borrow().clone());

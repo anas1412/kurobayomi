@@ -19,7 +19,7 @@ use super::pending;
 use super::primitives::ToastDuration;
 use super::route::BrowseRoute;
 use kuro_platform::kind::Kind;
-use super::view::{file_cover_loader, spinner_row};
+use super::view::file_cover_loader;
 
 /// What the screen shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,21 +68,17 @@ pub struct MigrateEntriesView {
 impl MigrateEntriesView {
     pub fn new(env: MigrateEnv) -> Rc<Self> {
         let root = gtk::Stack::new();
-        root.add_named(&spinner_row(), Some("loading"));
+        root.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("loading"));
         let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
         list.set_vexpand(true);
         root.add_named(&list, Some("list"));
-        let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
-        empty.set_valign(gtk::Align::Center);
-        empty.set_vexpand(true);
+        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
         let banner = InfoBanner::new();
         let failed = gtk::Box::new(gtk::Orientation::Vertical, 0);
         failed.append(banner.widget());
         failed.append(&empty);
         root.add_named(&failed, Some("failed"));
-        let empty_only = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
-        empty_only.set_valign(gtk::Align::Center);
-        empty_only.set_vexpand(true);
+        let empty_only = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
         root.add_named(&empty_only, Some("empty"));
         root.set_vexpand(true);
         root.set_visible_child_name("loading");

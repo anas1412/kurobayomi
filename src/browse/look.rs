@@ -4,7 +4,10 @@
 
 use gtk::prelude::*;
 use gtk::{Align, Orientation as O};
-use kuro_images::art::ArtRef;
+use std::rc::Rc;
+
+use kuro_images::art::{ArtKind, ArtRef};
+use kuro_platform::kind::Kind;
 
 use crate::library::layout::{self, CoverKind, SPACE_L};
 
@@ -20,15 +23,86 @@ pub fn badge(text: &str, accent: bool) -> gtk::Label {
 /// The empty state of a page (`ui::status`: a large dim icon over the message), with at most one action under it.
 /// Returns the page and its message label, for pages that change the message.
 pub fn empty_state(icon: &str, message: &str, action: Option<&gtk::Button>) -> (gtk::Box, gtk::Label) {
+    empty_state_with(icon, message, action.map(std::slice::from_ref).unwrap_or(&[]))
+}
+
+/// [`empty_state`] with any number of actions: one goes straight under the message, several sit in a centred row.
+pub fn empty_state_with(icon: &str, message: &str, actions: &[gtk::Button]) -> (gtk::Box, gtk::Label) {
     let page = crate::ui::status(icon, message);
     page.set_margin_start(SPACE_L);
     page.set_margin_end(SPACE_L);
     let label = page.last_child().and_downcast::<gtk::Label>().expect("the status ends with its message");
-    if let Some(action) = action {
-        action.set_halign(Align::Center);
-        page.append(action);
+    match actions {
+        [] => {}
+        [action] => {
+            action.set_halign(Align::Center);
+            page.append(action);
+        }
+        _ => {
+            let row = gtk::Box::new(O::Horizontal, 8);
+            row.set_halign(Align::Center);
+            for action in actions {
+                row.append(action);
+            }
+            page.append(&row);
+        }
     }
     (page, label)
+}
+
+/// The error state of a page: the empty state with an error icon and, when `retry` is given, a Retry button.
+pub fn error_state(message: &str, retry: Option<Rc<dyn Fn()>>) -> gtk::Box {
+    let button = retry.map(|retry| {
+        let button = gtk::Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_retry));
+        button.connect_clicked(move |_| retry());
+        button
+    });
+    empty_state("dialog-error-symbolic", message, button.as_ref()).0
+}
+
+/// The cover sizes of a list row, width x height (2:3 like the cards): [`SMALL`] in the Updates feed and the Browse
+/// lists, [`MEDIUM`] in History and Upcoming, [`BOOK`] for a row that leads with its cover.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoverSize {
+    pub width: i32,
+    pub height: i32,
+}
+
+pub const SMALL: CoverSize = CoverSize { width: 40, height: 56 };
+pub const MEDIUM: CoverSize = CoverSize { width: 53, height: 80 };
+pub const BOOK: CoverSize = CoverSize { width: 64, height: 96 };
+
+/// One `ArtRef` for the cover of an entry: the one place the struct is filled in by name.
+pub fn cover_art(owner: Kind, entry_id: i64, source_id: i64, url: Option<String>, favorite: bool, last_modified: i64) -> ArtRef {
+    ArtRef { owner, entry_id, source_id, kind: ArtKind::Cover, url, favorite, last_modified }
+}
+
+/// A list row: `cover` (from [`row_cover`] at a [`CoverSize`]), the bold title, an optional dim subtitle, and an
+/// optional `trailing` widget at the end. `ui`'s row metrics, so every list of entries has the same insets.
+pub fn list_row(cover: Option<gtk::Widget>, title: &str, subtitle: Option<&str>, trailing: Option<gtk::Widget>) -> gtk::ListBoxRow {
+    let line = gtk::Box::new(O::Horizontal, 12);
+    line.set_margin_start(crate::ui::ROW_PAD_H);
+    line.set_margin_end(crate::ui::ROW_PAD_H);
+    line.set_margin_top(crate::ui::ROW_PAD_V);
+    line.set_margin_bottom(crate::ui::ROW_PAD_V);
+    line.set_size_request(-1, crate::ui::ROW_MIN_HEIGHT - 2 * crate::ui::ROW_PAD_V);
+    if let Some(cover) = cover {
+        cover.set_valign(Align::Center);
+        line.append(&cover);
+    }
+    let text = gtk::Box::new(O::Vertical, 2);
+    text.set_hexpand(true);
+    text.set_valign(Align::Center);
+    text.append(&crate::ui::row_title(title));
+    if let Some(subtitle) = subtitle.filter(|s| !s.is_empty()) {
+        text.append(&crate::ui::dim(subtitle));
+    }
+    line.append(&text);
+    if let Some(trailing) = trailing {
+        trailing.set_valign(Align::Center);
+        line.append(&trailing);
+    }
+    gtk::ListBoxRow::builder().child(&line).build()
 }
 
 /// The cover of a list row: [`cover`] with the small rounded corners and initials of a row.

@@ -2,7 +2,7 @@
 //! The stored value is the enum name. System leaves the colour choice to the desktop.
 
 use gtk::prelude::*;
-use gtk::{Box as GBox, Orientation, ToggleButton};
+use gtk::ToggleButton;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::ui::ThemeMode;
 
@@ -35,18 +35,16 @@ pub fn apply(mode: ThemeMode) {
 }
 
 pub fn row(common: &ItemCommon, pref: Pref<ThemeMode>) -> PrefRow {
-    let group = GBox::new(Orientation::Horizontal, 0);
-    group.add_css_class("linked");
-    group.set_valign(gtk::Align::Center);
     let current = pref.get();
     apply(current);
+    let labels: Vec<String> = SEGMENTS.iter().map(|mode| segment_label(*mode)).collect();
+    let group = crate::ui::linked(&labels, SEGMENTS.iter().position(|mode| *mode == current).unwrap_or(usize::MAX));
+    group.set_valign(gtk::Align::Center);
     let mut buttons: Vec<(ThemeMode, ToggleButton)> = Vec::new();
+    let mut next = group.first_child();
     for mode in SEGMENTS {
-        let button = ToggleButton::with_label(&segment_label(mode));
-        if let Some((_, first)) = buttons.first() {
-            button.set_group(Some(first));
-        }
-        button.set_active(mode == current);
+        let button = next.and_downcast::<ToggleButton>().expect("`ui::linked` builds one toggle per label");
+        next = button.next_sibling();
         let pref = pref.clone();
         button.connect_toggled(move |b| {
             if !b.is_active() || !should_write(pref.get(), mode) {
@@ -56,7 +54,6 @@ pub fn row(common: &ItemCommon, pref: Pref<ThemeMode>) -> PrefRow {
                 apply(mode);
             }
         });
-        group.append(&button);
         buttons.push((mode, button));
     }
     let built = row::build(RowSpec {

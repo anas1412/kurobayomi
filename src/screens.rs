@@ -27,7 +27,6 @@ pub fn body(id: &str) -> Option<Built> {
         "download_queue" => downloads(),
         "categories" => categories(),
         "storage" => storage(),
-        "new_update" | "crash" => info_screen(id),
         id if crate::settings_ui::handles(id) => crate::settings_ui::body(id),
         _ => crate::entry::body(id),
     }
@@ -163,32 +162,6 @@ pub(crate) fn dialog_then_named(id: &str, dialog: &str, name: &str, on_ok: impl 
     }
 }
 
-pub(crate) fn list_row(prefix: Option<gtk::Widget>, title: &str, sub: &str, suffix: Vec<gtk::Widget>) -> gtk::ListBoxRow {
-    // the shared row metrics (`ui::row`)
-    let h = GBox::new(O::Horizontal, 12);
-    h.set_margin_start(ROW_PAD_H);
-    h.set_margin_end(ROW_PAD_H);
-    h.set_margin_top(ROW_PAD_V);
-    h.set_margin_bottom(ROW_PAD_V);
-    h.set_size_request(-1, ROW_MIN_HEIGHT - 2 * ROW_PAD_V);
-    if let Some(p) = prefix {
-        h.append(&p);
-    }
-    let v = GBox::new(O::Vertical, 2);
-    v.set_hexpand(true);
-    v.set_valign(Align::Center);
-    v.append(&Label::builder().label(title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build());
-    if !sub.is_empty() {
-        v.append(&dim(sub));
-    }
-    h.append(&v);
-    for s in suffix {
-        s.set_valign(Align::Center);
-        h.append(&s);
-    }
-    gtk::ListBoxRow::builder().child(&h).activatable(true).build()
-}
-
 pub(crate) fn fab(overlay: &gtk::Overlay, label: &str, icon: &str) -> Button {
     let h = GBox::new(O::Horizontal, 6);
     h.append(&gtk::Image::from_icon_name(icon));
@@ -220,7 +193,8 @@ pub(crate) fn library_page(views: [Built; 2]) -> GBox {
         let mut rest = b.end.into_iter().peekable();
         // the live view hands its search entry first; it takes the middle of the header
         let search = rest.next_if(|w| w.is::<gtk::SearchEntry>()).unwrap_or_else(|| GBox::new(O::Horizontal, 0).upcast());
-        centre.add_named(&search, Some(name));
+        // the same width limit as every other header search (`ui::page`)
+        centre.add_named(&crate::ui::clamp(&search, crate::ui::SEARCH_WIDTH), Some(name));
         let actions = GBox::new(O::Horizontal, 4);
         rest.for_each(|w| actions.append(&w));
         end.add_named(&actions, Some(name));
@@ -229,7 +203,6 @@ pub(crate) fn library_page(views: [Built; 2]) -> GBox {
         kinds.bind_property("visible-child-name", follower, "visible-child-name").sync_create().build();
     }
     let header = crate::ui::header_bar();
-    header.add_css_class("kb-library-header");
     header.set_decoration_layout(Some(&decoration(false)));
     header.pack_start(&gtk::StackSwitcher::builder().stack(&kinds).build());
     header.set_title_widget(Some(&centre));
@@ -269,40 +242,6 @@ fn categories() -> Option<Built> {
 
 fn storage() -> Option<Built> {
     crate::updates::mount::storage()
-}
-
-// New update / Crash share Aniyomi's InfoScreen layout.
-fn info_screen(id: &str) -> Option<Built> {
-    let s = screen(id);
-    let col = column();
-    let (icon, subtitle, buttons): (&str, &str, &[&str]) = match id {
-        "new_update" => ("software-update-available-symbolic", concat!("v", env!("CARGO_PKG_VERSION")), &["Download", "Not now"]),
-        _ => ("dialog-error-symbolic", "Kurobayomi ran into an unexpected error. We suggest you share the crash logs in our support channel on Discord.", &["Share crash logs", "Restart the application"]),
-    };
-    col.append(&gtk::Image::builder().icon_name(icon).pixel_size(48).halign(Align::Start).build());
-    col.append(&Label::builder().label(&s.title).xalign(0.0).css_classes(["title-1"]).build());
-    col.append(&dim(subtitle));
-    let stack = gtk::Stack::new();
-    stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
-    // no crash log or release notes are recorded yet: say so rather than show made-up text
-    let text = if id == "crash" { "No crash log was recorded." } else { "No release notes available." };
-    stack.add_child(&gtk::Frame::builder().child(&Label::builder().label(text).wrap(true).xalign(0.0).margin_start(12).margin_top(12).margin_end(12).margin_bottom(12).build()).build());
-    groups_into(&col, &s.groups);
-    col.append(&stack);
-    let row = GBox::new(O::Vertical, 6);
-    for (i, b) in buttons.iter().enumerate() {
-        let btn = Button::with_label(b);
-        if i == 0 {
-            btn.add_css_class("suggested-action");
-        }
-        row.append(&btn);
-        if i == 1 {
-            btn.connect_clicked(|_| pop());
-        }
-    }
-    col.append(&row);
-    tag(&col, id);
-    built(scrolled(&col), vec![])
 }
 
 /// Harness for tests that need the app data installed. `data::install` binds the data to the GTK thread for good, so
@@ -377,7 +316,7 @@ pub(crate) mod alone {
         let overlay = gtk::Overlay::new();
         crate::toast::attach(&overlay);
         let revealer = overlay.last_child().and_downcast::<gtk::Revealer>().expect("the toast revealer");
-        revealer.child().and_downcast::<gtk::Label>().expect("the toast label")
+        revealer.child().and_then(|bar| bar.first_child()).and_downcast::<gtk::Label>().expect("the toast label")
     }
 }
 

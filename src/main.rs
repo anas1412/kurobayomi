@@ -232,7 +232,7 @@ fn build_window(app: &gtk::Application) {
     host.start_downloads(std::sync::Arc::new(gio_notifier::GioNotifier::new(app, Vec::new())));
     // `app.incognito` exists before the panel's app menu and title icon look it up
     let base = &data::app().base;
-    let _ = incognito::attach(app, base.incognito_mode.clone(), base.downloaded_only.clone());
+    incognito::attach(app, base.incognito_mode.clone());
     let tabs = tabs();
     nav.add_child(&tabs);
     let sidebar = shell::sidebar::build(&tabs);
@@ -257,7 +257,7 @@ fn build_window(app: &gtk::Application) {
     net_client::set_toaster(toast::attach(&overlay));
     win.set_child(Some(&overlay));
     // the app-state banners above everything: indexing, downloaded only, incognito (T-36a-018). The incognito module
-    // keeps the actions and the notification; its own banner is not placed.
+    // keeps the actions and the notification; the banner is this one.
     let banners = std::rc::Rc::new(shell::banners::Banners::new());
     outer.prepend(&banners.widget);
     {

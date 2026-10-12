@@ -29,9 +29,9 @@ use super::glue::{consume_events, follow_changes, follow_ready, keep_alive, own_
 use super::grid::{COVER_WIDTH_PX, CONTAINER_MARGIN_PX, CoverBinds, GridColumns, cover_width, grid_columns, last_visible_index};
 use super::listing::{ListItem, ListedPage, Listing, PageLoader};
 use super::prefs::BrowsePrefs;
-use super::primitives::{EmptyAction, ToastSpec, stub_source_label};
+use super::primitives::{EmptyAction, ToastAction, ToastDuration, ToastSpec, stub_source_label};
 use super::tasks::{PageTasks, Tagged};
-use super::view::{CoverGuard, CoverLoader, empty_state, grid_cell, list_cell, spinner_row, toast_bar, toast_timeout_ms};
+use super::view::{CoverGuard, CoverLoader, empty_state, grid_cell, list_cell};
 use crate::widgets::context_menu::{self, Item};
 
 /// What the listing needs from the app.
@@ -72,11 +72,12 @@ struct Inner {
     ready: Cell<bool>,
     display: Cell<LibraryDisplayMode>,
     toast_dismissed: Cell<bool>,
+    /// Whether a toast was raised (the toast itself lives in the shared layer).
+    toast_shown: Cell<bool>,
     /// The cover width the grid cells were last built for.
     cover_px: Cell<i32>,
     stack: gtk::Stack,
     error_slot: gtk::Box,
-    toast_slot: gtk::Box,
     items_stack: gtk::Stack,
     /// The loading row under the items while the next page loads (the paging spinner).
     footer: gtk::Box,
@@ -130,33 +131,33 @@ impl ListingView {
         let scroller = gtk::ScrolledWindow::builder().child(&items_stack).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
 
         let error_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let stub = gtk::Label::new(Some(&trf(
-            MsgKey::source_not_installed,
-            &[("arg1", Arg::Str(&stub_source_label(&deps.source_name, &deps.source_lang, deps.source_id)))],
-        )));
-        stub.set_wrap(true);
-        let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
+        let stub = super::look::empty_state(
+            "dialog-warning-symbolic",
+            &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&stub_source_label(&deps.source_name, &deps.source_lang, deps.source_id)))]),
+            None,
+        )
+        .0;
+        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
         let stack = gtk::Stack::new();
-        stack.add_named(&spinner_row(), Some("spinner"));
+        stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("spinner"));
         stack.add_named(&stub, Some("stub"));
         stack.add_named(&error_slot, Some("error"));
         stack.add_named(&empty, Some("empty"));
         // the items, and under them a loading row while a later page loads
         let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        footer.append(&spinner_row());
+        let more = crate::ui::loading(crate::ui::LoadSize::Inline);
+        more.set_halign(gtk::Align::Center);
+        more.set_margin_top(16);
+        more.set_margin_bottom(16);
+        footer.append(&more);
         footer.set_visible(false);
         let items_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
         items_page.append(&scroller);
         items_page.append(&footer);
         stack.add_named(&items_page, Some("items"));
 
-        let toast_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        toast_slot.set_valign(gtk::Align::End);
-        toast_slot.set_halign(gtk::Align::Center);
-        toast_slot.set_margin_bottom(16);
         let root = gtk::Overlay::new();
         root.set_child(Some(&stack));
-        root.add_overlay(&toast_slot);
 
         let display = deps.prefs.display_mode();
         let ready = *deps.ready.borrow();
@@ -170,11 +171,11 @@ impl ListingView {
             }),
             tasks: Rc::new(RefCell::new(PageTasks::new())),
             toast_dismissed: Cell::new(false),
+            toast_shown: Cell::new(false),
             cover_px: Cell::new(COVER_WIDTH_PX),
             deps,
             stack,
             error_slot,
-            toast_slot,
             items_stack,
             footer,
             store,
@@ -508,7 +509,6 @@ impl Inner {
     fn render(self: &Rc<Self>) {
         let plan = self.listing.borrow().plan(self.ready.get(), self.deps.stub, self.deps.is_local, self.display.get());
         self.footer.set_visible(matches!(plan, ContentPlan::Items { .. }) && self.listing.borrow().loading_more());
-        self.clear(&self.toast_slot);
         match plan {
             ContentPlan::Spinner => self.stack.set_visible_child_name("spinner"),
             ContentPlan::Stub => self.stack.set_visible_child_name("stub"),
@@ -534,26 +534,26 @@ impl Inner {
         }
     }
 
+    /// The toast of a failed later page: the shared layer's toast, with Retry when the spec carries it.
     fn show_toast(self: &Rc<Self>, spec: &ToastSpec) {
-        let (retry, dismiss) = (Rc::downgrade(self), Rc::downgrade(self));
-        let bar = toast_bar(
-            spec,
-            move || {
-                if let Some(inner) = retry.upgrade() {
+        self.toast_shown.set(true);
+        let duration = match spec.duration {
+            ToastDuration::Seconds(s) => Some(std::time::Duration::from_secs(u64::from(s))),
+            ToastDuration::Indefinite => None,
+        };
+        if spec.action == Some(ToastAction::Retry) {
+            let weak = Rc::downgrade(self);
+            crate::toast::notify_action(&spec.message, &tr(MsgKey::action_retry), duration, move || {
+                if let Some(inner) = weak.upgrade() {
                     inner.retry();
                 }
-            },
-            move || {
-                if let Some(inner) = dismiss.upgrade() {
-                    inner.toast_dismissed.set(true);
-                    inner.render();
-                }
-            },
-        );
-        self.toast_slot.append(&bar);
-        if let Some(ms) = toast_timeout_ms(spec) {
+            });
+        } else {
+            crate::toast::notify_for(&spec.message, duration.unwrap_or(crate::toast::ACTION_DURATION));
+        }
+        if let Some(duration) = duration {
             let weak = Rc::downgrade(self);
-            glib::timeout_add_local_once(std::time::Duration::from_millis(u64::from(ms)), move || {
+            glib::timeout_add_local_once(duration, move || {
                 if let Some(inner) = weak.upgrade() {
                     inner.toast_dismissed.set(true);
                     inner.render();
@@ -707,32 +707,26 @@ pub(crate) mod tests {
     fn a_local_source_error_offers_retry_and_is_never_empty() {
         let rig = rig(vec![Err("no folder".into())], true, false, true);
         assert!(pump(|| shown(&rig) == "error"));
-        let mut count = 0;
-        let mut child = rig.view.inner.error_slot.first_child();
-        while let Some(w) = child {
-            let mut inner = w.first_child();
-            while let Some(i) = inner {
-                if i.is::<gtk::Box>() {
-                    let mut b = i.first_child();
-                    while let Some(x) = b {
-                        count += usize::from(x.is::<gtk::Button>());
-                        b = x.next_sibling();
-                    }
-                }
-                inner = i.next_sibling();
+        fn count(widget: &gtk::Widget) -> usize {
+            let mut total = usize::from(widget.is::<gtk::Button>());
+            let mut child = widget.first_child();
+            while let Some(w) = child {
+                total += count(&w);
+                child = w.next_sibling();
             }
-            child = w.next_sibling();
+            total
         }
+        let count = count(rig.view.inner.error_slot.upcast_ref());
         assert_eq!(count, 1);
     }
 
     fn a_later_page_failure_keeps_the_items_and_shows_a_toast_that_stays_up() {
         let rig = rig(vec![items(&["a"], true), Err("page 2 failed".into())], true, false, false);
-        assert!(pump(|| rig.view.inner.toast_slot.first_child().is_some()));
+        assert!(pump(|| rig.view.inner.toast_shown.get()));
         assert_eq!(shown(&rig), "items");
         assert_eq!(rig.view.inner.store.n_items(), 1);
         let _ = pump(|| false);
-        assert!(rig.view.inner.toast_slot.first_child().is_some(), "no auto-hide for an error toast");
+        assert!(rig.view.inner.toast_shown.get(), "no auto-hide for an error toast");
     }
 
     fn texts(root: &gtk::Widget, out: &mut Vec<String>) {
@@ -754,7 +748,7 @@ pub(crate) mod tests {
         assert!(found.contains(&tr(MsgKey::no_results_found)), "{found:?}");
 
         let rig = rig_second(vec![items(&["a"], true), items(&[], true)]);
-        assert!(pump(|| rig.view.inner.toast_slot.first_child().is_some()), "an empty later page raises the retry toast");
+        assert!(pump(|| rig.view.inner.toast_shown.get()), "an empty later page raises the retry toast");
         assert_eq!(shown(&rig), "items");
         assert_eq!(rig.view.inner.store.n_items(), 1);
         let calls = rig.script.calls.lock().expect("lock").len();

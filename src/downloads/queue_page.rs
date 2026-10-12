@@ -17,6 +17,7 @@ use kuro_downloads::engine::{AnimeEngine, MangaEngine, QueueEngine, anime_model,
 use kuro_downloads::queue_model::{QueueItem, QueueModel};
 use kuro_i18n::{MsgKey, tr};
 
+use crate::browse::look;
 use crate::downloads::Queues;
 use crate::downloads::live;
 use crate::downloads::manga_io::Waiting;
@@ -29,18 +30,14 @@ const REFRESH: Duration = Duration::from_secs(1);
 /// The queue page, or `None` when the app runs no download manager (the Download tab then shows its empty state).
 pub fn page() -> Option<gtk::Widget> {
     let queues = crate::shell::host::Shell::get()?.download_queues()?;
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    column.set_margin_top(16);
-    column.set_margin_bottom(16);
-    column.set_margin_start(16);
-    column.set_margin_end(16);
+    let column = crate::ui::column();
     // the shared top row of a page (`ui::pill_row`), as the library's categories
     let actions = crate::ui::pill_row();
     let toggle = gtk::Button::new();
     let clear = gtk::Button::with_label("Clear");
     actions.append(&toggle);
     actions.append(&clear);
-    let rows = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
     column.append(&actions);
     column.append(&rows);
 
@@ -129,50 +126,41 @@ impl Page {
         self.actions.set_visible(!empty);
         if empty {
             // the app's empty state (icon, line), as the library and history show theirs
-            let (state, _) = crate::browse::look::empty_state("folder-download-symbolic", "No downloads are queued.", None);
+            let (state, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", None);
             state.set_vexpand(true);
             self.rows.append(&state);
+            return;
         }
+        let list = crate::ui::boxed_list();
         for item in items {
-            self.rows.append(&self.row(item));
+            list.append(&self.row(item));
         }
         for line in &waiting {
-            self.rows.append(&self.waiting_row(line));
+            list.append(&self.waiting_row(line));
         }
+        self.rows.append(&list);
     }
 
     /// A saved download whose source is not installed. It is queued again when the source comes back. Cancel removes it.
-    fn waiting_row(&self, line: &Waiting) -> gtk::Box {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let text = gtk::Label::new(Some(&format!("{} · {}", line.title, line.chapter)));
-        text.set_xalign(0.0);
-        text.set_hexpand(true);
-        let status = gtk::Label::new(Some("Waiting for source"));
-        let cancel = gtk::Button::with_label("Cancel");
+    fn waiting_row(&self, line: &Waiting) -> gtk::ListBoxRow {
+        let cancel = gtk::Button::with_label(&tr(MsgKey::action_cancel));
         let (queues, chapter_id) = (self.queues.clone(), line.row.chapter_id);
         let on_menu = queues.clone();
         cancel.connect_clicked(move |_| {
             let _ = queues.cancel_waiting.send(chapter_id);
         });
+        let row = look::list_row(None, &format!("{} · {}", line.title, line.chapter), Some("Waiting for source"), Some(cancel.upcast()));
+        row.set_activatable(false);
         context_menu::attach(&row, move |_, _| {
             let queues = on_menu.clone();
             vec![Item::new(tr(MsgKey::action_cancel), 0, move || {
                 let _ = queues.cancel_waiting.send(chapter_id);
             })]
         });
-        row.append(&text);
-        row.append(&status);
-        row.append(&cancel);
         row
     }
 
-    fn row(&self, item: &QueueItem) -> gtk::Box {
-        let line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let text = gtk::Label::new(Some(&format!("{} · {}", item.title, item.item_name)));
-        text.set_xalign(0.0);
-        text.set_hexpand(true);
-        let status = gtk::Label::new(Some(&status_line(item)));
-        status.add_css_class("dim-label");
+    fn row(&self, item: &QueueItem) -> gtk::ListBoxRow {
         let (queues, kind, id) = (self.queues.clone(), item.kind, item.item_id);
         // a click on a queued or running row cancels it, and on a failed row starts its queue again
         let button = DownloadButton::new(move |request| match request {
@@ -182,15 +170,14 @@ impl Page {
         });
         let (state, percent) = live::queued(&self.queues, kind, id).unwrap_or((item.state, 0));
         button.set(state, percent);
+        let line = look::list_row(None, &format!("{} · {}", item.title, item.item_name), Some(&status_line(item)), Some(button.widget.clone().upcast()));
+        line.set_activatable(false);
         let (on_menu, drawn) = (self.queues.clone(), item.state);
         context_menu::attach(&line, move |_, _| {
             // the state now, not the one the row was drawn with
             let failed = live::queued(&on_menu, kind, id).map_or(drawn, |(state, _)| state) == DownloadState::Error;
             row_menu(&on_menu, kind, id, failed)
         });
-        line.append(&text);
-        line.append(&status);
-        line.append(&button.widget);
         self.buttons.borrow_mut().insert((kind, id), button);
         line
     }

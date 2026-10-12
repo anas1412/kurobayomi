@@ -59,12 +59,6 @@ impl<T> UpdatesLoad<T> {
     }
 }
 
-/// The row height of the feed in px (U 1.4).
-pub const ROW_HEIGHT: i32 = 56;
-/// The vertical inset of the cover in px, so the cover is `ROW_HEIGHT - 2 * COVER_INSET` tall.
-pub const COVER_INSET: i32 = 6;
-/// The cover width in px.
-pub const COVER_WIDTH: i32 = 40;
 /// The opacity of the title and the unit name of a read or seen row.
 pub const READ_ALPHA: f64 = 0.38;
 
@@ -146,11 +140,9 @@ mod tests {
     }
 
     #[test]
-    fn a_read_row_is_dimmed_and_the_row_geometry_is_the_spec() {
+    fn a_read_row_is_dimmed() {
         assert_eq!(row_alpha(true), 0.38);
         assert_eq!(row_alpha(false), 1.0);
-        assert_eq!(ROW_HEIGHT - 2 * COVER_INSET, 44);
-        assert_eq!(COVER_WIDTH, 40);
     }
 
     #[test]

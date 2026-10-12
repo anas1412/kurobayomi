@@ -26,11 +26,6 @@ pub fn label_backup() -> String {
     tr(MsgKey::label_backup)
 }
 
-/// The Back button's tooltip.
-pub fn back() -> String {
-    tr(MsgKey::action_webview_back)
-}
-
 /// Kurobayomi-only words (T-47ba-074). Not in the Kotlin tree, so they are plain English constants until the string
 /// table (area 51) takes them.
 pub const NOT_INCLUDED: &str = "Not included";
@@ -50,7 +45,6 @@ mod tests {
         assert_eq!(none(), "None");
         assert_eq!(logged_in(), "Logged in");
         assert_eq!(label_backup(), "Backup and restore");
-        assert_eq!(back(), "Back");
     }
 
     #[test]

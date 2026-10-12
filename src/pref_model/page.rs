@@ -1,11 +1,9 @@
-//! Settings page scaffold: header bar, a scrolled column with one boxed list per group (a `heading` above it, 24 px
+//! Settings page scaffold: a scrolled column with one boxed list per group (a `heading` above it, 24 px
 //! between groups, 16 px gutters, at most `ui::PAGE_WIDTH` wide and centred; the same layout as `ui::column`), and
 //! the highlight target. Groups that are disabled are not built.
 
-use std::rc::Rc;
-
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, HeaderBar, Label, ListBox, ListBoxRow, Orientation, PolicyType, Revealer, RevealerTransitionType, ScrolledWindow, SelectionMode};
+use gtk::{Box as GBox, ListBox, ListBoxRow, Orientation, PolicyType, Revealer, RevealerTransitionType, ScrolledWindow, SelectionMode};
 
 use super::enabled::EnabledFlag;
 use super::highlight;
@@ -23,27 +21,15 @@ pub struct Built {
     pub targets: Vec<(String, ListBoxRow)>,
 }
 
-/// Builds `tree` as a page titled `title`. Takes the pending highlight request (cleared even when no row matches),
-/// and reveals the matching row after the reveal delay.
-pub fn build(title: &str, on_back: Option<Rc<dyn Fn()>>, tree: &[Preference]) -> Built {
-    let body = body(tree);
-    let page = GBox::new(Orientation::Vertical, 0);
-    page.append(&header_bar(title, on_back));
-    page.append(&body.scrolled);
-    Built { widget: page.upcast(), scrolled: body.scrolled, targets: body.targets }
-}
-
 /// Builds `tree` without a header: the scrolled column of groups, for a caller that has a header of its own. The
 /// pending highlight request is taken here, so the page that is built next shows it.
 pub fn body(tree: &[Preference]) -> Built {
     let pending = highlight::take();
 
-    let content = GBox::new(Orientation::Vertical, GROUP_SPACER);
+    // the page column of `ui::column` (its gutters), with a group-sized gap between the groups
+    let content = crate::ui::column();
+    content.set_spacing(GROUP_SPACER);
     content.set_hexpand(true);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(24);
     let mut targets: Vec<(String, ListBoxRow)> = Vec::new();
 
     let sections = tree.iter().filter(|entry| match entry {
@@ -146,22 +132,6 @@ fn animate_enabled(row: &ListBoxRow, flag: Option<&EnabledFlag>) {
             revealer.set_reveal_child(true);
         }
     });
-}
-
-fn header_bar(title: &str, on_back: Option<Rc<dyn Fn()>>) -> HeaderBar {
-    let bar = HeaderBar::new();
-    let label = Label::new(Some(title));
-    label.add_css_class("title");
-    label.set_halign(Align::Center);
-    bar.set_title_widget(Some(&label));
-    if let Some(back) = on_back {
-        let button = Button::from_icon_name("go-previous-symbolic");
-        button.set_tooltip_text(Some(&super::strings::back()));
-        button.connect_clicked(move |_| back());
-        bar.pack_start(&button);
-    }
-    crate::ui::no_sticky_focus(&bar);
-    bar
 }
 
 #[cfg(test)]

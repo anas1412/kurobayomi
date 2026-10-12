@@ -1,5 +1,5 @@
-//! The storage entry row (T-42a-050): a 48 px square cover, a bold title on one line, and a second line with a 12 px
-//! colour dot, the size, a separator dot and the count. A trailing delete button asks the page's confirm dialog.
+//! The storage entry row (T-42a-050): a cover tile, a bold title on one line, and a second line with a 12 px colour dot,
+//! the size, a separator dot and the count. A trailing delete button asks the page's confirm dialog.
 
 use std::rc::Rc;
 
@@ -9,7 +9,9 @@ use gtk::{Align, Box as GBox, Button, DrawingArea, Label, ListBoxRow, Orientatio
 use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
+use crate::browse::look;
 use crate::updates::format::format_size;
+use crate::updates::row_texts;
 use crate::updates::storage::{Rgba, StorageRow, count_text};
 
 /// Side of the colour dot, in pixels.
@@ -31,26 +33,16 @@ fn colour_dot(colour: Rgba) -> DrawingArea {
     dot
 }
 
-/// The row. `cover` is the thumbnail widget, already loaded by the caller; `on_delete` runs the confirm dialog.
-pub fn storage_row(row: &StorageRow, kind: Kind, cover: &impl IsA<gtk::Widget>, on_delete: Rc<dyn Fn()>) -> ListBoxRow {
-    let line = GBox::new(O::Horizontal, 12);
-    crate::ui::margins(&line, 8);
+/// The row (`look::list_row`): the cover tile, the bold title, the size and count line under it, and the delete button.
+/// `on_delete` runs the confirm dialog.
+pub fn storage_row(row: &StorageRow, kind: Kind, on_delete: Rc<dyn Fn()>) -> ListBoxRow {
+    let delete = Button::from_icon_name("user-trash-symbolic");
+    delete.set_tooltip_text(Some(&tr(MsgKey::action_delete)));
+    delete.connect_clicked(move |_| on_delete());
 
-    cover.set_size_request(48, 48);
-    cover.set_valign(Align::Center);
-    line.append(cover);
-
-    let texts = GBox::new(O::Vertical, 2);
-    texts.set_hexpand(true);
-    texts.set_valign(Align::Center);
-    texts.append(
-        &Label::builder()
-            .label(&row.title)
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .css_classes(["heading"])
-            .build(),
-    );
+    let cover = look::row_cover(&row.title, None, look::SMALL.width, look::SMALL.height);
+    let list_row = look::list_row(Some(cover), &row.title, None, Some(delete.upcast()));
+    list_row.set_activatable(false);
 
     let meta = GBox::new(O::Horizontal, 6);
     meta.append(&colour_dot(row.color));
@@ -59,14 +51,6 @@ pub fn storage_row(row: &StorageRow, kind: Kind, cover: &impl IsA<gtk::Widget>, 
     for text in [size.as_str(), "·", count.as_str()] {
         meta.append(&Label::builder().label(text).xalign(0.0).css_classes(["dim-label", "caption"]).build());
     }
-    texts.append(&meta);
-    line.append(&texts);
-
-    let delete = Button::from_icon_name("user-trash-symbolic");
-    delete.set_valign(Align::Center);
-    delete.set_tooltip_text(Some(&tr(MsgKey::action_delete)));
-    delete.connect_clicked(move |_| on_delete());
-    line.append(&delete);
-
-    ListBoxRow::builder().child(&line).activatable(false).build()
+    row_texts(&list_row).append(&meta);
+    list_row
 }

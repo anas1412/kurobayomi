@@ -2,9 +2,13 @@
 //! action), the error state with a retry, and the list. The child names are the ones [`PageState::child_name`] gives.
 //! Widgets only; the rules are in [`crate::updates::list`] and [`crate::updates::updates_page`].
 
-use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Label, Spinner, Stack, StackTransitionType};
+use std::rc::Rc;
 
+use gtk::prelude::*;
+use gtk::{Align, Box as GBox, Button, Label, Stack, StackTransitionType};
+
+use crate::browse::look;
+use crate::ui::{LoadSize, loading};
 use crate::updates::list::PageState;
 
 pub struct PageStates {
@@ -12,27 +16,24 @@ pub struct PageStates {
     empty: GBox,
     empty_icon: gtk::Image,
     empty_label: Label,
-    error: Label,
+    /// Runs the load again; the error child is rebuilt with each message, so it keeps this.
+    on_retry: Rc<dyn Fn()>,
 }
 
 impl PageStates {
     /// The stack with its four children. `list` is the page's list widget; `on_retry` runs the load again.
     pub fn new(list: &impl IsA<gtk::Widget>, on_retry: impl Fn() + 'static) -> Self {
         let stack = Stack::builder().transition_type(StackTransitionType::Crossfade).vexpand(true).build();
-        stack.add_named(&Spinner::builder().spinning(true).halign(Align::Center).valign(Align::Center).build(), Some("loading"));
+        stack.add_named(&loading(LoadSize::Page), Some("loading"));
 
         // the empty look of the Library page (docs/design/other-tabs.md); the screen sets its icon and action
-        let (empty, empty_label) = crate::browse::look::empty_state("view-list-symbolic", "", None);
+        let (empty, empty_label) = look::empty_state("view-list-symbolic", "", None);
         let empty_icon = empty.first_child().and_downcast::<gtk::Image>().expect("the empty state starts with its icon");
         stack.add_named(&empty, Some("empty"));
 
-        let retry = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_retry));
-        retry.connect_clicked(move |_| on_retry());
-        let (error_box, error) = crate::browse::look::empty_state("dialog-warning-symbolic", "", Some(&retry));
-        stack.add_named(&error_box, Some("error"));
-
+        // the error child is added by `show`, with its message
         stack.add_named(list, Some("list"));
-        Self { stack, empty, empty_icon, empty_label, error }
+        Self { stack, empty, empty_icon, empty_label, on_retry: Rc::new(on_retry) }
     }
 
     /// The icon of the empty page and its one action (none by default).
@@ -52,7 +53,12 @@ impl PageStates {
     pub fn show(&self, state: &PageState) {
         match state {
             PageState::Empty(message) => self.empty_label.set_label(message),
-            PageState::Error(message) => self.error.set_label(message),
+            PageState::Error(message) => {
+                if let Some(old) = self.stack.child_by_name("error") {
+                    self.stack.remove(&old);
+                }
+                self.stack.add_named(&look::error_state(message, Some(Rc::clone(&self.on_retry))), Some("error"));
+            }
             PageState::Loading | PageState::List => {}
         }
         self.stack.set_visible_child_name(state.child_name());
@@ -76,7 +82,9 @@ mod tests {
             assert_eq!(pages.empty_icon.icon_name().as_deref(), Some("software-update-available-symbolic"));
             assert_eq!(action.parent().as_ref(), Some(pages.empty.upcast_ref::<gtk::Widget>()));
             pages.show(&PageState::Error("boom".into()));
-            assert_eq!(pages.error.label(), "boom");
+            assert_eq!(pages.stack.visible_child_name().as_deref(), Some("error"));
+            let error = pages.stack.child_by_name("error").and_then(|page| page.first_child()).and_then(|icon| icon.next_sibling()).and_downcast::<Label>().expect("the error message");
+            assert_eq!(error.label(), "boom");
         });
     }
 }

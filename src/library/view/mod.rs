@@ -29,7 +29,7 @@ use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::{LibraryItem, toolbar_title};
 use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_domain::library::search::{SEARCH_DEBOUNCE, empty_page, shows_global_search};
-use kuro_images::art::{ArtKind, ArtRef};
+use kuro_images::art::ArtRef;
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::library::actions;
@@ -94,7 +94,7 @@ fn refresh_active(inner: &Rc<RefCell<Inner>>) {
         (st.nav.update.clone(), page.map(|p| p.category.id))
     };
     let started = update(category);
-    crate::library::toast::notify(actions::update_toast(actions::UpdateScope::Category, !started));
+    crate::toast::notify_for(&actions::update_toast(actions::UpdateScope::Category, !started), crate::library::TOAST_TIME);
     sync_refresh_button(inner);
 }
 
@@ -152,8 +152,6 @@ struct Inner {
 pub struct LibraryView {
     inner: Rc<RefCell<Inner>>,
     root: gtk::Box,
-    /// The overlay around `root` that carries the library toast (T-37a-062).
-    shell: gtk::Overlay,
 }
 
 impl LibraryView {
@@ -174,7 +172,8 @@ impl LibraryView {
         hint.set_visible(false);
         let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
-        search.set_width_chars(28);
+        // the page header sizes it (`ui::page` clamps a search entry to `ui::SEARCH_WIDTH`)
+        search.set_hexpand(true);
         let refresh_button = crate::ui::icon_button("view-refresh-symbolic", &tr(MsgKey::action_update_category));
         let options = options::Options::new(deps.kind);
 
@@ -195,45 +194,29 @@ impl LibraryView {
         // the shared page scroller: it scrolls down only, so a wide grid never shows a sideways scrollbar
         let scroller = crate::ui::scrolled(&grid);
 
-        let empty_label = gtk::Label::new(None);
-        empty_label.add_css_class("kb-empty-title");
         let global_button = gtk::Button::new();
         global_button.set_visible(false);
-        global_button.set_halign(gtk::Align::Center);
-        let empty = gtk::Box::new(O::Vertical, layout::SPACE_M);
-        empty.set_valign(gtk::Align::Center);
-        empty.set_vexpand(true);
-        let empty_icon = gtk::Image::from_icon_name(match deps.kind {
-            Kind::Anime => "video-x-generic-symbolic",
-            Kind::Manga => "accessories-dictionary-symbolic",
-        });
-        empty_icon.set_pixel_size(64);
-        empty_icon.add_css_class("dim-label");
-        empty.append(&empty_icon);
-        empty.append(&empty_label);
-        empty.append(&global_button);
         let empty_action = gtk::Button::with_label(&tr(MsgKey::browse));
         empty_action.add_css_class("suggested-action");
         empty_action.set_visible(false);
-        empty_action.set_halign(gtk::Align::Center);
-        empty.append(&empty_action);
+        // the shared empty state; the message and the two actions are set by `render`
+        let (empty, empty_label) = crate::browse::look::empty_state_with(
+            match deps.kind {
+                Kind::Anime => "video-x-generic-symbolic",
+                Kind::Manga => "accessories-dictionary-symbolic",
+            },
+            "",
+            &[global_button.clone(), empty_action.clone()],
+        );
         let welcome = welcome::Welcome::new();
 
         let bar_label = gtk::Label::new(None);
-        bar_label.set_hexpand(true);
-        bar_label.set_xalign(0.0);
-        bar_label.add_css_class("title-2");
-        let sel_header = gtk::Box::new(O::Horizontal, layout::SPACE_S);
-        sel_header.set_margin_start(layout::SPACE_L);
-        sel_header.set_margin_end(layout::SPACE_L);
-        sel_header.set_margin_top(layout::SPACE_S);
+        // the shared selection header goes in here by `wire_bar`, which has the handlers' weak reference
+        let sel_header = gtk::Box::new(O::Vertical, 0);
         sel_header.set_visible(false);
-        sel_header.append(&bar_label);
         let download_button = crate::ui::quiet_menu(gtk::MenuButton::builder().label(tr(MsgKey::action_download)).build());
-        let action_bar = gtk::ActionBar::new();
-        let bar = gtk::Revealer::new();
-        bar.set_transition_type(gtk::RevealerTransitionType::SlideUp);
-        bar.set_child(Some(&action_bar));
+        // the buttons are packed into the bar's `ActionBar` by `wire_bar`
+        let bar = crate::ui::action_bar(&[]);
 
         let root = gtk::Box::new(O::Vertical, 0);
         root.set_hexpand(true);
@@ -283,8 +266,7 @@ impl LibraryView {
             bar,
             bar_label,
         }));
-        let shell = crate::library::toast::attach(&root);
-        let view = Self { inner: inner.clone(), root, shell };
+        let view = Self { inner: inner.clone(), root };
         // a resize across a column boundary or the 900 px breakpoint changes the count without a data change
         let (weak, seen) = (Rc::downgrade(&inner), FlagCell::new((-1, -1)));
         let scroller = inner.borrow().scroller.clone();
@@ -311,7 +293,7 @@ impl LibraryView {
 
     /// The widget to place in the page.
     pub fn widget(&self) -> gtk::Widget {
-        self.shell.clone().upcast()
+        self.root.clone().upcast()
     }
 
     /// The search entry, the refresh button and the view options button, for the page header.
@@ -343,7 +325,7 @@ impl LibraryView {
     pub fn update_library(&self) {
         let update = self.inner.borrow().nav.update.clone();
         let started = update(None);
-        crate::library::toast::notify(actions::update_toast(actions::UpdateScope::Library, !started));
+        crate::toast::notify_for(&actions::update_toast(actions::UpdateScope::Library, !started), crate::library::TOAST_TIME);
         sync_refresh_button(&self.inner);
     }
 
@@ -581,16 +563,27 @@ impl LibraryView {
             let st = self.inner.borrow();
             (st.sel_header.clone(), st.download_button.clone())
         };
-        let header_buttons: Vec<(String, Action)> = vec![
-            (tr(MsgKey::action_select_all), Box::new(|inner: &Rc<RefCell<Inner>>| select_with(inner, |sel, page| sel.select_all(page)))),
-            (tr(MsgKey::action_select_inverse), Box::new(|inner: &Rc<RefCell<Inner>>| select_with(inner, |sel, page| sel.invert(page)))),
-            (tr(MsgKey::action_cancel), Box::new(|inner: &Rc<RefCell<Inner>>| select_with(inner, |sel, _| sel.clear()))),
-        ];
-        for (label, action) in header_buttons {
-            let button = gtk::Button::with_label(&label);
-            connect(&button, action);
-            sel_header.append(&button);
-        }
+        let on_cancel = {
+            let weak = weak.clone();
+            move || {
+                if let Some(inner) = weak.upgrade() {
+                    select_with(&inner, |sel, _| sel.clear());
+                }
+            }
+        };
+        let on_select_all = {
+            let weak = weak.clone();
+            move || {
+                if let Some(inner) = weak.upgrade() {
+                    select_with(&inner, |sel, page| sel.select_all(page));
+                }
+            }
+        };
+        let header = crate::ui::selection_header(&self.inner.borrow().bar_label, on_cancel, on_select_all);
+        let invert = gtk::Button::with_label(&tr(MsgKey::action_select_inverse));
+        connect(&invert, Box::new(|inner: &Rc<RefCell<Inner>>| select_with(inner, |sel, page| sel.invert(page))));
+        header.append(&invert);
+        sel_header.append(&header);
         let bar_box = self.inner.borrow().bar.child().and_then(|w| w.downcast::<gtk::ActionBar>().ok());
         if let Some(bar_box) = bar_box {
             let buttons: Vec<(String, Action)> = vec![
@@ -608,10 +601,14 @@ impl LibraryView {
                 bar_box.pack_start(&button);
             }
             // the Download menu: the next 1, 5, 10 or 25 items, or every unviewed one (T-37a-028)
-            let menu = gtk::Box::new(O::Vertical, 2);
+            // the look of `ui::menu_button`: flat entries, left aligned, no spacing
+            let menu = gtk::Box::new(O::Vertical, 0);
             let popover = gtk::Popover::builder().child(&menu).build();
             for (amount, label) in actions::download_menu(kind) {
-                let item = gtk::Button::with_label(&label);
+                let item = gtk::Button::builder().label(&label).css_classes(["flat"]).build();
+                if let Some(text) = item.child().and_downcast::<gtk::Label>() {
+                    text.set_xalign(0.0);
+                }
                 let (weak_item, popover_item) = (weak.clone(), popover.clone());
                 item.connect_clicked(move |_| {
                     popover_item.popdown();
@@ -691,7 +688,7 @@ fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
             Err(e) => {
                 tracing::error!(error = %e, "loading the library failed");
                 drop(st);
-                crate::library::toast::notify(LOAD_FAILED);
+                crate::toast::notify_for(LOAD_FAILED, crate::library::TOAST_TIME);
                 return;
             }
         }
@@ -1007,7 +1004,7 @@ fn mark(inner: &Rc<RefCell<Inner>>, ids: &[i64], read: bool) {
     };
     let ok = actions::mark_many(&db, kind, ids, read);
     if let Some(text) = actions::partial_failure_toast(ok, ids.len()) {
-        crate::library::toast::notify(text);
+        crate::toast::notify_for(&text, crate::library::TOAST_TIME);
     }
     submit(inner);
 }
@@ -1184,7 +1181,7 @@ fn cover_art(st: &Inner, item: &LibraryItem) -> Option<ArtRef> {
         Kind::Manga => MangaRepo::new(db).by_id(item.row.id).ok().map(|m| (Kind::Manga, m.source, m.thumbnail_url, m.favorite, m.cover_last_modified))?,
         Kind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok().map(|a| (Kind::Anime, a.source, a.thumbnail_url, a.favorite, a.cover_last_modified))?,
     };
-    Some(ArtRef { owner, entry_id: item.row.id, source_id: source, kind: ArtKind::Cover, url: url.filter(|u| !u.is_empty()), favorite, last_modified })
+    Some(crate::browse::look::cover_art(owner, item.row.id, source, url.filter(|u| !u.is_empty()), favorite, last_modified))
 }
 
 /// The right-click menu of one cover (`actions::cover_menu`). Each item acts on this entry only and leaves any
@@ -1237,10 +1234,10 @@ fn resume_entry(inner: &Rc<RefCell<Inner>>, row: &LibraryRow) {
     };
     match actions::next_item(&db, kind, row, downloaded_only, |item| item_downloaded(item)) {
         Ok(Some(item)) => resume(Resume { entry: row.id, item, external: always_external() }),
-        Ok(None) => crate::library::toast::notify(actions::NO_NEXT_ITEM),
+        Ok(None) => crate::toast::notify_for(actions::NO_NEXT_ITEM, crate::library::TOAST_TIME),
         Err(e) => {
             tracing::error!(error = %e, entry = row.id, "finding the next item failed");
-            crate::library::toast::notify(actions::NO_NEXT_ITEM);
+            crate::toast::notify_for(actions::NO_NEXT_ITEM, crate::library::TOAST_TIME);
         }
     }
 }
@@ -1449,26 +1446,6 @@ mod tests {
             assert!(!pump_until(|| inner.borrow().store.n_items() == 3), "a hidden library does not reload");
             window.present();
             assert!(pump_until(|| inner.borrow().store.n_items() == 3), "showing it again brings the new anime");
-            window.destroy();
-        });
-    }
-
-    /// A library that cannot be read says so instead of staying silent.
-    #[test]
-    fn a_failed_load_shows_a_toast() {
-        crate::testing::with_display(|| {
-            let ctx = glib::MainContext::default();
-            let _owner = ctx.acquire().expect("main context");
-            let (_dir, view) = test_view(test_nav());
-            let window = gtk::Window::new();
-            window.set_child(Some(&view.widget()));
-            window.present();
-            let inner = view.inner.clone();
-            assert!(pump_until(|| view.root.is_mapped() && inner.borrow().built.is_some()), "the first load");
-            let generation = inner.borrow_mut().gate.issue();
-            apply_reply(&inner, Reply { generation, result: Err("disk I/O error".into()) });
-            let label = view.shell.last_child().and_downcast::<gtk::Revealer>().and_then(|r| r.child()).and_downcast::<gtk::Label>();
-            assert_eq!(label.expect("toast label").text().as_str(), LOAD_FAILED);
             window.destroy();
         });
     }

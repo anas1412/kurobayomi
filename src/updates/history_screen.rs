@@ -6,13 +6,14 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, ListBox};
-use kuro_images::art::{ArtKind, ArtRef};
 use crate::browse::entries::FavoriteStore;
+use crate::browse::look;
 use crate::browse::favorite::{DuplicateAnswer, duplicate_answer, duplicate_dialog};
 use kuro_domain::dates::ListRow;
 use kuro_domain::history::model::HistoryWithRelations;
@@ -34,8 +35,12 @@ use crate::updates::history_dialog::{self, ConfirmCopy};
 use crate::updates::history_row::{self, RowActions, history_row};
 use crate::updates::list::PageState;
 use crate::updates::open_route::{self, Route};
-use crate::updates::screen_toast::ScreenToast;
 use crate::updates::state_page::PageStates;
+
+/// A toast of `ms` milliseconds on the shared toast layer.
+fn toast(text: &str, ms: u64) {
+    crate::toast::notify_for(text, Duration::from_millis(ms));
+}
 
 /// The icon of the empty History page of a kind, the same as the empty Library page's.
 pub fn empty_icon(kind: Kind) -> &'static str {
@@ -53,13 +58,12 @@ pub fn uses_external(always_external: bool, kind: Kind) -> bool {
 
 pub struct HistoryScreen {
     kind: Kind,
-    root: gtk::Overlay,
+    root: gtk::Stack,
     search: gtk::SearchEntry,
     /// The empty page's way to the Library; hidden while a search finds nothing.
     to_library: gtk::Button,
     col: GBox,
     pages: PageStates,
-    toast: ScreenToast,
     state: RefCell<HistoryState<HistoryWithRelations>>,
     watch: RefCell<Option<glib::JoinHandle<()>>>,
 }
@@ -82,12 +86,9 @@ impl HistoryScreen {
             library.connect_clicked(|_| crate::ui::open("library"));
             pages.set_empty_look(empty_icon(kind), Some(&library));
             // the entry sits in the page header (`mount::history`), like the Library search
-            let search = gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search_hint)).width_chars(28).build();
-            let root = gtk::Overlay::new();
-            root.set_child(Some(pages.widget()));
-            let toast = ScreenToast::new();
-            root.add_overlay(toast.widget());
-            Self { kind, root, search, to_library: library, col, pages, toast, state: RefCell::default(), watch: RefCell::default() }
+            let search = gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search_hint)).hexpand(true).build();
+            let root = pages.widget().clone();
+            Self { kind, root, search, to_library: library, col, pages, state: RefCell::default(), watch: RefCell::default() }
         });
         let weak = Rc::downgrade(&screen);
         screen.search.connect_search_changed(move |entry| {
@@ -102,7 +103,7 @@ impl HistoryScreen {
         screen
     }
 
-    pub fn widget(&self) -> &gtk::Overlay {
+    pub fn widget(&self) -> &gtk::Stack {
         &self.root
     }
 
@@ -129,7 +130,7 @@ impl HistoryScreen {
                 Ok(rows) => screen.state.borrow_mut().set_rows((*rows).clone()),
                 Err(message) => {
                     screen.state.borrow_mut().set_error(message);
-                    screen.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
+                    toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
                 }
             }
             screen.render();
@@ -205,16 +206,8 @@ impl HistoryScreen {
             remove: act(Self::ask_remove),
             add_to_library: act(Self::add_to_library),
         };
-        let art = ArtRef {
-            owner: self.kind,
-            entry_id: line.cover.entry_id,
-            source_id: line.cover.source_id,
-            kind: ArtKind::Cover,
-            url: line.cover.url.clone(),
-            favorite: line.cover.favorite,
-            last_modified: line.cover.cover_last_modified,
-        };
-        let cover = crate::browse::look::row_cover(&line.title, Some(&art), history_row::COVER_WIDTH, history_row::COVER_HEIGHT);
+        let art = look::cover_art(self.kind, line.cover.entry_id, line.cover.source_id, line.cover.url.clone(), line.cover.favorite, line.cover.cover_last_modified);
+        let cover = look::row_cover(&line.title, Some(&art), look::MEDIUM.width, look::MEDIUM.height);
         history_row(&line.title, &line.text, &cover, line.cover.favorite, actions)
     }
 
@@ -231,7 +224,7 @@ impl HistoryScreen {
             Ok(Step::Added) => {}
             Ok(Step::Chooser) => self.choose_categories(store, line.entry_id, now),
             Ok(Step::Duplicate(existing)) => self.duplicate_dialog(store, line.entry_id, existing[0], now),
-            Err(_) => self.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
+            Err(_) => toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
         }
     }
 
@@ -239,19 +232,17 @@ impl HistoryScreen {
     fn choose_categories(self: &Rc<Self>, store: Arc<dyn FavoriteStore>, entry_id: i64, now: i64) {
         let rows = match history_add::chooser_options(store.as_ref(), entry_id) {
             Ok(rows) => rows.into_iter().map(|(c, on)| (c.id, c.name, on)).collect(),
-            Err(_) => return self.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
+            Err(_) => return toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
         };
         let labels = [tr(MsgKey::action_ok), tr(MsgKey::action_cancel), tr(MsgKey::action_edit_categories)];
-        let (weak, on_store) = (Rc::downgrade(self), Arc::clone(&store));
+        let on_store = Arc::clone(&store);
         history_dialog::choose_categories(
             tr(MsgKey::action_move_category),
             rows,
             labels,
             move |picked| {
-                if let Some(screen) = weak.upgrade() {
-                    if history_add::confirm_chooser(on_store.as_ref(), entry_id, now, picked).is_err() {
-                        screen.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
-                    }
+                if history_add::confirm_chooser(on_store.as_ref(), entry_id, now, picked).is_err() {
+                    toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
                 }
             },
             move || crate::ui::open("categories"),
@@ -278,7 +269,7 @@ impl HistoryScreen {
                 DuplicateAnswer::AddAnyway => match history_add::add_anyway(store.as_ref(), entry_id, now) {
                     Ok(Step::Chooser) => screen.choose_categories(Arc::clone(&store), entry_id, now),
                     Ok(_) => {}
-                    Err(_) => screen.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
+                    Err(_) => toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
                 },
                 DuplicateAnswer::Nothing => {}
             }
@@ -294,7 +285,7 @@ impl HistoryScreen {
     fn finish_resume(&self, entry_id: i64, outcome: Resume<Unit>) {
         match outcome {
             Resume::Open(unit) => open_unit(self.kind, entry_id, &unit),
-            Resume::NotFound { message, toast_ms } => self.toast.show(&message, toast_ms),
+            Resume::NotFound { message, toast_ms } => toast(&message, toast_ms),
         }
     }
 
@@ -321,7 +312,7 @@ impl HistoryScreen {
     /// The checkbox on resets the whole entry; off resets this row.
     fn confirm_remove(self: &Rc<Self>, line: &HistoryLine, reset_all: bool) {
         if history_data::apply_remove(&self.db(), self.kind, remove_action(line, reset_all)).is_err() {
-            self.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
+            toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
         }
     }
 
@@ -341,7 +332,7 @@ impl HistoryScreen {
             move |_| {
                 if let Some(screen) = confirm.upgrade() {
                     let cleared = HistoryRepo::new(screen.db()).clear_all(screen.kind);
-                    screen.toast.show(&clear_outcome(cleared), CLEAR_DONE_TOAST_MS);
+                    toast(&clear_outcome(cleared), CLEAR_DONE_TOAST_MS);
                 }
             },
             move || {

@@ -17,7 +17,6 @@ use gtk::{Box as GBox, Button, CheckButton, GestureClick, Image, Label, ListBox,
 use kuro_domain::dates::ListRow;
 use kuro_platform::kind::Kind;
 use kuro_domain::updates::repo::UpdatesRepo;
-use kuro_images::art::{ArtKind, ArtRef};
 use kuro_i18n::{MsgKey, tr};
 
 use crate::data;
@@ -29,16 +28,17 @@ use crate::updates::download_actions::{self, DownloadAction, EntryFacts, UnitTar
 use crate::updates::download_exec;
 use crate::updates::download_host;
 use crate::updates::download_state::{Change, DiskCache, DownloadState};
+use crate::browse::look;
 use crate::updates::feed::{self, FeedRow, Gesture, Press};
+use crate::updates::row_texts;
 use crate::updates::format;
 use crate::updates::history::COALESCE_MS;
 use crate::updates::{copy, open_route, qualities};
-use crate::updates::screen_toast::ScreenToast;
 use crate::updates::selection::{Selection, is_selection_mode};
 use crate::updates::state_page::PageStates;
 use crate::updates::updates_dialog::confirm_bulk_delete;
 use crate::updates::updates_page::{self, BackAction, UpdatesLoad, back_action, cover_click_enabled};
-use crate::library::layout::{SPACE_L, SPACE_S};
+use crate::library::layout::SPACE_S;
 use crate::widgets::context_menu::{self, Item};
 use crate::widgets::download_button::{DownloadButton, Request};
 
@@ -76,8 +76,8 @@ fn on_key_activate(row: &gtk::ListBoxRow, run: impl Fn() + 'static) {
 
 pub struct UpdatesScreen {
     kind: Kind,
-    root: gtk::Overlay,
-    /// The selection row under the header: the count, then Select all, Select inverse and Cancel.
+    root: GBox,
+    /// The selection row under the header: Cancel, the count, Select all and Select inverse.
     sel_header: GBox,
     sel_label: Label,
     /// The bottom action bar of the selection and the box its buttons go in.
@@ -85,7 +85,6 @@ pub struct UpdatesScreen {
     bar: GBox,
     col: GBox,
     pages: PageStates,
-    toast: ScreenToast,
     load: RefCell<UpdatesLoad<FeedRow>>,
     selection: RefCell<Selection>,
     watch: RefCell<Option<glib::JoinHandle<()>>>,
@@ -114,29 +113,23 @@ impl UpdatesScreen {
                     screen.start();
                 }
             });
-            // the selection looks as on the Library page: the count and the selection buttons under the header, the
-            // actions in a bar that slides up at the bottom
-            let sel_label = Label::builder().hexpand(true).xalign(0.0).css_classes(["title-2"]).build();
-            let sel_header = GBox::new(O::Horizontal, SPACE_S);
-            sel_header.set_margin_start(SPACE_L);
-            sel_header.set_margin_end(SPACE_L);
-            sel_header.set_margin_top(SPACE_S);
-            sel_header.set_visible(false);
-            sel_header.append(&sel_label);
-            for (label, run) in [
-                (MsgKey::action_select_all, Self::select_all as fn(&Rc<Self>)),
-                (MsgKey::action_select_inverse, Self::select_inverse as fn(&Rc<Self>)),
-                (MsgKey::action_cancel, Self::clear_selection as fn(&Rc<Self>)),
-            ] {
-                let button = Button::with_label(&tr(label));
+            // the selection looks as on the Library page: the shared selection header under the page header, the
+            // actions in the shared bar that slides up at the bottom
+            let run = |run: fn(&Rc<Self>)| {
                 let weak = weak.clone();
-                button.connect_clicked(move |_| {
+                move || {
                     if let Some(screen) = weak.upgrade() {
                         run(&screen);
                     }
-                });
-                sel_header.append(&button);
-            }
+                }
+            };
+            let sel_label = Label::new(None);
+            let sel_header = crate::ui::selection_header(&sel_label, run(Self::clear_selection), run(Self::select_all));
+            let invert = Button::with_label(&tr(MsgKey::action_select_inverse));
+            let invert_run = run(Self::select_inverse);
+            invert.connect_clicked(move |_| invert_run());
+            sel_header.append(&invert);
+            sel_header.set_visible(false);
             let bar = GBox::new(O::Horizontal, SPACE_S);
             // more actions than the window is wide scroll sideways instead of widening the window
             let bar_scroller = gtk::ScrolledWindow::builder()
@@ -145,28 +138,23 @@ impl UpdatesScreen {
                 .vscrollbar_policy(gtk::PolicyType::Never)
                 .propagate_natural_height(true)
                 .build();
-            let action_bar = gtk::ActionBar::new();
-            action_bar.pack_start(&bar_scroller);
-            crate::ui::no_sticky_focus(&action_bar);
-            let bar_revealer = gtk::Revealer::builder().child(&action_bar).transition_type(gtk::RevealerTransitionType::SlideUp).build();
+            let bar_revealer = crate::ui::action_bar(&[]);
+            if let Some(action_bar) = bar_revealer.child().and_downcast::<gtk::ActionBar>() {
+                action_bar.pack_start(&bar_scroller);
+            }
             let body = GBox::new(O::Vertical, 0);
             body.append(&sel_header);
             body.append(pages.widget());
             body.append(&bar_revealer);
-            let root = gtk::Overlay::new();
-            root.set_child(Some(&body));
-            let toast = ScreenToast::new();
-            root.add_overlay(toast.widget());
             Self {
                 kind,
-                root,
+                root: body,
                 sel_header,
                 sel_label,
                 bar_revealer,
                 bar,
                 col,
                 pages,
-                toast,
                 load: RefCell::new(UpdatesLoad::Loading),
                 selection: RefCell::default(),
                 watch: RefCell::default(),
@@ -222,12 +210,12 @@ impl UpdatesScreen {
         self.kind
     }
 
-    /// Shows `text` at the bottom of this screen for the usual toast time.
+    /// Shows `text` on the shared toast layer for the usual toast time.
     pub fn show_toast(&self, text: &str) {
-        self.toast.show(text, TOAST_MS);
+        crate::toast::notify_for(text, Duration::from_millis(TOAST_MS));
     }
 
-    pub fn widget(&self) -> &gtk::Overlay {
+    pub fn widget(&self) -> &GBox {
         &self.root
     }
 
@@ -298,7 +286,7 @@ impl UpdatesScreen {
             let toast = screen.publish(published.map(|rows| (*rows).clone()));
             screen.render();
             if let Some(message) = toast {
-                screen.toast.show(&message, TOAST_MS);
+                screen.show_toast(&message);
             }
         });
         *self.watch.borrow_mut() = Some(handle);
@@ -376,35 +364,23 @@ impl UpdatesScreen {
         }
     }
 
-    /// One feed row at the spec height of 56 px (T-42b-022): the selection check, the unread dot, the cover (40 px
-    /// wide, 6 px inset), the title over a line of bookmark, fillermark, unit name and progress, and the download
-    /// indicator. A read or seen row dims the title and the unit name to 0.38.
+    /// One feed row (`look::list_row`): the selection check, the unread dot and the cover lead, the title sits over a line
+    /// of bookmark, fillermark, unit name and progress, and the download indicator ends the row. A read or seen row dims
+    /// the title and the unit name to 0.38.
     fn row(self: &Rc<Self>, feed_row: &FeedRow, mode: bool) -> gtk::ListBoxRow {
         let row = &feed_row.row;
-        let line = GBox::new(O::Horizontal, 12);
-        line.set_size_request(-1, updates_page::ROW_HEIGHT);
-        line.set_margin_start(12);
-        line.set_margin_end(12);
+        let lead = GBox::new(O::Horizontal, 12);
         let check = CheckButton::builder().active(feed_row.selected).visible(mode).can_target(false).valign(gtk::Align::Center).build();
-        line.append(&check);
+        lead.append(&check);
         let dot = Image::from_icon_name("media-record-symbolic");
         dot.set_pixel_size(8);
         dot.add_css_class("accent");
         dot.set_valign(gtk::Align::Center);
         dot.set_visible(!row.done);
-        line.append(&dot);
+        lead.append(&dot);
 
-        let art = ArtRef {
-            owner: self.kind,
-            entry_id: row.entry_id,
-            source_id: row.source_id,
-            kind: ArtKind::Cover,
-            url: row.thumbnail_url.clone(),
-            favorite: true,
-            last_modified: row.cover_last_modified,
-        };
-        let cover = crate::browse::look::row_cover(&row.entry_title, Some(&art), updates_page::COVER_WIDTH, updates_page::ROW_HEIGHT - 2 * updates_page::COVER_INSET);
-        cover.set_halign(gtk::Align::Center);
+        let art = look::cover_art(self.kind, row.entry_id, row.source_id, row.thumbnail_url.clone(), true, row.cover_last_modified);
+        let cover = look::row_cover(&row.entry_title, Some(&art), look::SMALL.width, look::SMALL.height);
         let cover_tap = GestureClick::new();
         let (weak, entry_id) = (Rc::downgrade(self), row.entry_id);
         cover_tap.connect_pressed(move |gesture, _, _, _| {
@@ -415,15 +391,16 @@ impl UpdatesScreen {
             }
         });
         cover.add_controller(cover_tap);
-        line.append(&cover);
+        lead.append(&cover);
 
+        let list_row = look::list_row(Some(lead.upcast()), &row.entry_title, None, Some(self.download_button(feed_row, mode).upcast()));
+        list_row.set_activatable(false);
+        list_row.set_widget_name(&feed::row_name(row.item_id));
         let alpha = updates_page::row_alpha(row.done);
-        let texts = GBox::new(O::Vertical, 2);
-        texts.set_hexpand(true);
-        texts.set_valign(gtk::Align::Center);
-        let title = Label::builder().label(&row.entry_title).xalign(0.0).single_line_mode(true).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["heading"]).build();
-        title.set_opacity(alpha);
-        texts.append(&title);
+        let texts = row_texts(&list_row);
+        if let Some(title) = texts.first_child() {
+            title.set_opacity(alpha);
+        }
         let detail = GBox::new(O::Horizontal, 4);
         if row.bookmark {
             let star = Image::from_icon_name("starred-symbolic");
@@ -445,10 +422,6 @@ impl UpdatesScreen {
             detail.append(&Label::builder().label(progress).css_classes(["dim-label"]).build());
         }
         texts.append(&detail);
-        line.append(&texts);
-        line.append(&self.download_button(feed_row, mode));
-
-        let list_row = gtk::ListBoxRow::builder().child(&line).activatable(false).name(feed::row_name(row.item_id)).build();
         if feed_row.selected {
             list_row.add_css_class(crate::theme::style::class::SELECTED);
         }
@@ -582,7 +555,7 @@ impl UpdatesScreen {
         };
         self.render();
         if let Some(message) = message {
-            self.toast.show(&message, TOAST_MS);
+            self.show_toast(&message);
         }
     }
 
