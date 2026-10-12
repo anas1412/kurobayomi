@@ -2,7 +2,9 @@
 
 pub mod search;
 
+use kuro_data::track::Track;
 use kuro_platform::kind::Kind;
+
 use crate::error::TrackError;
 
 /// Tracker service id, stored as `sync_id`.
@@ -91,42 +93,37 @@ pub fn copy_personal_from_manga(dst: &mut MangaTrack, src: &MangaTrack, copy_rem
 }
 
 impl AnimeTrack {
-    /// The database row. A `None` id is written as 0 (the upsert ignores it) unless `id_required`.
-    pub fn to_db(&self, id_required: bool) -> Result<kuro_data::track::AnimeTrack, TrackError> {
-        let id = match (self.id, id_required) {
-            (Some(id), _) => id,
-            (None, true) => return Err(TrackError::MissingId),
-            (None, false) => 0,
-        };
-        Ok(kuro_data::track::AnimeTrack {
-            id,
-            anime_id: self.anime_id,
-            tracker_id: self.tracker_id.0,
+    /// The shared database row. A `None` id is written as 0 (unsaved, the upsert ignores it) unless `id_required`.
+    pub fn to_db(&self, id_required: bool) -> Result<Track, TrackError> {
+        Ok(Track {
+            id: row_id(self.id, id_required)?,
+            entry_id: self.anime_id,
             remote_id: self.remote_id,
             library_id: self.library_id,
             title: self.title.clone(),
-            last_episode_seen: self.last_episode_seen,
-            total_episodes: self.total_episodes,
+            last_item: self.last_episode_seen,
+            total_items: self.total_episodes,
             status: self.status,
             score: self.score,
             remote_url: self.remote_url.clone(),
             start_date: self.start_date,
             finish_date: self.finish_date,
             private: self.private,
+            ..Track::new(Kind::Anime, self.tracker_id.0)
         })
     }
 
     /// Maps a database row back. The row id is always present.
-    pub fn from_db(row: &kuro_data::track::AnimeTrack) -> Self {
+    pub fn from_db(row: &Track) -> Self {
         Self {
             id: Some(row.id),
-            anime_id: row.anime_id,
+            anime_id: row.entry_id,
             tracker_id: TrackerId(row.tracker_id),
             remote_id: row.remote_id,
             library_id: row.library_id,
             title: row.title.clone(),
-            last_episode_seen: row.last_episode_seen,
-            total_episodes: row.total_episodes,
+            last_episode_seen: row.last_item,
+            total_episodes: row.total_items,
             status: row.status,
             score: row.score,
             remote_url: row.remote_url.clone(),
@@ -138,42 +135,37 @@ impl AnimeTrack {
 }
 
 impl MangaTrack {
-    /// The database row. Same id rule as [`AnimeTrack::to_db`].
-    pub fn to_db(&self, id_required: bool) -> Result<kuro_data::track::MangaTrack, TrackError> {
-        let id = match (self.id, id_required) {
-            (Some(id), _) => id,
-            (None, true) => return Err(TrackError::MissingId),
-            (None, false) => 0,
-        };
-        Ok(kuro_data::track::MangaTrack {
-            id,
-            manga_id: self.manga_id,
-            tracker_id: self.tracker_id.0,
+    /// The shared database row. Same id rule as [`AnimeTrack::to_db`].
+    pub fn to_db(&self, id_required: bool) -> Result<Track, TrackError> {
+        Ok(Track {
+            id: row_id(self.id, id_required)?,
+            entry_id: self.manga_id,
             remote_id: self.remote_id,
             library_id: self.library_id,
             title: self.title.clone(),
-            last_chapter_read: self.last_chapter_read,
-            total_chapters: self.total_chapters,
+            last_item: self.last_chapter_read,
+            total_items: self.total_chapters,
             status: self.status,
             score: self.score,
             remote_url: self.remote_url.clone(),
             start_date: self.start_date,
             finish_date: self.finish_date,
             private: self.private,
+            ..Track::new(Kind::Manga, self.tracker_id.0)
         })
     }
 
     /// Maps a database row back. The row id is always present.
-    pub fn from_db(row: &kuro_data::track::MangaTrack) -> Self {
+    pub fn from_db(row: &Track) -> Self {
         Self {
             id: Some(row.id),
-            manga_id: row.manga_id,
+            manga_id: row.entry_id,
             tracker_id: TrackerId(row.tracker_id),
             remote_id: row.remote_id,
             library_id: row.library_id,
             title: row.title.clone(),
-            last_chapter_read: row.last_chapter_read,
-            total_chapters: row.total_chapters,
+            last_chapter_read: row.last_item,
+            total_chapters: row.total_items,
             status: row.status,
             score: row.score,
             remote_url: row.remote_url.clone(),
@@ -181,6 +173,14 @@ impl MangaTrack {
             finish_date: row.finish_date,
             private: row.private,
         }
+    }
+}
+
+fn row_id(id: Option<i64>, required: bool) -> Result<i64, TrackError> {
+    match (id, required) {
+        (Some(id), _) => Ok(id),
+        (None, true) => Err(TrackError::MissingId),
+        (None, false) => Ok(0),
     }
 }
 

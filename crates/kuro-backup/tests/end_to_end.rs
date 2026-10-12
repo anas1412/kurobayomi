@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use chrono::{Duration as ChronoDuration, Local, TimeZone};
 use kuro_backup::auto::{AutoConfig, AutoHost, PowerState, run_loop};
-use kuro_backup::creator::{AnimeEntry, CreateInputs, LibraryReader, MangaEntry, PrefStore, SourcePrefStore, SourceRegistry, build_backup};
+use kuro_backup::creator::{CreateInputs, EntryData, LibraryReader, PrefStore, SourcePrefStore, SourceRegistry, build_backup};
 use kuro_backup::error::BackupError;
 use kuro_backup::file::{MAX_AUTO_BACKUPS, Target, create_file, write_backup};
 use kuro_backup::format::decode_file;
@@ -15,44 +15,24 @@ use kuro_backup::job::JobSlot;
 use kuro_backup::options::BackupOptions;
 use kuro_backup::schema::PrefValue;
 use kuro_data::category::Category;
-use kuro_data::chapter::Chapter;
-use kuro_data::manga::Manga;
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
 use kuro_platform::kind::Kind;
 use tokio::sync::watch;
 
 struct Library {
-    manga: Vec<MangaEntry>,
+    manga: Vec<EntryData>,
 }
 
 impl LibraryReader for Library {
-    fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError> {
-        Ok(self.manga.iter().map(copy).collect())
+    fn favorites(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError> {
+        Ok(if kind.is_anime() { Vec::new() } else { self.manga.clone() })
     }
-    fn manga_read_not_in_library(&self) -> Result<Vec<MangaEntry>, BackupError> {
+    fn not_in_library(&self, _: Kind) -> Result<Vec<EntryData>, BackupError> {
         Ok(Vec::new())
     }
-    fn anime_favorites(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-        Ok(Vec::new())
-    }
-    fn anime_watched_not_in_library(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-        Ok(Vec::new())
-    }
-    fn manga_categories(&self) -> Result<Vec<Category>, BackupError> {
-        Ok(vec![Category { id: 4, name: "Reading".into(), order: 1, flags: 0, hidden: false }])
-    }
-    fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-        Ok(Vec::new())
-    }
-}
-
-fn copy(e: &MangaEntry) -> MangaEntry {
-    MangaEntry {
-        manga: e.manga.clone(),
-        chapters: e.chapters.clone(),
-        excluded_scanlators: e.excluded_scanlators.clone(),
-        categories: e.categories.clone(),
-        tracks: e.tracks.clone(),
-        history: e.history.clone(),
+    fn categories(&self, kind: Kind) -> Result<Vec<Category>, BackupError> {
+        Ok(if kind.is_anime() { Vec::new() } else { vec![Category { id: 4, name: "Reading".into(), order: 1, flags: 0, hidden: false }] })
     }
 }
 
@@ -81,8 +61,8 @@ impl SourcePrefStore for NoPrefs {
     }
 }
 
-fn one_manga(chapters: usize) -> MangaEntry {
-    let mut m = Manga::create();
+fn one_manga(chapters: usize) -> EntryData {
+    let mut m = Entry::create(Kind::Manga);
     m.id = 1;
     m.source = 7;
     m.url = "/m/1".into();
@@ -90,17 +70,17 @@ fn one_manga(chapters: usize) -> MangaEntry {
     m.favorite = true;
     let chapters = (0..chapters)
         .map(|i| {
-            let mut c = Chapter::create();
+            let mut c = Item::create(Kind::Manga);
             c.id = 10 + i as i64;
-            c.manga_id = 1;
+            c.entry_id = 1;
             c.url = format!("/c/{i}");
             c.name = format!("Chapter {i}");
             c
         })
         .collect();
-    MangaEntry {
-        manga: m,
-        chapters,
+    EntryData {
+        entry: m,
+        items: chapters,
         excluded_scanlators: Default::default(),
         categories: vec![Category { id: 4, name: "Reading".into(), order: 1, flags: 0, hidden: false }],
         tracks: Vec::new(),

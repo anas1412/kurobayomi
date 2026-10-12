@@ -1,23 +1,22 @@
 //! Anime entry restore (area 22, T-22a-022 to T-22a-025). Seasons are restored under their parent (D7 and D18 fixed):
 //! `plan_anime` splits the sorted list into top-level rows and seasons, and each season takes the database id of its
-//! parent. Rules follow `plans/22-backup-restore/p1-behavior.md` section 4.4 with the task-block fixes.
+//! parent. The backup row becomes a shared [`Incoming`] entry and `write::restore_entry` writes it. Rules follow
+//! `plans/22-backup-restore/p1-behavior.md` section 4.4 with the task-block fixes.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
-use kuro_db::codec::GenreList;
-use kuro_db::schema_anime::{Memo, Millis};
-use kuro_db::statements_anime::{
-    AnimeRow, AnimeTrack, AnimeTrackUpdate, AnimeUpdate, EpisodeRow, EpisodeUpdate, anime_by_id, anime_by_url_and_source,
-    episodes_by_anime_id, insert_anime, insert_episode, tracks_by_anime_id, update_anime, update_episode, update_track,
-    upsert_history, upsert_track,
-};
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
+use kuro_data::track::Track;
+use kuro_db::schema_anime::Memo;
 use kuro_db::{DbResult, Transaction};
-use kuro_domain::entries::fetch_interval::{ItemDates, Stored, to_update};
-use rusqlite::OptionalExtension;
+use kuro_platform::kind::Kind;
 
-use super::categories::{differs_from_stored, membership_ids};
-use super::merge::{RunClock, merge_progress, round6, sort_new_first};
-use crate::schema::{BackupAnime, BackupAnimeHistory, BackupAnimeTracking, BackupEpisode};
+use super::merge::{RunClock, round6, sort_new_first};
+use super::write::{self, HistoryIn, Incoming};
+use crate::schema::{BackupAnime, BackupAnimeTracking, BackupEpisode};
+
+pub use super::write::refresh_interval;
 
 /// A top-level anime row with the seasons that restore under it.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,18 +25,9 @@ pub struct AnimeRoot {
     pub seasons: Vec<BackupAnime>,
 }
 
-/// What the anime restore counts for the summary.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct AnimeOutcome {
-    /// History rows whose `readDuration` is not stored for anime (E-42). Informational.
-    pub dropped_read_durations: usize,
-}
-
 /// The `(source, url)` pairs of the anime already in `entries`, read once per section (T-22a-022).
 pub fn existing_pairs(tx: &Transaction<'_>) -> DbResult<HashSet<(i64, String)>> {
-    let mut stmt = tx.prepare("SELECT source, url FROM entries WHERE kind = 'anime'")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-    Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
+    write::existing_pairs(tx, Kind::Anime)
 }
 
 /// Entries not in the database first, newest `lastModifiedAt` first, ties in backup order (T-22a-022).
@@ -66,64 +56,10 @@ pub fn restore_anime_root(
     clock: &RunClock,
     root: &AnimeRoot,
     categories: &HashMap<i64, i64>,
-) -> DbResult<AnimeOutcome> {
-    let mut out = AnimeOutcome::default();
-    let parent = restore_anime_entry(tx, clock, &root.entry, None, categories, &mut out)?;
+) -> DbResult<()> {
+    let parent = restore_anime_entry(tx, clock, &root.entry, None, categories)?;
     for season in &root.seasons {
-        restore_anime_entry(tx, clock, season, Some(parent), categories, &mut out)?;
-    }
-    Ok(out)
-}
-
-fn memberships_differ(tx: &Transaction<'_>, anime_id: i64, ids: &[i64]) -> DbResult<bool> {
-    let stored: Vec<i64> = tx
-        .prepare("SELECT category_id FROM entry_categories WHERE entry_id = ?1 AND kind = 'anime'")?
-        .query_map([anime_id], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
-    Ok(differs_from_stored(stored, ids))
-}
-
-/// True when applying `p` would leave `d` as it is. The write is skipped then, so a repeat restore writes nothing.
-fn update_is_noop(p: &AnimeUpdate, d: &AnimeRow) -> bool {
-    fn same<T: PartialEq>(p: &Option<T>, cur: &T) -> bool {
-        p.as_ref().is_none_or(|v| v == cur)
-    }
-    fn same_opt<T: PartialEq>(p: &Option<T>, cur: &Option<T>) -> bool {
-        p.as_ref().is_none_or(|v| Some(v) == cur.as_ref())
-    }
-    same(&p.favorite, &d.favorite)
-        && same(&p.initialized, &d.initialized)
-        && same(&p.version, &d.version)
-        && same(&p.status, &d.status)
-        && same(&p.title, &d.title)
-        && same(&p.viewer_flags, &d.viewer)
-        && same(&p.episode_flags, &d.episode_flags)
-        && same(&p.cover_last_modified, &d.cover_last_modified)
-        && same(&p.date_added, &d.date_added)
-        && same(&p.update_strategy, &d.update_strategy)
-        && same(&p.fetch_type, &d.fetch_type)
-        && same(&p.season_flags, &d.season_flags)
-        && same(&p.season_number, &d.season_number)
-        && same(&p.season_source_order, &d.season_source_order)
-        && same(&p.background_last_modified, &d.background_last_modified)
-        && same(&p.memo, &d.memo)
-        && same_opt(&p.artist, &d.artist)
-        && same_opt(&p.author, &d.author)
-        && same_opt(&p.description, &d.description)
-        && same_opt(&p.genre, &d.genre)
-        && same_opt(&p.thumbnail_url, &d.thumbnail_url)
-        && same_opt(&p.last_update, &d.last_update)
-        && same_opt(&p.parent_id, &d.parent_id)
-        && same_opt(&p.background_url, &d.background_url)
-}
-
-/// Replaces the category memberships of one anime (T-22a-025). Written here because the `kuro-db` helper opens its own
-/// transaction, which SQLite refuses inside the entry transaction.
-fn set_categories(tx: &Transaction<'_>, anime_id: i64, ids: &[i64]) -> DbResult<()> {
-    tx.execute("DELETE FROM entry_categories WHERE entry_id = ?1 AND kind = 'anime'", [anime_id])?;
-    let unique: BTreeSet<i64> = ids.iter().copied().collect();
-    for id in unique {
-        tx.execute("INSERT OR IGNORE INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', ?2)", [anime_id, id])?;
+        restore_anime_entry(tx, clock, season, Some(parent), categories)?;
     }
     Ok(())
 }
@@ -134,298 +70,107 @@ pub fn memo_of(bytes: &[u8]) -> Memo {
 }
 
 /// Restores one row (a root, or a season under `parent`) inside the caller's transaction. Returns its database id.
+/// History keeps `readDuration` as the larger of the stored and the backup value, like manga.
 pub fn restore_anime_entry(
     tx: &Transaction<'_>,
     clock: &RunClock,
     b: &BackupAnime,
     parent: Option<i64>,
     categories: &HashMap<i64, i64>,
-    out: &mut AnimeOutcome,
 ) -> DbResult<i64> {
-    let id = match anime_by_url_and_source(tx, &b.url, b.source)? {
-        None => insert_new(tx, b, parent)?,
-        Some(d) => {
-            update_existing(tx, b, &d, parent)?;
-            d.id
-        }
+    let incoming = Incoming {
+        entry: entry_of(b),
+        items: b.episodes.iter().map(item_of).collect(),
+        tracks: b.tracking.iter().map(track_of).collect(),
+        history: b
+            .history
+            .iter()
+            .map(|h| HistoryIn { url: h.url.clone(), last_at: h.last_read, duration_ms: h.read_duration })
+            .collect(),
+        category_orders: &b.categories,
+        excluded_scanlators: &[],
     };
-    if let Some(ids) = membership_ids(categories, &b.categories) {
-        if memberships_differ(tx, id, &ids)? {
-            // The membership insert trigger bumps `version` unless the row is syncing; the restore keeps the version it set.
-            let version: i64 = tx.query_row("SELECT version FROM entries WHERE _id = ?1 AND kind = 'anime'", [id], |r| r.get(0))?;
-            set_categories(tx, id, &ids)?;
-            tx.execute("UPDATE entries SET version = ?1 WHERE _id = ?2 AND kind = 'anime'", [version, id])?;
-        }
-    }
-    restore_episodes(tx, id, &b.episodes)?;
-    restore_tracks(tx, id, &b.tracking)?;
-    restore_history(tx, id, &b.history, out)?;
-    refresh_interval(tx, clock, id)?;
-    Ok(id)
+    write::restore_entry(tx, clock, &incoming, parent, categories)
 }
 
-/// A new row (T-22a-022). `initialized` is `description != null`. `parent` is the database id of the root for a season,
-/// and `None` for a root (the backup's raw `parentId` is never written, D7).
-fn insert_new(tx: &Transaction<'_>, b: &BackupAnime, parent: Option<i64>) -> DbResult<i64> {
-    let row = AnimeRow {
-        id: 0,
+/// A new row (T-22a-022). `initialized` is `description != null`. The parent is set by the writer: the database id of
+/// the root for a season, and none for a root (the backup's raw `parentId` is never written, D7).
+fn entry_of(b: &BackupAnime) -> Entry {
+    Entry {
         source: b.source,
         url: b.url.clone(),
         artist: b.artist.clone(),
         author: b.author.clone(),
         description: b.description.clone(),
-        genre: Some(GenreList(b.genre.clone())),
+        genre: Some(b.genre.clone()),
         title: b.title.clone(),
         status: i64::from(b.status),
         thumbnail_url: b.thumbnail_url.clone(),
         favorite: b.favorite,
-        last_update: Some(0),
-        next_update: Some(0),
         initialized: b.description.is_some(),
-        viewer: i64::from(b.viewer_flags),
-        episode_flags: i64::from(b.episode_flags),
-        cover_last_modified: 0,
+        viewer_flags: i64::from(b.viewer_flags),
+        item_flags: i64::from(b.episode_flags),
         date_added: b.date_added,
         update_strategy: b.update_strategy,
-        calculate_interval: 0,
-        last_modified_at: 0,
-        favorite_modified_at: None,
         version: b.version,
-        is_syncing: 0,
-        fetch_type: b.fetch_type,
-        parent_id: parent,
-        season_flags: b.season_flags,
-        season_number: b.season_number,
-        season_source_order: b.season_source_order,
+        fetch_type: Some(b.fetch_type),
+        season_flags: Some(b.season_flags),
+        season_number: Some(b.season_number),
+        season_source_order: Some(b.season_source_order),
         background_url: b.background_url.clone(),
-        background_last_modified: 0,
-        memo: memo_of(&b.memo),
-    };
-    Ok(insert_anime(tx, &row)?)
-}
-
-/// The merge of an existing row (T-22a-022). Same ownership as manga (D5, parity). Fetch type follows the newer side.
-/// The parent is written only for a season (`parent`). A root leaves it as the row has it.
-fn update_existing(tx: &Transaction<'_>, b: &BackupAnime, d: &AnimeRow, parent: Option<i64>) -> DbResult<()> {
-    let mut p = AnimeUpdate {
-        id: d.id,
-        favorite: Some(d.favorite || b.favorite),
-        initialized: Some(d.initialized || b.description.is_some()),
-        parent_id: parent,
-        ..Default::default()
-    };
-    if b.version > d.version {
-        p.artist = b.artist.clone();
-        p.author = b.author.clone();
-        p.description = b.description.clone();
-        p.genre = Some(GenreList(b.genre.clone()));
-        p.thumbnail_url = b.thumbnail_url.clone();
-        p.status = Some(i64::from(b.status));
-        p.version = Some(b.version);
-        p.fetch_type = Some(b.fetch_type);
-    } else {
-        p.title = Some(b.title.clone());
-        p.viewer_flags = Some(i64::from(b.viewer_flags));
-        p.episode_flags = Some(i64::from(b.episode_flags));
-        p.update_strategy = Some(b.update_strategy);
-        p.date_added = Some(b.date_added);
-        p.last_update = Some(0);
-        p.cover_last_modified = Some(0);
-        p.season_flags = Some(b.season_flags);
-        p.season_number = Some(b.season_number);
-        p.season_source_order = Some(b.season_source_order);
-        p.background_url = b.background_url.clone();
-        p.background_last_modified = Some(0);
-        p.memo = Some(memo_of(&b.memo));
+        memo: Some(memo_of(&b.memo)),
+        ..Entry::create(Kind::Anime)
     }
-    if !update_is_noop(&p, d) {
-        update_anime(tx, &p)?;
+}
+
+fn item_of(b: &BackupEpisode) -> Item {
+    Item {
+        url: b.url.clone(),
+        name: b.name.clone(),
+        scanlator: b.scanlator.clone(),
+        done: b.seen,
+        bookmark: b.bookmark,
+        fillermark: b.fillermark,
+        progress: b.last_second_seen,
+        number: round6(b.episode_number),
+        source_order: b.source_order,
+        date_fetch: b.date_fetch,
+        date_upload: b.date_upload,
+        version: b.version,
+        total_seconds: Some(b.total_seconds),
+        summary: b.summary.clone(),
+        preview_url: b.preview_url.clone(),
+        memo: Some(memo_of(&b.memo)),
+        ..Item::create(Kind::Anime)
     }
-    Ok(())
 }
 
-/// Episodes (T-22a-024). Lookup is by url within this anime. The same-state skip and the progress rule follow chapters.
-fn restore_episodes(tx: &Transaction<'_>, anime_id: i64, backup: &[BackupEpisode]) -> DbResult<()> {
-    let db = episodes_by_anime_id(tx, anime_id)?;
-    let by_url: HashMap<&str, &EpisodeRow> = db.iter().map(|r| (r.url.as_str(), r)).collect();
-    for b in backup {
-        let row = EpisodeRow {
-            id: 0,
-            anime_id,
-            url: b.url.clone(),
-            name: b.name.clone(),
-            scanlator: b.scanlator.clone(),
-            seen: b.seen,
-            bookmark: b.bookmark,
-            last_second_seen: b.last_second_seen,
-            total_seconds: b.total_seconds,
-            episode_number: round6(b.episode_number),
-            source_order: b.source_order,
-            date_fetch: b.date_fetch,
-            date_upload: b.date_upload,
-            last_modified_at: 0,
-            version: b.version,
-            is_syncing: 0,
-            summary: b.summary.clone(),
-            preview_url: b.preview_url.clone(),
-            fillermark: b.fillermark,
-            memo: memo_of(&b.memo),
-        };
-        match by_url.get(row.url.as_str()) {
-            None => {
-                insert_episode(tx, &row)?;
-            }
-            Some(d) if same_episode_state(&row, d) => {}
-            Some(d) => {
-                let (seen, last_second_seen) =
-                    merge_progress(row.seen, row.last_second_seen, d.seen, d.last_second_seen);
-                update_episode(
-                    tx,
-                    &EpisodeUpdate {
-                        id: d.id,
-                        seen: Some(seen),
-                        bookmark: Some(row.bookmark || d.bookmark),
-                        fillermark: Some(row.fillermark || d.fillermark),
-                        last_second_seen: Some(last_second_seen),
-                        total_seconds: Some(row.total_seconds),
-                        version: Some(row.version),
-                        memo: Some(row.memo.clone()),
-                        ..Default::default()
-                    },
-                )?;
-            }
-        }
+fn track_of(b: &BackupAnimeTracking) -> Track {
+    Track {
+        remote_id: b.remote_id(),
+        library_id: Some(b.library_id),
+        title: b.title.clone(),
+        last_item: f64::from(b.last_episode_seen),
+        total_items: i64::from(b.total_episodes),
+        status: i64::from(b.status),
+        score: f64::from(b.score),
+        remote_url: b.tracking_url.clone(),
+        start_date: b.started_watching_date,
+        finish_date: b.finished_watching_date,
+        private: b.private,
+        ..Track::new(Kind::Anime, i64::from(b.sync_id))
     }
-    Ok(())
-}
-
-/// `forComparison` for an episode: every field but the ids, the upload and fetch dates, `lastModifiedAt` and `version`.
-fn same_episode_state(a: &EpisodeRow, d: &EpisodeRow) -> bool {
-    EpisodeRow {
-        id: d.id,
-        anime_id: d.anime_id,
-        date_fetch: d.date_fetch,
-        date_upload: d.date_upload,
-        last_modified_at: d.last_modified_at,
-        version: d.version,
-        is_syncing: d.is_syncing,
-        ..a.clone()
-    } == *d
-}
-
-/// Tracks (T-22a-025). Same rules as manga tracks, with `last_episode_seen`.
-fn restore_tracks(tx: &Transaction<'_>, anime_id: i64, backup: &[BackupAnimeTracking]) -> DbResult<()> {
-    let db = tracks_by_anime_id(tx, anime_id)?;
-    let by_tracker: HashMap<i64, &AnimeTrack> = db.iter().map(|r| (r.sync_id, r)).collect();
-    for b in backup {
-        let row = AnimeTrack {
-            id: 0,
-            anime_id,
-            sync_id: i64::from(b.sync_id),
-            remote_id: b.remote_id(),
-            library_id: Some(b.library_id),
-            title: b.title.clone(),
-            last_episode_seen: f64::from(b.last_episode_seen),
-            total_episodes: i64::from(b.total_episodes),
-            status: i64::from(b.status),
-            score: f64::from(b.score),
-            remote_url: b.tracking_url.clone(),
-            start_date: b.started_watching_date,
-            finish_date: b.finished_watching_date,
-            private: b.private,
-        };
-        match by_tracker.get(&row.sync_id) {
-            None => {
-                upsert_track(tx, &row)?;
-            }
-            Some(d) if same_track_state(&row, d) => {}
-            Some(d) => {
-                update_track(
-                    tx,
-                    &AnimeTrackUpdate {
-                        id: d.id,
-                        remote_id: Some(row.remote_id),
-                        library_id: row.library_id,
-                        last_episode_seen: Some(d.last_episode_seen.max(row.last_episode_seen)),
-                        ..Default::default()
-                    },
-                )?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// `forComparison` for an anime track: every field but the id and the anime id.
-fn same_track_state(a: &AnimeTrack, d: &AnimeTrack) -> bool {
-    AnimeTrack { id: d.id, anime_id: d.anime_id, ..a.clone() } == *d
-}
-
-/// Anime history (T-22a-025). The episode is looked up in this anime (D9 fixed). `last_seen` ends at the later of the
-/// two timestamps. `readDuration` is not stored and is counted in `out` (E-42).
-fn restore_history(
-    tx: &Transaction<'_>,
-    anime_id: i64,
-    backup: &[BackupAnimeHistory],
-    out: &mut AnimeOutcome,
-) -> DbResult<()> {
-    let episode_ids: HashMap<String, i64> =
-        episodes_by_anime_id(tx, anime_id)?.into_iter().map(|r| (r.url, r.id)).collect();
-    for h in backup {
-        if h.read_duration != 0 {
-            out.dropped_read_durations += 1;
-        }
-        let Some(&episode_id) = episode_ids.get(&h.url) else {
-            continue;
-        };
-        let stored: Option<i64> = tx
-            .query_row("SELECT last_at FROM history WHERE item_id = ?1", [episode_id], |r| r.get(0))
-            .optional()?;
-        let seen_at = stored.map_or(h.last_read, |db| h.last_read.max(db));
-        if stored == Some(seen_at) {
-            continue;
-        }
-        upsert_history(tx, episode_id, Millis(seen_at))?;
-    }
-    Ok(())
-}
-
-/// Recomputes `next_update` and `fetch_interval` for one anime from its episodes and the run clock (T-22a-021).
-pub fn refresh_interval(tx: &Transaction<'_>, clock: &RunClock, anime_id: i64) -> DbResult<()> {
-    let row = anime_by_id(tx, anime_id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-    let items: Vec<ItemDates> = episodes_by_anime_id(tx, anime_id)?
-        .iter()
-        .map(|r| ItemDates { date_upload: r.date_upload, date_fetch: r.date_fetch })
-        .collect();
-    let stored = Stored {
-        fetch_interval: row.calculate_interval as i32,
-        next_update: row.next_update.unwrap_or(0),
-        last_update: row.last_update.unwrap_or(0),
-    };
-    let out = to_update(stored, &items, &clock.now, clock.window, clock.clock_now_ms);
-    if row.next_update == Some(out.next_update) && row.calculate_interval == i64::from(out.fetch_interval) {
-        return Ok(());
-    }
-    update_anime(
-        tx,
-        &AnimeUpdate {
-            id: anime_id,
-            next_update: Some(out.next_update),
-            fetch_interval: Some(i64::from(out.fetch_interval)),
-            ..Default::default()
-        },
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone};
     use kuro_db::schema_unified;
-    use kuro_db::statements_anime::{categories_by_anime_id, episodes_by_url_and_anime_id, insert_category};
+    use kuro_db::tables::{EntryRow, categories, entries, history, items, tracks};
     use rusqlite::Connection;
 
     use super::*;
+    use crate::schema::BackupAnimeHistory;
 
     fn clock() -> RunClock {
         RunClock::new(Local.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).single().unwrap())
@@ -445,21 +190,20 @@ mod tests {
         BackupEpisode { url: url.into(), name: format!("ep {url}"), seen, last_second_seen: last, episode_number: 2.0, version: 1, ..Default::default() }
     }
 
-    fn by_url(c: &Connection, url: &str) -> AnimeRow {
-        anime_by_url_and_source(c, url, 3).unwrap().unwrap()
+    fn by_url(c: &Connection, url: &str) -> EntryRow {
+        entries::by_url_and_source(c, Kind::Anime, url, 3).unwrap().unwrap()
     }
 
-    fn restore(c: &mut Connection, root: &AnimeRoot) -> AnimeOutcome {
+    fn restore(c: &mut Connection, root: &AnimeRoot) {
         let tx = c.transaction().unwrap();
-        let out = restore_anime_root(&tx, &clock(), root, &HashMap::new()).unwrap();
+        restore_anime_root(&tx, &clock(), root, &HashMap::new()).unwrap();
         tx.commit().unwrap();
-        out
     }
 
     #[test]
     fn new_row_with_mapped_categories_keeps_the_backup_version() {
         let (_d, mut c) = db();
-        let cat = insert_category(&c, "A", 0, 0).unwrap();
+        let cat = categories::insert(&c, Kind::Anime, "A", 0, 0).unwrap();
         let mut a = anime("ver");
         a.version = 6;
         a.categories = vec![0];
@@ -529,14 +273,14 @@ mod tests {
             episode("e3", false, 0),
         ];
         restore(&mut c, &AnimeRoot { entry: a2, seasons: vec![] });
-        let rows = episodes_by_anime_id(&c, id).unwrap();
+        let rows = items::by_entry(&c, id, false).unwrap();
         let get = |u: &str| rows.iter().find(|r| r.url == u).unwrap().clone();
         assert_eq!(rows.len(), 3);
-        assert!(get("e1").seen, "seen never reverts");
+        assert!(get("e1").done, "seen never reverts");
         assert!(get("e1").bookmark, "bookmark is OR");
-        assert_eq!(get("e2").last_second_seen, 120);
-        assert!((get("e2").episode_number - 2.0).abs() < f64::EPSILON);
-        assert!(!get("e3").seen);
+        assert_eq!(get("e2").progress, 120);
+        assert!((get("e2").number - 2.0).abs() < f64::EPSILON);
+        assert!(!get("e3").done);
     }
 
     #[test]
@@ -551,40 +295,41 @@ mod tests {
         let roots = plan_anime(vec![root, season]);
         restore(&mut c, &roots[0]);
         let s = by_url(&c, "s2");
-        let eps = episodes_by_url_and_anime_id(&c, "only-in-season", s.id).unwrap();
+        let eps = items::by_url_and_entry(&c, "only-in-season", s.id).unwrap();
         assert_eq!(eps.len(), 1);
     }
 
     #[test]
-    fn history_uses_the_later_timestamp_and_counts_dropped_durations() {
+    fn history_uses_the_later_timestamp_and_keeps_the_larger_duration() {
         let (_d, mut c) = db();
         let mut a = anime("hist");
         a.episodes = vec![episode("h1", true, 0)];
         a.history = vec![BackupAnimeHistory { url: "h1".into(), last_read: 500, read_duration: 77 }];
-        let out = restore(&mut c, &AnimeRoot { entry: a.clone(), seasons: vec![] });
-        assert_eq!(out.dropped_read_durations, 1, "E-42: readDuration not stored");
+        restore(&mut c, &AnimeRoot { entry: a.clone(), seasons: vec![] });
         let id = by_url(&c, "hist").id;
-        let ep = episodes_by_anime_id(&c, id).unwrap()[0].id;
-        let seen: i64 = c.query_row("SELECT last_at FROM history WHERE item_id = ?1", [ep], |r| r.get(0)).unwrap();
-        assert_eq!(seen, 500);
+        let h = |c: &Connection| history::by_entry(c, id).unwrap()[0];
+        assert_eq!((h(&c).last_at, h(&c).duration_ms), (500, 77), "the backup duration is stored, not dropped");
 
-        a.history = vec![BackupAnimeHistory { url: "h1".into(), last_read: 100, read_duration: 0 }];
+        a.history = vec![BackupAnimeHistory { url: "h1".into(), last_read: 100, read_duration: 20 }];
+        restore(&mut c, &AnimeRoot { entry: a.clone(), seasons: vec![] });
+        assert_eq!((h(&c).last_at, h(&c).duration_ms), (500, 77), "max keeps the later time and the larger duration");
+
+        a.history = vec![BackupAnimeHistory { url: "h1".into(), last_read: 100, read_duration: 90 }];
         restore(&mut c, &AnimeRoot { entry: a, seasons: vec![] });
-        let seen: i64 = c.query_row("SELECT last_at FROM history WHERE item_id = ?1", [ep], |r| r.get(0)).unwrap();
-        assert_eq!(seen, 500, "max keeps the later DB value");
+        assert_eq!((h(&c).last_at, h(&c).duration_ms), (500, 90));
     }
 
     #[test]
     fn categories_are_replaced_when_an_order_maps() {
         let (_d, mut c) = db();
-        let cat = insert_category(&c, "Watching", 0, 0).unwrap();
+        let cat = categories::insert(&c, Kind::Anime, "Watching", 0, 0).unwrap();
         let mut a = anime("cat-a");
         a.categories = vec![0];
         let tx = c.transaction().unwrap();
         restore_anime_root(&tx, &clock(), &AnimeRoot { entry: a, seasons: vec![] }, &HashMap::from([(0, cat)])).unwrap();
         tx.commit().unwrap();
         let id = by_url(&c, "cat-a").id;
-        let got: Vec<i64> = categories_by_anime_id(&c, id).unwrap().into_iter().map(|r| r.id).collect();
+        let got: Vec<i64> = categories::by_entry(&c, Kind::Anime, id).unwrap().into_iter().map(|r| r.id).collect();
         assert_eq!(got, vec![cat]);
     }
 
@@ -604,8 +349,8 @@ mod tests {
         a.tracking[0].media_id = 9;
         restore(&mut c, &AnimeRoot { entry: a, seasons: vec![] });
         let id = by_url(&c, "trk").id;
-        let t = &tracks_by_anime_id(&c, id).unwrap()[0];
-        assert_eq!((t.remote_id, t.last_episode_seen), (9, 2.0));
+        let t = &tracks::by_entry(&c, id).unwrap()[0];
+        assert_eq!((t.remote_id, t.last_item), (9, 2.0));
     }
 
     #[test]

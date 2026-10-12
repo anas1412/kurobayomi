@@ -7,6 +7,7 @@ pub mod auto;
 pub mod creator;
 pub mod error;
 pub mod file;
+pub mod flags;
 pub mod format;
 pub mod job;
 pub mod notify;

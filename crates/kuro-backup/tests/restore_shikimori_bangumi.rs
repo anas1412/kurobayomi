@@ -12,8 +12,8 @@ use kuro_backup::restore::options::RestoreOptions;
 use kuro_backup::restore::prefs::IntervalScheduler;
 use kuro_backup::schema::{Backup, BackupAnime, BackupAnimeTracking, BackupManga, BackupTracking};
 use kuro_backup::wire::Message;
-use kuro_db::statements_anime;
-use kuro_db::statements_manga::manga_sync;
+use kuro_db::tables::tracks;
+use kuro_platform::kind::Kind;
 use kuro_db::schema_unified;
 use kuro_prefs::store::PrefStore;
 use rusqlite::Connection;
@@ -136,18 +136,18 @@ fn t_31a_048_shikimori_and_bangumi_manga_tracks_restore_unchanged() {
     let mut dbs = fresh();
     restore(&mut dbs, &file);
 
-    let mut rows = manga_sync::get_tracks(&dbs.db).unwrap();
-    rows.sort_by_key(|t| t.sync_id);
+    let mut rows = tracks::all(&dbs.db, Kind::Manga).unwrap();
+    rows.sort_by_key(|t| t.tracker_id);
     assert_eq!(rows.len(), 2);
 
     let shiki = &rows[0];
-    assert_eq!((shiki.sync_id, shiki.remote_id, shiki.library_id), (4, 55, Some(8123)));
+    assert_eq!((shiki.tracker_id, shiki.remote_id, shiki.library_id), (4, 55, Some(8123)));
     assert_eq!((shiki.status, shiki.score), (6, 8.0));
     assert_eq!((shiki.start_date, shiki.finish_date, shiki.private), (STARTED, FINISHED, false));
-    assert_eq!((shiki.last_chapter_read, shiki.total_chapters), (12.5, 40));
+    assert_eq!((shiki.last_item, shiki.total_items), (12.5, 40));
 
     let bgm = &rows[1];
-    assert_eq!((bgm.sync_id, bgm.remote_id, bgm.library_id), (5, 777, Some(0)));
+    assert_eq!((bgm.tracker_id, bgm.remote_id, bgm.library_id), (5, 777, Some(0)));
     assert_eq!((bgm.status, bgm.score), (3, 7.0));
     assert_eq!((bgm.start_date, bgm.finish_date, bgm.private), (STARTED, 0, true));
 }
@@ -160,18 +160,18 @@ fn t_31a_048_shikimori_and_bangumi_anime_tracks_restore_unchanged() {
     let mut dbs = fresh();
     restore(&mut dbs, &file);
 
-    let mut rows = statements_anime::tracks(&dbs.db).unwrap();
-    rows.sort_by_key(|t| t.sync_id);
+    let mut rows = tracks::all(&dbs.db, Kind::Anime).unwrap();
+    rows.sort_by_key(|t| t.tracker_id);
     assert_eq!(rows.len(), 2);
 
     let shiki = &rows[0];
-    assert_eq!((shiki.sync_id, shiki.remote_id, shiki.library_id), (4, 56, Some(9001)));
+    assert_eq!((shiki.tracker_id, shiki.remote_id, shiki.library_id), (4, 56, Some(9001)));
     assert_eq!((shiki.status, shiki.score), (2, 9.0));
     assert_eq!((shiki.start_date, shiki.finish_date, shiki.private), (STARTED, FINISHED, false));
-    assert_eq!((shiki.last_episode_seen, shiki.total_episodes), (5.0, 12));
+    assert_eq!((shiki.last_item, shiki.total_items), (5.0, 12));
 
     let bgm = &rows[1];
-    assert_eq!((bgm.sync_id, bgm.remote_id, bgm.library_id), (5, 778, Some(0)));
+    assert_eq!((bgm.tracker_id, bgm.remote_id, bgm.library_id), (5, 778, Some(0)));
     assert_eq!((bgm.status, bgm.score), (5, 6.0));
     assert_eq!((bgm.start_date, bgm.finish_date, bgm.private), (STARTED, 0, true));
 }

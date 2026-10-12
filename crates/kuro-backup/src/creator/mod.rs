@@ -8,37 +8,27 @@ pub mod extensions;
 pub mod meta;
 pub mod preferences;
 
-use kuro_data::anime::Anime;
 use kuro_data::category::Category;
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
-use kuro_data::history::{AnimeHistory, MangaHistory};
-use kuro_data::manga::Manga;
-use kuro_data::track::{AnimeTrack, MangaTrack};
+use kuro_data::entry::Entry;
+use kuro_data::entry_history::History;
+use kuro_data::item::Item;
+use kuro_data::track::Track;
 use kuro_platform::kind::Kind;
 
 use crate::error::BackupError;
 use crate::options::BackupOptions;
 use crate::schema::{Backup, PrefValue};
 
-/// A manga with the rows the creator needs, loaded by the reader.
-pub struct MangaEntry {
-    pub manga: Manga,
-    /// All chapters of the manga, unfiltered (`applyScanlatorFilter = 0`).
-    pub chapters: Vec<Chapter>,
+/// An entry of either kind with the rows the creator needs, loaded by the reader.
+#[derive(Clone)]
+pub struct EntryData {
+    pub entry: Entry,
+    /// All items of the entry, unfiltered (`applyScanlatorFilter = 0`).
+    pub items: Vec<Item>,
     pub excluded_scanlators: std::collections::BTreeSet<String>,
     pub categories: Vec<Category>,
-    pub tracks: Vec<MangaTrack>,
-    pub history: Vec<MangaHistory>,
-}
-
-/// An anime with the rows the creator needs.
-pub struct AnimeEntry {
-    pub anime: Anime,
-    pub episodes: Vec<Episode>,
-    pub categories: Vec<Category>,
-    pub tracks: Vec<AnimeTrack>,
-    pub history: Vec<AnimeHistory>,
+    pub tracks: Vec<Track>,
+    pub history: Vec<History>,
 }
 
 /// What one build pass returns: the container and the extension packages skipped for a missing artifact.
@@ -52,15 +42,12 @@ pub trait LibraryReader {
         f()
     }
 
-    fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError>;
-    /// Read manga that are not in the library (B-08a). Called only when `read_entries` and `library_entries` are on.
-    fn manga_read_not_in_library(&self) -> Result<Vec<MangaEntry>, BackupError>;
-    fn anime_favorites(&self) -> Result<Vec<AnimeEntry>, BackupError>;
-    /// Watched anime that are not in the library (B-08b).
-    fn anime_watched_not_in_library(&self) -> Result<Vec<AnimeEntry>, BackupError>;
-    /// All manga categories, system category (id 0) included; the creator filters it.
-    fn manga_categories(&self) -> Result<Vec<Category>, BackupError>;
-    fn anime_categories(&self) -> Result<Vec<Category>, BackupError>;
+    fn favorites(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError>;
+    /// Entries of the kind that are not in the library but have read or watched items (B-08a, B-08b). Called only when
+    /// `read_entries` and `library_entries` are on.
+    fn not_in_library(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError>;
+    /// All categories of the kind, system category (id 0) included; the creator filters it.
+    fn categories(&self, kind: Kind) -> Result<Vec<Category>, BackupError>;
 }
 
 /// Source identity for source references and stub names (B-08d, B-14).
@@ -108,38 +95,27 @@ fn build_pass(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
     let lib = inputs.library;
 
     // E-09: the non-favourite queries run only when their result can reach the output.
-    let mut manga_entries = Vec::new();
-    let mut anime_entries = Vec::new();
-    if opts.library_entries {
-        manga_entries = lib.manga_favorites()?;
-        if opts.read_entries {
-            manga_entries.extend(lib.manga_read_not_in_library()?);
+    let entries_of = |kind: Kind| -> Result<Vec<EntryData>, BackupError> {
+        if !opts.library_entries {
+            return Ok(Vec::new());
         }
-        anime_entries = lib.anime_favorites()?;
+        let mut list = lib.favorites(kind)?;
         if opts.read_entries {
-            anime_entries.extend(lib.anime_watched_not_in_library()?);
+            list.extend(lib.not_in_library(kind)?);
         }
-    }
-
-    let manga = manga_entries
+        Ok(list)
+    };
+    let manga = entries_of(Kind::Manga)?
         .iter()
         .map(|e| entries::manga_entry(e, opts))
         .collect::<Result<Vec<_>, _>>()?;
-    let anime = anime_entries
+    let anime = entries_of(Kind::Anime)?
         .iter()
         .map(|e| entries::anime_entry(e, opts))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let categories = if opts.categories {
-        meta::categories(&lib.manga_categories()?)
-    } else {
-        Vec::new()
-    };
-    let anime_categories = if opts.categories {
-        meta::categories(&lib.anime_categories()?)
-    } else {
-        Vec::new()
-    };
+    let categories = if opts.categories { meta::categories(&lib.categories(Kind::Manga)?) } else { Vec::new() };
+    let anime_categories = if opts.categories { meta::categories(&lib.categories(Kind::Anime)?) } else { Vec::new() };
 
     let sources = meta::manga_sources(&manga, inputs.sources);
     let anime_sources = meta::anime_sources(&anime, inputs.sources);
@@ -190,75 +166,41 @@ fn build_pass(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
 mod tests {
     use std::cell::Cell;
 
-    use kuro_data::anime::Anime;
     use kuro_data::category::Category;
-    use kuro_data::chapter::Chapter;
-    use kuro_data::episode::Episode;
-    use kuro_data::history::MangaHistory;
-    use kuro_data::manga::Manga;
-    use kuro_data::track::MangaTrack;
+    use kuro_data::entry_history::History;
+    use kuro_data::item::Item;
+    use kuro_data::track::Track;
 
     use super::*;
     use crate::schema::{PrefValue, Backup};
 
     #[derive(Default)]
     struct Fake {
-        manga_fav: Vec<MangaEntry>,
-        manga_read: Vec<MangaEntry>,
-        anime_fav: Vec<AnimeEntry>,
-        anime_watched: Vec<AnimeEntry>,
+        manga_fav: Vec<EntryData>,
+        manga_read: Vec<EntryData>,
+        anime_fav: Vec<EntryData>,
+        anime_watched: Vec<EntryData>,
         manga_cats: Vec<Category>,
         manga_read_calls: Cell<u32>,
         anime_watched_calls: Cell<u32>,
     }
 
     impl LibraryReader for Fake {
-        fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError> {
-            Ok(clone_manga(&self.manga_fav))
+        fn favorites(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError> {
+            Ok(if kind.is_anime() { self.anime_fav.clone() } else { self.manga_fav.clone() })
         }
-        fn manga_read_not_in_library(&self) -> Result<Vec<MangaEntry>, BackupError> {
-            self.manga_read_calls.set(self.manga_read_calls.get() + 1);
-            Ok(clone_manga(&self.manga_read))
-        }
-        fn anime_favorites(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-            Ok(clone_anime(&self.anime_fav))
-        }
-        fn anime_watched_not_in_library(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-            self.anime_watched_calls.set(self.anime_watched_calls.get() + 1);
-            Ok(clone_anime(&self.anime_watched))
-        }
-        fn manga_categories(&self) -> Result<Vec<Category>, BackupError> {
-            Ok(self.manga_cats.clone())
-        }
-        fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-            Ok(Vec::new())
-        }
-    }
-
-    // Entries are not Clone in kuro-data's wrappers, so the fake rebuilds them field by field.
-    fn clone_manga(src: &[MangaEntry]) -> Vec<MangaEntry> {
-        src.iter()
-            .map(|e| MangaEntry {
-                manga: e.manga.clone(),
-                chapters: e.chapters.clone(),
-                excluded_scanlators: e.excluded_scanlators.clone(),
-                categories: e.categories.clone(),
-                tracks: e.tracks.clone(),
-                history: e.history.clone(),
+        fn not_in_library(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError> {
+            Ok(if kind.is_anime() {
+                self.anime_watched_calls.set(self.anime_watched_calls.get() + 1);
+                self.anime_watched.clone()
+            } else {
+                self.manga_read_calls.set(self.manga_read_calls.get() + 1);
+                self.manga_read.clone()
             })
-            .collect()
-    }
-
-    fn clone_anime(src: &[AnimeEntry]) -> Vec<AnimeEntry> {
-        src.iter()
-            .map(|e| AnimeEntry {
-                anime: e.anime.clone(),
-                episodes: e.episodes.clone(),
-                categories: e.categories.clone(),
-                tracks: e.tracks.clone(),
-                history: e.history.clone(),
-            })
-            .collect()
+        }
+        fn categories(&self, kind: Kind) -> Result<Vec<Category>, BackupError> {
+            Ok(if kind.is_anime() { Vec::new() } else { self.manga_cats.clone() })
+        }
     }
 
     struct NoSources;
@@ -286,8 +228,8 @@ mod tests {
         }
     }
 
-    fn manga(id: i64, source: i64, favorite: bool) -> Manga {
-        let mut m = Manga::create();
+    fn manga(id: i64, source: i64, favorite: bool) -> Entry {
+        let mut m = Entry::create(Kind::Manga);
         m.id = id;
         m.source = source;
         m.url = format!("/m/{id}");
@@ -296,42 +238,52 @@ mod tests {
         m
     }
 
-    fn chapter(id: i64, manga_id: i64, url: &str, scanlator: Option<&str>) -> Chapter {
-        let mut c = Chapter::create();
+    fn chapter(id: i64, manga_id: i64, url: &str, scanlator: Option<&str>) -> Item {
+        let mut c = Item::create(Kind::Manga);
         c.id = id;
-        c.manga_id = manga_id;
+        c.entry_id = manga_id;
         c.url = url.into();
         c.name = format!("Ch {id}");
         c.scanlator = scanlator.map(str::to_owned);
-        c.chapter_number = 1.5;
+        c.number = 1.5;
         c
     }
 
-    fn sample_manga_entry() -> MangaEntry {
-        MangaEntry {
-            manga: manga(1, 7, true),
-            chapters: vec![chapter(10, 1, "/c/10", Some("Excluded")), chapter(11, 1, "/c/11", Some("Ok"))],
+    fn sample_manga_entry() -> EntryData {
+        let mut track = Track::new(Kind::Manga, 2);
+        track.id = 1;
+        track.entry_id = 1;
+        track.remote_id = 77;
+        track.title = "t".into();
+        track.last_item = 3.0;
+        track.total_items = 12;
+        track.status = 1;
+        track.score = 8.0;
+        track.remote_url = "u".into();
+        EntryData {
+            entry: manga(1, 7, true),
+            items: vec![chapter(10, 1, "/c/10", Some("Excluded")), chapter(11, 1, "/c/11", Some("Ok"))],
             excluded_scanlators: ["Excluded".to_string()].into_iter().collect(),
             categories: vec![Category { id: 5, name: "Read".into(), order: 2, flags: 0, hidden: false }, Category { id: 0, name: "Default".into(), order: 0, flags: 0, hidden: false }],
-            tracks: vec![MangaTrack { id: 1, manga_id: 1, tracker_id: 2, remote_id: 77, library_id: None, title: "t".into(), last_chapter_read: 3.0, total_chapters: 12, status: 1, score: 8.0, remote_url: "u".into(), start_date: 0, finish_date: 0, private: false }],
-            history: vec![MangaHistory { id: 1, chapter_id: 11, last_read: 1000, time_read: 55 }, MangaHistory { id: 2, chapter_id: 999, last_read: 1, time_read: 1 }],
+            tracks: vec![track],
+            history: vec![History { id: 1, item_id: 11, last_at: 1000, duration_ms: 55 }, History { id: 2, item_id: 999, last_at: 1, duration_ms: 1 }],
         }
     }
 
-    fn sample_anime_entry() -> AnimeEntry {
-        let mut a = Anime::create();
+    fn sample_anime_entry() -> EntryData {
+        let mut a = Entry::create(Kind::Anime);
         a.id = 3;
         a.source = 8;
         a.url = "/a/3".into();
         a.favorite = true;
         a.background_url = Some("https://bg".into());
-        let mut ep = Episode::create();
+        let mut ep = Item::create(Kind::Anime);
         ep.id = 30;
-        ep.anime_id = 3;
+        ep.entry_id = 3;
         ep.url = "/e/30".into();
         ep.name = "E30".into();
-        ep.episode_number = 2.0;
-        AnimeEntry { anime: a, episodes: vec![ep], categories: Vec::new(), tracks: Vec::new(), history: Vec::new() }
+        ep.number = 2.0;
+        EntryData { entry: a, items: vec![ep], categories: Vec::new(), excluded_scanlators: Default::default(), tracks: Vec::new(), history: Vec::new() }
     }
 
     fn build(fake: &Fake, opts: &BackupOptions) -> Result<Backup, BackupError> {
@@ -357,6 +309,19 @@ mod tests {
         // Chapters are unfiltered when they are written (applyScanlatorFilter = 0).
         let all = build(&fake, &BackupOptions::default()).unwrap();
         assert_eq!(all.manga[0].chapters.len(), 2);
+    }
+
+    #[test]
+    fn manga_flags_go_out_in_the_wire_layout_and_anime_history_keeps_its_duration() {
+        let mut m = sample_manga_entry();
+        m.entry.item_flags = 0x200 | 0x1;
+        let mut a = sample_anime_entry();
+        a.entry.item_flags = 0x600;
+        a.history = vec![History { id: 1, item_id: 30, last_at: 900, duration_ms: 42 }];
+        let b = build(&Fake { manga_fav: vec![m], anime_fav: vec![a], ..Default::default() }, &BackupOptions::default()).unwrap();
+        assert_eq!(b.manga[0].chapter_flags, 0x101, "sorting moves from 0x200 down to 0x100");
+        assert_eq!(b.anime[0].episode_flags, 0x600, "anime flags are the stored word");
+        assert_eq!((b.anime[0].history[0].last_read, b.anime[0].history[0].read_duration), (900, 42));
     }
 
     #[test]
@@ -431,7 +396,7 @@ mod tests {
     #[test]
     fn overflow_fails_the_backup_and_names_the_row() {
         let mut e = sample_manga_entry();
-        e.manga.status = 1i64 << 40;
+        e.entry.status = 1i64 << 40;
         let fake = Fake { manga_fav: vec![e], ..Default::default() };
         let err = build(&fake, &BackupOptions::default()).unwrap_err();
         assert!(matches!(err, BackupError::Overflow { entry: "manga", id: 1, field: "status" }));
@@ -498,13 +463,13 @@ mod tests {
         use crate::wire::Message;
         let long = "長".repeat(4096);
         let titles = ["🙂 Привет 🇯🇵", "مرحبا بالعالم", "e\u{301}a\u{300}\u{323}", long.as_str()];
-        let entries: Vec<MangaEntry> = titles
+        let entries: Vec<EntryData> = titles
             .iter()
             .enumerate()
             .map(|(i, t)| {
                 let mut e = sample_manga_entry();
-                e.manga.id = 100 + i as i64;
-                e.manga.title = (*t).to_string();
+                e.entry.id = 100 + i as i64;
+                e.entry.title = (*t).to_string();
                 e
             })
             .collect();
@@ -521,7 +486,7 @@ mod tests {
     fn float_precision_documented() {
         use crate::wire::Message;
         let mut entry = sample_manga_entry();
-        entry.chapters[1].chapter_number = 1234.5678;
+        entry.items[1].number = 1234.5678;
         let fake = Fake { manga_fav: vec![entry], ..Default::default() };
         let backup = build(&fake, &BackupOptions::default()).unwrap();
         let back = Backup::from_bytes(&backup.to_bytes().unwrap()).unwrap();

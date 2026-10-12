@@ -135,9 +135,9 @@ mod tests {
             private: true,
         };
         let row = anime.to_db(true).unwrap();
-        // The tracking URL goes to the URL field and progress to last_episode_seen for anime.
+        // The tracking URL goes to the URL field and progress to last_item.
         assert_eq!(row.remote_url, "https://kitsu.app/anime/show");
-        assert_eq!(row.last_episode_seen, 4.0);
+        assert_eq!(row.last_item, 4.0);
         let record = TrackRecord::from(AnimeTrack::from_db(&row));
         match &record {
             TrackRecord::Anime(back) => assert_eq!(back.to_db(true).unwrap(), row),
@@ -163,7 +163,7 @@ mod tests {
         };
         let row = manga.to_db(true).unwrap();
         assert_eq!(row.remote_url, "https://anilist.co/manga/3");
-        assert_eq!(row.last_chapter_read, 3.5);
+        assert_eq!(row.last_item, 3.5);
         let record = TrackRecord::from(MangaTrack::from_db(&row));
         match &record {
             TrackRecord::Manga(back) => assert_eq!(back.to_db(true).unwrap(), row),

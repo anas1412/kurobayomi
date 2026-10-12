@@ -4,8 +4,7 @@
 use kuro_platform::kind::Kind;
 use std::collections::{HashMap, HashSet};
 
-use kuro_db::statements_anime;
-use kuro_db::statements_manga;
+use kuro_db::tables::categories;
 use kuro_db::DbResult;
 use rusqlite::Connection;
 
@@ -29,25 +28,11 @@ struct Row {
 
 /// The categories of the table. The system category (id 0, seeded by the schema) is not a user category and is left out.
 fn existing(c: &Connection, kind: Kind) -> DbResult<Vec<Row>> {
-    Ok(match kind {
-        Kind::Manga => statements_manga::categories::get_categories(c)?
-            .into_iter()
-            .map(|r| Row { id: r.id, name: r.name, order: r.order, flags: r.flags })
-            .filter(|r| r.id != 0)
-            .collect(),
-        Kind::Anime => statements_anime::categories(c)?
-            .into_iter()
-            .map(|r| Row { id: r.id, name: r.name, order: r.order, flags: r.flags })
-            .filter(|r| r.id != 0)
-            .collect(),
-    })
-}
-
-fn insert(c: &Connection, kind: Kind, name: &str, order: i64, flags: i64) -> DbResult<i64> {
-    Ok(match kind {
-        Kind::Manga => statements_manga::categories::insert(c, name, order, flags)?,
-        Kind::Anime => statements_anime::insert_category(c, name, order, flags)?,
-    })
+    Ok(categories::all(c, kind)?
+        .into_iter()
+        .map(|r| Row { id: r.id, name: r.name, order: r.order, flags: r.flags })
+        .filter(|r| r.id != 0)
+        .collect())
 }
 
 /// Matches backup categories to database categories by exact name and creates the missing ones (T-22a-008).
@@ -71,7 +56,7 @@ pub fn restore_categories(c: &Connection, kind: Kind, backup: &[BackupCategory])
         let id = match by_name.get(&b.name) {
             Some(&id) => id,
             None => {
-                let id = insert(c, kind, &b.name, next_order, b.flags)?;
+                let id = categories::insert(c, kind, &b.name, next_order, b.flags)?;
                 next_order += 1;
                 by_name.insert(b.name.clone(), id);
                 flags.push(b.flags);
@@ -125,7 +110,7 @@ mod tests {
     }
 
     fn names(c: &Connection) -> Vec<(String, i64, i64)> {
-        statements_manga::categories::get_categories(c)
+        categories::all(c, Kind::Manga)
             .unwrap()
             .into_iter()
             .filter(|r| r.id != 0)
@@ -136,8 +121,8 @@ mod tests {
     #[test]
     fn existing_name_keeps_db_flags_and_new_names_follow_max_order() {
         let (_d, c) = test_db();
-        statements_manga::categories::insert(&c, "Read", 0, 1).unwrap();
-        statements_manga::categories::insert(&c, "Later", 4, 2).unwrap();
+        categories::insert(&c, Kind::Manga, "Read", 0, 1).unwrap();
+        categories::insert(&c, Kind::Manga, "Later", 4, 2).unwrap();
         let backup = vec![cat("Later", 0, 10, 9), cat("Fresh", 1, 11, 3)];
         let out = restore_categories(&c, Kind::Manga, &backup).unwrap();
         assert_eq!(names(&c), vec![

@@ -13,8 +13,8 @@ use kuro_backup::restore::driver::{Targets, counts, restore_backup};
 use kuro_backup::restore::options::RestoreOptions;
 use kuro_backup::restore::prefs::IntervalScheduler;
 use kuro_backup::restore::sections::Run;
-use kuro_db::statements_anime;
-use kuro_db::statements_manga::manga_sync;
+use kuro_db::tables::{entries as entry_rows, items as item_rows, tracks};
+use kuro_platform::kind::Kind;
 use kuro_db::schema_unified;
 use kuro_prefs::store::PrefStore;
 use rusqlite::Connection;
@@ -83,7 +83,7 @@ fn x100_mihon_file_restores_into_an_empty_database() {
     assert_eq!(items(&dbs.db, "manga"), 6);
     assert_eq!(count(&dbs.db, "categories") - seeded_categories, 1);
     assert_eq!(count(&dbs.db, "history"), 1);
-    assert_eq!(manga_sync::get_tracks(&dbs.db).unwrap().len(), 1);
+    assert_eq!(tracks::all(&dbs.db, Kind::Manga).unwrap().len(), 1);
 }
 
 #[test]
@@ -189,7 +189,6 @@ fn cancel_before_the_first_entry_writes_nothing() {
 
 use kuro_backup::schema::{Backup, BackupAnime, BackupChapter, BackupManga};
 use kuro_backup::wire::Message;
-use kuro_db::statements_manga::{chapters, mangas};
 use kuro_prefs::values::PrefValue as Stored;
 
 fn restore_fixture(dbs: &mut Dbs, dir: &Path, name: &str) -> Run {
@@ -249,11 +248,11 @@ fn x105_float_chapter_numbers_and_scores_are_stored() {
     let dir = fixtures_dir();
     let mut dbs = fresh();
     restore_fixture(&mut dbs, dir.path(), "float_numbers.tachibk");
-    let id = mangas::get_by_url_and_source(&dbs.db, "/m/1", 7).unwrap().unwrap().id;
-    let mut numbers: Vec<f64> = chapters::get_by_manga_id(&dbs.db, id, false).unwrap().iter().map(|c| c.chapter_number).collect();
+    let id = entry_rows::by_url_and_source(&dbs.db, Kind::Manga, "/m/1", 7).unwrap().unwrap().id;
+    let mut numbers: Vec<f64> = item_rows::by_entry(&dbs.db, id, false).unwrap().iter().map(|c| c.number).collect();
     numbers.sort_by(f64::total_cmp);
     assert_eq!(numbers, vec![1.1, 2.5, 10.0]);
-    let mut scores: Vec<f64> = manga_sync::get_tracks(&dbs.db).unwrap().iter().map(|t| t.score).collect();
+    let mut scores: Vec<f64> = tracks::all(&dbs.db, Kind::Manga).unwrap().iter().map(|t| t.score).collect();
     scores.sort_by(f64::total_cmp);
     assert_eq!(scores, vec![f64::from(7.3_f32), 8.5]);
 }
@@ -312,7 +311,7 @@ fn x110_a_manga_without_the_favorite_field_is_restored_as_a_favourite() {
     let dir = fixtures_dir();
     let mut dbs = fresh();
     restore_fixture(&mut dbs, dir.path(), "no_favorite_field.tachibk");
-    assert!(mangas::get_by_url_and_source(&dbs.db, "/m/9", 7).unwrap().unwrap().favorite);
+    assert!(entry_rows::by_url_and_source(&dbs.db, Kind::Manga, "/m/9", 7).unwrap().unwrap().favorite);
 }
 
 #[test]
@@ -363,13 +362,13 @@ fn x113_restore_over_rows_that_are_newer_or_older_than_the_file() {
         };
         restore_value(&mut dbs, dir.path(), &file);
 
-        let m = mangas::get_by_url_and_source(&dbs.db, "/m/v", 7).unwrap().unwrap();
+        let m = entry_rows::by_url_and_source(&dbs.db, Kind::Manga, "/m/v", 7).unwrap().unwrap();
         assert_eq!((m.author.as_deref(), m.title.as_str(), m.version), (Some(author), title, stored), "manga, backup version {version}");
-        let a = statements_anime::anime_by_url_and_source(&dbs.db, "/a/v", 8).unwrap().unwrap();
+        let a = entry_rows::by_url_and_source(&dbs.db, Kind::Anime, "/a/v", 8).unwrap().unwrap();
         assert_eq!((a.author.as_deref(), a.title.as_str(), a.version), (Some(author), title, stored), "anime, backup version {version}");
         // Read progress never goes backwards, whichever side is newer.
-        let ch = chapters::get_by_manga_id(&dbs.db, m.id, false).unwrap();
-        assert!(ch[0].read, "backup version {version}: a read chapter stays read");
+        let ch = item_rows::by_entry(&dbs.db, m.id, false).unwrap();
+        assert!(ch[0].done, "backup version {version}: a read chapter stays read");
         assert_eq!(entries(&dbs.db, "manga"), 1);
         assert_eq!(entries(&dbs.db, "anime"), 1);
     }

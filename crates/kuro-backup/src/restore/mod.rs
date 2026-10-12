@@ -12,8 +12,8 @@
 //! | D16 chapter metadata | keep: existing chapters keep the database name, number and date | `manga::chapters_insert_new_and_merge_progress_on_existing` |
 //! | D22 favourite default | keep the decoder default (a missing field is a favourite); decoder detail of area 21 | `tests/restore_integration.rs::x110_a_manga_without_the_favorite_field_is_restored_as_a_favourite` |
 //! | D23 categorized display | keep: the flag is written only when the backup computes it | `categories::categorized_display_is_true_only_with_two_distinct_flags`, `prefs::categorized_display_is_written_only_when_computed` |
-//! | E-25 `is_syncing` | fixed: a restored manga row is written with `is_syncing = false`; anime rows keep the database value | `manga::new_row_is_not_syncing_and_ignores_the_backup_modified_times`, `manga::existing_row_marked_syncing_is_cleared_and_backup_modified_times_are_not_written` |
-//! | E-26 `lastModifiedAt` and `favoriteModifiedAt` | keep the Kotlin write set; the sort reads the backup value | `manga::existing_row_marked_syncing_is_cleared_and_backup_modified_times_are_not_written`, `manga::sort_puts_new_rows_first_then_newest_modified` |
+//! | E-25 `is_syncing` | gone: the unified tables do not store it, so a restored row can never be left marked as syncing | no test needed |
+//! | E-26 `lastModifiedAt` and `favoriteModifiedAt` | keep the Kotlin write set; the sort reads the backup value | `manga::backup_modified_times_are_not_written_on_an_existing_row`, `manga::sort_puts_new_rows_first_then_newest_modified` |
 //! | E-16 duplicate category names | fixed: one row per name, later duplicates map to it | `categories::duplicate_backup_names_create_one_row_and_map_to_it` |
 //! | E-04 zero-content backup | refused before the restore starts, with the text "Backup does not contain any library entries" | `validate::empty_backup_is_refused_with_key_text` |
 //! | D4 and F-01 cancel mid-entry | fixed: the entry is rolled back and no error line is written | `driver::cancel_between_entry_writes_rolls_the_entry_back`, `driver::cancel_stops_at_the_exact_entry_through_the_driver` |
@@ -34,6 +34,7 @@ pub mod progress;
 pub mod runner;
 pub mod screen;
 pub mod sections;
+pub mod write;
 
 /// Why a restore stopped before its plan finished.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

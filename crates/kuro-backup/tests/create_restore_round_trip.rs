@@ -2,7 +2,7 @@
 //! restores, for the full default set and for each single option that `can_create` allows.
 
 use chrono::{Local, TimeZone};
-use kuro_backup::creator::{AnimeEntry, CreateInputs, LibraryReader, MangaEntry, PrefStore, SourcePrefStore, SourceRegistry};
+use kuro_backup::creator::{CreateInputs, EntryData, LibraryReader, PrefStore, SourcePrefStore, SourceRegistry};
 use kuro_backup::error::BackupError;
 use kuro_backup::file::{Target, create_file};
 use kuro_backup::format::decode_file;
@@ -12,10 +12,9 @@ use kuro_backup::restore::options::RestoreOptions;
 use kuro_backup::restore::prefs::IntervalScheduler;
 use kuro_backup::schema::PrefValue;
 use kuro_backup::validate::{TrackerRegistry, preflight_file};
-use kuro_data::anime::Anime;
 use kuro_data::category::Category;
-use kuro_data::chapter::Chapter;
-use kuro_data::manga::Manga;
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
 use kuro_db::schema_unified;
 use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore as Store;
@@ -26,51 +25,42 @@ fn category() -> Category {
     Category { id: 4, name: "Reading".into(), order: 1, flags: 0, hidden: false }
 }
 
-fn manga_entry() -> MangaEntry {
-    let mut m = Manga::create();
+fn manga_entry() -> EntryData {
+    let mut m = Entry::create(Kind::Manga);
     m.id = 1;
     m.source = 7;
     m.url = "/m/1".into();
     m.title = "Manga".into();
     m.favorite = true;
-    let mut c = Chapter::create();
+    let mut c = Item::create(Kind::Manga);
     c.id = 10;
-    c.manga_id = 1;
+    c.entry_id = 1;
     c.url = "/m/1/c".into();
     c.name = "Chapter".into();
-    MangaEntry { manga: m, chapters: vec![c], excluded_scanlators: Default::default(), categories: vec![category()], tracks: Vec::new(), history: Vec::new() }
+    EntryData { entry: m, items: vec![c], excluded_scanlators: Default::default(), categories: vec![category()], tracks: Vec::new(), history: Vec::new() }
 }
 
-fn anime_entry() -> AnimeEntry {
-    let mut a = Anime::create();
+fn anime_entry() -> EntryData {
+    let mut a = Entry::create(Kind::Anime);
     a.id = 2;
     a.source = 8;
     a.url = "/a/1".into();
     a.title = "Anime".into();
     a.favorite = true;
-    AnimeEntry { anime: a, episodes: Vec::new(), categories: Vec::new(), tracks: Vec::new(), history: Vec::new() }
+    EntryData { entry: a, items: Vec::new(), excluded_scanlators: Default::default(), categories: Vec::new(), tracks: Vec::new(), history: Vec::new() }
 }
 
 struct Library;
 
 impl LibraryReader for Library {
-    fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError> {
-        Ok(vec![manga_entry()])
+    fn favorites(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError> {
+        Ok(vec![if kind.is_anime() { anime_entry() } else { manga_entry() }])
     }
-    fn manga_read_not_in_library(&self) -> Result<Vec<MangaEntry>, BackupError> {
+    fn not_in_library(&self, _: Kind) -> Result<Vec<EntryData>, BackupError> {
         Ok(Vec::new())
     }
-    fn anime_favorites(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-        Ok(vec![anime_entry()])
-    }
-    fn anime_watched_not_in_library(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-        Ok(Vec::new())
-    }
-    fn manga_categories(&self) -> Result<Vec<Category>, BackupError> {
-        Ok(vec![category()])
-    }
-    fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-        Ok(vec![Category { id: 5, name: "Watching".into(), order: 1, flags: 0, hidden: false }])
+    fn categories(&self, kind: Kind) -> Result<Vec<Category>, BackupError> {
+        Ok(vec![if kind.is_anime() { Category { id: 5, name: "Watching".into(), order: 1, flags: 0, hidden: false } } else { category() }])
     }
 }
 

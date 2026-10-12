@@ -7,17 +7,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use kuro_data::DataError;
-use kuro_data::anime::AnimeRepo;
 use kuro_data::category::{Category, CategoryRepo};
-use kuro_data::chapter::ChapterRepo;
-use kuro_data::episode::EpisodeRepo;
-use kuro_data::history::{AnimeHistoryRepo, MangaHistoryRepo};
-use kuro_data::manga::{Manga, MangaRepo};
-use kuro_data::track::{AnimeTrackRepo, MangaTrackRepo};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::entry_history::HistoryRepo;
+use kuro_data::item::ItemRepo;
+use kuro_data::track::TrackRepo;
 use kuro_db::handle::Db;
 use kuro_prefs::values::PrefValue as AppValue;
 
-use super::{AnimeEntry, Built, ExtensionArtifacts, LibraryReader, MangaEntry, PrefStore, SourcePrefStore};
+use super::{Built, EntryData, ExtensionArtifacts, LibraryReader, PrefStore, SourcePrefStore};
 use crate::error::BackupError;
 use crate::schema::PrefValue;
 
@@ -35,27 +33,20 @@ impl DbLibrary {
         Self { db }
     }
 
-    fn manga_entry(&self, manga: Manga) -> Result<MangaEntry, BackupError> {
-        let id = manga.id;
-        Ok(MangaEntry {
-            chapters: ChapterRepo::new(self.db.clone()).by_manga_id(id, false).map_err(read)?,
-            excluded_scanlators: MangaRepo::new(self.db.clone()).excluded_scanlators(id).map_err(read)?,
-            categories: CategoryRepo::new(self.db.clone(), Kind::Manga).by_entry(id).map_err(read)?,
-            tracks: MangaTrackRepo::new(self.db.clone()).by_entry(id).map_err(read)?,
-            history: MangaHistoryRepo::new(self.db.clone()).by_manga_id(id).map_err(read)?,
-            manga,
+    fn entry_data(&self, entry: Entry) -> Result<EntryData, BackupError> {
+        let id = entry.id;
+        Ok(EntryData {
+            items: ItemRepo::new(self.db.clone()).by_entry_id(id, false).map_err(read)?,
+            excluded_scanlators: EntryRepo::new(self.db.clone()).excluded_scanlators(id).map_err(read)?,
+            categories: CategoryRepo::new(self.db.clone(), entry.kind).by_entry(id).map_err(read)?,
+            tracks: TrackRepo::new(self.db.clone()).by_entry(id).map_err(read)?,
+            history: HistoryRepo::new(self.db.clone()).by_entry_id(id).map_err(read)?,
+            entry,
         })
     }
 
-    fn anime_entry(&self, anime: kuro_data::anime::Anime) -> Result<AnimeEntry, BackupError> {
-        let id = anime.id;
-        Ok(AnimeEntry {
-            episodes: EpisodeRepo::new(self.db.clone()).by_anime_id(id).map_err(read)?,
-            categories: CategoryRepo::new(self.db.clone(), Kind::Anime).by_entry(id).map_err(read)?,
-            tracks: AnimeTrackRepo::new(self.db.clone()).by_entry(id).map_err(read)?,
-            history: AnimeHistoryRepo::new(self.db.clone()).by_anime_id(id).map_err(read)?,
-            anime,
-        })
+    fn all(&self, entries: Vec<Entry>) -> Result<Vec<EntryData>, BackupError> {
+        entries.into_iter().map(|e| self.entry_data(e)).collect()
     }
 }
 
@@ -77,34 +68,17 @@ impl LibraryReader for DbLibrary {
         }
     }
 
-    fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError> {
-        let favorites = MangaRepo::new(self.db.clone()).favorites().map_err(read)?;
-        favorites.into_iter().map(|m| self.manga_entry(m)).collect()
+    fn favorites(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError> {
+        self.all(EntryRepo::new(self.db.clone()).favorites(kind).map_err(read)?)
     }
 
-    fn manga_read_not_in_library(&self) -> Result<Vec<MangaEntry>, BackupError> {
-        let read_only = MangaRepo::new(self.db.clone()).read_not_in_library().map_err(read)?;
-        read_only.into_iter().map(|m| self.manga_entry(m)).collect()
+    fn not_in_library(&self, kind: Kind) -> Result<Vec<EntryData>, BackupError> {
+        self.all(EntryRepo::new(self.db.clone()).watched_not_in_library(kind).map_err(read)?)
     }
 
-    fn anime_favorites(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-        let favorites = AnimeRepo::new(self.db.clone()).favorites().map_err(read)?;
-        favorites.into_iter().map(|a| self.anime_entry(a)).collect()
+    fn categories(&self, kind: Kind) -> Result<Vec<Category>, BackupError> {
+        CategoryRepo::new(self.db.clone(), kind).all().map_err(read)
     }
-
-    fn anime_watched_not_in_library(&self) -> Result<Vec<AnimeEntry>, BackupError> {
-        let watched = AnimeRepo::new(self.db.clone()).watched_not_in_library().map_err(read)?;
-        watched.into_iter().map(|a| self.anime_entry(a)).collect()
-    }
-
-    fn manga_categories(&self) -> Result<Vec<Category>, BackupError> {
-        CategoryRepo::new(self.db.clone(), Kind::Manga).all().map_err(read)
-    }
-
-    fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-        CategoryRepo::new(self.db.clone(), Kind::Anime).all().map_err(read)
-    }
-
 }
 
 /// The backup value of a stored preference value.
@@ -204,11 +178,11 @@ mod tests {
     fn an_empty_library_reads_as_empty_lists_and_the_system_category() {
         let (_dir, db) = dbs();
         let lib = DbLibrary::new(db);
-        assert!(lib.manga_favorites().unwrap().is_empty());
-        assert!(lib.anime_favorites().unwrap().is_empty());
-        assert!(lib.manga_read_not_in_library().unwrap().is_empty());
-        assert!(lib.anime_watched_not_in_library().unwrap().is_empty());
-        assert!(lib.manga_categories().unwrap().iter().all(|c| c.id == 0), "only the system row");
+        assert!(lib.favorites(Kind::Manga).unwrap().is_empty());
+        assert!(lib.favorites(Kind::Anime).unwrap().is_empty());
+        assert!(lib.not_in_library(Kind::Manga).unwrap().is_empty());
+        assert!(lib.not_in_library(Kind::Anime).unwrap().is_empty());
+        assert!(lib.categories(Kind::Manga).unwrap().iter().all(|c| c.id == 0), "only the system row");
     }
 
     /// E-05: a write that starts during the pass commits only after it, so the pass reads one state.
@@ -223,38 +197,38 @@ mod tests {
             writer = Some(std::thread::spawn({
                 let db = writer_db.clone();
                 move || {
-                    let mut m = Manga::create();
+                    let mut m = Entry::create(Kind::Manga);
                     m.source = 7;
                     m.url = "/m/late".into();
                     m.title = "Late".into();
                     m.favorite = true;
-                    MangaRepo::new(db).insert(&m).unwrap();
+                    EntryRepo::new(db).insert(&m).unwrap();
                 }
             }));
             std::thread::sleep(std::time::Duration::from_millis(200));
-            during = lib.manga_favorites().unwrap().len();
+            during = lib.favorites(Kind::Manga).unwrap().len();
             Ok((Backup::default(), Vec::new()))
         });
         assert!(built.is_ok());
         assert_eq!(during, 0, "the late write was not visible inside the pass");
         writer.unwrap().join().unwrap();
-        assert_eq!(lib.manga_favorites().unwrap().len(), 1, "the write lands once the pass ends");
+        assert_eq!(lib.favorites(Kind::Manga).unwrap().len(), 1, "the write lands once the pass ends");
     }
 
     #[test]
     fn a_favourite_is_read_with_its_chapters_and_categories() {
         let (_dir, db) = dbs();
-        let repo = MangaRepo::new(db.clone());
-        let mut m = Manga::create();
+        let repo = EntryRepo::new(db.clone());
+        let mut m = Entry::create(Kind::Manga);
         m.source = 7;
         m.url = "/m/1".into();
         m.title = "One".into();
         m.favorite = true;
         let id = repo.insert(&m).unwrap();
         let lib = DbLibrary::new(db);
-        let entries = lib.manga_favorites().unwrap();
+        let entries = lib.favorites(Kind::Manga).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!((entries[0].manga.id, entries[0].manga.title.as_str()), (id, "One"));
+        assert_eq!((entries[0].entry.id, entries[0].entry.title.as_str()), (id, "One"));
     }
 
     #[test]
@@ -312,12 +286,12 @@ mod tests {
     #[test]
     fn a_backup_with_extensions_carries_the_artifacts_and_reports_the_skipped_one() {
         let (dir, db) = dbs();
-        let mut m = Manga::create();
+        let mut m = Entry::create(Kind::Manga);
         m.source = 7;
         m.url = "/m/1".into();
         m.title = "One".into();
         m.favorite = true;
-        MangaRepo::new(db.clone()).insert(&m).unwrap();
+        EntryRepo::new(db.clone()).insert(&m).unwrap();
         let exts = dir.path().join("exts");
         std::fs::create_dir_all(exts.join("anime")).unwrap();
         std::fs::write(exts.join("anime/a.demo.kuroext"), b"A").unwrap();

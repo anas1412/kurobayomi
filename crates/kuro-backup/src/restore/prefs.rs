@@ -193,14 +193,11 @@ pub fn restore_source_prefs(
 /// The category maps of the preference restore (T-22a-009): backup category id (the device id) to the database id of
 /// the same name, once for manga and once for anime. Both lists come from the backup's manga categories.
 pub fn category_maps(c: &Connection, backup: &[BackupCategory]) -> DbResult<CategoryMaps> {
-    let manga_by_name: HashMap<String, i64> = kuro_db::statements_manga::categories::get_categories(c)?
-        .into_iter()
-        .map(|r| (r.name, r.id))
-        .collect();
-    let anime_by_name: HashMap<String, i64> = kuro_db::statements_anime::categories(c)?
-        .into_iter()
-        .map(|r| (r.name, r.id))
-        .collect();
+    let by_name = |kind: kuro_platform::kind::Kind| -> DbResult<HashMap<String, i64>> {
+        Ok(kuro_db::tables::categories::all(c, kind)?.into_iter().map(|r| (r.name, r.id)).collect())
+    };
+    let manga_by_name = by_name(kuro_platform::kind::Kind::Manga)?;
+    let anime_by_name = by_name(kuro_platform::kind::Kind::Anime)?;
     let mut maps = CategoryMaps::default();
     for b in backup {
         if let Some(&id) = manga_by_name.get(&b.name) {

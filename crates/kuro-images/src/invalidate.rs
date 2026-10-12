@@ -156,9 +156,10 @@ fn outcome(art: &ArtRef, ok: bool) -> Message {
 }
 
 /// The Edit action: copies the picked file into the custom image, then bumps the timestamp so the keyer changes
-/// (behavior sections 19.3, 24.2). Returns the snackbar message. An anime that is not in the library is refused
-/// (edge E-IMG-14, proposal). Local entries are not handled here: their own folder is written by area:14, so they
-/// report a failure rather than writing a stray custom file.
+/// (behavior sections 19.3, 24.2). Returns the snackbar message. An entry that is not in the library is refused for
+/// both kinds (edge E-IMG-14, decision 11c; the same rule as `kuro_local::images::art_route`). Local entries are not
+/// handled here: their own folder is written by area:14, so they report a failure rather than writing a stray custom
+/// file.
 pub async fn edit_custom(
     paths: &dyn Paths,
     store: &dyn TimestampStore,
@@ -166,7 +167,7 @@ pub async fn edit_custom(
     picked: &Path,
     now_ms: i64,
 ) -> Message {
-    let allowed = !art.is_local() && (art.owner == Kind::Manga || art.favorite);
+    let allowed = !art.is_local() && art.favorite;
     let ok = allowed
         && set_custom_from_file(paths, art.family(), art.entry_id, picked)
             .await
@@ -448,7 +449,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_anime_outside_the_library_or_a_local_entry_is_refused() {
+    async fn an_entry_outside_the_library_or_a_local_entry_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = TestPaths::new(tmp.path());
         let picked = tmp.path().join("pick.png");
@@ -464,6 +465,8 @@ mod tests {
             edit_custom(&paths, &store, &anime, &picked, NOW).await,
             Message::FailedToUpdateBackground
         );
+        let manga = ArtRef { favorite: false, ..entry(1) };
+        assert_eq!(edit_custom(&paths, &store, &manga, &picked, NOW).await, Message::FailedToUpdateCover, "decision 11c: both kinds");
         assert_eq!(
             edit_custom(&paths, &store, &entry(LOCAL_SOURCE_ID), &picked, NOW).await,
             Message::FailedToUpdateCover

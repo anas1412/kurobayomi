@@ -1,10 +1,12 @@
-//! Manga and anime entry creators (T-21a-013, T-21a-014) and the row conversions of B-08a, B-08b and B-09.
+//! Manga and anime entry creators (T-21a-013, T-21a-014) and the row conversions of B-08a, B-08b and B-09. Both read
+//! the shared [`EntryData`]; only the wire shapes differ.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-use crate::creator::{AnimeEntry, MangaEntry};
+use crate::creator::EntryData;
+use crate::flags::chapter_flags_to_wire;
 use crate::error::BackupError;
 use crate::options::BackupOptions;
 use crate::schema::{BackupAnime, BackupAnimeHistory, BackupAnimeTracking, BackupChapter, BackupEpisode, BackupHistory, BackupManga, BackupTracking};
@@ -45,8 +47,23 @@ pub fn memo_bytes(memo: &Map<String, Value>) -> Vec<u8> {
     serde_json::to_vec(memo).unwrap_or_else(|_| b"{}".to_vec())
 }
 
-pub fn manga_entry(e: &MangaEntry, opts: &BackupOptions) -> Result<BackupManga, BackupError> {
-    let m = &e.manga;
+/// History rows named by the url of their item: `(url, last_at, duration_ms)`. A row whose item is gone is skipped.
+fn history_rows<'a>(e: &'a EntryData, what: &'static str) -> Vec<(&'a str, i64, i64)> {
+    let urls: BTreeMap<i64, &str> = e.items.iter().map(|i| (i.id, i.url.as_str())).collect();
+    e.history
+        .iter()
+        .filter_map(|h| match urls.get(&h.item_id) {
+            Some(url) => Some((*url, h.last_at, h.duration_ms)),
+            None => {
+                tracing::warn!(entry = e.entry.id, item = h.item_id, "history row without {what}; skipped");
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn manga_entry(e: &EntryData, opts: &BackupOptions) -> Result<BackupManga, BackupError> {
+    let m = &e.entry;
     let id = m.id;
     let viewer_flags = i32_of("manga", id, "viewer_flags", m.viewer_flags)?;
     let mut out = BackupManga {
@@ -62,7 +79,7 @@ pub fn manga_entry(e: &MangaEntry, opts: &BackupOptions) -> Result<BackupManga, 
         date_added: m.date_added,
         viewer: viewer_flags & VIEWER_MASK,
         viewer_flags: Some(viewer_flags),
-        chapter_flags: i32_of("manga", id, "chapter_flags", m.chapter_flags)?,
+        chapter_flags: i32_of("manga", id, "chapter_flags", chapter_flags_to_wire(m.item_flags))?,
         favorite: m.favorite,
         update_strategy: m.update_strategy,
         last_modified_at: m.last_modified_at,
@@ -73,20 +90,20 @@ pub fn manga_entry(e: &MangaEntry, opts: &BackupOptions) -> Result<BackupManga, 
         ..Default::default()
     };
 
-    if opts.chapters && !e.chapters.is_empty() {
+    if opts.chapters && !e.items.is_empty() {
         out.chapters = e
-            .chapters
+            .items
             .iter()
             .map(|c| BackupChapter {
                 url: c.url.clone(),
                 name: c.name.clone(),
                 scanlator: c.scanlator.clone(),
-                read: c.read,
+                read: c.done,
                 bookmark: c.bookmark,
-                last_page_read: c.last_page_read,
+                last_page_read: c.progress,
                 date_fetch: c.date_fetch,
                 date_upload: c.date_upload,
-                chapter_number: f32_of(c.chapter_number),
+                chapter_number: f32_of(c.number),
                 source_order: c.source_order,
                 last_modified_at: c.last_modified_at,
                 version: c.version,
@@ -109,8 +126,8 @@ pub fn manga_entry(e: &MangaEntry, opts: &BackupOptions) -> Result<BackupManga, 
                     media_id_int: 0,
                     tracking_url: t.remote_url.clone(),
                     title: t.title.clone(),
-                    last_chapter_read: f32_of(t.last_chapter_read),
-                    total_chapters: i32_of("manga", id, "total_chapters", t.total_chapters)?,
+                    last_chapter_read: f32_of(t.last_item),
+                    total_chapters: i32_of("manga", id, "total_chapters", t.total_items)?,
                     score: f32_of(t.score),
                     status: i32_of("manga", id, "tracking_status", t.status)?,
                     started_reading_date: t.start_date,
@@ -123,25 +140,17 @@ pub fn manga_entry(e: &MangaEntry, opts: &BackupOptions) -> Result<BackupManga, 
     }
 
     if opts.history && !e.history.is_empty() {
-        let urls: BTreeMap<i64, &str> = e.chapters.iter().map(|c| (c.id, c.url.as_str())).collect();
-        out.history = e
-            .history
-            .iter()
-            .filter_map(|h| match urls.get(&h.chapter_id) {
-                Some(url) => Some(BackupHistory { url: (*url).to_owned(), last_read: h.last_read, read_duration: h.time_read }),
-                None => {
-                    tracing::warn!(manga = id, chapter = h.chapter_id, "history row without a chapter; skipped");
-                    None
-                }
-            })
+        out.history = history_rows(e, "a chapter")
+            .into_iter()
+            .map(|(url, last_read, read_duration)| BackupHistory { url: url.to_owned(), last_read, read_duration })
             .collect();
     }
 
     Ok(out)
 }
 
-pub fn anime_entry(e: &AnimeEntry, opts: &BackupOptions) -> Result<BackupAnime, BackupError> {
-    let a = &e.anime;
+pub fn anime_entry(e: &EntryData, opts: &BackupOptions) -> Result<BackupAnime, BackupError> {
+    let a = &e.entry;
     let id = a.id;
     let mut out = BackupAnime {
         source: a.source,
@@ -155,50 +164,49 @@ pub fn anime_entry(e: &AnimeEntry, opts: &BackupOptions) -> Result<BackupAnime, 
         thumbnail_url: a.thumbnail_url.clone(),
         date_added: a.date_added,
         favorite: a.favorite,
-        episode_flags: i32_of("anime", id, "episode_flags", a.episode_flags)?,
+        // Anime `episodeFlags` is the stored word as it is.
+        episode_flags: i32_of("anime", id, "episode_flags", a.item_flags)?,
         viewer_flags: i32_of("anime", id, "viewer_flags", a.viewer_flags)?,
         update_strategy: a.update_strategy,
         last_modified_at: a.last_modified_at,
         favorite_modified_at: a.favorite_modified_at,
         version: a.version,
-        memo: memo_bytes(&a.memo),
+        memo: memo_bytes(&a.memo()),
         // E-26: written when the anime has a background.
         background_url: a.background_url.clone(),
         parent_id: a.parent_id,
         id: Some(id),
-        season_flags: a.season_flags,
-        season_number: a.season_number,
-        season_source_order: a.season_source_order,
-        fetch_type: a.fetch_type,
+        season_flags: a.season_flags(),
+        season_number: a.season_number(),
+        season_source_order: a.season_source_order(),
+        fetch_type: a.fetch_type(),
         ..Default::default()
     };
 
-    if opts.chapters && !e.episodes.is_empty() {
+    if opts.chapters && !e.items.is_empty() {
         out.episodes = e
-            .episodes
+            .items
             .iter()
-            .map(|ep| {
-                Ok(BackupEpisode {
-                    url: ep.url.clone(),
-                    name: ep.name.clone(),
-                    scanlator: ep.scanlator.clone(),
-                    seen: ep.seen,
-                    bookmark: ep.bookmark,
-                    last_second_seen: ep.last_second_seen,
-                    total_seconds: ep.total_seconds,
-                    date_fetch: ep.date_fetch,
-                    date_upload: ep.date_upload,
-                    episode_number: f32_of(ep.episode_number),
-                    source_order: ep.source_order,
-                    last_modified_at: ep.last_modified_at,
-                    version: ep.version,
-                    memo: memo_bytes(&ep.memo),
-                    fillermark: ep.fillermark,
-                    summary: ep.summary.clone(),
-                    preview_url: ep.preview_url.clone(),
-                })
+            .map(|ep| BackupEpisode {
+                url: ep.url.clone(),
+                name: ep.name.clone(),
+                scanlator: ep.scanlator.clone(),
+                seen: ep.done,
+                bookmark: ep.bookmark,
+                last_second_seen: ep.progress,
+                total_seconds: ep.total_seconds(),
+                date_fetch: ep.date_fetch,
+                date_upload: ep.date_upload,
+                episode_number: f32_of(ep.number),
+                source_order: ep.source_order,
+                last_modified_at: ep.last_modified_at,
+                version: ep.version,
+                memo: memo_bytes(&ep.memo()),
+                fillermark: ep.fillermark,
+                summary: ep.summary.clone(),
+                preview_url: ep.preview_url.clone(),
             })
-            .collect::<Result<_, BackupError>>()?;
+            .collect();
     }
 
     if opts.categories {
@@ -216,8 +224,8 @@ pub fn anime_entry(e: &AnimeEntry, opts: &BackupOptions) -> Result<BackupAnime, 
                     media_id_int: 0,
                     tracking_url: t.remote_url.clone(),
                     title: t.title.clone(),
-                    last_episode_seen: f32_of(t.last_episode_seen),
-                    total_episodes: i32_of("anime", id, "total_episodes", t.total_episodes)?,
+                    last_episode_seen: f32_of(t.last_item),
+                    total_episodes: i32_of("anime", id, "total_episodes", t.total_items)?,
                     score: f32_of(t.score),
                     status: i32_of("anime", id, "tracking_status", t.status)?,
                     started_watching_date: t.start_date,
@@ -230,17 +238,10 @@ pub fn anime_entry(e: &AnimeEntry, opts: &BackupOptions) -> Result<BackupAnime, 
     }
 
     if opts.history && !e.history.is_empty() {
-        let urls: BTreeMap<i64, &str> = e.episodes.iter().map(|ep| (ep.id, ep.url.as_str())).collect();
-        out.history = e
-            .history
-            .iter()
-            .filter_map(|h| match urls.get(&h.episode_id) {
-                Some(url) => Some(BackupAnimeHistory { url: (*url).to_owned(), last_read: h.last_seen.unwrap_or(0), read_duration: 0 }),
-                None => {
-                    tracing::warn!(anime = id, episode = h.episode_id, "history row without an episode; skipped");
-                    None
-                }
-            })
+        // The duration is written for both kinds (E-42 fixed).
+        out.history = history_rows(e, "an episode")
+            .into_iter()
+            .map(|(url, last_read, read_duration)| BackupAnimeHistory { url: url.to_owned(), last_read, read_duration })
             .collect();
     }
 

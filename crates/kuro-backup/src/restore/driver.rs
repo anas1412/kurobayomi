@@ -6,15 +6,14 @@ use kuro_platform::kind::Kind;
 use std::collections::HashMap;
 
 use chrono::{DateTime, Local};
-use kuro_db::statements_anime as sa;
-use kuro_db::statements_manga::{self as sm, StubSourceRow};
+use kuro_db::tables::stub_sources;
 use kuro_db::{DbResult, Transaction};
 use kuro_prefs::import::CategoryMaps;
 use kuro_prefs::store::PrefStore;
 use rusqlite::Connection;
 
 use super::RestoreError;
-use super::anime::{AnimeOutcome, existing_pairs as anime_pairs, plan_anime, restore_anime_entry, sort_anime};
+use super::anime::{existing_pairs as anime_pairs, plan_anime, restore_anime_entry, sort_anime};
 use super::categories::{CategoryRestore, restore_categories};
 use super::manga::{existing_pairs as manga_pairs, restore_manga_entry, sort_manga};
 use super::merge::RunClock;
@@ -145,24 +144,12 @@ fn anime_source_name(sources: &[BackupAnimeSource], id: i64) -> String {
 /// through the registry. A stored name is never overwritten, and a blank backup name writes nothing.
 fn keep_stub_name(tx: &Transaction<'_>, kind: Kind, id: i64, name: Option<&str>) -> DbResult<()> {
     let Some(name) = name.filter(|name| !name.trim().is_empty()) else { return Ok(()) };
-    match kind {
-        Kind::Manga => {
-            let stored = sm::sources::find_one(tx, id)?;
-            if stored.as_ref().is_some_and(|row| !row.name.trim().is_empty()) {
-                return Ok(());
-            }
-            let lang = stored.map(|row| row.lang).unwrap_or_default();
-            sm::sources::upsert(tx, &StubSourceRow { id, lang, name: name.to_owned() })?;
-        }
-        Kind::Anime => {
-            let stored = sa::stub_source(tx, id)?;
-            if stored.as_ref().is_some_and(|row| !row.name.trim().is_empty()) {
-                return Ok(());
-            }
-            let lang = stored.map(|row| row.lang).unwrap_or_default();
-            sa::upsert_stub_source(tx, id, &lang, name)?;
-        }
+    let stored = stub_sources::find_one(tx, kind, id)?;
+    if stored.as_ref().is_some_and(|row| !row.name.trim().is_empty()) {
+        return Ok(());
     }
+    let lang = stored.map(|row| row.lang).unwrap_or_default();
+    stub_sources::upsert(tx, kind, id, &lang, name)?;
     Ok(())
 }
 
@@ -242,9 +229,8 @@ impl DbRestorer<'_> {
             return done(entry.title, Err("its parent entry was not restored".into()));
         }
         let prefix = format!("{} [{}]", entry.title, anime_source_name(&self.backup.anime_sources, entry.source));
-        let mut outcome = AnimeOutcome::default();
         let result = in_entry_tx(self.t.db, self.cancel, |tx| {
-            let id = restore_anime_entry(tx, &self.clock, &entry, parent, &self.anime_by_order, &mut outcome)?;
+            let id = restore_anime_entry(tx, &self.clock, &entry, parent, &self.anime_by_order)?;
             let name = self.backup.anime_sources.iter().find(|s| s.source_id == entry.source).map(|s| s.name.as_str());
             keep_stub_name(tx, Kind::Anime, entry.source, name)?;
             Ok(id)
@@ -302,8 +288,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use chrono::TimeZone;
-    use kuro_db::statements_anime::{anime_by_url_and_source, categories_by_anime_id};
-    use kuro_db::statements_manga::{categories, chapters, mangas};
+    use kuro_db::tables::{categories, entries, items};
     use kuro_db::schema_unified;
     use kuro_prefs::values::PrefValue as Value;
 
@@ -416,20 +401,20 @@ mod tests {
         assert_eq!((events.last().unwrap().done, events.last().unwrap().total), (total, total));
 
         // categories first, entries mapped, and the stored version is the backup version (T-22a-014)
-        let reading = categories::get_categories(&e.db).unwrap().into_iter().find(|c| c.name == "Reading").unwrap().id;
-        let fresh = mangas::get_by_url_and_source(&e.db, "fresh", 7).unwrap().unwrap();
+        let reading = categories::all(&e.db, Kind::Manga).unwrap().into_iter().find(|c| c.name == "Reading").unwrap().id;
+        let fresh = entries::by_url_and_source(&e.db, Kind::Manga, "fresh", 7).unwrap().unwrap();
         assert_eq!(fresh.version, 4);
-        let member: Vec<i64> = categories::get_categories_by_manga_id(&e.db, fresh.id).unwrap().into_iter().map(|r| r.id).collect();
+        let member: Vec<i64> = categories::by_entry(&e.db, Kind::Manga, fresh.id).unwrap().into_iter().map(|r| r.id).collect();
         assert!(member.contains(&reading) && member.len() == 2);
-        assert_eq!(chapters::get_by_manga_id(&e.db, fresh.id, false).unwrap().len(), 1);
-        let root = anime_by_url_and_source(&e.db, "root", 3).unwrap().unwrap();
-        let season = anime_by_url_and_source(&e.db, "season", 3).unwrap().unwrap();
+        assert_eq!(items::by_entry(&e.db, fresh.id, false).unwrap().len(), 1);
+        let root = entries::by_url_and_source(&e.db, Kind::Anime, "root", 3).unwrap().unwrap();
+        let season = entries::by_url_and_source(&e.db, Kind::Anime, "season", 3).unwrap().unwrap();
         assert_eq!((root.version, season.version), (6, 6));
         assert_eq!(season.parent_id, Some(root.id));
-        assert_eq!(categories_by_anime_id(&e.db, season.id).unwrap().len(), 1);
+        assert_eq!(categories::by_entry(&e.db, Kind::Anime, season.id).unwrap().len(), 1);
 
         // preferences: the default category is remapped, the schedulers saw the restored intervals once each
-        let later = categories::get_categories(&e.db).unwrap().into_iter().find(|c| c.name == "Later").unwrap().id;
+        let later = categories::all(&e.db, Kind::Manga).unwrap().into_iter().find(|c| c.name == "Later").unwrap().id;
         assert_eq!(e.app.get_raw("default_category"), Some(Value::Int(later as i32)));
         assert_eq!(e.timers.borrow().as_slice(), [("library", Some(24)), ("backup", None)]);
         assert_eq!(e.sources.borrow()["source_1234"].get_raw("show_nsfw_source"), Some(Value::Bool(true)));
@@ -450,15 +435,14 @@ mod tests {
     fn a_backup_source_name_becomes_the_stub_row_unless_one_is_stored() {
         // T-20a-094: the library shows the name of a source that is not installed, and a stored name stays
         let mut e = env();
-        let stored = kuro_db::statements_manga::StubSourceRow { id: 7, lang: "en".into(), name: "Kept".into() };
-        kuro_db::statements_manga::sources::upsert(&e.db, &stored).unwrap();
+        stub_sources::upsert(&e.db, Kind::Manga, 7, "en", "Kept").unwrap();
         let backup = Backup {
             sources: vec![BackupSource { name: "Ghost".into(), source_id: 7 }, BackupSource { name: "Lost".into(), source_id: 8 }],
             manga: vec![manga("x", vec![]), BackupManga { source: 8, ..manga("y", vec![]) }],
             ..Default::default()
         };
         run(&mut e, backup, all_but_extensions(), &|| false);
-        let row = |id: i64| kuro_db::statements_manga::sources::find_one(&e.db, id).unwrap().unwrap();
+        let row = |id: i64| stub_sources::find_one(&e.db, Kind::Manga, id).unwrap().unwrap();
         assert_eq!((row(7).name.as_str(), row(7).lang.as_str()), ("Kept", "en"));
         assert_eq!((row(8).name.as_str(), row(8).lang.as_str()), ("Lost", ""));
     }
@@ -474,7 +458,7 @@ mod tests {
             ..Default::default()
         };
         run(&mut e, second, all_but_extensions(), &|| false);
-        assert_eq!(anime_by_url_and_source(&e.db, "root", 3).unwrap().unwrap().version, 6);
+        assert_eq!(entries::by_url_and_source(&e.db, Kind::Anime, "root", 3).unwrap().unwrap().version, 6);
     }
 
     /// F-02: the flag is read once per section (eight, in plan order), and for an entry before it and before its commit.
@@ -502,7 +486,7 @@ mod tests {
             assert_eq!(run.stop, (n <= 14).then_some(RestoreError::Cancelled), "flag at check {n}");
             assert!(run.errors.is_empty(), "a cancel writes no error line");
             assert_eq!(events.len(), finished, "flag at check {n}");
-            let stored = mangas::get_all_source_and_url(&e.db).unwrap().len();
+            let stored = entries::all_source_and_url(&e.db, Kind::Manga).unwrap().len();
             assert_eq!(stored, finished, "flag at check {n}: each finished entry is committed, nothing else");
         }
     }
@@ -535,7 +519,7 @@ mod tests {
         let (run, events) = run(&mut e, backup, only_library, &|| false);
         assert_eq!(run.errors.len(), 2);
         assert_eq!(events.len(), 2);
-        assert!(anime_by_url_and_source(&e.db, "season", 3).unwrap().is_none());
+        assert!(entries::by_url_and_source(&e.db, Kind::Anime, "season", 3).unwrap().is_none());
     }
 
     #[test]
@@ -561,7 +545,7 @@ mod tests {
         let run = restore_backup(backup, opts, now(), targets, &cancel, &mut |_| items_done.set(items_done.get() + 1));
         assert_eq!(run.stop, Some(RestoreError::Cancelled));
         assert!(run.errors.is_empty(), "a cancel is not an error line");
-        let stored: Vec<String> = mangas::get_all_source_and_url(&e.db).unwrap().into_iter().map(|(_, url)| url).collect();
+        let stored: Vec<String> = entries::all_source_and_url(&e.db, Kind::Manga).unwrap().into_iter().map(|(_, url)| url).collect();
         assert_eq!(stored, vec!["a".to_string()]);
     }
 
