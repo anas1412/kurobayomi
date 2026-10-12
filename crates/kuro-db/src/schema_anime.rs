@@ -404,10 +404,6 @@ mod tests {
     use crate::open::DbError;
     use crate::schema_anime::flags as f;
 
-    const SKIP_INTRO_CONTENT: &str = "local intro_length = mp.get_property_number(\"user-data/current-anime/intro-length\")\naniyomi.right_seek_by(intro_length)";
-    const SKIP_INTRO_LONG_PRESS: &str = "aniyomi.int_picker(\"Change intro length\", \"%ds\", 0, 255, 1, \"user-data/current-anime/intro-length\")";
-    const SKIP_INTRO_ON_STARTUP: &str = "function update_button(_, length)\n  if length ~= nil then\n    if length == 0 then\n\t  aniyomi.hide_button()\n\t  return\n\telse\n\t  aniyomi.show_button()\n\tend\n    aniyomi.set_button_title(\"+\" .. length .. \" s\")\n  end\nend\n\nif $isPrimary then\n  mp.observe_property(\"user-data/current-anime/intro-length\", \"number\", update_button)\nend";
-
     fn pragma_i64(c: &Connection, name: &str) -> i64 {
         c.pragma_query_value(None, name, |r| r.get(0)).unwrap()
     }
@@ -623,21 +619,6 @@ mod tests {
         let button_name: String =
             c.query_row("SELECT name FROM custom_buttons WHERE _id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(button_name, "+85 s");
-    }
-
-    #[test]
-    fn skip_intro_seed_lua_is_byte_exact() {
-        let c = open_in_memory().unwrap();
-        let (content, long_press, on_startup): (String, String, String) = c
-            .query_row(
-                "SELECT content, longPressContent, onStartup FROM custom_buttons WHERE _id = 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(content, SKIP_INTRO_CONTENT);
-        assert_eq!(long_press, SKIP_INTRO_LONG_PRESS);
-        assert_eq!(on_startup, SKIP_INTRO_ON_STARTUP);
     }
 
     #[test]

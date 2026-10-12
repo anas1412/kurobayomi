@@ -3,6 +3,7 @@
 //! reports the error text. The throttle and the version rule are `kuro_domain::release::check`; no check time is stored,
 //! so every call is un-throttled, and this file decides when the check may run at all.
 
+use gtk::prelude::*;
 use std::time::Duration;
 
 use gtk::glib;
@@ -10,6 +11,8 @@ use kuro_domain::release::check::{Outcome, check_for_update};
 use kuro_domain::release::github::{GithubReleases, ReleaseHttp};
 use kuro_domain::release::{Release, ReleaseError, ReleaseService};
 use kuro_i18n::{MsgKey, tr};
+
+use crate::ui::{DialogButton, Role};
 
 /// The GitHub `owner/name` that releases are read from (`UPDATE_REPOSITORY`). Empty turns the check off. A build
 /// sets it with the `KB_UPDATE_REPOSITORY` environment variable.
@@ -123,23 +126,16 @@ fn update_text(release: &Release) -> String {
 /// "New version available!" with the notes, and Open on GitHub or Not now. There is no in-place install, the package
 /// manager owns the files (T-07a-037).
 fn show_update(release: &Release) {
-    let dialog = gtk::AlertDialog::builder()
-        .message(update_text(release))
-        .detail(&release.info)
-        .buttons([tr(MsgKey::update_check_open), tr(MsgKey::action_not_now)])
-        .cancel_button(1)
-        .default_button(0)
-        .build();
     let link = release.release_link.clone();
-    dialog.choose(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, move |choice| {
-        if choice == Ok(0) {
-            gtk::UriLauncher::new(&link).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-                if let Err(e) = result {
-                    tracing::warn!(error = %e, "could not open the release page");
-                }
-            });
-        }
+    let open = DialogButton::new(tr(MsgKey::update_check_open), Role::Suggested, move || {
+        gtk::UriLauncher::new(&link).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
+            if let Err(e) = result {
+                tracing::warn!(error = %e, "could not open the release page");
+            }
+        });
     });
+    let body = crate::ui::message(&release.info);
+    crate::ui::dialog(&update_text(release), &body, 420, vec![DialogButton::cancel(tr(MsgKey::action_not_now)), open]).present();
 }
 
 #[cfg(test)]

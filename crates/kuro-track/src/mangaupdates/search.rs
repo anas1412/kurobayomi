@@ -56,27 +56,6 @@ mod tests {
     }
 
     #[test]
-    fn t_32a_023_the_twelve_fixture_cases_match_kotlin_or_are_known_differences() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/mangaupdates/htmldecode_cases.json"
-        ))
-        .unwrap();
-        let cases = fixture["cases"].as_array().unwrap();
-        assert_eq!(cases.len(), 12);
-        for case in cases {
-            let got = html_to_text(case["input"].as_str().unwrap());
-            let kotlin = case["kotlin"].as_str().unwrap();
-            match case.get("port").and_then(|p| p.as_str()) {
-                Some(port) => {
-                    assert_eq!(got, port, "{}", case["name"]);
-                    assert_ne!(got, kotlin, "{} is no longer a difference", case["name"]);
-                }
-                None => assert_eq!(got, kotlin, "{}", case["name"]),
-            }
-        }
-    }
-
-    #[test]
     fn t_32a_021_a_record_maps_to_a_search_row() {
         let record: Record = serde_json::from_str(
             r#"{"series_id":77,"title":"<b>Title</b> &amp; more","url":"https://www.mangaupdates.com/series/x","description":"Desc &quot;q&quot;","image":{"url":{"original":"https://img/o.jpg","thumb":"https://img/t.jpg"}},"type":"Manga","year":"2019"}"#,

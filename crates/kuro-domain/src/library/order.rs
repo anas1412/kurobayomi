@@ -280,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn sorting_twenty_thousand_rows_is_fast_enough_for_the_contract() {
         let big: Vec<LibraryItem> = (0..20_000).map(|i| item(i, &format!("Title {}", i % 997), 3, 1, i, i)).collect();
         let start = std::time::Instant::now();

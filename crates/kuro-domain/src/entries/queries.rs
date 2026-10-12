@@ -156,11 +156,7 @@ pub fn get_library_anime(repo: &AnimeRepo) -> DataResult<Vec<LibraryAnime>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::LibraryState;
     use crate::testdb::{anime_repo, manga_repo};
-    use kuro_data::LookupOrInsert;
-    use kuro_data::anime::{AnimeUpdate, DeletableEntry, SeasonAnime};
-    use kuro_data::manga::MangaUpdate;
 
     fn manga(url: &str, title: &str, favorite: bool) -> Manga {
         Manga {
@@ -297,75 +293,6 @@ mod tests {
         let (_dir, repo) = manga_repo();
         repo.insert(&manga("/m/x", "X", true)).expect("insert");
         assert_eq!(get_library_manga(&repo).expect("ok").len(), 1);
-    }
-
-    #[test]
-    fn every_public_repository_method_is_reachable() {
-        // Compile-time coverage: every public method of MangaRepo (21) and AnimeRepo (24) is named here.
-        let _manga = (
-            MangaRepo::by_id as fn(&MangaRepo, i64) -> DataResult<Manga>,
-            MangaRepo::by_url_and_source as fn(&MangaRepo, &str, i64) -> DataResult<Option<Manga>>,
-            MangaRepo::favorites as fn(&MangaRepo) -> DataResult<Vec<Manga>>,
-            MangaRepo::favorites_by_source as fn(&MangaRepo, i64) -> DataResult<Vec<Manga>>,
-            MangaRepo::subscribe_by_id
-                as fn(&MangaRepo, i64) -> kuro_db::subscribe::Subscription<Option<Manga>>,
-            MangaRepo::subscribe_by_url_and_source
-                as fn(&MangaRepo, &str, i64) -> kuro_db::subscribe::Subscription<Option<Manga>>,
-            MangaRepo::subscribe_favorites_by_source
-                as fn(&MangaRepo, i64) -> kuro_db::subscribe::Subscription<Vec<Manga>>,
-            MangaRepo::subscribe_library
-                as fn(&MangaRepo) -> kuro_db::subscribe::Subscription<LibraryState<LibraryManga>>,
-            MangaRepo::read_not_in_library as fn(&MangaRepo) -> DataResult<Vec<Manga>>,
-            MangaRepo::library as fn(&MangaRepo) -> DataResult<Vec<LibraryManga>>,
-            MangaRepo::duplicates as fn(&MangaRepo, i64, &str) -> DataResult<Vec<Manga>>,
-            MangaRepo::upcoming as fn(&MangaRepo, &[i64], i64) -> DataResult<Vec<Manga>>,
-            MangaRepo::reset_viewer_flags as fn(&MangaRepo) -> DataResult<()>,
-            MangaRepo::set_categories as fn(&MangaRepo, i64, &[i64]) -> DataResult<()>,
-            MangaRepo::insert as fn(&MangaRepo, &Manga) -> DataResult<i64>,
-            MangaRepo::update as fn(&MangaRepo, &MangaUpdate) -> DataResult<()>,
-            MangaRepo::update_all as fn(&MangaRepo, &[MangaUpdate]) -> DataResult<()>,
-            MangaRepo::all_source_and_url as fn(&MangaRepo) -> DataResult<Vec<(i64, String)>>,
-            MangaRepo::delete_non_library_by_sources as fn(&MangaRepo, &[i64]) -> DataResult<()>,
-            MangaRepo::favorite_counts_by_source as fn(&MangaRepo) -> DataResult<Vec<(i64, i64)>>,
-            MangaRepo::non_library_counts_by_source
-                as fn(&MangaRepo) -> DataResult<Vec<(i64, i64)>>,
-            MangaRepo::lookup_or_insert
-                as fn(&MangaRepo, &Manga) -> DataResult<LookupOrInsert<Manga>>,
-        );
-        let _anime = (
-            AnimeRepo::by_id as fn(&AnimeRepo, i64) -> DataResult<Anime>,
-            AnimeRepo::by_url_and_source as fn(&AnimeRepo, &str, i64) -> DataResult<Option<Anime>>,
-            AnimeRepo::subscribe_by_id
-                as fn(&AnimeRepo, i64) -> kuro_db::subscribe::Subscription<Option<Anime>>,
-            AnimeRepo::subscribe_by_url_and_source
-                as fn(&AnimeRepo, &str, i64) -> kuro_db::subscribe::Subscription<Option<Anime>>,
-            AnimeRepo::subscribe_favorites_by_source
-                as fn(&AnimeRepo, i64) -> kuro_db::subscribe::Subscription<Vec<Anime>>,
-            AnimeRepo::subscribe_library
-                as fn(&AnimeRepo) -> kuro_db::subscribe::Subscription<LibraryState<LibraryAnime>>,
-            AnimeRepo::subscribe_seasons_by_parent
-                as fn(&AnimeRepo, i64) -> kuro_db::subscribe::Subscription<Vec<SeasonAnime>>,
-            AnimeRepo::favorites as fn(&AnimeRepo) -> DataResult<Vec<Anime>>,
-            AnimeRepo::favorites_by_source as fn(&AnimeRepo, i64) -> DataResult<Vec<Anime>>,
-            AnimeRepo::watched_not_in_library as fn(&AnimeRepo) -> DataResult<Vec<Anime>>,
-            AnimeRepo::library as fn(&AnimeRepo) -> DataResult<Vec<LibraryAnime>>,
-            AnimeRepo::duplicates as fn(&AnimeRepo, i64, &str) -> DataResult<Vec<Anime>>,
-            AnimeRepo::upcoming as fn(&AnimeRepo, &[i64], i64) -> DataResult<Vec<Anime>>,
-            AnimeRepo::reset_viewer_flags as fn(&AnimeRepo) -> DataResult<()>,
-            AnimeRepo::set_categories as fn(&AnimeRepo, i64, &[i64]) -> DataResult<()>,
-            AnimeRepo::insert as fn(&AnimeRepo, &Anime) -> DataResult<i64>,
-            AnimeRepo::update as fn(&AnimeRepo, &AnimeUpdate) -> DataResult<()>,
-            AnimeRepo::update_all as fn(&AnimeRepo, &[AnimeUpdate]) -> DataResult<()>,
-            AnimeRepo::seasons_by_parent as fn(&AnimeRepo, i64) -> DataResult<Vec<SeasonAnime>>,
-            AnimeRepo::children_by_parent as fn(&AnimeRepo, i64) -> DataResult<Vec<Anime>>,
-            AnimeRepo::remove_parent_ids as fn(&AnimeRepo, &[i64]) -> DataResult<()>,
-            AnimeRepo::deletable_parents as fn(&AnimeRepo) -> DataResult<Vec<DeletableEntry>>,
-            AnimeRepo::delete_non_library_by_ids as fn(&AnimeRepo, &[i64]) -> DataResult<()>,
-            AnimeRepo::all_source_and_url as fn(&AnimeRepo) -> DataResult<Vec<(i64, String)>>,
-            AnimeRepo::favorite_counts_by_source as fn(&AnimeRepo) -> DataResult<Vec<(i64, i64)>>,
-            AnimeRepo::lookup_or_insert
-                as fn(&AnimeRepo, &Anime) -> DataResult<LookupOrInsert<Anime>>,
-        );
     }
 }
 

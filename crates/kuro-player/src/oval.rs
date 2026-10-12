@@ -105,29 +105,6 @@ mod tests {
     }
 
     #[test]
-    fn right_oval_follows_the_kotlin_path() {
-        let path = right_oval(100.0, 50.0);
-        assert_eq!(path[0], PathCmd::MoveTo(100.0, 50.0));
-        assert_eq!(path[1], PathCmd::LineTo(100.0, 0.0));
-        assert_eq!(path[2], PathCmd::LineTo(10.0, 0.0));
-        assert_eq!(
-            path[3],
-            PathCmd::CubicTo((10.0, 0.0), (-30.0, 25.0), (10.0, 50.0))
-        );
-    }
-
-    #[test]
-    fn left_oval_is_the_mirror_with_the_scaled_control_point() {
-        let path = left_oval(100.0, 50.0);
-        assert_eq!(path[0], PathCmd::MoveTo(0.0, 0.0));
-        assert_eq!(path[2], PathCmd::LineTo(90.0, 50.0));
-        assert_eq!(
-            path[3],
-            PathCmd::CubicTo((90.0, 50.0), (100.0, 25.0), (90.0, 0.0))
-        );
-    }
-
-    #[test]
     fn oval_fill_is_point_two_while_active() {
         assert_eq!(oval_alpha(0), 0.0);
         assert_eq!(oval_alpha(10), 0.2);

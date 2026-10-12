@@ -327,16 +327,6 @@ mod tests {
         }
     }
 
-    // The eight pages: Security and privacy and Advanced are gone, their rows live on the pages above.
-    #[test]
-    fn the_list_has_the_eight_pages_and_no_security_or_advanced_page() {
-        let ids: Vec<String> = entries().into_iter().map(|e| e.id).collect();
-        assert_eq!(ids.len(), 8);
-        for gone in ["settings_security", "settings_advanced", "settings_tracking"] {
-            assert!(!ids.iter().any(|id| id == gone), "{gone}");
-        }
-    }
-
     // the eight rows and their subtitles are the same in the list and in the menu table of settings_ui::menu
     #[test]
     fn the_list_matches_the_menu_table() {

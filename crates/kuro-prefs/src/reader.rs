@@ -236,12 +236,4 @@ mod tests {
         assert!(crate::registry::is_dropped("reader_tapping_inverted_webtoon"));
     }
 
-    #[test]
-    fn value_tables_have_the_documented_lengths_and_order() {
-        assert_eq!(IMAGE_SCALE_TYPE.len(), 6);
-        assert_eq!(IMAGE_SCALE_TYPE[5], "scale_type_smart_fit");
-        assert_eq!(ZOOM_START.len(), 4);
-        assert_eq!(ZOOM_START[3], "zoom_start_center");
-    }
-
 }

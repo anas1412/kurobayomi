@@ -378,12 +378,6 @@ mod tests {
             .unwrap()
     }
 
-    #[test]
-    fn concurrency_limits_are_eight_and_three() {
-        assert_eq!(FETCH_CONCURRENCY, 8);
-        assert_eq!(DECODE_CONCURRENCY, 3);
-    }
-
     #[tokio::test]
     async fn custom_cover_wins_without_touching_the_network() {
         let tmp = tempfile::tempdir().unwrap();

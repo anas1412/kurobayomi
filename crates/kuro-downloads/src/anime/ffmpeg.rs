@@ -161,11 +161,54 @@ pub fn build_ffprobe_args(video_url: &str, headers: &[(String, String)]) -> Vec<
     let header_arg = header_option(headers);
     let mut args: Vec<OsString> = Vec::new();
     push_input_headers(&mut args, video_url, &header_arg);
-    for value in ["-v", "quiet", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"] {
+    // errors only, so a failure names its reason ("403 Forbidden", "not in allowed_segment_extensions") instead of nothing
+    for value in ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"] {
         push(&mut args, value);
     }
     push(&mut args, video_url);
     args
+}
+
+/// Input options an HLS playlist needs: sites hide their video segments behind image names (`000.jpg`), which ffmpeg
+/// 7.1 and later refuse unless `extension_picky` is off. Older ffmpeg has no such option (and no such check), so it is
+/// passed only when the installed ffprobe knows it.
+pub fn hls_input_options(ffprobe: &OsStr, url: &str) -> Vec<(String, String)> {
+    let is_playlist = url.split(['?', '#']).next().is_some_and(|path| path.ends_with(".m3u8"));
+    if is_playlist && knows_extension_picky(ffprobe) { vec![("extension_picky".to_owned(), "0".to_owned())] } else { Vec::new() }
+}
+
+/// `args` with `options` inserted before every `-i` whose input is an HLS playlist: the video and each separate
+/// subtitle or audio track (their playlists hide segments the same way).
+pub fn with_playlist_options(args: Vec<OsString>, options: &[(String, String)]) -> Vec<OsString> {
+    if options.is_empty() {
+        return args;
+    }
+    let is_playlist = |arg: &OsString| arg.to_str().and_then(|a| a.split(['?', '#']).next()).is_some_and(|p| p.ends_with(".m3u8"));
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "-i" && args.get(i + 1).is_some_and(is_playlist) {
+            for (key, value) in options {
+                out.push(format!("-{key}").into());
+                out.push(value.into());
+            }
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// Whether this ffprobe's HLS demuxer has `extension_picky`. Asked once per program and run.
+fn knows_extension_picky(ffprobe: &OsStr) -> bool {
+    static KNOWS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<OsString, bool>>> = std::sync::OnceLock::new();
+    let mut known = KNOWS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    *known.entry(ffprobe.to_owned()).or_insert_with(|| {
+        std::process::Command::new(ffprobe)
+            .args(["-hide_banner", "-h", "demuxer=hls"])
+            .output()
+            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("extension_picky"))
+    })
 }
 
 /// The duration in whole seconds (behaviour 5.7: `toFloatOrNull()` then `toLong()`). Anything unparsable, such as
@@ -203,7 +246,13 @@ fn spawn_error(err: io::Error) -> DownloadError {
 /// Runs ffprobe and returns the duration in whole seconds. A non-zero exit is `Ffprobe` with the first line of its
 /// stderr (retryable, behaviour 5.7 step 5).
 pub async fn probe_duration(program: &OsStr, video_url: &str, headers: &[(String, String)]) -> Result<i64, DownloadError> {
-    let args = build_ffprobe_args(video_url, headers);
+    let mut args = build_ffprobe_args(video_url, headers);
+    // the input options go before the input, which is the last argument
+    let at = args.len() - 1;
+    for (key, value) in hls_input_options(program, video_url).into_iter().rev() {
+        args.insert(at, value.into());
+        args.insert(at, format!("-{key}").into());
+    }
     let output = Command::new(program)
         .args(&args)
         .stdin(Stdio::null())
@@ -590,6 +639,25 @@ mod tests {
         let bin = script(dir.path(), "ffprobe", "echo 'Invalid data found' >&2\necho 'second' >&2\nexit 1");
         let err = probe_duration(bin.as_os_str(), "https://cdn.example/v.m3u8", &[]).await.unwrap_err();
         assert_eq!(err.to_string(), "Invalid data found");
+    }
+
+    #[test]
+    fn every_playlist_input_gets_the_options_and_a_file_input_does_not() {
+        let args: Vec<OsString> = ["-i", "https://a/v.m3u8", "-i", "https://a/sub.vtt", "-i", "https://a/audio.m3u8?t=1", "out.mkv"].map(OsString::from).to_vec();
+        let opts = vec![("extension_picky".to_owned(), "0".to_owned())];
+        let out: Vec<String> = with_playlist_options(args, &opts).into_iter().map(|a| a.into_string().unwrap()).collect();
+        assert_eq!(out, ["-extension_picky", "0", "-i", "https://a/v.m3u8", "-i", "https://a/sub.vtt", "-extension_picky", "0", "-i", "https://a/audio.m3u8?t=1", "out.mkv"]);
+    }
+
+    #[test]
+    fn only_a_playlist_gets_the_lenient_segment_option_and_only_from_an_ffprobe_that_knows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let new = script(dir.path(), "ffprobe-new", "echo '  -extension_picky   <boolean>'");
+        let old = script(dir.path(), "ffprobe-old", "echo '  -allowed_extensions <string>'");
+        let lenient = vec![("extension_picky".to_owned(), "0".to_owned())];
+        assert_eq!(hls_input_options(new.as_os_str(), "https://cdn/x/master.m3u8?token=1"), lenient);
+        assert!(hls_input_options(new.as_os_str(), "https://cdn/x/video.mp4").is_empty());
+        assert!(hls_input_options(old.as_os_str(), "https://cdn/x/master.m3u8").is_empty(), "older ffmpeg has no such option");
     }
 
     #[tokio::test]

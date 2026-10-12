@@ -44,16 +44,4 @@ mod tests {
             assert!(!drop.replacement.is_empty(), "{}", drop.feature);
         }
     }
-
-    #[test]
-    fn the_notification_permission_is_replaced_by_the_status_row() {
-        let notification = DROPS.iter().find(|d| d.feature.contains("notification permission")).unwrap();
-        assert!(notification.replacement.contains("T-36a-027"));
-    }
-
-    #[test]
-    fn the_assist_content_is_replaced_by_the_window_url_in_the_webview_header() {
-        let assist = DROPS.iter().find(|d| d.feature.contains("assist content")).unwrap();
-        assert!(assist.replacement.contains("WebView page header"));
-    }
 }

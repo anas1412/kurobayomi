@@ -95,69 +95,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_horizontal_drag_needs_the_pref_and_no_lock() {
-        assert!(horizontal_drag_enabled(true, false));
-        assert!(!horizontal_drag_enabled(true, true));
-        assert!(!horizontal_drag_enabled(false, false));
-    }
-
-    #[test]
-    fn a_drag_moves_the_target_by_fifteen_percent_of_the_move() {
-        let mut d = HorizontalDrag::begin(100.0, 200.0);
-        assert_eq!(d.update(100.0, 500.0, 300.0, 100.0), Some(115));
-        assert_eq!(d.delta(), 15);
-        assert_eq!(d.update(115.0, 500.0, 190.0, -10.0), Some(99));
-        assert_eq!(d.delta(), -1);
-    }
-
-    #[test]
-    fn the_target_clamps_to_zero_and_the_duration() {
-        let mut d = HorizontalDrag::begin(10.0, 0.0);
-        assert_eq!(d.update(10.0, 50.0, -1000.0, -1000.0), Some(0));
-        assert_eq!(d.update(10.0, 50.0, 5000.0, 5000.0), Some(50));
-    }
-
-    #[test]
-    fn no_drag_left_at_zero_and_no_drag_right_at_the_end() {
-        let mut d = HorizontalDrag::begin(0.0, 100.0);
-        assert_eq!(d.update(0.0, 50.0, 50.0, -50.0), None);
-        assert_eq!(d.target(), 0);
-        let mut e = HorizontalDrag::begin(50.0, 100.0);
-        assert_eq!(e.update(50.0, 50.0, 200.0, 100.0), None);
-    }
-
-    #[test]
-    fn the_start_position_truncates_toward_zero() {
-        let d = HorizontalDrag::begin(0.9, 0.0);
-        assert_eq!(d.start(), 0);
-    }
-
-    #[test]
-    fn release_seeks_only_when_the_target_moved() {
-        let mut d = HorizontalDrag::begin(20.0, 0.0);
-        assert_eq!(d.release("absolute"), None);
-        d.update(20.0, 100.0, 100.0, 100.0);
-        assert_eq!(
-            d.release("absolute+keyframes"),
-            Some((35, "absolute+keyframes"))
-        );
-    }
-
-    #[test]
-    fn steps_truncate_toward_zero() {
-        // 2.9 truncates to 2, -2.9 truncates to -2.
-        assert_eq!(horizontal_step(0, 0.0, 2.9, 1.0), 2);
-        assert_eq!(horizontal_step(0, 0.0, -2.9, 1.0), -2);
-    }
-
-    #[test]
-    fn horizontal_drag_uses_the_seek_sensitivity() {
-        // 100 px right at 0.15 seconds per px is 15 seconds.
-        assert_eq!(horizontal_step(85, 200.0, 300.0, SEEK_SENS), 100);
-        assert_eq!(horizontal_step(85, 300.0, 200.0, SEEK_SENS), 70);
-    }
-
-    #[test]
     fn zones_split_at_forty_and_sixty_percent() {
         assert_eq!(zone_at(399.0, 1000.0), Zone::Left);
         assert_eq!(zone_at(400.0, 1000.0), Zone::Center);

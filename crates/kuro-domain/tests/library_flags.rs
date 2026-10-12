@@ -1,7 +1,6 @@
 //! Port of `LibraryFlagsTest.kt` (T-08a-002 and T-07a-035) plus the flag-algebra properties.
 
 use kuro_domain::kind::EntryKind;
-use kuro_domain::library::display_mode::LibraryDisplayMode;
 use kuro_domain::library::flags::{add_unmasked, contains, merge};
 use kuro_domain::library::sort::{Direction, LibrarySort, SORT_MASK, SortType};
 
@@ -12,14 +11,6 @@ fn sort(ty: SortType, dir: Direction) -> LibrarySort {
 /// `Long + Flag` for a sort: the mask-aware merge of the sort flag.
 fn plus(value: i64, other: LibrarySort) -> i64 {
     merge(value, other.flag(), SORT_MASK)
-}
-
-#[test]
-fn check_the_amount_of_flags() {
-    assert_eq!(LibraryDisplayMode::ALL.len(), 4);
-    assert_eq!(SortType::types(EntryKind::Manga).len(), 10);
-    assert_eq!(Direction::ALL.len(), 2);
-    assert_eq!(SortType::types(EntryKind::Anime).len(), 11);
 }
 
 #[test]

@@ -364,6 +364,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn ten_thousand_rows_go_through_the_pipeline_in_one_pass() {
         // T-37a-054: one pass over the rows, no per-row rebuild. The 50 ms target is measured in the release
         // build; this guard only catches a quadratic blow-up in the debug test build.

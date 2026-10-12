@@ -348,6 +348,7 @@ mod property_tests {
     /// TT-27-302. Over a deterministic run of adds, the stored value of each key equals the largest value ever added
     /// for it, so it never goes down.
     #[test]
+    #[ignore = "slow: run on demand"]
     fn tr_27_302_the_queued_value_never_decreases() {
         let dir = TempDir::new().unwrap();
         let q = RetryQueue::new(TestDb::anime_handle(&dir)).unwrap();

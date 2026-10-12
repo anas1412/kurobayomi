@@ -730,7 +730,7 @@
      ]
     }
    ],
-   "empty": "You have no categories. Tap the plus button to create one for organizing your library.",
+   "empty": "No categories yet. Add one to sort your library into groups.",
    "notes": "App bar with back arrow, title 'Categories', tab row 'Anime' | 'Manga'. Reorderable LazyColumn of ElevatedCards (8dp spacing, 16dp padding): each card row = drag handle icon (DragHandle, 16dp padding, drag to reorder), category name (weight 1, tap = rename), IconButtons: Edit ('Rename category'), Visibility/VisibilityOff ('Hide' - toggles hidden; shows Visibility when currently hidden), Delete. Default/system category not listed. Extended FAB bottom-end 'Add' with plus icon (collapses on scroll) -> Add category dialog. Name field error text 'A category with this name already exists!' when duplicate, '*required' supporting text when empty; confirm disabled while invalid. Empty: EmptyScreen with the empty text."
   },
   {

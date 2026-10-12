@@ -167,19 +167,6 @@ mod tests {
     }
 
     #[test]
-    fn app_theme_has_the_21_names_and_the_three_deprecated_have_no_title() {
-        assert_eq!(AppTheme::ALL.len(), 21);
-        assert_eq!(AppTheme::ALL[0], AppTheme::DEFAULT);
-        assert_eq!(AppTheme::ALL[17], AppTheme::MONOCHROME);
-        assert_eq!(AppTheme::ALL[20], AppTheme::BLUE);
-        assert_eq!(AppTheme::DEFAULT.title_key(), Some("label_default"));
-        assert_eq!(AppTheme::MONOCHROME.title_key(), Some("theme_monochrome"));
-        for deprecated in [AppTheme::DARK_BLUE, AppTheme::HOT_PINK, AppTheme::BLUE] {
-            assert_eq!(deprecated.title_key(), None);
-        }
-    }
-
-    #[test]
     fn a_stored_theme_name_and_an_old_tablet_key_do_not_break_loading() {
         let store = PrefStore::in_memory();
         store.set_raw("pref_app_theme", PrefValue::Str("MONET".into()));

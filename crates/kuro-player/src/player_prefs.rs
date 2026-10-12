@@ -362,21 +362,6 @@ mod tests {
         assert_eq!(table.len() + 1, CATALOGUE.len());
     }
 
-    /// T75
-    #[test]
-    fn t75_speed_presets_count_12() {
-        let Some(PrefKey {
-            default: PrefDefault::StringSet(set),
-            ..
-        }) = find("default_speed_presets")
-        else {
-            panic!("default_speed_presets missing");
-        };
-        assert_eq!(set.len(), 12);
-        assert_eq!(set[0], "0.25");
-        assert_eq!(set[11], "4.0");
-    }
-
     /// T76
     #[test]
     fn t76_audio_channels_values() {

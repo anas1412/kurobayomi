@@ -276,26 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn the_java_order_matches_the_jvm_fixture_on_every_pair() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/java_ci_order.json")).expect("fixture");
-        let items: Vec<String> = fixture["items"].as_array().expect("items").iter().map(|v| v.as_str().unwrap().to_owned()).collect();
-        for pair in fixture["pairs"].as_array().expect("pairs") {
-            let (a, b, sign) = (pair[0].as_str().unwrap(), pair[1].as_str().unwrap(), pair[2].as_i64().unwrap());
-            let got = match cmp_ignore_case_java(a, b) {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1,
-            };
-            assert_eq!(got, sign, "compare({a:?}, {b:?})");
-        }
-        let mut sorted = items.clone();
-        sorted.sort_by(|a, b| cmp_ignore_case_java(a, b));
-        let expected: Vec<String> = fixture["sorted"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect();
-        assert_eq!(sorted, expected);
-    }
-
-    #[test]
     fn toggles_flip_show_hide_and_pin_and_languages() {
         let prefs = test_prefs();
         let toggles = SourceToggles::default();

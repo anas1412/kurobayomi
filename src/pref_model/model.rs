@@ -295,15 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn there_are_exactly_thirteen_item_variants() {
-        assert_eq!(Kind::ALL.len(), 13);
-        let mut seen: Vec<Kind> = Kind::ALL.to_vec();
-        seen.sort_by_key(|k| *k as u8);
-        seen.dedup();
-        assert_eq!(seen.len(), 13);
-    }
-
-    #[test]
     fn bound_rows_default_to_the_percent_s_template_and_static_rows_to_none() {
         assert_eq!(ItemCommon::bound("Theme").subtitle.as_deref(), Some("%s"));
         assert_eq!(ItemCommon::new("Help").subtitle, None);

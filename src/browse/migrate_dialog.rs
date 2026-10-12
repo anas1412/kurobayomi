@@ -11,6 +11,7 @@
 //! reports back when the migration ends. Until then the options sit dimmed under a spinner, the buttons are hidden, a
 //! second request is refused and the window refuses to close; a failure keeps the dialog open with its reason.
 
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -21,6 +22,7 @@ use super::dialogs::DialogSlot;
 use super::migrate_engine::MigratePlan;
 use super::migrate_flags::{self, RunGuard, options, preselected};
 use super::route::BrowseKind;
+use crate::ui::{DialogButton, Role};
 
 /// A button of the dialog, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +169,21 @@ impl Dialog {
     }
 }
 
+/// The row the shared dialog puts its buttons in: the parent of the first button under `widget`.
+fn button_row(widget: &gtk::Widget) -> Option<gtk::Box> {
+    if widget.is::<gtk::Button>() {
+        return widget.parent().and_downcast();
+    }
+    let mut child = widget.first_child();
+    while let Some(next) = child {
+        if let Some(found) = button_row(&next) {
+            return Some(found);
+        }
+        child = next.next_sibling();
+    }
+    None
+}
+
 /// Shows the dialog over `anchor`'s window. Ctrl+Enter migrates and Ctrl+Shift+Enter copies when migrating is possible.
 /// `saved` is the bitmap the options start from. While a run is going the window refuses to close, so Escape does nothing.
 pub fn show(slot: &DialogSlot, anchor: &impl IsA<gtk::Widget>, facts: Facts, saved: i32, handlers: MigrateHandlers) -> gtk::Window {
@@ -198,52 +215,42 @@ pub fn show(slot: &DialogSlot, anchor: &impl IsA<gtk::Widget>, facts: Facts, sav
     overlay.set_child(Some(&body));
     overlay.add_overlay(&spinner);
 
-    // the Show button sits on the left, the actions on the right
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let buttons: Vec<gtk::Button> = plan
+    // the dialog is built after its buttons, which reach it through this cell
+    let cell: Rc<OnceCell<Rc<Dialog>>> = Rc::default();
+    let buttons = plan
         .actions
         .iter()
         .map(|action| {
-            let button = gtk::Button::with_label(&action.label(facts.kind));
-            if *action == Action::Migrate {
-                button.add_css_class("suggested-action");
+            let (label, this) = (action.label(facts.kind), Rc::clone(&cell));
+            match action {
+                Action::ShowEntry | Action::ShowSeasons => DialogButton::new(label, Role::Normal, move || {
+                    if let Some(dialog) = this.get() {
+                        (dialog.handlers.show_entry)();
+                    }
+                }),
+                Action::Copy | Action::Migrate => {
+                    let replace = *action == Action::Migrate;
+                    DialogButton::keep_open_unless(label, if replace { Role::Suggested } else { Role::Normal }, move || {
+                        if let Some(dialog) = this.get() {
+                            dialog.start(replace);
+                        }
+                        false
+                    })
+                }
             }
-            if *action == Action::ShowEntry {
-                button.set_hexpand(true);
-                button.set_halign(gtk::Align::Start);
-            }
-            row.append(&button);
-            button
         })
         .collect();
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    for set in [gtk::Box::set_margin_start, gtk::Box::set_margin_end, gtk::Box::set_margin_top, gtk::Box::set_margin_bottom] {
-        set(&column, 18);
-    }
-    column.append(&overlay);
-    column.append(&row);
-    let title = gtk::Label::new(Some(&tr(MsgKey::migration_dialog_what_to_include)));
-    let window = crate::ui::modal(title.upcast_ref::<gtk::Widget>(), &column, 420, -1);
+    let window = crate::ui::dialog(&tr(MsgKey::migration_dialog_what_to_include), &overlay, 420, buttons);
     window.set_transient_for(anchor.upcast_ref::<gtk::Widget>().root().and_downcast::<gtk::Window>().as_ref());
-    super::keys::close_on_escape(&window);
+    let row = button_row(window.child().expect("child").upcast_ref()).expect("the button row");
 
     let dialog = Rc::new(Dialog { window: window.downgrade(), checks, body, spinner, error, row, guard: RunGuard::default(), handlers });
+    let _ = cell.set(Rc::clone(&dialog));
     // a running migration cannot be dismissed: Escape and the close button end up here
     let running = Rc::clone(&dialog);
     window.connect_close_request(move |_| if running.guard.is_running() { gtk::glib::Propagation::Stop } else { gtk::glib::Propagation::Proceed });
     slot.adopt(&window);
 
-    for (action, button) in plan.actions.iter().zip(&buttons) {
-        let (this, closing) = (Rc::clone(&dialog), window.clone());
-        match action {
-            Action::ShowEntry | Action::ShowSeasons => button.connect_clicked(move |_| {
-                closing.close();
-                (this.handlers.show_entry)();
-            }),
-            Action::Copy => button.connect_clicked(move |_| this.start(false)),
-            Action::Migrate => button.connect_clicked(move |_| this.start(true)),
-        };
-    }
     if plan.actions.contains(&Action::Migrate) {
         let (to_migrate, to_copy) = (Rc::clone(&dialog), Rc::clone(&dialog));
         super::keys::attach_migrate_keys(&window, move || to_migrate.start(true), move || to_copy.start(false));

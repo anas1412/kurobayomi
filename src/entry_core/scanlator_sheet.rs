@@ -76,21 +76,11 @@ impl ScanlatorSheet {
 /// Opens the sheet. `on_ok` runs with the excluded set when OK is pressed.
 pub fn open(available: &[String], excluded: &BTreeSet<String>, on_ok: impl Fn(BTreeSet<String>) + 'static) {
     let sheet = Rc::new(RefCell::new(ScanlatorSheet::new(available, excluded)));
-    let col = ui::column();
-    let title = gtk::Label::new(Some(&tr(MsgKey::exclude_scanlators)));
-    let window = ui::modal(title.upcast_ref(), &col, 360, 480);
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let cancel = gtk::Button::with_label(&tr(MsgKey::action_cancel));
-    cancel.connect_clicked({
-        let window = window.clone();
-        move |_| window.close()
-    });
+    let col = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let title = tr(MsgKey::exclude_scanlators);
     if sheet.borrow().is_empty() {
-        col.append(&gtk::Label::builder().label(tr(MsgKey::no_scanlators_found)).xalign(0.0).wrap(true).build());
-        buttons.set_halign(gtk::Align::End);
-        buttons.append(&cancel);
-        col.append(&buttons);
-        window.present();
+        col.append(&ui::message(&tr(MsgKey::no_scanlators_found)));
+        ui::dialog(&title, &col, 360, vec![ui::DialogButton::cancel(tr(MsgKey::action_cancel))]).present();
         return;
     }
     let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -105,7 +95,7 @@ pub fn open(available: &[String], excluded: &BTreeSet<String>, on_ok: impl Fn(BT
             (name.clone(), check)
         })
         .collect();
-    let bulk = gtk::Button::builder().css_classes(["flat"]).build();
+    let bulk = gtk::Button::builder().css_classes(["flat"]).halign(gtk::Align::Start).build();
     let label_bulk = {
         let (sheet, bulk) = (Rc::clone(&sheet), bulk.clone());
         move || bulk.set_label(&tr(if sheet.borrow().bulk() == Bulk::SelectAll { MsgKey::action_select_all } else { MsgKey::action_reset }))
@@ -133,21 +123,18 @@ pub fn open(available: &[String], excluded: &BTreeSet<String>, on_ok: impl Fn(BT
             label_bulk();
         }
     });
-    let ok = gtk::Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
-    ok.connect_clicked({
-        let (sheet, window) = (Rc::clone(&sheet), window.clone());
-        move |_| {
-            on_ok(sheet.borrow().confirm());
-            window.close();
-        }
-    });
-    let spacer = gtk::Box::builder().hexpand(true).build();
-    for w in [bulk.upcast_ref::<gtk::Widget>(), spacer.upcast_ref(), cancel.upcast_ref(), ok.upcast_ref()] {
-        buttons.append(w);
-    }
-    col.append(&ui::scrolled(&list));
-    col.append(&buttons);
-    window.present();
+    col.append(&bulk);
+    col.append(&gtk::ScrolledWindow::builder()
+        .child(&list)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(360)
+        .build());
+    let buttons = vec![
+        ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
+        ui::DialogButton::new(tr(MsgKey::action_ok), ui::Role::Suggested, move || on_ok(sheet.borrow().confirm())),
+    ];
+    ui::dialog(&title, &col, 360, buttons).present();
 }
 
 #[cfg(test)]

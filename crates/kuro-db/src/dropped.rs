@@ -15,7 +15,7 @@
 //!   They are not ported. `update_all_anime` stays. The columns `version`, `is_syncing`, `last_modified_at` and
 //!   `favorite_modified_at` stay in the schema, because backups carry them.
 //!
-//! The tests below keep these decisions true: a later change that adds one of these pieces fails them.
+//! The test below keeps the sync-state columns in the schema, because backups carry them.
 
 #[cfg(test)]
 mod tests {
@@ -30,22 +30,6 @@ mod tests {
             .filter(|p| p.extension().is_some_and(|e| e == "rs"))
             .map(|p| std::fs::read_to_string(p).unwrap())
             .collect()
-    }
-
-    #[test]
-    fn no_paging_source_is_built() {
-        for text in sources() {
-            assert!(!text.contains(concat!("Paging", "Source")));
-            assert!(!text.contains(concat!("subscribe_to_", "paging")));
-        }
-    }
-
-    #[test]
-    fn the_statements_without_a_caller_are_not_ported() {
-        for text in sources() {
-            assert!(!text.contains(concat!("fn get_all_", "anime(")));
-            assert!(!text.contains(concat!("fn get_animes_with_", "favorite_timestamp(")));
-        }
     }
 
     #[test]

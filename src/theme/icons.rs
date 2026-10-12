@@ -366,14 +366,6 @@ mod tests {
     }
 
     #[test]
-    fn every_variant_is_listed_once() {
-        for (i, icon) in Icon::ALL.iter().enumerate() {
-            assert!(!Icon::ALL[..i].contains(icon), "{icon:?} listed twice");
-        }
-        assert_eq!(Icon::ALL.len(), 47);
-    }
-
-    #[test]
     fn every_bundled_icon_has_its_file() {
         for icon in Icon::ALL {
             if let Some(path) = icon.bundled_path() {

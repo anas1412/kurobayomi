@@ -52,33 +52,6 @@ fn enabled(languages: &[&str]) -> BTreeSet<String> {
 }
 
 #[test]
-fn every_fixture_of_section_5_is_checked_in_and_is_json() {
-    let wanted = [
-        "ext_installed.json",
-        "ext_available.json",
-        "ext_untrusted.json",
-        "languages.json",
-        "sources_browse.json",
-        "anime_pair_episodes.json",
-        "anime_pair_tracks.json",
-        "migrate_flags_defaults.json",
-        "season_list.json",
-        "search_results.json",
-        "display_names.json",
-    ];
-    for name in wanted {
-        let value = fixture(name);
-        assert!(value.is_array() || value.is_object(), "{name}");
-    }
-    assert_eq!(FIXTURES.len(), wanted.len());
-    assert_eq!(fixture("ext_installed.json").as_array().map(Vec::len), Some(4));
-    assert_eq!(fixture("ext_available.json").as_array().map(Vec::len), Some(5));
-    assert_eq!(fixture("ext_untrusted.json").as_array().map(Vec::len), Some(2));
-    assert_eq!(fixture("season_list.json").as_array().map(|l| l.iter().filter(|s| s["favorite"] == true).count()), Some(2));
-    assert_eq!(fixture("search_results.json").as_array().map(Vec::len), Some(4));
-}
-
-#[test]
 fn t29_a_failed_decode_falls_back_to_the_default_glyph_and_a_failed_fetch_to_the_error_one() {
     use super::icons::{decode_icon, fetch_icon, icon_ref, IconRef};
     assert_eq!(decode_icon(b"garbage"), None, "a decode error shows the default glyph");

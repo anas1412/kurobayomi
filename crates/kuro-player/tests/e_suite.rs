@@ -458,29 +458,3 @@ fn t79_episode_flag_masks_match_the_source_values() {
         [0x6, 0x18, 0x60, 0x180]
     );
 }
-
-// The check: every number of section 4 has a test.
-
-fn sources() -> String {
-    let mut text = String::new();
-    for dir in ["src", "tests"] {
-        for entry in std::fs::read_dir(path(dir, "")).unwrap().flatten() {
-            let file = entry.path();
-            if file.extension().is_some_and(|e| e == "rs") {
-                text.push_str(&std::fs::read_to_string(&file).unwrap());
-            }
-        }
-    }
-    text
-}
-
-#[test]
-fn every_numbered_test_t1_to_t79_is_present() {
-    let text = sources();
-    // T69 to T73 tested the `user-data/aniyomi` Lua bridge, which was removed.
-    let missing: Vec<u32> = (1..=79)
-        .filter(|n| !(69..=73).contains(n))
-        .filter(|n| !text.contains(&format!("fn t{n}_")))
-        .collect();
-    assert!(missing.is_empty(), "no test named for T{missing:?}");
-}

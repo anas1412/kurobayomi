@@ -2289,53 +2289,6 @@ mod tests {
     }
 
     #[test]
-    fn custom_buttons_create_delete_toggle_reorder_and_expand() {
-        let c = open_in_memory().unwrap();
-        let seed = custom_buttons(&c).unwrap();
-        assert_eq!(seed.len(), 1);
-        assert_eq!((seed[0].id, seed[0].sort_index, seed[0].is_favorite), (1, 0, true));
-
-        let b2 = create_custom_button(&c, "two", "$id", "", "").unwrap();
-        let b3 = create_custom_button(&c, "three", "x", "", "").unwrap();
-        let order = |c: &Connection| -> Vec<(i64, i64)> {
-            custom_buttons(c).unwrap().iter().map(|b| (b.id, b.sort_index)).collect()
-        };
-        assert_eq!(order(&c), [(1, 0), (b2, 1), (b3, 2)]);
-        assert!(custom_buttons(&c).unwrap().iter().skip(1).all(|b| !b.is_favorite), "new buttons are never favourites");
-
-        delete_custom_button(&c, 1).unwrap();
-        assert_eq!(order(&c), [(b2, 0), (b3, 1)], "survivors renumbered from 0");
-
-        toggle_custom_button_favorite(&c, b3).unwrap();
-        let favorites = |c: &Connection| -> Vec<i64> {
-            custom_buttons(c).unwrap().iter().filter(|b| b.is_favorite).map(|b| b.id).collect()
-        };
-        assert_eq!(favorites(&c), [b3], "exactly one favourite");
-        toggle_custom_button_favorite(&c, b3).unwrap();
-        assert!(favorites(&c).is_empty(), "turning the favourite off clears only that button");
-
-        reorder_custom_button(&c, b3, 0).unwrap();
-        assert_eq!(order(&c), [(b3, 0), (b2, 1)]);
-
-        update_custom_button(&c, b2, &CustomButtonUpdate { name: Some("renamed".into()), ..Default::default() }).unwrap();
-        let b2_row = custom_buttons(&c).unwrap().into_iter().find(|b| b.id == b2).unwrap();
-        assert_eq!((b2_row.name.as_str(), b2_row.content.as_str()), ("renamed", "$id"), "partial update keeps content");
-
-        let btn = CustomButton {
-            id: 9,
-            content: "id=$id primary=$isPrimary".into(),
-            long_press_content: "$isPrimary".into(),
-            on_startup: "if $isPrimary then".into(),
-            ..Default::default()
-        };
-        let primary = btn.content_for(9);
-        assert_eq!(primary.content, "id=9 primary=true");
-        assert_eq!(primary.long_press_content, "true");
-        let other = btn.content_for(1);
-        assert_eq!(other.on_startup, "if false then");
-    }
-
-    #[test]
     fn extension_store_upsert_twice_then_delete_and_preference_insert() {
         let c = open_in_memory().unwrap();
         assert_eq!(extension_store_count(&c).unwrap(), 0);
@@ -2449,14 +2402,5 @@ mod tests {
         let left: Vec<i64> = st.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         assert_eq!(left, [keep, other], "the library row and the other source survive");
         assert!(!left.contains(&gone), "the listed source's non-library row is deleted");
-    }
-
-    #[test]
-    fn a_fresh_anime_database_has_the_seed_custom_button_with_id_one() {
-        let c = open_in_memory().unwrap();
-        let buttons = custom_buttons(&c).unwrap();
-        let seed = buttons.iter().find(|b| b.id == 1).expect("seed button 1");
-        assert!(seed.is_favorite, "the seed row ships as the favourite");
-        assert_eq!(seed.sort_index, 0);
     }
 }

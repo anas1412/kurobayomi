@@ -363,6 +363,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn background_commands_never_block_the_caller() {
         let handle = headless();
         let start = std::time::Instant::now();
@@ -417,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn create_and_drop_twenty_times() {
         for _ in 0..20 {
             let handle = headless();

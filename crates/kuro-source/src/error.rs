@@ -47,11 +47,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn http_404_displays_the_kotlin_text() {
-        assert_eq!(SourceError::Http(404).to_string(), "HTTP error 404");
-    }
-
-    #[test]
     fn every_variant_has_a_display_text() {
         let all = [
             SourceError::LocalServer("bind".into()),

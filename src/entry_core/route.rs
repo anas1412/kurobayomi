@@ -32,6 +32,7 @@ use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::tracking;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
+use crate::entry_core::category_dialog_view;
 use crate::entry_core::fetch_interval_dialog;
 use crate::entry_core::shortcut_help_view;
 use crate::entry_core::shortcuts::{HeaderKey, header_key};
@@ -970,35 +971,22 @@ impl View {
 
     /// The delete confirmation (T-38a-030): OK clears the selection and deletes the chapters the dialog holds.
     fn show_delete_dialog(self: &Rc<Self>, ids: Vec<i64>) {
-        let cancel = Button::with_label(&tr(MsgKey::action_cancel));
-        let ok = Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
-        let buttons = GBox::new(O::Horizontal, 8);
-        buttons.set_halign(Align::End);
-        buttons.append(&cancel);
-        buttons.append(&ok);
-        let col = ui::column();
-        col.append(&Label::builder().label(tr(MsgKey::confirm_delete_chapters)).wrap(true).xalign(0.0).build());
-        col.append(&buttons);
-        let window = ui::modal(Label::new(Some(&tr(MsgKey::are_you_sure))).upcast_ref(), &col, 400, 200);
-        cancel.connect_clicked({
-            let (window, weak) = (window.clone(), Rc::downgrade(self));
-            move |_| {
-                window.close();
-                if let Some(view) = weak.upgrade() {
-                    view.act(UiAction::DismissDialog);
-                }
-            }
-        });
-        ok.connect_clicked({
-            let (window, weak) = (window.clone(), Rc::downgrade(self));
-            move |_| {
-                window.close();
-                if let Some(view) = weak.upgrade() {
+        let body = ui::message(&tr(MsgKey::confirm_delete_chapters));
+        let (weak_cancel, weak_ok) = (Rc::downgrade(self), Rc::downgrade(self));
+        let buttons = vec![
+            ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
+            ui::DialogButton::new(tr(MsgKey::action_ok), ui::Role::Destructive, move || {
+                if let Some(view) = weak_ok.upgrade() {
                     view.act(UiAction::ConfirmDeleteChapters(ids.clone()));
                 }
+            }),
+        ];
+        ui::dialog_or_dismiss(&tr(MsgKey::are_you_sure), &body, 400, buttons, move || {
+            if let Some(view) = weak_cancel.upgrade() {
+                view.act(UiAction::DismissDialog);
             }
-        });
-        window.present();
+        })
+        .present();
     }
 
     /// The Download menu: the next 1, 5, 10 or 25 unread chapters, or every unread one.
@@ -1192,55 +1180,29 @@ impl View {
             Some(Dialog::DuplicateManga { duplicate_id, .. }) => *duplicate_id,
             _ => return,
         };
-        let show = Button::with_label(&tr(MsgKey::action_show_manga));
-        let add = Button::builder().label(tr(MsgKey::action_add_anyway)).css_classes(["suggested-action"]).build();
-        let migrate = Button::with_label(&tr(MsgKey::action_migrate_duplicate));
-        let cancel = Button::with_label(&tr(MsgKey::action_cancel));
-        let buttons = GBox::new(O::Horizontal, 8);
-        buttons.set_halign(Align::End);
-        for b in [&cancel, &show, &migrate, &add] {
-            buttons.append(b);
-        }
-        let col = ui::column();
-        col.append(&Label::builder().label(tr(MsgKey::confirm_add_duplicate_manga)).wrap(true).xalign(0.0).build());
-        col.append(&buttons);
-        let window = ui::modal(Label::new(Some(&tr(MsgKey::are_you_sure))).upcast_ref(), &col, 400, 220);
-        // Show entry dismisses the sheet first, then pushes the duplicate page on top (E-24)
-        show.connect_clicked({
-            let window = window.clone();
-            move |_| {
-                window.close();
-                crate::entry_core::route::open(duplicate_id);
-            }
-        });
-        cancel.connect_clicked({
-            let window = window.clone();
-            move |_| window.close()
-        });
-        migrate.connect_clicked({
-            let (window, weak) = (window.clone(), Rc::downgrade(self));
-            move |_| {
-                window.close();
-                if let Some(view) = weak.upgrade() {
+        let body = ui::message(&tr(MsgKey::confirm_add_duplicate_manga));
+        let (weak_migrate, weak_add, weak_dismiss) = (Rc::downgrade(self), Rc::downgrade(self), Rc::downgrade(self));
+        let buttons = vec![
+            ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
+            // Show entry dismisses the sheet first, then pushes the duplicate page on top (E-24)
+            ui::DialogButton::new(tr(MsgKey::action_show_manga), ui::Role::Normal, move || crate::entry_core::route::open(duplicate_id)),
+            ui::DialogButton::new(tr(MsgKey::action_migrate_duplicate), ui::Role::Normal, move || {
+                if let Some(view) = weak_migrate.upgrade() {
                     // one primary-key read names the old entry for the migrate dialog
                     let title = kuro_data::manga::MangaRepo::new(data::app().db(EntryKind::Manga)).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
                     view.migrate_entry(duplicate_id, title);
                 }
-            }
-        });
-        let weak = Rc::downgrade(self);
-        add.connect_clicked({
-            let (window, weak) = (window.clone(), weak.clone());
-            move |_| {
-                if let Some(view) = weak.upgrade() {
+            }),
+            ui::DialogButton::new(tr(MsgKey::action_add_anyway), ui::Role::Suggested, move || {
+                if let Some(view) = weak_add.upgrade() {
                     view.act(UiAction::ToggleFavorite { skip_duplicate: true });
                 }
-                window.close();
-            }
-        });
+            }),
+        ];
         // every way out lets the page show the dialog again next time
+        let window = ui::dialog(&tr(MsgKey::are_you_sure), &body, 400, buttons);
         window.connect_close_request(move |_| {
-            if let Some(view) = weak.upgrade() {
+            if let Some(view) = weak_dismiss.upgrade() {
                 view.duplicate_open.set(false);
                 view.act(UiAction::DismissDialog);
             }
@@ -1257,40 +1219,23 @@ impl View {
             CategoryDialog::new(ready.manga.id, !ready.manga.favorite, &ready.categories, &ready.category_membership)
         };
         self.act(UiAction::OpenDialog(Dialog::ChangeCategory(model.clone())));
-        let model = Rc::new(RefCell::new(model));
-        let list = ui::boxed_list();
-        for (i, item) in model.borrow().items.iter().enumerate() {
-            let check = gtk::CheckButton::builder().label(&item.name).active(item.checked).margin_start(8).margin_end(8).build();
-            let model = Rc::clone(&model);
-            check.connect_toggled(move |_| model.borrow_mut().toggle(i));
-            list.append(&check);
-        }
-        let ok = Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
-        let col = ui::column();
-        col.append(&list);
-        col.append(&ok);
-        let title = Label::new(Some(&tr(MsgKey::action_edit_categories)));
-        let window = ui::modal(title.upcast_ref(), &col, 360, 420);
-        let weak = Rc::downgrade(self);
-        ok.connect_clicked({
-            let (window, weak, model) = (window.clone(), weak.clone(), Rc::clone(&model));
-            move |_| {
-                if let Some(view) = weak.upgrade() {
-                    view.act(UiAction::ConfirmCategory(model.borrow().confirm()));
+        let (weak_ok, weak_dismiss) = (Rc::downgrade(self), Rc::downgrade(self));
+        // any other way out (Escape, the close button, Cancel) leaves without writing; in the add flow the tracking sheet
+        // follows when a tracker is logged in and "open the track menu on adding" is on, both read now (E-TRK-5)
+        category_dialog_view::open_with(
+            model,
+            move |m| {
+                if let Some(view) = weak_ok.upgrade() {
+                    view.act(UiAction::ConfirmCategory(m.confirm()));
                 }
-                window.close();
-            }
-        });
-        // any other way out (Escape, the close button) leaves without writing; in the add flow the tracking sheet follows
-        // when a tracker is logged in and "open the track menu on adding" is on, both read now (E-TRK-5)
-        window.connect_close_request(move |_| {
-            if let Some(view) = weak.upgrade() {
-                let auto_open = view.auto_open_tracking();
-                view.act(UiAction::DismissCategory { auto_open });
-            }
-            glib::Propagation::Proceed
-        });
-        window.present();
+            },
+            move || {
+                if let Some(view) = weak_dismiss.upgrade() {
+                    let auto_open = view.auto_open_tracking();
+                    view.act(UiAction::DismissCategory { auto_open });
+                }
+            },
+        );
     }
 }
 

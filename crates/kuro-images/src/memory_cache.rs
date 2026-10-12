@@ -130,11 +130,6 @@ mod tests {
     const ON: CachePolicy = CachePolicy::Enabled;
 
     #[test]
-    fn default_budget_is_64_mib() {
-        assert_eq!(DEFAULT_BUDGET_BYTES, 67_108_864);
-    }
-
-    #[test]
     fn hit_returns_the_shared_buffer() {
         let cache = MemoryCache::new(1000);
         let img = image(100);

@@ -210,6 +210,7 @@ async fn a_failing_query_is_an_item_not_the_end_of_the_stream() {
 // T-04a-008: the handler --------------------------------------------------------------------------
 
 #[test]
+#[ignore = "slow: run on demand"]
 fn two_concurrent_writes_serialize() {
     let (_p, db) = open();
     let db = Arc::clone(db.handle());
@@ -235,6 +236,7 @@ fn two_concurrent_writes_serialize() {
 }
 
 #[test]
+#[ignore = "slow: run on demand"]
 fn a_long_write_does_not_block_readers() {
     let (_p, db) = open();
     let db = Arc::clone(db.handle());

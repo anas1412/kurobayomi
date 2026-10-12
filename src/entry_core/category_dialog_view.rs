@@ -14,34 +14,48 @@ use crate::ui;
 /// Opens the dialog over `model`. `on_ok` runs with the checked ids before the window closes; `on_dismiss` runs on
 /// every close that was not OK. The window is returned, so a page can keep it in its one dialog slot.
 pub fn open(model: CategoryDialog, on_ok: impl Fn(Vec<i64>) + 'static, on_dismiss: impl Fn() + 'static) -> gtk::Window {
+    open_with(model, move |m| on_ok(m.checked_ids()), on_dismiss)
+}
+
+/// [`open`] where `on_ok` gets the whole model (for a caller that confirms through `CategoryDialog::confirm`).
+pub fn open_with(model: CategoryDialog, on_ok: impl Fn(&CategoryDialog) + 'static, on_dismiss: impl Fn() + 'static) -> gtk::Window {
     let model = Rc::new(RefCell::new(model));
-    let list = ui::boxed_list();
-    for (i, item) in model.borrow().items.iter().enumerate() {
-        let check = gtk::CheckButton::builder().label(&item.name).active(item.checked).margin_start(8).margin_end(8).build();
-        let model = Rc::clone(&model);
-        check.connect_toggled(move |_| model.borrow_mut().toggle(i));
-        list.append(&check);
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let manage = gtk::Button::builder().label(tr(MsgKey::action_edit_categories)).css_classes(["flat"]).halign(gtk::Align::Start).build();
+    body.append(&manage);
+    if model.borrow().items.is_empty() {
+        body.append(&gtk::Label::builder().label("No categories yet.").css_classes(["dim-label"]).xalign(0.0).build());
+    } else {
+        let list = ui::boxed_list();
+        for (i, item) in model.borrow().items.iter().enumerate() {
+            let check = gtk::CheckButton::builder().label(&item.name).active(item.checked).margin_start(8).margin_end(8).build();
+            let model = Rc::clone(&model);
+            check.connect_toggled(move |_| model.borrow_mut().toggle(i));
+            list.append(&check);
+        }
+        let scroll = gtk::ScrolledWindow::builder()
+            .child(&list)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(360)
+            .build();
+        body.append(&scroll);
     }
-    let ok = gtk::Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
-    let col = ui::column();
-    col.append(&list);
-    col.append(&ok);
-    let title = gtk::Label::new(Some(&tr(MsgKey::action_edit_categories)));
-    let window = ui::modal(title.upcast_ref(), &col, 360, 420);
-    let confirmed = Rc::new(std::cell::Cell::new(false));
-    ok.connect_clicked({
-        let (window, model, confirmed) = (window.clone(), Rc::clone(&model), Rc::clone(&confirmed));
+    let buttons = vec![
+        ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
+        ui::DialogButton::new(tr(MsgKey::action_ok), ui::Role::Suggested, {
+            let model = Rc::clone(&model);
+            move || on_ok(&model.borrow())
+        }),
+    ];
+    let window = ui::dialog_or_dismiss(&tr(MsgKey::action_edit_categories), &body, 360, buttons, on_dismiss);
+    // a dismiss that opens the categories screen
+    manage.connect_clicked({
+        let window = window.clone();
         move |_| {
-            confirmed.set(true);
-            on_ok(model.borrow().checked_ids());
             window.close();
+            ui::open("categories");
         }
-    });
-    window.connect_close_request(move |_| {
-        if !confirmed.get() {
-            on_dismiss();
-        }
-        gtk::glib::Propagation::Proceed
     });
     window.present();
     window

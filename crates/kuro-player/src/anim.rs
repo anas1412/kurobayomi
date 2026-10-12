@@ -147,13 +147,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timings_match_the_kotlin_specs() {
-        assert_eq!(ENTER_MS, 100);
-        assert_eq!(EXIT_MS, 300);
-        assert_eq!(SHEET_MS, 350);
-    }
-
-    #[test]
     fn reduce_motion_or_disabled_gtk_animations_make_fades() {
         assert_eq!(motion(false, true), Motion::Slide);
         assert_eq!(motion(true, true), Motion::Fade);

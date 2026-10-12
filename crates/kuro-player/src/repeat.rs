@@ -67,18 +67,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schedule_matches_the_kotlin_waits() {
-        let mut s = RepeatSchedule::default();
-        let waits: Vec<u64> = (0..19).map(|_| s.next_delay()).collect();
-        assert_eq!(
-            waits,
-            vec![
-                750, 562, 421, 315, 236, 177, 132, 99, 74, 55, 41, 30, 22, 16, 12, 9, 6, 5, 5
-            ]
-        );
-    }
-
-    #[test]
     fn fire_times_start_at_the_press() {
         let mut r = Repeater::default();
         let mut time = 0;

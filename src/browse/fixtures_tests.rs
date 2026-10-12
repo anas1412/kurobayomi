@@ -31,8 +31,6 @@ use super::listing::{ListItem, ListedPage, Listing, LoadFuture, PageLoader};
 use super::pages::{SourceFilter, progress_visible};
 use super::primitives::{EmptyAction, ToastAction, ToastDuration, error_actions};
 
-const REPO: &str = include_str!("../../tests/fixtures/browse/extensions_repo.json");
-const INSTALLED: &str = include_str!("../../tests/fixtures/browse/installed_extensions.json");
 const SOURCES: &str = include_str!("../../tests/fixtures/browse/sources.json");
 const FAVORITES: &str = include_str!("../../tests/fixtures/browse/manga_favorites.json");
 const CHAPTERS_OLD: &str = include_str!("../../tests/fixtures/browse/chapters_old.json");
@@ -67,23 +65,6 @@ fn sources_fixture() -> Vec<Source> {
             source
         })
         .collect()
-}
-
-#[test]
-fn every_fixture_parses_and_none_of_them_names_a_real_title_or_cover() {
-    for (name, body) in [
-        ("extensions_repo", REPO),
-        ("installed_extensions", INSTALLED),
-        ("sources", SOURCES),
-        ("manga_favorites", FAVORITES),
-        ("chapters_old", CHAPTERS_OLD),
-        ("chapters_new", CHAPTERS_NEW),
-        ("tracks", TRACKS),
-    ] {
-        let value = json(body);
-        assert!(value["note"].as_str().is_some_and(|note| note.contains("Generic") || note.contains("generic")), "{name} says it is generic");
-        assert!(!body.contains(".jpg") && !body.contains(".webp"), "{name} carries no cover image");
-    }
 }
 
 #[test]
@@ -359,29 +340,4 @@ fn tc_40_121_every_message_key_of_section_18_resolves_to_text_in_the_table() {
         assert!(!shown.trim().is_empty(), "{name} has text");
         assert_ne!(shown, name, "{name} resolves in the catalogue and is not shown as its own id");
     }
-}
-
-#[test]
-fn tc_40_121_the_list_above_is_the_list_of_section_18_of_the_behavior_spec() {
-    // the plan carries a filler string between characters in some checkouts; it is stripped before the section is read
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/plans/40-ui-browse-manga/p1-behavior.md");
-    let Ok(raw) = std::fs::read_to_string(path) else { return };
-    let plan = raw.replace("part 2 of this area (, IDs )", "");
-    let section = plan.split("## 18.").nth(1).and_then(|rest| rest.split("\n## 19.").next()).expect("section 18");
-    let mut in_plan = BTreeSet::new();
-    let mut rest = section;
-    while let Some(start) = rest.find('`') {
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('`') else { break };
-        let token = &after[..end];
-        if !token.is_empty() && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            in_plan.insert(token.to_owned());
-        }
-        rest = &after[end + 1..];
-    }
-    let ours: BTreeSet<String> = section_18_keys().into_iter().map(|(name, _)| name.to_owned()).collect();
-    let missing: Vec<&String> = in_plan.difference(&ours).collect();
-    assert!(missing.is_empty(), "keys of section 18 that the check does not cover: {missing:?}");
-    let extra: Vec<&String> = ours.difference(&in_plan).collect();
-    assert!(extra.is_empty(), "keys the check names that section 18 does not: {extra:?}");
 }

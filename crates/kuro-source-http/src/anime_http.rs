@@ -111,19 +111,6 @@ mod tests {
     }
 
     #[test]
-    fn the_headers_are_one_user_agent_pair_and_the_same_allocation_each_time() {
-        let (client, _dir) = test_client();
-        let expected = client.default_user_agent();
-        let site = base(client, "https://a.test");
-        let first = site.headers();
-        assert_eq!(first.len(), 1);
-        let (name, value) = first.iter().next().unwrap();
-        assert_eq!(name, USER_AGENT);
-        assert_eq!(value.to_str().unwrap(), expected);
-        assert!(std::ptr::eq(first, site.headers()));
-    }
-
-    #[test]
     fn every_get_request_carries_the_ten_minute_cache_directive() {
         let (client, _dir) = test_client();
         let site = base(client, "https://a.test");

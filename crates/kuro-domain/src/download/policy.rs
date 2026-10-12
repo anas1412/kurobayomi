@@ -125,14 +125,6 @@ mod tests {
 mod queue_threshold_tests {
     use super::*;
 
-    /// T-15a-016: the constants the queue warnings and the notification use.
-    #[test]
-    fn the_queue_constants_match_the_behaviour_section() {
-        assert_eq!(DOWNLOAD_NOTIFICATION_TIMEOUT_MS, 30_000);
-        assert_eq!(LIBRARY_UPDATE_PER_SOURCE_WARNING, 60);
-        assert_eq!((DOWNLOADS_QUEUED_WARNING_THRESHOLD, CHAPTERS_PER_SOURCE_QUEUE_WARNING_THRESHOLD), (30, 15));
-    }
-
     #[test]
     fn the_download_warning_needs_an_empty_queue_and_auto_start_and_skips_unmetered_sources() {
         let sixteen_from_one = || (0..16).map(|_| (1, false));

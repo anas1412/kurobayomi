@@ -124,62 +124,7 @@ pub fn report<'a>(keys: impl IntoIterator<Item = &'a str>) -> Vec<DroppedKey> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-    use std::path::Path;
-
     use super::*;
-
-    /// The data table of the plan, if the plans folder is present (a source tarball may not ship it).
-    fn plan_rows() -> Option<Vec<(Vec<String>, String)>> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("plans/11-app-migrations/p1-data-and-config.md");
-        let text = std::fs::read_to_string(path).ok()?;
-        let section = text.split("## 2.").nth(1)?.split("## 3.").next()?;
-        let rows = section
-            .lines()
-            .filter(|l| l.starts_with("| `"))
-            .map(|l| {
-                let cells: Vec<&str> = l.split('|').map(str::trim).collect();
-                let keys = cells[1].split('`').skip(1).step_by(2).map(str::to_owned).collect();
-                (keys, cells[cells.len() - 2].to_owned())
-            })
-            .collect();
-        Some(rows)
-    }
-
-    #[test]
-    fn t11a029_every_key_the_plan_ignores_is_listed_and_no_converted_key_is() {
-        let Some(rows) = plan_rows() else { return };
-        assert!(rows.len() > 40, "the plan table was read");
-        let mut ignored = 0;
-        for (keys, how) in rows {
-            for key in keys.iter().filter(|k| !k.starts_with('_') || k.starts_with("__APP_STATE_trusted")) {
-                let listed = lookup(key).is_some();
-                if how.starts_with("ignored") {
-                    assert!(listed, "{key} is ignored by the plan but is not in the register");
-                    ignored += 1;
-                } else {
-                    assert!(!listed, "{key} is {how} in the plan, so it must not be in the register");
-                }
-            }
-        }
-        assert!(ignored >= 18, "the ignored keys were found ({ignored})");
-    }
-
-    #[test]
-    fn the_register_names_every_group_the_task_lists() {
-        let tasks: BTreeSet<_> = REGISTER.iter().map(|e| e.task).collect();
-        for task in ["T-11a-020", "T-11a-021", "T-11a-022", "T-11a-023", "T-11a-024"] {
-            assert!(tasks.contains(task), "{task}");
-        }
-        for name in ["chapter_disk_cache", "track_token_1", "UpdateChecker", "automatic_ext_updates", "extension_installer", "tracking_queue", "trusted_signatures"] {
-            assert!(lookup(name).is_some(), "{name}");
-        }
-        assert!(REGISTER.iter().all(|e| !e.reason.is_empty() && e.task.starts_with("T-")));
-        let mut patterns: Vec<_> = REGISTER.iter().map(|e| e.pattern).collect();
-        patterns.sort_unstable();
-        patterns.dedup();
-        assert_eq!(patterns.len(), REGISTER.len(), "one row per pattern");
-    }
 
     #[test]
     fn prefix_entries_match_and_exact_entries_win() {

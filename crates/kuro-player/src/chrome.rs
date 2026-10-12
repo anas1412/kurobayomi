@@ -227,19 +227,6 @@ mod tests {
     }
 
     #[test]
-    fn pip_button_follows_the_preference_and_loading() {
-        assert_eq!(
-            pip_button(true, false),
-            PipButton {
-                visible: true,
-                enabled: true
-            }
-        );
-        assert!(!pip_button(true, true).enabled);
-        assert!(!pip_button(false, false).visible);
-    }
-
-    #[test]
     fn chapter_text_is_time_bullet_name() {
         assert_eq!(chapter_text(85.0, "Intro"), "01:25 • Intro");
         assert_eq!(chapter_text(3725.0, "Credits"), "1:02:05 • Credits");

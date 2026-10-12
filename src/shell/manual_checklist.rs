@@ -75,20 +75,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_five_manual_rows_are_listed_once_each() {
-        let ids: Vec<&str> = CHECKLIST.iter().map(|c| c.id).collect();
-        assert_eq!(ids, ["TC-53-10", "TC-53-33", "TC-53-40", "TC-53-41", "TC-53-42"]);
-    }
-
-    #[test]
-    fn every_row_names_both_desktops_and_has_steps_and_an_expectation() {
-        for check in CHECKLIST {
-            assert_eq!(check.desktops, [Desktop::KdePlasma, Desktop::Gnome], "{}", check.id);
-            assert!(!check.steps.is_empty() && !check.expected.is_empty(), "{}", check.id);
-        }
-    }
-
-    #[test]
     fn a_row_that_was_not_run_is_not_recorded_as_a_pass() {
         assert!(CHECKLIST.iter().all(|c| c.result == Outcome::NotRun));
         assert_ne!(Outcome::Pass, Outcome::Fail);

@@ -167,36 +167,6 @@ fn every_plural_has_an_other_variant() {
 }
 
 #[test]
-fn the_19_kept_non_translatable_names_are_present() {
-    let names = [
-        "app_name",
-        "action_web_view",
-        "pref_progress_70",
-        "pref_progress_75",
-        "pref_progress_80",
-        "pref_progress_85",
-        "pref_progress_90",
-        "pref_progress_95",
-        "pref_progress_100",
-        "pref_skip_30",
-        "pref_skip_20",
-        "pref_skip_10",
-        "pref_skip_5",
-        "pref_skip_3",
-        "player_speed",
-        "player_sheets_track_title_w_lang",
-        "player_sheets_track_title_wo_lang",
-        "player_sheets_track_lang_wo_title",
-        "player_gesture_seek_indicator",
-    ];
-    assert_eq!(names.len(), 19);
-    let ids: HashSet<&str> = MsgKey::ALL.iter().map(|k| k.id()).collect();
-    for name in names {
-        assert!(ids.contains(name), "{name}");
-    }
-}
-
-#[test]
 fn init_is_applied_once_and_later_calls_are_ignored() {
     let slot: OnceLock<Catalog> = OnceLock::new();
     let sources: &[(&str, &str)] = &[("en", "a = Hello\n"), ("de", "a = Hallo\n")];

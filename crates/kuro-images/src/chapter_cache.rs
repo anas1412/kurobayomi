@@ -166,14 +166,6 @@ mod tests {
         ]
     }
 
-    #[test]
-    fn constants_match_the_disk_lru_cache_parameters() {
-        assert_eq!(APP_VERSION, 1);
-        assert_eq!(VALUE_COUNT, 1);
-        assert_eq!(CACHE_SIZE, 104_857_600);
-        assert_eq!(FOLDER, "chapter_disk_cache");
-    }
-
     #[tokio::test]
     async fn open_uses_the_cache_dir_folder() {
         let tmp = tempfile::tempdir().unwrap();

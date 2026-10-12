@@ -8,35 +8,23 @@ use gtk::prelude::*;
 use kuro_domain::category::bulk::Choice;
 
 use crate::library::category_dialog::CategoryDialog;
+use crate::ui::{DialogButton, Role};
 
 /// Opens the dialog. `on_confirm` gets the `(include, exclude)` lists; `on_edit` opens the category screen.
 pub fn show(dialog: CategoryDialog, on_confirm: impl Fn(Vec<i64>, Vec<i64>) + 'static, on_edit: impl Fn() + 'static) {
-    let title = gtk::Label::new(Some("Set categories"));
     let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    body.set_margin_start(16);
-    body.set_margin_end(16);
-    body.set_margin_top(12);
-    body.set_margin_bottom(12);
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    buttons.set_halign(gtk::Align::End);
-    let cancel = gtk::Button::with_label("Cancel");
-    let ok = gtk::Button::with_label("OK");
-    ok.add_css_class("suggested-action");
+    let cancel = || DialogButton::cancel("Cancel");
 
     if dialog.is_empty() {
         body.append(&gtk::Label::new(Some("You don't have any categories yet.")));
         let edit = gtk::Button::with_label("Edit categories");
         body.append(&edit);
-        buttons.append(&cancel);
-        body.append(&buttons);
-        let window = crate::ui::modal(&title.clone().upcast(), &body, 360, 200);
+        let window = crate::ui::dialog("Set categories", &body, 360, vec![cancel()]);
         let w = window.clone();
         edit.connect_clicked(move |_| {
             w.close();
             on_edit();
         });
-        let w = window.clone();
-        cancel.connect_clicked(move |_| w.close());
         window.present();
         return;
     }
@@ -68,21 +56,18 @@ pub fn show(dialog: CategoryDialog, on_confirm: impl Fn(Vec<i64>, Vec<i64>) + 's
         state_click.borrow_mut().click(id);
         paint(&state_click.borrow(), &checks_click);
     });
-    body.append(&list);
-
-    buttons.append(&cancel);
-    buttons.append(&ok);
-    body.append(&buttons);
-    let window = crate::ui::modal(&title.clone().upcast(), &body, 360, 420);
-    let w = window.clone();
-    cancel.connect_clicked(move |_| w.close());
-    let w = window.clone();
-    ok.connect_clicked(move |_| {
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&list)
+        .propagate_natural_height(true)
+        .max_content_height(360)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    body.append(&scroll);
+    let ok = DialogButton::new("OK", Role::Suggested, move || {
         let (include, exclude) = state.borrow().confirm();
-        w.close();
         on_confirm(include, exclude);
     });
-    window.present();
+    crate::ui::dialog("Set categories", &body, 360, vec![cancel(), ok]).present();
 }
 
 /// Sets each check to the state of its row. Mixed rows show inconsistent.

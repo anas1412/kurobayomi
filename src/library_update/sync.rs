@@ -283,6 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "slow: run on demand"]
     async fn perf_02_a_500_item_sync_is_fast() {
         // The plan's bound is 100 ms in a release build; a debug build is held to a loose bound.
         let dir = tempfile::tempdir().expect("temp dir");

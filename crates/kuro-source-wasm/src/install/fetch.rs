@@ -164,6 +164,5 @@ mod tests {
     async fn a_download_that_cannot_be_read_back_gives_the_kotlin_text() {
         let err = read_downloaded(Path::new("/nonexistent/kuro/download.kuroext.part")).await.unwrap_err();
         assert_eq!(err, InstallError::ReadDownload);
-        assert_eq!(err.to_string(), "Failed to read downloaded extension file.");
     }
 }

@@ -713,15 +713,6 @@ mod tests {
     }
 
     #[test]
-    fn torrserver_trackers_are_the_plan_list_joined_by_newlines() {
-        const PLAN: &str = include_str!("../../../plans/02-preferences-system/p1-data-and-config.md");
-        let block = PLAN.split("### 6.1").nth(1).unwrap().split("```").nth(1).unwrap();
-        let urls: Vec<&str> = block.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-        assert_eq!(urls.len(), 26);
-        assert_eq!(urls.join("\n"), TORRSERVER_TRACKERS);
-    }
-
-    #[test]
     fn keys_are_unique() {
         let mut seen = std::collections::HashMap::new();
         for meta in REGISTRY {

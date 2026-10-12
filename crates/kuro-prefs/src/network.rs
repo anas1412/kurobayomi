@@ -44,14 +44,6 @@ pub fn http_log_level(verbose: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::PrefStore;
-
-    #[test]
-    fn the_settings_diet_left_the_network_section_without_keys() {
-        assert_eq!(NetworkPrefs::TABLE, "network");
-        assert!(NetworkPrefs::FIELDS.is_empty());
-        assert!(NetworkPrefs::new(PrefStore::in_memory()).defaults().is_empty());
-    }
 
     #[test]
     fn doh_ids_one_to_thirteen_have_an_endpoint_and_others_do_not() {

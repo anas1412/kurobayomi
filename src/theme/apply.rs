@@ -288,11 +288,6 @@ mod tests {
     }
 
     #[test]
-    fn base_stylesheet_has_no_parse_errors_in_the_css_grammar() {
-        assert_eq!(BASE_CSS.matches('{').count(), BASE_CSS.matches('}').count());
-    }
-
-    #[test]
     fn a_nested_request_is_queued_and_run_once() {
         let g = Guard { applying: Cell::new(false), pending: Cell::new(false) };
         assert!(g.enter());

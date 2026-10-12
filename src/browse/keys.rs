@@ -102,21 +102,6 @@ pub fn attach_escape_step(page: &impl IsA<gtk::Widget>, search_open: impl Fn() -
     page.add_controller(keys);
 }
 
-/// Escape closes `window` (the filter sheet). Nothing is reverted: the edits already live in the caller's state.
-pub fn close_on_escape(window: &gtk::Window) {
-    let keys = gtk::EventControllerKey::new();
-    let closing = window.clone();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        if key == Key::Escape {
-            closing.close();
-            gtk::glib::Propagation::Stop
-        } else {
-            gtk::glib::Propagation::Proceed
-        }
-    });
-    window.add_controller(keys);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

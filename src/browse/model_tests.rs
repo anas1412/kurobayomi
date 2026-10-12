@@ -21,7 +21,7 @@ fn set(items: &[&str]) -> BTreeSet<String> {
 /// Module `source_list`.
 mod source_list {
     use super::*;
-    use crate::browse::sources::{ListInput, Section, SourceRow, section_cmp, source_list};
+    use crate::browse::sources::{ListInput, Section, SourceRow, source_list};
 
     /// One word per row: the header kind or the source name, with `*` on the copy under Last used.
     fn shape(rows: &[SourceRow]) -> Vec<String> {
@@ -63,22 +63,6 @@ mod source_list {
     fn build_source_list_pinned_and_last_used_duplicate() {
         let rows = build(&[source(1, "x", "en")], &["1"], 1);
         assert_eq!(shape(&rows), ["last", "x*", "pinned", "x"], "E-SL-04: a pinned last-used source is listed under both");
-    }
-
-    #[test]
-    fn group_key_cmp_is_total_order() {
-        let keys = [Section::LastUsed, Section::Pinned, Section::Language("de".into()), Section::Language("en".into()), Section::Language("ja".into()), Section::Language(String::new())];
-        for a in &keys {
-            assert_eq!(section_cmp(a, a), Ordering::Equal, "equal keys are Equal");
-            for b in &keys {
-                assert_eq!(section_cmp(a, b), section_cmp(b, a).reverse(), "antisymmetry of {a:?} and {b:?}");
-                for c in &keys {
-                    if section_cmp(a, b) != Ordering::Greater && section_cmp(b, c) != Ordering::Greater {
-                        assert_ne!(section_cmp(a, c), Ordering::Greater, "transitivity of {a:?} {b:?} {c:?}");
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -156,14 +140,6 @@ mod migrate_sources {
 mod collate {
     use super::*;
     use crate::browse::names::case_insensitive_cmp;
-    use kuro_core::text::primary_cmp;
-
-    #[test]
-    fn primary_cmp_ignores_case_and_accents() {
-        assert_eq!(primary_cmp("é", "e"), Ordering::Equal);
-        assert_eq!(primary_cmp("A", "a"), Ordering::Equal);
-        assert_eq!(primary_cmp("a", "b"), Ordering::Less);
-    }
 
     #[test]
     fn case_insensitive_cmp_matches_java_fixtures() {

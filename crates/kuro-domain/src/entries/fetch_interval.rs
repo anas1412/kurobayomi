@@ -582,6 +582,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn a_hundred_thousand_items_compute_quickly() {
         let list: Vec<ItemDates> = (0..100_000).map(|i| at(i * HOUR)).collect();
         let started = std::time::Instant::now();

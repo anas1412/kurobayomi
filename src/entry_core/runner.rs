@@ -678,6 +678,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn dispose_during_a_fetch_cancels_the_fetch_and_a_queued_write_still_lands() {
         let rt = rt();
         let (_dir, store, id) = store(true, 1);

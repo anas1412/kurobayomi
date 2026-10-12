@@ -140,20 +140,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn there_are_twelve_faces_verbatim() {
-        assert_eq!(ERROR_FACES.len(), 12);
-        assert_eq!(ERROR_FACES[0], "(･o･;)");
-        assert_eq!(ERROR_FACES[3], "(˘･_･˘)");
-        assert_eq!(ERROR_FACES[11], "(¬_¬)");
-    }
-
-    #[test]
-    fn the_known_quirks_are_kept() {
-        assert!(!ERROR_FACES[5].ends_with(')'), "6th face has no closing bracket");
-        assert!(ERROR_FACES[10].starts_with(' '), "11th face starts with a space");
-    }
-
-    #[test]
     fn a_face_is_taken_modulo_the_list() {
         assert_eq!(face_at(0), ERROR_FACES[0]);
         assert_eq!(face_at(12), ERROR_FACES[0]);

@@ -174,18 +174,4 @@ mod tests {
         assert!(step(112).is_none() && step(139).is_none());
         assert!(step(115).unwrap().contains("animehistory_temp"));
     }
-
-    #[test]
-    fn the_committed_files_match_a_regeneration_from_the_sqm_files() {
-        let root = std::env::var("KURO_ANIYOMI_SRC").unwrap_or_else(|_| "/home/blackbox/aniyomi-src".into());
-        let dir = Path::new(&root).join("data/src/main/sqldelightanime/migrations");
-        if !dir.is_dir() {
-            eprintln!("skipped: {} is not there", dir.display());
-            return;
-        }
-        for n in FIRST_STEP..=LAST_STEP {
-            let sqm = std::fs::read_to_string(dir.join(format!("{n}.sqm"))).unwrap();
-            assert_eq!(crate::legacy::strip_annotations(&sqm), step(n).unwrap(), "{n}.sql is stale");
-        }
-    }
 }

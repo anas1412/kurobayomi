@@ -9,7 +9,6 @@
 
 use std::rc::Rc;
 
-use gtk::glib;
 use gtk::prelude::*;
 use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
 
@@ -20,6 +19,7 @@ use crate::pref_model::model::{ItemCommon, Preference, PreferenceItem};
 use crate::pref_model::page;
 use crate::settings_ui::reader::page::layout_rows;
 use crate::settings_ui::rows::group;
+use crate::ui::{DialogButton, Role};
 
 /// The reading mode of this manga. The pick goes to `on_mode`, which applies it to the open reader at once.
 fn mode_row(mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) -> PreferenceItem {
@@ -44,21 +44,13 @@ pub fn page_rows(prefs: &ReaderPrefs, mode: ReadingMode, on_mode: Rc<dyn Fn(Read
 /// Opens the window over `parent`, capped at 75 percent of its height (`ReaderSettingsDialog.kt:38`). Escape closes it.
 pub fn open(parent: &impl IsA<gtk::Window>, prefs: &ReaderPrefs, mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) {
     let body = page::body(&page_rows(prefs, mode, on_mode));
-    let title = gtk::Label::builder().label(strings::ACTION_SETTINGS).css_classes(["title"]).build();
     let max_height = parent.as_ref().height().max(1) * 3 / 4;
-    let window = crate::ui::modal(title.upcast_ref::<gtk::Widget>(), &body.widget, 420, max_height);
-    let keys = gtk::EventControllerKey::new();
-    let weak = window.downgrade();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk::gdk::Key::Escape {
-            if let Some(window) = weak.upgrade() {
-                window.close();
-            }
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
-    window.add_controller(keys);
+    // the page scrolls itself: it is as tall as its rows up to the cap, so the dialog's own scroller never kicks in
+    body.scrolled.set_vexpand(false);
+    body.scrolled.set_propagate_natural_height(true);
+    body.scrolled.set_max_content_height(max_height);
+    let window = crate::ui::dialog(strings::ACTION_SETTINGS, &body.widget, 420, vec![DialogButton::new("Close", Role::Suggested, || {})]);
+    window.set_transient_for(Some(parent));
     window.present();
 }
 

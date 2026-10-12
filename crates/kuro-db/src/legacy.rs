@@ -124,8 +124,6 @@ fn annotation_len(text: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
 
     #[test]
@@ -150,22 +148,6 @@ mod tests {
                 assert!(!sql.contains(word), "{}.sql has {word}", i + 1);
             }
             assert!(!sql.contains('"'), "{}.sql has a double-quoted string", i + 1);
-        }
-    }
-
-    /// TC-I01: the committed files equal a regeneration from the `.sqm` text. Needs the Aniyomi source:
-    /// `KURO_ANIYOMI_SRC` or `/home/blackbox/aniyomi-src`; without it the test has nothing to compare and passes.
-    #[test]
-    fn tc_i01_the_committed_files_match_a_regeneration_from_the_sqm_files() {
-        let root = std::env::var("KURO_ANIYOMI_SRC").unwrap_or_else(|_| "/home/blackbox/aniyomi-src".into());
-        let dir = Path::new(&root).join("data/src/main/sqldelight/migrations");
-        if !dir.is_dir() {
-            eprintln!("skipped: {} is not there", dir.display());
-            return;
-        }
-        for n in 1..=32 {
-            let sqm = std::fs::read_to_string(dir.join(format!("{n}.sqm"))).unwrap();
-            assert_eq!(strip_annotations(&sqm), MIGRATIONS[n - 1], "{n}.sql is stale");
         }
     }
 

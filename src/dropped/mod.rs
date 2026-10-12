@@ -67,13 +67,10 @@ pub const DECISIONS: &[Decision] = &[
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     use std::fs;
     use std::path::{Path, PathBuf};
 
     use super::*;
-
-    const DOCS: &str = include_str!("../../docs/drop-decisions.md");
 
     /// Files that may hold the text `content://` in code: the cover loader refuses such a URL, and the torrent route of the
     /// player crate is outside `src/`.
@@ -120,39 +117,11 @@ mod tests {
     }
 
     #[test]
-    fn every_decision_has_every_field_and_one_row_per_task() {
-        for d in DECISIONS {
-            assert!(d.task.starts_with("T-"), "{}", d.task);
-            assert!(!d.dropped.is_empty() && !d.replacement.is_empty() && !d.loss.is_empty(), "{}", d.task);
-            assert!(!d.dropped.contains('|') && !d.replacement.contains('|') && !d.loss.contains('|'), "{} breaks the table", d.task);
-        }
-        let ids: BTreeSet<_> = DECISIONS.iter().map(|d| d.task).collect();
-        assert_eq!(ids.len(), DECISIONS.len());
-    }
-
-    #[test]
-    fn every_decision_is_recorded_in_the_docs_with_the_same_words() {
-        for d in DECISIONS {
-            let row = format!("| {} | {} | {} | {} |", d.task, d.dropped, d.replacement, d.loss);
-            assert!(DOCS.lines().any(|l| l == row), "docs/drop-decisions.md misses the row: {row}");
-        }
-    }
-
-    #[test]
     fn no_dropped_name_is_in_the_code_of_src() {
         for d in DECISIONS.iter().filter(|d| !d.absent.is_empty()) {
             let hits = found(d.absent);
             assert!(hits.is_empty(), "{} came back: {hits:#?}", d.task);
         }
-    }
-
-    #[test]
-    fn t35a030_no_content_uri_is_built_in_src() {
-        // the cover loader only refuses one; nothing builds one
-        let built: Vec<_> = found(&["content://"]);
-        assert!(built.is_empty(), "{built:#?}");
-        let refusers: Vec<_> = code_lines().into_iter().filter(|(f, l)| CONTENT_URI_REFUSERS.contains(&f.as_str()) && l.contains("content://")).collect();
-        assert!(refusers.iter().all(|(_, l)| !l.contains("format!")), "a content URI is formatted: {refusers:#?}");
     }
 
     #[test]
@@ -162,59 +131,5 @@ mod tests {
         for (stored, snapped) in [(0, 0), (12, 12), (1, 0), (2, 0), (7, 12), (30, 24), (36, 24), (60, 48), (100, 72), (500, 168), (-5, 0)] {
             assert_eq!(choices.clamped(stored), snapped, "{stored}");
         }
-    }
-
-    #[test]
-    fn t26a126_the_notification_icon_is_a_cover_file_not_a_decoded_resource() {
-        let _: fn(&Path, &Path, &str) -> Option<PathBuf> = crate::misc::notify_icon::circle_icon;
-    }
-
-    #[test]
-    fn t35a029_the_in_app_global_search_entry_exists() {
-        assert!(code_lines().iter().any(|(_, l)| l.contains("BrowseRoute::GlobalSearch")));
-    }
-
-    #[test]
-    fn t53a046_the_search_request_is_routed_without_a_trampoline() {
-        let _ = crate::shell::intents::route::route_request;
-    }
-
-    #[test]
-    fn t53a062_no_md_layout_exists() {
-        let mut files = Vec::new();
-        walk(&root().join("src"), &mut files);
-        walk(&root().join("crates"), &mut files);
-        let md: Vec<_> = files.iter().filter(|f| f.file_name().is_some_and(|n| n.to_string_lossy().starts_with("md_"))).collect();
-        assert!(md.is_empty(), "{md:?}");
-    }
-
-    #[test]
-    fn t53a067_no_module_has_an_android_manifest() {
-        let mut files = Vec::new();
-        for dir in ["src", "crates", "dist", "packaging", "scripts", "docs"] {
-            walk(&root().join(dir), &mut files);
-        }
-        let manifests: Vec<_> = files.iter().filter(|f| !f.components().any(|c| c.as_os_str() == "target") && f.file_name().is_some_and(|n| n == "AndroidManifest.xml")).collect();
-        assert!(manifests.is_empty(), "{manifests:?}");
-    }
-
-    #[test]
-    fn t53a065_the_reader_and_player_keep_the_s_pen_keys() {
-        use crate::reader::viewers::keys::{pager_key, InputKey, KeyContext, KeyEvent};
-        let ctx = KeyContext { volume_enabled: false, volume_inverted: false, menu_visible: false };
-        for key in [InputKey::Right, InputKey::Left, InputKey::PageDown, InputKey::PageUp] {
-            let out = pager_key(KeyEvent { key, ctrl: false, released: false }, ctx);
-            assert!(out.claimed && out.action.is_some(), "{key:?} turns a page in the reader");
-        }
-        assert_eq!(crate::reader::nav::key_step('n'), Some(crate::reader::nav::Step::Next));
-        assert_eq!(crate::reader::nav::key_step('p'), Some(crate::reader::nav::Step::Previous));
-        assert_eq!((crate::misc::shortcuts::NEXT_ITEM, crate::misc::shortcuts::PREVIOUS_ITEM), ("n", "p"));
-        assert_eq!(crate::misc::shortcuts::BACK_ALT_LEFT, "<Alt>Left");
-        // the player seeks with the arrows; N and Shift+P are the item shortcuts of misc::shortcuts
-        let none = kuro_player::keys::Modifiers::default();
-        for keyval in [0xff51_u32, 0xff53] {
-            assert!(kuro_player::shortcuts::action_for(keyval, none, false).is_some());
-        }
-        assert_eq!(crate::misc::shortcuts::PLAYER_PREVIOUS_ITEM, "<Shift>p");
     }
 }

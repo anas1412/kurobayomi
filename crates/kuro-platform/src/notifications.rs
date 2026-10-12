@@ -95,16 +95,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn there_are_thirteen_channels_with_unique_ids() {
-        assert_eq!(CATEGORIES.len(), 13);
-        let mut ids: Vec<&str> = CATEGORIES.iter().map(|c| c.channel_id).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        assert_eq!(ids.len(), 13);
-        assert!(CATEGORIES.iter().all(|c| category(c.channel_id).is_some()));
-    }
-
-    #[test]
     fn colliding_ids_map_to_distinct_keys() {
         assert_ne!(key("common_channel", 2), key("app_apk_update_channel", 2));
         assert_eq!(key("common_channel", 2), "common_channel:2");

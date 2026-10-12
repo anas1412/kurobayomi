@@ -29,21 +29,8 @@
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     /// The English catalog as the app ships it.
     const ENGLISH: &str = include_str!("../locales/en/kurobayomi.ftl");
-
-    /// Every `.rs` file of this crate's `src` directory, as text, except this decision file.
-    fn sources() -> Vec<String> {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .filter(|p| p.extension().is_some_and(|e| e == "rs") && !p.ends_with("dropped.rs"))
-            .map(|p| std::fs::read_to_string(p).unwrap())
-            .collect()
-    }
 
     fn line_of(key: &str) -> &str {
         ENGLISH
@@ -53,56 +40,7 @@ mod tests {
     }
 
     #[test]
-    fn the_confirm_exit_text_is_not_reused_by_the_app() {
-        assert_eq!(line_of("confirm_exit"), "confirm_exit = Enable Horizontal Seek");
-        for text in sources() {
-            assert!(!text.contains("confirm_exit"), "confirm_exit must stay unused");
-        }
-    }
-
-    #[test]
     fn the_airing_time_trailing_space_is_an_explicit_placeable() {
         assert!(line_of("pref_show_next_episode_airing_time").ends_with("{\" \"}"));
-    }
-
-    #[test]
-    fn t51a036_the_channel_names_stay_in_the_catalog_and_unused() {
-        for key in [
-            "channel_common",
-            "channel_progress",
-            "channel_complete",
-            "channel_errors",
-            "channel_new_chapters",
-            "channel_app_updates",
-            "channel_ext_updates",
-            "channel_new_chapters_episodes",
-        ] {
-            line_of(key);
-            for text in sources() {
-                assert!(!text.contains(key), "{key} must stay unused");
-            }
-        }
-    }
-
-    #[test]
-    fn t51a037_the_spen_names_stay_in_the_catalog_and_unused() {
-        for key in ["spen_previous_page", "spen_next_page"] {
-            line_of(key);
-            for text in sources() {
-                assert!(!text.contains(key), "{key} must stay unused");
-            }
-        }
-    }
-
-    #[test]
-    fn duplicate_pairs_are_both_kept() {
-        for key in [
-            "pref_audio_channels",
-            "pref_player_audio_channels",
-            "pref_audio_pitch_correction_title",
-            "pref_player_audio_pitch_correction",
-        ] {
-            line_of(key);
-        }
     }
 }

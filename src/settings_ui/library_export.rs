@@ -8,6 +8,7 @@ use kuro_data::manga::MangaRepo;
 use crate::pref_model::model::PreferenceItem;
 use crate::settings_ui::library_csv::{self, Columns, Entry};
 use crate::settings_ui::rows::text;
+use crate::ui::{DialogButton, Role};
 
 pub const ROW_TITLE: &str = "Library List";
 pub const DIALOG_TITLE: &str = "Select data to include";
@@ -55,10 +56,6 @@ fn open_dialog() {
     apply(&boxes, Columns::ALL);
 
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    column.set_margin_top(16);
-    column.set_margin_bottom(16);
-    column.set_margin_start(16);
-    column.set_margin_end(16);
     let heading = gtk::Label::new(Some(DIALOG_TITLE));
     heading.add_css_class("heading");
     heading.set_halign(gtk::Align::Start);
@@ -73,22 +70,12 @@ fn open_dialog() {
         column.append(button);
     }
 
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    buttons.set_halign(gtk::Align::End);
-    let cancel = gtk::Button::with_label("Cancel");
-    let export = gtk::Button::with_label("Export");
-    export.add_css_class("suggested-action");
-    buttons.append(&cancel);
-    buttons.append(&export);
-    column.append(&buttons);
-    let window = crate::ui::modal(gtk::Label::new(Some(ROW_TITLE)).upcast_ref::<gtk::Widget>(), &column, 320, -1);
-    window.set_default_widget(Some(&export));
-
-    let close = window.clone();
-    cancel.connect_clicked(move |_| close.close());
-    let (close, boxes_for_export) = (window.clone(), boxes.clone());
-    export.connect_clicked(move |_| {
-        let columns = read(&boxes_for_export);
+    // the Export button needs the window as the parent of the save dialog, which is built after the buttons
+    let window: std::rc::Rc<std::cell::OnceCell<gtk::Window>> = std::rc::Rc::default();
+    let export_window = std::rc::Rc::clone(&window);
+    let export = DialogButton::keep_open_unless("Export", Role::Suggested, move || {
+        let Some(close) = export_window.get().cloned() else { return false };
+        let columns = read(&boxes);
         let body = library_csv::export(&entries, columns);
         let dialog = gtk::FileDialog::new();
         dialog.set_initial_name(Some(library_csv::FILE_NAME));
@@ -104,8 +91,11 @@ fn open_dialog() {
             }
             done.close();
         });
+        false
     });
-    window.present();
+    let built = crate::ui::dialog(ROW_TITLE, &column, 320, vec![DialogButton::cancel("Cancel"), export]);
+    let _ = window.set(built.clone());
+    built.present();
 }
 
 /// The Export group with the Library List row.

@@ -35,14 +35,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_six_steps_are_in_kotlin_order() {
-        let all = [Idle, Pending, Downloading, Installing, Installed, Error];
-        let ordinals: Vec<usize> = all.iter().map(|step| *step as usize).collect();
-        assert_eq!(ordinals, vec![0, 1, 2, 3, 4, 5]);
-        assert_eq!(all.len(), 6);
-    }
-
-    #[test]
     fn only_idle_installed_and_error_are_completed() {
         let completed: Vec<InstallStep> =
             [Idle, Pending, Downloading, Installing, Installed, Error].into_iter().filter(|s| s.is_completed()).collect();

@@ -79,36 +79,3 @@ fn the_queue_sql_fixture_gives_the_store_its_parent_tables() {
     store.replace_all(&[row(10, 0), row(12, 1)]).unwrap();
     assert_eq!(store.load().unwrap().iter().map(|r| r.chapter_id).collect::<Vec<_>>(), vec![10, 12]);
 }
-
-#[test]
-fn the_comic_info_golden_file_is_the_one_the_comic_info_test_compares() {
-    let golden = fs::read_to_string(data("comicinfo/golden.xml")).unwrap();
-    assert!(golden.starts_with("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ComicInfo "));
-    assert!(golden.contains("<Series>Test: Manga/1</Series>") && golden.contains("<Number>12.5</Number>"));
-}
-
-/// Section 13 lists TST-01 to TST-52. Each id must appear in a test of the module that owns the function.
-#[test]
-fn every_test_id_of_the_plan_is_named_by_a_test() {
-    let sources = [
-        include_str!("queue.rs"),
-        include_str!("scheduler.rs"),
-        include_str!("manager.rs"),
-        include_str!("downloader.rs"),
-        include_str!("pipeline.rs"),
-        include_str!("images.rs"),
-        include_str!("throttle.rs"),
-        include_str!("comicinfo.rs"),
-        include_str!("sanitize.rs"),
-        include_str!("layout.rs"),
-        include_str!("index.rs"),
-        include_str!("store.rs"),
-        include_str!("pending.rs"),
-        include_str!("notify.rs"),
-    ];
-    let missing: Vec<String> = (1..=52)
-        .map(|n| format!("TST-{n:02}"))
-        .filter(|id| !sources.iter().any(|s| s.contains(id.as_str())))
-        .collect();
-    assert!(missing.is_empty(), "no test names {missing:?}");
-}

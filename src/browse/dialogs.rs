@@ -7,6 +7,8 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 
+use crate::ui::{DialogButton, Role};
+
 /// How a dialog button looks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonStyle {
@@ -55,51 +57,47 @@ impl DialogSlot {
             old.close();
         }
         let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        for set in [gtk::Box::set_margin_start, gtk::Box::set_margin_end, gtk::Box::set_margin_top, gtk::Box::set_margin_bottom] {
-            set(&column, 18);
-        }
         if let Some(body) = &spec.body {
-            column.append(&gtk::Label::builder().label(body).wrap(true).xalign(0.0).max_width_chars(50).build());
+            column.append(&crate::ui::message(body));
         }
         if let Some(extra) = &extra {
             column.append(extra);
         }
-        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        buttons.set_halign(gtk::Align::End);
-        column.append(&buttons);
 
         let parent = anchor.upcast_ref::<gtk::Widget>().root().and_downcast::<gtk::Window>();
-        // the shared modal window: it has the header bar that carries the window buttons (the top bar rule)
-        let title = gtk::Label::new(Some(&spec.title));
-        let window = crate::ui::modal(title.upcast_ref::<gtk::Widget>(), &column, 360, -1);
-        window.set_title(Some(&spec.title));
-        window.set_transient_for(parent.as_ref());
-
         let answered = Rc::new(Cell::new(false));
         let on_answer: Rc<dyn Fn(Option<usize>)> = Rc::new(on_answer);
-        for (index, (label, style)) in spec.buttons.iter().enumerate() {
-            let button = gtk::Button::with_label(label);
-            match style {
-                ButtonStyle::Plain => {}
-                ButtonStyle::Suggested => button.add_css_class("suggested-action"),
-                ButtonStyle::Destructive => button.add_css_class("destructive-action"),
+        let buttons = spec
+            .buttons
+            .iter()
+            .enumerate()
+            .map(|(index, (label, style))| {
+                let role = match style {
+                    ButtonStyle::Plain => Role::Normal,
+                    ButtonStyle::Suggested => Role::Suggested,
+                    ButtonStyle::Destructive => Role::Destructive,
+                };
+                let (answered, on_answer) = (Rc::clone(&answered), Rc::clone(&on_answer));
+                DialogButton::new(label, role, move || {
+                    if !answered.replace(true) {
+                        on_answer(Some(index));
+                    }
+                })
+            })
+            .collect();
+        // Escape, the close button and a replacement all dismiss: they answer `None`
+        let dismissed = (Rc::clone(&answered), Rc::clone(&on_answer));
+        let window = crate::ui::dialog_or_dismiss(&spec.title, &column, 360, buttons, move || {
+            if !dismissed.0.replace(true) {
+                dismissed.1(None);
             }
-            let (window, answered, on_answer) = (window.clone(), Rc::clone(&answered), Rc::clone(&on_answer));
-            button.connect_clicked(move |_| {
-                if !answered.replace(true) {
-                    on_answer(Some(index));
-                }
-                window.close();
-            });
-            buttons.append(&button);
-        }
+        });
+        window.set_title(Some(&spec.title));
+        window.set_transient_for(parent.as_ref());
         {
-            let (answered, slot) = (Rc::clone(&answered), Rc::clone(&self.current));
+            let slot = Rc::clone(&self.current);
             let this = window.clone();
             window.connect_close_request(move |_| {
-                if !answered.replace(true) {
-                    on_answer(None);
-                }
                 let mut current = slot.borrow_mut();
                 if current.as_ref() == Some(&this) {
                     current.take();
@@ -107,18 +105,6 @@ impl DialogSlot {
                 gtk::glib::Propagation::Proceed
             });
         }
-        // Escape cancels: it closes the dialog, which answers `None` like any dismissal
-        let escape = gtk::EventControllerKey::new();
-        let closing = window.clone();
-        escape.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk::gdk::Key::Escape {
-                closing.close();
-                gtk::glib::Propagation::Stop
-            } else {
-                gtk::glib::Propagation::Proceed
-            }
-        });
-        window.add_controller(escape);
         *self.current.borrow_mut() = Some(window.clone());
         window.present();
         window
@@ -220,15 +206,7 @@ pub(crate) mod tests {
         let answers: Rc<RefCell<Vec<Option<usize>>>> = Rc::default();
         let log = Rc::clone(&answers);
         let window = slot.show(&anchor, spec("Ask"), move |a| log.borrow_mut().push(a));
-        let controllers = window.observe_controllers();
-        let keys = (0..controllers.n_items())
-            .filter_map(|i| controllers.item(i))
-            .find_map(|c| c.downcast::<gtk::EventControllerKey>().ok())
-            .expect("key controller");
-        let none = gtk::gdk::ModifierType::empty();
-        assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::a, &0_u32, &none]), "other keys go on");
-        assert!(answers.borrow().is_empty());
-        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Escape, &0_u32, &none]));
+        assert!(window.activate_action("window.close", None).is_ok(), "Escape is the window.close shortcut");
         assert_eq!(*answers.borrow(), [None], "Escape is a dismissal");
         assert!(slot.current().is_none());
     }

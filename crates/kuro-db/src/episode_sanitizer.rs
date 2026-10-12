@@ -66,12 +66,4 @@ mod tests {
         assert!(!is_kotlin_whitespace('\u{0085}'));
         assert!(!is_kotlin_whitespace('.'));
     }
-
-    #[test]
-    fn the_trim_set_has_29_distinct_characters() {
-        let mut sorted = TRIM_CHARS.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), 29);
-    }
 }

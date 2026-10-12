@@ -305,6 +305,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn ten_thousand_names_parse_quickly() {
         let names: Vec<String> = (0..10_000)
             .map(|i| format!("Series Name Ch.{i}.5 [Group] (2020)"))

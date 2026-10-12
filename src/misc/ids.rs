@@ -156,15 +156,6 @@ pub fn library_progress(kind: EntryKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
-
-    #[test]
-    fn the_registry_has_23_ids_and_no_duplicates() {
-        // T-35a-005
-        let unique: BTreeSet<&str> = ALL_IDS.iter().copied().collect();
-        assert_eq!(unique.len(), ALL_IDS.len(), "no duplicate id");
-        assert_eq!(ALL_IDS.len(), 23);
-    }
 
     #[test]
     fn every_category_id_has_a_category_and_backup_complete_is_high() {

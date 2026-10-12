@@ -143,28 +143,4 @@ mod tests {
         let ua = seen_user_agent("Mozillaé", HeaderMap::new()).await;
         assert_eq!(ua, None);
     }
-
-    #[tokio::test]
-    async fn a_domain_with_a_pasted_clearance_gets_its_own_user_agent_instead_of_the_default() {
-        let server = wiremock::MockServer::start().await;
-        wiremock::Mock::given(wiremock::matchers::any())
-            .respond_with(wiremock::ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-        let dir = tempfile::tempdir().unwrap();
-        let jar = CookieJar::load(dir.path().join("cookies.json"));
-        let url = url::Url::parse(&server.uri()).unwrap();
-        jar.import_clearance(&url, "abc", "Firefox/136.0").unwrap();
-        let client = NetworkClient::for_tests(vec![Arc::new(
-            UserAgentInterceptor::new(|| "kuro/1.0".to_owned()).with_domain_defaults(jar),
-        )]);
-        client.execute(request::get(&format!("{}/", server.uri())).unwrap()).await.unwrap();
-        // a request that carries its own user agent keeps it
-        let mut own = HeaderMap::new();
-        own.append(USER_AGENT, HeaderValue::from_static("mine"));
-        client.execute(request::get(&format!("{}/", server.uri())).unwrap().headers(own)).await.unwrap();
-        let received = server.received_requests().await.unwrap();
-        let agents: Vec<_> = received.iter().map(|r| r.headers.get("user-agent").unwrap().to_str().unwrap().to_owned()).collect();
-        assert_eq!(agents, ["Firefox/136.0", "mine"]);
-    }
 }

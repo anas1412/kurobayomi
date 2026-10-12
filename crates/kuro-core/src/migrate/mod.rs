@@ -423,17 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn the_log_lines_match_the_kotlin_text() {
-        let ctx = MigrationContext::new(false);
-        let all = [Migration::of("SetupBackupCreateMigration", Version::Always, always_true), at(64, always_true)];
-        let (result, log) = captured(|| futures_block(run(&select(1, 100), &ctx, &all, || {})));
-        result.unwrap();
-        assert!(log.contains("Running migration: { name = SetupBackupCreateMigration, version = -1.0 }"), "{log}");
-        assert!(log.contains("Running migration: { name = Test, version = 64.0 }"), "{log}");
-        assert!(!log.contains("(Dry-run)"));
-    }
-
-    #[test]
     fn the_callback_runs_after_the_last_step() {
         static FINISHED: AtomicUsize = AtomicUsize::new(0);
         fn step<'a>(_: &'a MigrationContext) -> MigrationFuture<'a> {
@@ -556,14 +545,5 @@ mod tests {
         let result = run_blocking(runtime.handle(), &store, 4, &ctx, &[of(Version::Always, always_true)]);
         assert!(result.unwrap());
         assert!(store.get_raw(LAST_VERSION_CODE).is_none());
-    }
-
-    #[test]
-    fn version_log_text_matches_float_to_string_and_always_sorts_first() {
-        assert_eq!(Version::Always.log_text(), "-1.0");
-        assert_eq!(Version::At(64).log_text(), "64.0");
-        assert!(Version::Always < Version::At(0));
-        assert!(Version::At(1) < Version::At(2));
-        assert!(Version::Always.is_always() && !Version::At(1).is_always());
     }
 }

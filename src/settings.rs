@@ -295,6 +295,7 @@ fn sorted_by_name(mut sources: Vec<(i64, String, i64)>) -> Vec<(i64, String, i64
 /// Housekeeping after "Clear database" committed (T-03a-028): above 1000 removed chapters or episodes the WAL is
 /// checkpointed and the user is offered VACUUM. Both run on their own connection to the file, off the open handle.
 fn after_clear(anime: bool, removed: usize) {
+    use crate::ui::{DialogButton, Role};
     use kuro_platform::paths::Paths as _;
     let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
     let path = if anime { kuro_db::schema_anime::db_path(&paths.data_dir()) } else { kuro_db::schema_manga::db_path(&paths.data_dir()) };
@@ -309,23 +310,16 @@ fn after_clear(anime: bool, removed: usize) {
     if !after.offer_vacuum {
         return;
     }
-    let dialog = gtk::AlertDialog::builder()
-        .message("Compact the database to free the space?")
-        .detail("This can take a while. The app stays usable, but do not close it until it is done.")
-        .buttons(["Not now", "Compact"])
-        .default_button(0)
-        .cancel_button(0)
-        .modal(true)
-        .build();
-    dialog.choose(gtk::Window::list_toplevels().into_iter().find_map(|w| w.downcast::<gtk::Window>().ok()).as_ref(), None::<&gtk::gio::Cancellable>, move |picked| {
-        if picked == Ok(1) {
-            std::thread::spawn(move || {
-                if let Err(e) = open().and_then(|c| kuro_db::maintenance::vacuum(&c)) {
-                    tracing::warn!(error = %e, "VACUUM failed");
-                }
-            });
-        }
+    let compact = DialogButton::new("Compact", Role::Suggested, move || {
+        let open = open.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = open().and_then(|c| kuro_db::maintenance::vacuum(&c)) {
+                tracing::warn!(error = %e, "VACUUM failed");
+            }
+        });
     });
+    let body = crate::ui::message("This can take a while. The app stays usable, but do not close it until it is done.");
+    crate::ui::dialog("Compact the database to free the space?", &body, 420, vec![DialogButton::cancel("Not now"), compact]).present();
 }
 
 /// Advanced > "Clear WebView data" (T-12a-034): the toast text for the outcome of `clear_data`.

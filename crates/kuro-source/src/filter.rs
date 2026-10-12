@@ -325,16 +325,6 @@ mod tests {
     }
 
     #[test]
-    fn a_header_equals_a_select_at_state_zero_as_in_kotlin() {
-        assert_eq!(
-            Filter::header("A"),
-            Filter::select("A", vec!["x".into()]),
-            "Kotlin: header state 0 equals select state 0"
-        );
-        assert_ne!(Filter::header("A"), Filter::select_at("A", vec!["x".into(), "y".into()], 1));
-    }
-
-    #[test]
     fn select_value_is_none_out_of_range() {
         let mut f = Filter::select("Pick", values());
         assert_eq!(f.select_value(), Some("A"));

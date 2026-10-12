@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, check_on_path, probe_duration, run_remux};
+use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, check_on_path, hls_input_options, probe_duration, run_remux, with_playlist_options};
 use crate::anime::layout::{AnimeLayout, episode_folder_names, rename_dir};
 use crate::anime::manager::EpisodeRunner;
 use crate::anime::model::{AnimeDownload, Video};
@@ -114,7 +114,9 @@ impl EpisodeEngine {
             _ = cancel.cancelled() => return Err(DownloadError::Cancelled),
             duration = probe_duration(&self.ffprobe, &video.url, &headers) => duration?,
         };
-        let args = build_remux_args(video, &[], partial);
+        // every playlist input (the video and its separate tracks) gets the lenient segment option when it applies
+        let lenient = hls_input_options(&self.ffprobe, "x.m3u8");
+        let args = with_playlist_options(build_remux_args(video, &[], partial), &lenient);
         debug!(target: "kuro_downloads", episode = item.episode.id, headers = %redacted_headers(&headers), "remuxing episode");
         run_remux(&self.ffmpeg, &args, duration, partial, &item.progress, cancel).await
     }

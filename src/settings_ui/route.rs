@@ -542,7 +542,7 @@ mod tests {
             assert_eq!(switches.len(), 1);
             assert!(switches[0].is_ancestor(&headers[0]), "the kind switch is in the header row");
             assert!(all_under(&headers[0], &|w| w.tooltip_text().as_deref() == Some("Add category")).len() == 1, "Add in the header");
-            let empty = all_under(root, &|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label().starts_with("You have no categories")));
+            let empty = all_under(root, &|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label().starts_with("No categories yet")));
             assert!(empty.iter().any(|w| shown_in(w, root)), "the empty state of the visible kind");
         });
     }

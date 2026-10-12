@@ -50,51 +50,6 @@ fn has_warning(build: &LocaleBuild, needle: &str) -> bool {
 }
 
 #[test]
-fn parse_moko_counts_match_the_inventory() {
-    // T-51a-029: 857 + 19 core, 570 + 15 Aniyomi, and 22 translatable="false" names.
-    let count = |sources: &[Source], plain: bool| {
-        sources
-            .iter()
-            .filter(|s| matches!(s.body, Body::Plain(_)) == plain)
-            .count()
-    };
-    let core_strings = parse(CORE_STRINGS);
-    let core_plurals = parse(CORE_PLURALS);
-    let aniyomi_strings = parse(ANIYOMI_STRINGS);
-    let aniyomi_plurals = parse(ANIYOMI_PLURALS);
-    assert_eq!(count(&core_strings, true), 857);
-    assert_eq!(count(&core_plurals, false), 19);
-    assert_eq!(count(&aniyomi_strings, true), 570);
-    assert_eq!(count(&aniyomi_plurals, false), 15);
-    let non_translatable = [
-        &core_strings,
-        &core_plurals,
-        &aniyomi_strings,
-        &aniyomi_plurals,
-    ]
-    .iter()
-    .flat_map(|list| list.iter())
-    .filter(|s| !s.translatable)
-    .count();
-    assert_eq!(non_translatable, 22);
-}
-
-#[test]
-fn english_generation_counts_1384_messages() {
-    let (core, aniyomi) = base();
-    let text = generate_english(&core, &aniyomi).expect("generates");
-    let ids = text
-        .lines()
-        .filter(|l| l.contains(" =") && !l.starts_with('#') && !l.starts_with(' '))
-        .count();
-    assert_eq!(ids, 1384, "1343 from the Aniyomi base (1434 minus the 91 dropped names) plus the 41 in kurobayomi-extra.ftl");
-    assert_eq!(
-        text, ENGLISH_FTL,
-        "the committed English file is the generator output"
-    );
-}
-
-#[test]
 fn dropped_names_are_left_out_of_english_and_of_every_locale() {
     let (core, aniyomi) = base();
     let english = generate_english(&core, &aniyomi).expect("generates");

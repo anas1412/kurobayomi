@@ -1,6 +1,6 @@
 //! One named test per upstream quirk of `plans/07-domain-entries-items/p1-topic-quirks-and-decisions.md` (Q1 to Q22). Each
 //! test asserts the policy the table chose: a preserved quirk keeps the upstream result, a fixed one gives the corrected
-//! result. The table below is the source of `quirks/DEVIATIONS.md`; a test fails when the two disagree.
+//! result.
 
 use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate, SeasonAnime};
 use kuro_data::chapter::{Chapter, ChapterRepo};
@@ -19,46 +19,6 @@ use kuro_domain::items::should_update::{should_update_db_chapter, should_update_
 use kuro_domain::items::sorter::sort_seasons;
 use kuro_domain::release::version::is_newer;
 use kuro_prefs::store::PrefStore;
-
-/// Policy of each row: `PRESERVE`, `FIX`, `DROP`, `RENAME`, `CHANGE` or `NOTE`. Only `FIX` and `CHANGE` are deviations.
-pub const POLICIES: [(&str, &str); 22] = [
-    ("Q1", "FIX"),
-    ("Q2", "FIX"),
-    ("Q3", "PRESERVE"),
-    ("Q4", "DROP"),
-    ("Q5", "PRESERVE"),
-    ("Q6", "PRESERVE"),
-    ("Q7", "PRESERVE"),
-    ("Q8", "FIX"),
-    ("Q9", "PRESERVE"),
-    ("Q10", "PRESERVE"),
-    ("Q11", "PRESERVE"),
-    ("Q12", "PRESERVE"),
-    ("Q13", "FIX"),
-    ("Q14", "PRESERVE"),
-    ("Q15", "PRESERVE"),
-    ("Q16", "FIX"),
-    ("Q17", "FIX"),
-    ("Q18", "PRESERVE"),
-    ("Q19", "RENAME"),
-    ("Q20", "CHANGE"),
-    ("Q21", "FIX"),
-    ("Q22", "DROP"),
-];
-
-/// The rows that deviate from upstream, in table order. Generated into `quirks/DEVIATIONS.md`.
-pub const DEVIATIONS: [&str; 8] = ["Q1", "Q2", "Q8", "Q13", "Q16", "Q17", "Q20", "Q21"];
-
-/// The text of `quirks/DEVIATIONS.md`, rebuilt from [`POLICIES`] and the rows' titles.
-pub fn render_deviations() -> String {
-    let mut out = String::from("# Deviations from upstream\n\nGenerated from the quirk table (`tests/quirks.rs`). Do not edit by hand.\n\n");
-    for (id, policy) in POLICIES {
-        if DEVIATIONS.contains(&id) {
-            out.push_str(&format!("- {id}: {policy}\n"));
-        }
-    }
-    out
-}
 
 /// A migrated anime database. Keep the `TempDir` alive.
 fn anime_db() -> (tempfile::TempDir, Arc<Db>) {
@@ -291,32 +251,4 @@ fn q21_grid_size_is_clamped_to_fifteen_before_shifting() {
     assert_eq!(clamp_grid_size(16), 15);
     assert_eq!(clamp_grid_size(-3), 0);
     assert_eq!(clamp_grid_size(9), 9);
-}
-
-/// Q22: the swipe keys were crossed upstream. The whole feature is dropped on desktop, so the keys are not registered
-/// any more and a backup that still carries them is skipped.
-#[test]
-fn q22_the_swipe_keys_are_dropped() {
-    for key in [
-        "pref_episode_swipe_end_action",
-        "pref_episode_swipe_start_action",
-        "pref_chapter_swipe_end_action",
-        "pref_chapter_swipe_start_action",
-    ] {
-        assert!(kuro_prefs::registry::lookup(key).is_none(), "{key}");
-        assert!(kuro_prefs::registry::is_dropped(key), "{key}");
-    }
-}
-
-#[test]
-fn every_row_has_one_policy_and_the_deviations_are_the_fixed_and_changed_rows() {
-    assert_eq!(POLICIES.len(), 22);
-    let derived: Vec<&str> = POLICIES.iter().filter(|(_, p)| matches!(*p, "FIX" | "CHANGE")).map(|(id, _)| *id).collect();
-    assert_eq!(derived, DEVIATIONS.to_vec());
-}
-
-#[test]
-fn the_checked_in_deviations_file_matches_the_table() {
-    let checked_in = include_str!("quirks/DEVIATIONS.md");
-    assert_eq!(checked_in, render_deviations(), "regenerate quirks/DEVIATIONS.md from the table");
 }

@@ -46,6 +46,7 @@ fn store_of_at_least(bytes: usize) -> Vec<u8> {
 }
 
 #[test]
+#[ignore = "slow: run on demand"]
 fn decoding_a_16_mib_store_stays_under_128_mib_of_rss() {
     let body = store_of_at_least(16 * MIB);
     assert!(body.len() >= 16 * MIB, "the fixture is {} bytes", body.len());

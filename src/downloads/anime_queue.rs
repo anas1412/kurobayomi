@@ -134,12 +134,9 @@ fn notices(queue: AnimeQueue, notifier: Arc<dyn Notifier>) {
                     let running = queue.running();
                     let snapshot = queue.snapshot();
                     // no notification while downloading (the Downloads item shows it); only the end is announced
-                    if !running && was_running {
-                        if snapshot.is_empty() {
-                            notice.complete();
-                        } else {
-                            notice.paused();
-                        }
+                    // a stop with episodes left (a pause or a failure) posts nothing: the failure has its own notice
+                    if !running && was_running && snapshot.is_empty() {
+                        notice.complete();
                     }
                     was_running = running;
                 }

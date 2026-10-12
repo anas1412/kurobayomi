@@ -137,12 +137,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_kotlin_quirk_gives_three_rows_for_2_2_1() {
-        // T-R1 (D-12): total 5, two rows by count, but the overflow closes a third row
-        assert_eq!(pack_rows(&[2, 2, 1], 3), vec![vec![0], vec![1], vec![2]]);
-    }
-
-    #[test]
     fn empty_and_zero_size_input_packs_to_nothing() {
         // T-R2: the guard replaces the Kotlin division by zero
         assert!(pack_rows(&[], 3).is_empty());

@@ -23,6 +23,7 @@ use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::changelog;
 use crate::settings_ui::clipboard::copy_to_clipboard;
 use crate::settings_ui::rows::{item, tap_item, text, TapRow};
+use crate::ui::{DialogButton, Role};
 
 pub const VERSION_TITLE: &str = "Version";
 pub const BUILD_TIME_TITLE: &str = "Build time";
@@ -152,10 +153,6 @@ fn launch(url: &str, failed: impl FnOnce() + 'static) {
 /// fails and a toast says so.
 fn show_update(release: &Release) {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    column.set_margin_top(24);
-    column.set_margin_bottom(16);
-    column.set_margin_start(24);
-    column.set_margin_end(24);
     let icon = gtk::Image::builder().icon_name("software-update-available-symbolic").pixel_size(48).halign(gtk::Align::Center).build();
     icon.set_accessible_role(gtk::AccessibleRole::Presentation);
     column.append(&icon);
@@ -168,7 +165,7 @@ fn show_update(release: &Release) {
         launch(url, || {});
         gtk::glib::Propagation::Stop
     });
-    let scroll = gtk::ScrolledWindow::builder().child(&notes).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+    let scroll = gtk::ScrolledWindow::builder().child(&notes).propagate_natural_height(true).max_content_height(360).hscrollbar_policy(gtk::PolicyType::Never).build();
     column.append(&scroll);
 
     if changelog::link_visible(&release.release_link) {
@@ -179,38 +176,12 @@ fn show_update(release: &Release) {
         column.append(&open);
     }
 
-    let download = gtk::Button::builder().label(tr(MsgKey::update_check_confirm)).css_classes(["suggested-action"]).build();
-    let not_now = gtk::Button::with_label(&tr(MsgKey::action_not_now));
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    buttons.set_halign(gtk::Align::End);
-    buttons.append(&download);
-    buttons.append(&not_now);
-    column.append(&buttons);
-    let title = gtk::Label::new(Some(&tr(MsgKey::update_check_notification_update_available)));
-    let window = crate::ui::modal(title.upcast_ref::<gtk::Widget>(), &column, 520, 560);
-    window.set_default_widget(Some(&download));
-
     let file = release.download_link.clone();
-    let closing = window.clone();
-    download.connect_clicked(move |button| {
-        button.set_sensitive(false);
+    let download = DialogButton::new(tr(MsgKey::update_check_confirm), Role::Suggested, move || {
         launch(&file, || crate::toast::notify(tr(MsgKey::update_check_notification_download_error)));
-        closing.close();
     });
-    let closing = window.clone();
-    not_now.connect_clicked(move |_| closing.close());
-    let keys = gtk::EventControllerKey::new();
-    let closing = window.clone();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk::gdk::Key::Escape {
-            closing.close();
-            gtk::glib::Propagation::Stop
-        } else {
-            gtk::glib::Propagation::Proceed
-        }
-    });
-    window.add_controller(keys);
-    window.present();
+    let title = tr(MsgKey::update_check_notification_update_available);
+    crate::ui::dialog(&title, &column, 520, vec![DialogButton::cancel(tr(MsgKey::action_not_now)), download]).present();
 }
 
 /// A tap on the row: starts a check unless one runs, shows the spinner meanwhile, then the report.

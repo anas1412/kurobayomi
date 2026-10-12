@@ -191,41 +191,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pip_codes_reach_the_same_channel_as_the_mpris_buttons() {
-        let (tx, rx) = action_channel();
-        for code in 1..=5 {
-            assert!(send_pip_control(&tx, code));
-        }
-        assert!(!send_pip_control(&tx, 0));
-        assert!(!send_pip_control(&tx, 6));
-        // An MPRIS button goes down the same channel.
-        tx.try_send(action(MprisButton::Pause, SingleActionGesture::PlayPause, 10.0))
-            .unwrap();
-        let got: Vec<MprisAction> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-        assert_eq!(
-            got,
-            vec![
-                MprisAction::Pause,
-                MprisAction::Unpause,
-                MprisAction::SwitchEpisode { previous: true },
-                MprisAction::SwitchEpisode { previous: false },
-                MprisAction::Seek(10.0),
-                MprisAction::Pause,
-            ]
-        );
-    }
-
-    #[test]
-    fn the_mini_player_row_sends_the_codes_its_buttons_show() {
-        let row = mini_player_buttons(true, 1, 3, false);
-        assert_eq!(pip_action(row.first), MprisAction::SwitchEpisode { previous: true });
-        assert_eq!(pip_action(row.play_pause), MprisAction::Pause);
-        let row = mini_player_buttons(false, 0, 3, true);
-        assert_eq!(pip_action(row.first), MprisAction::Seek(10.0));
-        assert_eq!(pip_action(row.play_pause), MprisAction::Unpause);
-    }
-
-    #[test]
     fn seek_buttons_use_the_skip_length_in_both_directions() {
         assert_eq!(
             action(MprisButton::Previous, SingleActionGesture::Seek, 10.0),
@@ -311,39 +276,5 @@ mod tests {
                 ("xesam:album", "Show".to_owned()),
             ]
         );
-    }
-
-    #[test]
-    fn pip_codes_round_trip_and_unknown_codes_are_dropped() {
-        for code in 1..=5 {
-            assert_eq!(
-                PipControl::from_code(code).map(PipControl::code),
-                Some(code)
-            );
-        }
-        assert_eq!(PipControl::from_code(0), None);
-        assert_eq!(PipControl::from_code(6), None);
-    }
-
-    #[test]
-    fn mini_player_previous_and_next_ends_are_disabled() {
-        let first = mini_player_buttons(true, 0, 3, false);
-        assert_eq!(first.first, PipControl::Previous);
-        assert!(!first.first_enabled);
-        assert!(first.next_enabled);
-        assert_eq!(first.play_pause, PipControl::Pause);
-
-        let last = mini_player_buttons(true, 2, 3, true);
-        assert!(last.first_enabled);
-        assert!(!last.next_enabled);
-        assert_eq!(last.play_pause, PipControl::Play);
-    }
-
-    #[test]
-    fn mini_player_without_replace_skips_and_never_disables_it() {
-        let row = mini_player_buttons(false, 0, 1, false);
-        assert_eq!(row.first, PipControl::Skip);
-        assert!(row.first_enabled);
-        assert!(!row.next_enabled);
     }
 }

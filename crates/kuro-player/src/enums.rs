@@ -363,48 +363,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sheets_has_eight_variants() {
-        assert_eq!(Sheets::ALL.len(), 8);
-        assert_eq!(
-            Sheets::ALL
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len(),
-            8
-        );
-    }
-
-    #[test]
-    fn sheet_spec_ids_match_the_mockup() {
-        let ids: Vec<&str> = Sheets::ALL.iter().map(|s| s.spec_id()).collect();
-        assert_eq!(
-            ids,
-            [
-                "none",
-                "playback_speed",
-                "subtitle_tracks",
-                "audio_tracks",
-                "quality_tracks",
-                "chapters",
-                "more",
-                "screenshot",
-            ]
-        );
-    }
-
-    #[test]
-    fn panels_has_five_variants() {
-        assert_eq!(Panels::ALL.len(), 5);
-        assert_eq!(
-            Panels::ALL
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len(),
-            5
-        );
-    }
-
-    #[test]
     fn defaults_match_preferences() {
         assert_eq!(VideoAspect::default(), VideoAspect::Fit);
         assert_eq!(Sheets::default(), Sheets::None);

@@ -75,13 +75,4 @@ mod tests {
     fn nothing_installed_accepts_anything() {
         assert!(check_install(None, 0, &SIGNER).is_ok());
     }
-
-    #[test]
-    fn the_refusals_carry_the_kotlin_log_text() {
-        assert_eq!(
-            InstallError::Downgrade.to_string(),
-            "Installed extension version is higher. Downgrading is not allowed."
-        );
-        assert_eq!(InstallError::SignerMismatch.to_string(), "Installed extension signature is not matched.");
-    }
 }

@@ -158,7 +158,6 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
     b
 }
 
-/// Open a screen by id: hand-built if one exists, otherwise rendered from its spec.
 thread_local! {
     static LAST_OPENED: std::cell::RefCell<std::collections::HashMap<&'static str, std::time::Instant>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -177,6 +176,7 @@ pub fn first_within(what: &'static str, window_ms: u64) -> bool {
     })
 }
 
+/// Open a screen by id: hand-built if one exists, otherwise rendered from its spec.
 pub fn open(id: &str) {
     #[cfg(test)]
     if OPENED.with(|o| o.borrow_mut().as_mut().map(|v| v.push(id.to_owned())).is_some()) {
@@ -562,38 +562,124 @@ pub fn show_dialog(d: &Dialog) {
     show_dialog_then(d, || {});
 }
 
-/// Shows a spec dialog. Its last button runs `on_ok` and then closes the dialog; the other buttons only close it.
-pub fn show_dialog_then(d: &Dialog, on_ok: impl Fn() + 'static) {
+/// How a dialog button looks and acts. `Suggested` and `Destructive` mark the main button, which Enter presses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Normal,
+    Suggested,
+    Destructive,
+}
+
+/// One dialog button: its label, its role and what it does. `run` returns whether the dialog closes after it (a name
+/// that is taken keeps the dialog open, for example).
+pub struct DialogButton {
+    pub label: String,
+    pub role: Role,
+    pub run: Rc<dyn Fn() -> bool>,
+    /// A Cancel button: closing with it counts as dismissing the dialog, like Escape or the close button.
+    pub dismisses: bool,
+}
+
+impl DialogButton {
+    /// A button that runs `run` and closes the dialog.
+    pub fn new(label: impl Into<String>, role: Role, run: impl Fn() + 'static) -> Self {
+        Self::keep_open_unless(label, role, move || {
+            run();
+            true
+        })
+    }
+
+    /// A button that only closes the dialog.
+    pub fn cancel(label: impl Into<String>) -> Self {
+        Self { dismisses: true, ..Self::new(label, Role::Normal, || {}) }
+    }
+
+    /// A button that closes the dialog only when `run` returns true.
+    pub fn keep_open_unless(label: impl Into<String>, role: Role, run: impl Fn() -> bool + 'static) -> Self {
+        Self { label: label.into(), role, run: Rc::new(run), dismisses: false }
+    }
+}
+
+/// The one dialog of the app: a title bar, `body` with the standard margins (it scrolls once it is taller than the
+/// screen allows), and the buttons in a row at the bottom right. The window is as tall as its content, the main button
+/// is the default (Enter), and Escape closes it. Every dialog is built here, so they all look and behave the same.
+pub fn dialog(title: &str, body: &impl IsA<gtk::Widget>, width: i32, buttons: Vec<DialogButton>) -> gtk::Window {
+    dialog_or_dismiss(title, body, width, buttons, || {})
+}
+
+/// [`dialog`] that runs `on_dismiss` once when it closes any way other than through a button that is not a Cancel
+/// button: Escape, the close button or Cancel.
+pub fn dialog_or_dismiss(title: &str, body: &impl IsA<gtk::Widget>, width: i32, buttons: Vec<DialogButton>, on_dismiss: impl Fn() + 'static) -> gtk::Window {
+    let answered = Rc::new(std::cell::Cell::new(false));
     let col = GBox::new(O::Vertical, 12);
     margins(&col, 18);
-    if let Some(t) = &d.text {
-        col.append(&Label::builder().label(t).wrap(true).xalign(0.0).max_width_chars(50).build());
+    col.append(body);
+    let row = GBox::new(O::Horizontal, 6);
+    row.set_halign(Align::End);
+    row.set_margin_top(6);
+    col.append(&row);
+    let win = modal(&Label::builder().label(title).css_classes(["title"]).build().upcast(), &scrolled_max(&col, 560), width, -1);
+    win.set_resizable(false);
+    for b in buttons {
+        let button = Button::with_label(&b.label);
+        match b.role {
+            Role::Normal => {}
+            Role::Suggested => button.add_css_class("suggested-action"),
+            Role::Destructive => button.add_css_class("destructive-action"),
+        }
+        if b.role != Role::Normal {
+            win.set_default_widget(Some(&button));
+        }
+        let (w, run, answered, dismisses) = (win.clone(), b.run, Rc::clone(&answered), b.dismisses);
+        button.connect_clicked(move |_| {
+            if run() {
+                answered.set(!dismisses);
+                w.close();
+            }
+        });
+        row.append(&button);
     }
-    groups_into(&col, &d.groups);
-    let buttons = GBox::new(O::Horizontal, 6);
-    buttons.set_halign(Align::End);
-    buttons.set_margin_top(6);
-    col.append(&buttons);
-    let win = modal(&Label::builder().label(&d.title).css_classes(["title"]).build().upcast(), &scrolled_max(&col, 520), 420, -1);
+    let escape = gtk::ShortcutController::new();
+    escape.add_shortcut(gtk::Shortcut::new(gtk::ShortcutTrigger::parse_string("Escape"), Some(gtk::NamedAction::new("window.close"))));
+    win.add_controller(escape);
+    win.connect_close_request(move |_| {
+        if !answered.get() {
+            on_dismiss();
+        }
+        glib::Propagation::Proceed
+    });
+    win
+}
+
+/// A dialog of text: [`dialog`] with one wrapped paragraph as its body.
+pub fn message(text: &str) -> Label {
+    Label::builder().label(text).wrap(true).xalign(0.0).max_width_chars(50).build()
+}
+
+/// Shows a spec dialog. Its last button runs `on_ok` and then closes the dialog; the other buttons only close it.
+pub fn show_dialog_then(d: &Dialog, on_ok: impl Fn() + 'static) {
+    let body = GBox::new(O::Vertical, 12);
+    if let Some(t) = &d.text {
+        body.append(&message(t));
+    }
+    groups_into(&body, &d.groups);
     let labels = if d.buttons.is_empty() { vec!["OK".to_string()] } else { d.buttons.clone() };
     let n = labels.len();
     let on_ok = Rc::new(on_ok);
-    for (i, l) in labels.iter().enumerate() {
-        let b = Button::with_label(l);
-        let is_last = i + 1 == n;
-        if is_last {
-            b.add_css_class(if l.to_lowercase().contains("delete") || l.to_lowercase().contains("remove") { "destructive-action" } else { "suggested-action" });
-        }
-        let (w, on_ok) = (win.clone(), Rc::clone(&on_ok));
-        b.connect_clicked(move |_| {
-            if is_last {
-                on_ok();
+    let buttons = labels
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            if i + 1 < n {
+                return DialogButton::cancel(l);
             }
-            w.close();
-        });
-        buttons.append(&b);
-    }
-    win.present();
+            let lower = l.to_lowercase();
+            let role = if lower.contains("delete") || lower.contains("remove") { Role::Destructive } else { Role::Suggested };
+            let on_ok = Rc::clone(&on_ok);
+            DialogButton::new(l, role, move || on_ok())
+        })
+        .collect();
+    dialog(&d.title, &body, 420, buttons).present();
 }
 
 fn norm(s: &str) -> String {
@@ -709,6 +795,45 @@ mod tests {
         let mut found = Vec::new();
         all(root, &mut found);
         found.iter().filter_map(|w| w.downcast_ref::<Label>().map(|l| l.label().to_string())).collect()
+    }
+
+    #[test]
+    fn the_shared_dialog_puts_cancel_then_the_main_button_and_tells_a_dismiss_from_an_answer() {
+        crate::testing::with_display(|| {
+            let _nav = crate::testing::nav();
+            let (ran, dismissed) = (Rc::new(std::cell::Cell::new(0)), Rc::new(std::cell::Cell::new(0)));
+            let open = || {
+                let (ran, dismissed) = (Rc::clone(&ran), Rc::clone(&dismissed));
+                let buttons = vec![DialogButton::cancel("Cancel"), DialogButton::new("Add", Role::Suggested, move || ran.set(ran.get() + 1))];
+                dialog_or_dismiss("Add category", &message("Body"), 380, buttons, move || dismissed.set(dismissed.get() + 1))
+            };
+            let buttons_of = |win: &gtk::Window| {
+                let mut found = Vec::new();
+                all(win.upcast_ref(), &mut found);
+                found.into_iter().filter_map(|w| w.downcast::<Button>().ok()).filter(|b| b.label().is_some()).collect::<Vec<_>>()
+            };
+
+            // a window that was never shown has nothing to close, so each one is presented like the app does
+            let win = open();
+            win.present();
+            assert!(!win.is_resizable() && win.is_modal());
+            let buttons = buttons_of(&win);
+            assert_eq!(buttons.iter().map(|b| b.label().unwrap().to_string()).collect::<Vec<_>>(), ["Cancel", "Add"]);
+            assert!(buttons[1].has_css_class("suggested-action"));
+            assert_eq!(win.default_widget().as_ref(), Some(buttons[1].upcast_ref::<gtk::Widget>()), "Enter presses the main button");
+            buttons[1].emit_clicked();
+            assert_eq!((ran.get(), dismissed.get()), (1, 0), "the answer runs and is not a dismiss");
+
+            let win = open();
+            win.present();
+            buttons_of(&win)[0].emit_clicked();
+            assert_eq!((ran.get(), dismissed.get()), (1, 1), "Cancel dismisses");
+
+            let win = open();
+            win.present();
+            win.close();
+            assert_eq!((ran.get(), dismissed.get()), (1, 2), "the close button dismisses");
+        });
     }
 
     #[test]

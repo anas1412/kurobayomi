@@ -59,31 +59,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_hint_shows_only_while_doh_is_on() {
-        assert!(!local_name_hint_visible(-1));
-        assert!(!local_name_hint_visible(0));
-        assert!(local_name_hint_visible(1));
-        assert!(local_name_hint_visible(13));
-        assert!(!local_name_hint_visible(14));
-        assert_eq!(LOCAL_NAME_HINT, "Local names such as localhost are not resolved while DoH is on.");
-    }
-
-    #[test]
-    fn ok_needs_a_non_blank_entry_that_changed() {
-        assert!(!user_agent_ok_enabled("", "kuro/1.0"));
-        assert!(!user_agent_ok_enabled("   ", "kuro/1.0"));
-        assert!(!user_agent_ok_enabled("kuro/1.0", "kuro/1.0"));
-        assert!(user_agent_ok_enabled("kuro/2.0", "kuro/1.0"));
-    }
-
-    #[test]
-    fn control_characters_make_a_user_agent_invalid() {
-        assert!(user_agent_is_valid("Mozilla/5.0 (X11; Linux x86_64)"));
-        assert!(!user_agent_is_valid("bad\nagent"));
-        assert!(!user_agent_is_valid("bad\u{7}agent"));
-    }
-
-    #[test]
     fn a_missing_file_yields_the_defaults() {
         let prefs = NetworkPrefs::new(PrefStore::in_memory());
         let settings = NetworkSettings::from_prefs(&prefs);

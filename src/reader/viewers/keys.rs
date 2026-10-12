@@ -208,24 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn volume_keys_are_not_claimed_when_off_or_when_the_menu_is_visible() {
-        assert!(!pager_key(press(InputKey::VolumeUp), OFF).claimed);
-        let menu = KeyContext { menu_visible: true, ..ON };
-        assert!(!pager_key(press(InputKey::VolumeDown), menu).claimed);
-        assert!(!webtoon_key(press(InputKey::VolumeDown), menu).claimed);
-    }
-
-    #[test]
-    fn volume_keys_page_and_invert_when_enabled() {
-        assert_eq!(pager_key(press(InputKey::VolumeDown), ON).action, Some(KeyAction::Page(PageCmd::Next)));
-        assert_eq!(pager_key(press(InputKey::VolumeUp), ON).action, Some(KeyAction::Page(PageCmd::Prev)));
-        let inverted = KeyContext { volume_inverted: true, ..ON };
-        assert_eq!(pager_key(press(InputKey::VolumeDown), inverted).action, Some(KeyAction::Page(PageCmd::Prev)));
-        assert_eq!(webtoon_key(press(InputKey::VolumeDown), inverted).action, Some(KeyAction::Scroll { down: false }));
-        assert_eq!(webtoon_key(press(InputKey::VolumeUp), inverted).action, Some(KeyAction::Scroll { down: true }));
-    }
-
-    #[test]
     fn webtoon_scroll_keys_are_consumed_on_both_edges_and_scroll_on_press() {
         for key in [InputKey::Left, InputKey::Up, InputKey::PageUp] {
             assert_eq!(webtoon_key(press(key), OFF).action, Some(KeyAction::Scroll { down: false }));

@@ -1,14 +1,15 @@
-//! The one dialog helper every preference dialog uses: transient, modal, fixed width, Escape = Cancel,
-//! and a confirm button that the caller enables or disables.
+//! The one dialog helper every preference dialog uses: the shared dialog of `crate::ui`, with a confirm button that
+//! the caller enables or disables.
 
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{glib, Align, Box as GBox, Button, Label, Orientation};
+use gtk::{glib, Box as GBox, Button, Label, Orientation};
 
 use super::super::strings;
 use super::DIALOG_WIDTH;
+use crate::ui::{DialogButton, Role};
 
 /// A dialog built by [`show`]. The caller owns the body and decides when to close it.
 #[derive(Clone)]
@@ -68,31 +69,8 @@ pub fn show(
     on_confirm: impl Fn(Dialog) + 'static,
     on_cancel: impl Fn() + 'static,
 ) -> Dialog {
-    let window = gtk::Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .resizable(false)
-        .default_width(DIALOG_WIDTH)
-        .title(title)
-        .build();
     let done = Rc::new(Cell::new(false));
-    let on_cancel: Rc<dyn Fn()> = Rc::new(on_cancel);
-    let cancel: Rc<dyn Fn()> = {
-        let (done, window, on_cancel) = (done.clone(), window.clone(), on_cancel.clone());
-        Rc::new(move || {
-            if !done.get() {
-                done.set(true);
-                on_cancel();
-                window.destroy();
-            }
-        })
-    };
-
     let column = GBox::new(Orientation::Vertical, 16);
-    column.set_margin_top(24);
-    column.set_margin_bottom(16);
-    column.set_margin_start(24);
-    column.set_margin_end(24);
     // the window title shows the title once; the body does not repeat it
     column.append(body);
     let error = Label::new(None);
@@ -102,43 +80,35 @@ pub fn show(
     error.set_visible(false);
     column.append(&error);
 
-    let buttons = GBox::new(Orientation::Horizontal, 8);
-    buttons.set_halign(Align::End);
-    let cancel_button = Button::with_label(&strings::cancel());
-    buttons.append(&cancel_button);
-    let mut dialog = Dialog { window: window.clone(), confirm: None, error, done: done.clone() };
+    // the confirm button needs the dialog, which is built after the window that holds the button
+    let cell: Rc<OnceCell<Dialog>> = Rc::default();
+    let mut buttons = vec![DialogButton::cancel(strings::cancel())];
     if let Some(label) = confirm {
-        let confirm_button = Button::with_label(label);
-        confirm_button.add_css_class("suggested-action");
-        buttons.append(&confirm_button);
-        dialog.confirm = Some(confirm_button.clone());
-        let handle = dialog.clone();
-        confirm_button.connect_clicked(move |_| on_confirm(handle.clone()));
+        let cell = cell.clone();
+        buttons.push(DialogButton::keep_open_unless(label, Role::Suggested, move || {
+            if let Some(dialog) = cell.get() {
+                on_confirm(dialog.clone());
+            }
+            false
+        }));
     }
-    column.append(&buttons);
-    window.set_child(Some(&column));
-
-    let cancel_click = cancel.clone();
-    cancel_button.connect_clicked(move |_| cancel_click());
-    let (close_done, close_cancel) = (done.clone(), on_cancel.clone());
-    window.connect_close_request(move |_| {
-        if !close_done.get() {
-            close_done.set(true);
-            close_cancel();
+    let close_done = done.clone();
+    let window = crate::ui::dialog_or_dismiss(title, &column, DIALOG_WIDTH, buttons, move || {
+        if !close_done.replace(true) {
+            on_cancel();
         }
-        glib::Propagation::Proceed
     });
+    window.set_title(Some(title));
+    window.set_transient_for(Some(parent));
+    // the confirm button is the last button of the window: its row comes last
+    let confirm_button = confirm.and_then(|_| last_button(window.child()?.upcast_ref()));
+    let dialog = Dialog { window: window.clone(), confirm: confirm_button.clone(), error, done };
+    let _ = cell.set(dialog.clone());
 
+    // Enter submits an enabled dialog (T-19a-067); a field or button that handles Enter itself never gets here
     let keys = gtk::EventControllerKey::new();
-    let cancel_key = cancel.clone();
-    let confirm_key = dialog.confirm.clone();
     keys.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk::gdk::Key::Escape {
-            cancel_key();
-            return glib::Propagation::Stop;
-        }
-        // Enter submits an enabled dialog (T-19a-067); a field or button that handles Enter itself never gets here
-        if let Some(confirm) = confirm_key.as_ref().filter(|_| is_enter(key)) {
+        if let Some(confirm) = confirm_button.as_ref().filter(|_| is_enter(key)) {
             if confirm.is_sensitive() {
                 confirm.emit_clicked();
             }
@@ -150,6 +120,17 @@ pub fn show(
 
     window.present();
     dialog
+}
+
+/// The last button at or below `widget` in tree order.
+fn last_button(widget: &gtk::Widget) -> Option<Button> {
+    let mut found = None;
+    let mut child = widget.first_child();
+    while let Some(next) = child {
+        found = last_button(&next).or(found);
+        child = next.next_sibling();
+    }
+    found.or_else(|| widget.clone().downcast::<Button>().ok())
 }
 
 #[cfg(test)]
@@ -171,7 +152,7 @@ mod tests {
     #[test]
     fn the_title_is_shown_once_in_the_window_title_and_not_repeated_in_the_body() {
         crate::testing::with_display(|| {
-            let parent = gtk::Window::new();
+            let (_, parent) = crate::testing::nav();
             let body = Label::new(Some("Some text"));
             let dialog = show(&parent, "Pick one", &body, Some("OK"), |_| {}, || {});
             assert_eq!(dialog.window.title().as_deref(), Some("Pick one"));
@@ -179,7 +160,6 @@ mod tests {
             assert_eq!(labels_reading(&content, "Pick one"), 0);
             assert_eq!(labels_reading(&content, "Some text"), 1);
             dialog.window.destroy();
-            parent.destroy();
         });
     }
 

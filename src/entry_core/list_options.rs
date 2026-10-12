@@ -16,7 +16,7 @@ use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::entry_core::flags::Write;
-use crate::ui;
+use crate::ui::{self, DialogButton, Role};
 use crate::widgets::view_options::{Item, Pick, Section, ViewOptions};
 
 /// The action of "Use as default for all titles".
@@ -293,30 +293,10 @@ impl Spec {
 /// "Use as default for all titles": asks once, then runs `on_ok`. The list options of this title become the default of
 /// new titles and are written to every title of the library.
 pub fn confirm_default(on_ok: impl Fn() + 'static) {
-    let ok = gtk::Button::builder().label("Use for all titles").css_classes(["suggested-action"]).build();
-    let cancel = gtk::Button::with_label(&tr(MsgKey::action_cancel));
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    buttons.set_halign(gtk::Align::End);
-    buttons.append(&cancel);
-    buttons.append(&ok);
-    let col = ui::column();
     let text = "Every title in your library takes these list options, and titles you open later start with them.";
-    col.append(&gtk::Label::builder().label(text).wrap(true).xalign(0.0).build());
-    col.append(&buttons);
-    let title = gtk::Label::new(Some("Use as default for all titles"));
-    let window = ui::modal(title.upcast_ref(), &col, 380, 180);
-    cancel.connect_clicked({
-        let window = window.clone();
-        move |_| window.close()
-    });
-    ok.connect_clicked({
-        let window = window.clone();
-        move |_| {
-            window.close();
-            on_ok();
-        }
-    });
-    window.present();
+    let body = ui::message(text);
+    let buttons = vec![DialogButton::cancel(tr(MsgKey::action_cancel)), DialogButton::new("Use for all titles", Role::Suggested, on_ok)];
+    ui::dialog("Use as default for all titles", &body, 380, buttons).present();
 }
 
 #[cfg(test)]

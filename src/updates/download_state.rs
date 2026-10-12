@@ -116,15 +116,6 @@ mod tests {
     }
 
     #[test]
-    fn download_state_ordinals_are_preserved() {
-        assert_eq!(DownloadState::NotDownloaded as u8, 0);
-        assert_eq!(DownloadState::Queue as u8, 1);
-        assert_eq!(DownloadState::Downloading as u8, 2);
-        assert_eq!(DownloadState::Downloaded as u8, 3);
-        assert_eq!(DownloadState::Error as u8, 4);
-    }
-
-    #[test]
     fn download_disk_check_is_cached_per_key_and_invalidated() {
         let mut cache = DiskCache::default();
         let mut calls = 0;

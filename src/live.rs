@@ -6,13 +6,13 @@ use std::rc::Rc;
 
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Label, ListBox, Orientation as O};
+use gtk::{Box as GBox, Button, Label, ListBox, Orientation as O};
 use kuro_domain::category::model::Category;
 use kuro_domain::kind::EntryKind;
 
 use crate::data;
 use crate::screens::{dialog_then_named, list_row};
-use crate::ui::{boxed_list, column, icon_button, margins, modal, scrolled, screen};
+use crate::ui::{boxed_list, column, icon_button, scrolled, screen, DialogButton, Role};
 use crate::watch::bind_watch;
 
 fn kind_of(anime: bool) -> EntryKind {
@@ -41,47 +41,32 @@ const DUPLICATE_CATEGORY: &str = "A category with this name already exists!";
 /// reports as used, with [`DUPLICATE_CATEGORY`] shown under the entry.
 fn name_dialog(dialog: &str, initial: &str, taken: impl Fn(&str) -> bool + 'static, on_ok: impl Fn(String) + 'static) {
     let Some(spec) = screen("categories").dialogs.into_iter().find(|d| d.id == dialog) else { return };
-    let labels = if spec.buttons.is_empty() { vec!["OK".to_owned()] } else { spec.buttons.clone() };
-    let col = GBox::new(O::Vertical, 12);
-    margins(&col, 18);
+    let labels = if spec.buttons.is_empty() { vec!["Cancel".to_owned(), "OK".to_owned()] } else { spec.buttons.clone() };
+    let body = GBox::new(O::Vertical, 6);
     let entry = gtk::Entry::builder().text(initial).activates_default(true).build();
-    col.append(&entry);
+    body.append(&entry);
     let error = Label::builder().css_classes(["error"]).xalign(0.0).wrap(true).visible(false).build();
-    col.append(&error);
-    let taken = Rc::new(taken);
-    let buttons = GBox::new(O::Horizontal, 6);
-    buttons.set_halign(Align::End);
-    col.append(&buttons);
-    let win = modal(&Label::builder().label(&spec.title).css_classes(["title"]).build().upcast(), &scrolled(&col), 420, -1);
-    let on_ok = Rc::new(on_ok);
-    let last = labels.len().saturating_sub(1);
-    for (i, label) in labels.iter().enumerate() {
-        let button = Button::with_label(label);
-        if i == last {
-            button.add_css_class("suggested-action");
-        }
-        let (win, entry, on_ok, error, taken) = (win.clone(), entry.clone(), Rc::clone(&on_ok), error.clone(), Rc::clone(&taken));
-        let is_ok = i == last;
-        button.connect_clicked(move |_| {
-            if !is_ok {
-                win.close();
-                return;
-            }
+    body.append(&error);
+    let (cancel, ok) = (labels.first().cloned().unwrap_or_default(), labels.last().cloned().unwrap_or_default());
+    let save = {
+        let entry = entry.clone();
+        move || {
             let name = entry.text().trim().to_owned();
             if name.is_empty() {
-                return;
+                return false;
             }
             if taken(&name) {
                 error.set_text(DUPLICATE_CATEGORY);
                 error.set_visible(true);
-                return;
+                return false;
             }
             on_ok(name);
-            win.close();
-        });
-        buttons.append(&button);
-    }
+            true
+        }
+    };
+    let win = crate::ui::dialog(&spec.title, &body, 380, vec![DialogButton::cancel(cancel), DialogButton::keep_open_unless(ok, Role::Suggested, save)]);
     win.present();
+    entry.grab_focus();
 }
 
 /// One category row list of one kind. Rename, hide and delete write through the category service. With no user

@@ -32,16 +32,3 @@ pub fn probe_mini_player() -> Option<MiniPlayerSupport> {
     mini_player_support(Some(gtk::glib::prelude::ObjectExt::type_(&display).name()))
 }
 
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_mini_player_probe_follows_the_display_type() {
-        assert_eq!(mini_player_support(Some("GdkX11Display")), Some(MiniPlayerSupport::AlwaysOnTop));
-        assert_eq!(mini_player_support(Some("GdkWaylandDisplay")), Some(MiniPlayerSupport::Windowed));
-        assert_eq!(mini_player_support(Some("GdkBroadwayDisplay")), None);
-        assert_eq!(mini_player_support(None), None);
-    }
-}

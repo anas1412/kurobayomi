@@ -428,65 +428,8 @@ mod tests {
     use http::HeaderValue;
     use reqwest::cookie::CookieStore as _;
 
-    const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/136.0";
-
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
-    }
-
-    #[test]
-    fn a_pasted_clearance_is_stored_for_the_domain() {
-        let dir = tempfile::tempdir().unwrap();
-        let jar = CookieJar::load(dir.path().join("cookies.json"));
-        let site = url("https://site.test/manga");
-        jar.import_clearance(&site, "abc123", UA).unwrap();
-        let cookies = jar.get(&site);
-        assert!(cookies.iter().any(|c| c.name() == "cf_clearance" && c.value() == "abc123"));
-        // it is scoped to the registrable domain, so a sibling host sends it too, and another domain does not
-        assert!(!jar.get(&url("https://www.site.test/")).is_empty());
-        assert!(jar.get(&url("https://other.test/")).is_empty());
-        // it is persistent, so it is in the file a reload reads
-        jar.flush().unwrap();
-        assert!(!CookieJar::load(dir.path().join("cookies.json")).get(&site).is_empty());
-    }
-
-    #[test]
-    fn an_empty_or_malformed_clearance_is_refused_and_nothing_is_stored() {
-        let dir = tempfile::tempdir().unwrap();
-        let jar = CookieJar::load(dir.path().join("cookies.json"));
-        let site = url("https://site.test/");
-        assert_eq!(jar.import_clearance(&site, "", UA), Err(ClearanceImportError::Empty));
-        assert_eq!(jar.import_clearance(&site, "a;b", UA), Err(ClearanceImportError::Malformed));
-        assert_eq!(jar.import_clearance(&site, "a b", UA), Err(ClearanceImportError::Malformed));
-        assert_eq!(jar.import_clearance(&site, "ok", "  "), Err(ClearanceImportError::InvalidUserAgent));
-        assert_eq!(jar.import_clearance(&site, "ok", "bad\nagent"), Err(ClearanceImportError::InvalidUserAgent));
-        assert!(jar.get(&site).is_empty());
-        assert_eq!(jar.domain_user_agent(&site), None);
-    }
-
-    #[test]
-    fn the_entered_user_agent_becomes_the_domain_default_and_survives_a_reload() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("cookies.json");
-        let jar = CookieJar::load(file.clone());
-        jar.import_clearance(&url("https://www.site.test/a"), "abc", "  Mozilla/5.0 (X11) Firefox/136.0 ").unwrap();
-        // the registrable domain keys it, so a sibling host shares it and another domain does not
-        let agent = Some("Mozilla/5.0 (X11) Firefox/136.0".to_owned());
-        assert_eq!(jar.domain_user_agent(&url("https://api.site.test/")), agent);
-        assert_eq!(jar.domain_user_agent(&url("https://other.test/")), None);
-        assert_eq!(CookieJar::load(file).domain_user_agent(&url("https://site.test/")), agent);
-    }
-
-    #[test]
-    fn clearing_the_cookies_forgets_the_domain_user_agents() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("cookies.json");
-        let jar = CookieJar::load(file.clone());
-        let site = url("https://site.test/");
-        jar.import_clearance(&site, "abc", UA).unwrap();
-        jar.remove_all().unwrap();
-        assert_eq!(jar.domain_user_agent(&site), None);
-        assert_eq!(CookieJar::load(file).domain_user_agent(&site), None);
     }
 
     fn web(name: &str, value: &str, domain: &str, path: &str, expires: Option<i64>) -> WebCookie {

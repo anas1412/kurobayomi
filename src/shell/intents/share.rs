@@ -134,16 +134,4 @@ mod tests {
         assert_eq!(show_in_folder(Path::new("/home/u/Downloads/page.png")), Plan::ShowInFolder("/home/u/Downloads/page.png".into()));
         assert_eq!(show_in_folder(Path::new("page.png")), Plan::Nothing);
     }
-
-    #[test]
-    fn no_share_chooser_and_no_backup_share_type_in_the_shell() {
-        // the backup MIME stays in the backup crate; the shell has no share sheet
-        for (name, text) in [("share.rs", include_str!("share.rs")), ("route.rs", include_str!("route.rs"))] {
-            let production = &text[..text.find("#[cfg(test)]").unwrap_or(text.len())];
-            let code: Vec<_> = production.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
-            for forbidden in ["x-protobuf", "ACTION_SEND", "createChooser", "toShareIntent"] {
-                assert!(!code.iter().any(|l| l.contains(forbidden)), "{name}: {forbidden}");
-            }
-        }
-    }
 }

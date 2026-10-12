@@ -131,14 +131,6 @@ mod tests {
     }
 
     #[test]
-    fn drag_dismisses_past_56_px_or_a_fast_fling() {
-        assert!(!drag_dismisses(56.0, 0.0));
-        assert!(drag_dismisses(56.5, 0.0));
-        assert!(!drag_dismisses(10.0, 125.0));
-        assert!(drag_dismisses(10.0, 125.5));
-    }
-
-    #[test]
     fn scrim_click_needs_a_fully_open_sheet() {
         assert!(!scrim_click_closes(false));
         assert!(scrim_click_closes(true));

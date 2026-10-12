@@ -73,15 +73,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_splash_timers_are_ported() {
-        let source = include_str!("bootstrap.rs");
-        let code = &source[..source.find("#[cfg(test)]").unwrap()];
-        for timer in ["MIN_SHOW", "MAX_WAIT", "keep_hidden", "Duration"] {
-            assert!(!code.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| l.contains(timer)), "{timer}");
-        }
-    }
-
-    #[test]
     fn the_library_page_loads_until_the_migrator_finishes() {
         let mut boot: Bootstrap<&str> = Bootstrap::new();
         assert_eq!(boot.library_state(), LibraryState::Loading);

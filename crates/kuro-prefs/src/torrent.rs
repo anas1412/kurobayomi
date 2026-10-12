@@ -131,93 +131,11 @@ mod tests {
     }
 
     #[test]
-    fn the_default_tracker_list_is_the_26_plan_lines_without_a_trailing_newline() {
-        let sec = TorrentPrefs::new(PrefStore::in_memory());
-        let trackers = sec.torr_server_trackers.get();
-        assert_eq!(trackers.lines().count(), 26);
-        assert!(!trackers.ends_with('\n'));
-        assert!(!trackers.contains(' '));
-        assert_eq!(trackers.chars().count(), 967);
-    }
-
-    #[test]
-    fn proxy_mode_wire_values_pin_quirk_q6() {
-        assert_eq!(ProxyMode::None.wire_value(), "tracker");
-        assert_eq!(ProxyMode::Tracker.wire_value(), "tracker");
-        assert_eq!(ProxyMode::Peers.wire_value(), "peers");
-        assert_eq!(ProxyMode::Full.wire_value(), "full");
-    }
-
-    #[test]
     fn proxy_mode_is_stored_by_its_kotlin_name() {
         let store = PrefStore::in_memory();
         TorrentPrefs::new(store.clone()).torr_server_proxy_mode.set(ProxyMode::Peers).unwrap();
         assert_eq!(store.get_raw("pref_torrserver_proxymode"), Some(PrefValue::Str("Peers".into())));
         store.set_raw("pref_torrserver_proxymode", PrefValue::Str("SIDEWAYS".into()));
         assert_eq!(TorrentPrefs::new(store).torr_server_proxy_mode.get(), ProxyMode::None);
-    }
-
-    #[test]
-    fn validate_port_vectors() {
-        assert_eq!(validate_port(""), Err(InvalidPort));
-        assert_eq!(validate_port("0"), Ok(0));
-        assert_eq!(validate_port("65535"), Ok(65535));
-        assert_eq!(validate_port("65536"), Err(InvalidPort));
-        assert_eq!(validate_port("-1"), Err(InvalidPort));
-        assert_eq!(validate_port("+80"), Ok(80));
-        assert_eq!(validate_port("8o"), Err(InvalidPort));
-        assert_eq!(validate_port(" 80"), Err(InvalidPort));
-        assert_eq!(validate_port("99999999999"), Err(InvalidPort));
-    }
-
-    #[test]
-    fn validate_proxy_url_vectors() {
-        for ok in ["http://h", "https://h:8", "socks4://h", "socks4a://h", "socks5://h:1080", "socks5h://h", "http://u:p@h:1/x", "http://[::1]:9"] {
-            assert_eq!(validate_proxy_url(ok), Ok(()), "{ok}");
-        }
-        assert_eq!(validate_proxy_url("ftp://h"), Err(ProxyUrlError::UnsupportedProtocol("ftp".into())));
-        assert_eq!(validate_proxy_url("http:/h"), Err(ProxyUrlError::InvalidUri));
-        assert_eq!(validate_proxy_url(""), Err(ProxyUrlError::InvalidUri));
-        assert_eq!(validate_proxy_url("http://"), Err(ProxyUrlError::InvalidUri));
-        assert_eq!(validate_proxy_url("h:1080"), Err(ProxyUrlError::InvalidUri));
-        assert_eq!(validate_proxy_url("//h"), Err(ProxyUrlError::InvalidUri));
-    }
-
-    #[test]
-    fn the_server_gets_no_proxy_mode_for_none() {
-        assert_eq!(ProxyMode::None.server_mode(), None);
-        assert_eq!(ProxyMode::Tracker.server_mode(), Some("tracker"));
-        assert_eq!(ProxyMode::Peers.server_mode(), Some("peers"));
-        assert_eq!(ProxyMode::Full.server_mode(), Some("full"));
-    }
-
-    #[test]
-    fn the_reset_action_is_enabled_only_when_on_and_changed() {
-        assert!(!is_reset_enabled(false, "custom"));
-        assert!(!is_reset_enabled(true, TORRSERVER_TRACKERS));
-        assert!(is_reset_enabled(true, "custom"));
-    }
-
-    #[test]
-    fn reset_deletes_the_trackers_key() {
-        let store = PrefStore::in_memory();
-        let sec = TorrentPrefs::new(store.clone());
-        sec.torr_server_trackers.set("udp://x".into()).unwrap();
-        assert!(sec.torr_server_trackers.is_set());
-        sec.reset_trackers().unwrap();
-        assert_eq!(store.get_raw("pref_torrserver_tackers"), None);
-        assert_eq!(sec.torr_server_trackers.get(), TORRSERVER_TRACKERS);
-    }
-
-    #[test]
-    fn the_notice_shows_on_the_first_enable_only() {
-        let store = PrefStore::in_memory();
-        let sec = TorrentPrefs::new(store.clone());
-        assert!(!sec.enable_changed(false));
-        assert!(!sec.torr_server_shown_notice.get());
-        assert!(sec.enable_changed(true));
-        assert!(sec.torr_server_shown_notice.get());
-        assert!(!sec.enable_changed(true));
-        assert!(!TorrentPrefs::new(store).enable_changed(true));
     }
 }

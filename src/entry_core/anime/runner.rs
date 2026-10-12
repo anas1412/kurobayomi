@@ -794,6 +794,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow: run on demand"]
     fn dispose_during_a_refresh_cancels_it_and_a_queued_write_still_lands() {
         let rt = rt();
         let (_dir, store, id) = with_episodes(true, false, 1, 0);

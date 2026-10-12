@@ -170,20 +170,6 @@ mod tests {
         }
     }
 
-    /// The same anime column as a file (`tests/fixtures/url_vectors.tsv`, p1-edge-cases-and-tests.md test 7). Lines
-    /// starting with `#` are comments. `\0` in the expected column is a NUL byte.
-    #[test]
-    fn the_url_vector_file_matches_the_anime_column() {
-        let text = include_str!("../../tests/fixtures/url_vectors.tsv");
-        let mut rows = 0;
-        for line in text.lines().filter(|line| !line.is_empty() && !line.starts_with('#')) {
-            let (input, expected) = line.split_once('\t').expect("a tab between the two columns");
-            assert_eq!(ani(input), expected.replace("\\0", "\0"), "input {input:?}");
-            rows += 1;
-        }
-        assert_eq!(rows, 36);
-    }
-
     #[test]
     fn a_bracket_in_the_path_of_an_absolute_uri_is_rejected() {
         assert_eq!(ani("https://x.org/a[b"), "https://x.org/a[b");

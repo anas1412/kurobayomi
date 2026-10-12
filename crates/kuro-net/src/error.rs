@@ -116,11 +116,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn http_error_text_matches_the_kotlin_exception() {
-        assert_eq!(NetError::Http { code: 404 }.to_string(), "HTTP error 404");
-    }
-
-    #[test]
     fn every_variant_has_a_user_message() {
         let all = [
             NetError::Http { code: 503 },

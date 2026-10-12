@@ -24,7 +24,7 @@ pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 pub const WARNING_TIMEOUT_SECS: u32 = 30;
 /// Errors inside this window are summarised (proposal, E-U02).
 pub const ERROR_WINDOW: Duration = Duration::from_secs(5);
-pub const PAUSED_TEXT: &str = "Episode download paused";
+pub const DONE_TEXT: &str = "Episodes are ready to watch offline";
 pub const DOWNLOADING_TEXT: &str = "Downloading…";
 
 /// The text of the progress line: `Downloading…` at 0, else `Downloading (N%)`.
@@ -51,15 +51,15 @@ pub fn progress_notice(anime_title: &str, episode_name: &str, percent: i32, hide
     }
 }
 
-/// The paused notice: "Paused" with Resume and Cancel all, not ongoing.
-pub fn paused_notice() -> Notice {
+/// The notice of a finished queue: "Downloads finished", not ongoing, no actions.
+pub fn done_notice() -> Notice {
     Notice {
         id: PROGRESS_ID,
         priority: Priority::Low,
-        title: crate::notify::PAUSED_TITLE.into(),
-        body: Some(PAUSED_TEXT.into()),
+        title: crate::notify::DONE_TITLE.into(),
+        body: Some(DONE_TEXT.into()),
         ongoing: false,
-        actions: vec![Action::Resume, Action::CancelAll],
+        actions: Vec::new(),
         expire_secs: None,
     }
 }
@@ -182,14 +182,14 @@ impl AnimeNotifier {
         true
     }
 
-    /// The run was paused by the user: replace the progress line with the paused notice.
-    pub fn paused(&mut self) {
+    /// The run finished: the done notice replaces any progress line.
+    pub fn complete(&mut self) {
         self.last_progress = None;
-        self.sink.show(&paused_notice());
+        self.sink.show(&done_notice());
     }
 
-    /// The run finished. No completion message is shown: the progress line goes away.
-    pub fn complete(&mut self) {
+    /// The queue was cleared: the progress line goes away and nothing is announced.
+    pub fn dismiss(&mut self) {
         self.last_progress = None;
         self.sink.withdraw(PROGRESS_ID);
     }
@@ -215,8 +215,8 @@ impl AnimeNotifier {
                 self.error(now, manga_title.as_deref(), chapter_name.as_deref(), message);
             }
             DownloadEvent::Warning { text, help_url, .. } => self.warning(text, known_help_url(help_url.as_deref())),
-            DownloadEvent::Paused => self.paused(),
-            DownloadEvent::Complete | DownloadEvent::Dismiss => self.complete(),
+            DownloadEvent::Complete => self.complete(),
+            DownloadEvent::Dismiss => self.dismiss(),
             _ => {}
         }
     }
@@ -280,14 +280,14 @@ mod tests {
     }
 
     #[test]
-    fn paused_replaces_progress_and_complete_withdraws_it() {
+    fn the_end_shows_the_done_notice_and_a_dismiss_withdraws() {
         let (mut n, rec) = notifier(false);
-        n.paused();
         n.complete();
+        n.dismiss();
         let shown = rec.0.lock().unwrap();
         assert_eq!(shown[0].id, PROGRESS_ID);
-        assert_eq!(shown[0].title, "Paused");
-        assert_eq!(shown[0].actions, vec![Action::Resume, Action::CancelAll]);
+        assert_eq!(shown[0].title, "Downloads finished");
+        assert!(shown[0].actions.is_empty());
         assert_eq!(*rec.1.lock().unwrap(), vec![PROGRESS_ID]);
     }
 
@@ -359,10 +359,13 @@ mod tests {
         let t0 = Instant::now();
         n.dispatch(t0, &DownloadEvent::Started);
         n.dispatch(t0, &DownloadEvent::Warning { text: "No network connection available".into(), timeout_secs: Some(30), help_url: None });
+        n.dispatch(t0, &DownloadEvent::Paused);
         n.dispatch(t0, &DownloadEvent::Complete);
+        n.dispatch(t0, &DownloadEvent::Dismiss);
         let shown = rec.0.lock().unwrap();
-        assert_eq!(shown.len(), 1);
+        assert_eq!(shown.len(), 2, "the warning and the done notice; a pause shows nothing");
         assert_eq!(shown[0].body.as_deref(), Some("No network connection available"));
+        assert_eq!(shown[1].title, "Downloads finished");
         assert_eq!(*rec.1.lock().unwrap(), vec![PROGRESS_ID]);
     }
 }

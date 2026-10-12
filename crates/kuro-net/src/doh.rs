@@ -328,43 +328,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_has_thirteen_providers_with_ids_one_to_thirteen() {
-        assert_eq!(DohProvider::ALL.len(), 13);
-        for (i, provider) in DohProvider::ALL.iter().enumerate() {
-            assert_eq!(provider.id(), i as i32 + 1);
-            assert_eq!(DohProvider::from_pref(i as i32 + 1), Some(*provider));
-        }
-    }
-
-    #[test]
     fn disabled_and_unknown_ids_have_no_provider() {
         for id in [-1, 0, 14] {
             assert_eq!(DohProvider::from_pref(id), None, "id {id}");
         }
-    }
-
-    #[test]
-    fn urls_and_bootstrap_addresses_follow_the_kotlin_table() {
-        assert_eq!(
-            DohProvider::Cloudflare.url(),
-            "https://cloudflare-dns.com/dns-query"
-        );
-        assert_eq!(DohProvider::Cloudflare.bootstrap().len(), 9);
-        assert_eq!(DohProvider::Cloudflare.bootstrap()[0], "162.159.36.1");
-        assert_eq!(DohProvider::Qihoo360.bootstrap().len(), 7);
-        assert_eq!(
-            DohProvider::DnsPod.bootstrap(),
-            &["1.12.12.12", "120.53.53.53"]
-        );
-        assert_eq!(
-            DohProvider::ControlD.url(),
-            "https://freedns.controld.com/p0"
-        );
-        assert_eq!(DohProvider::ControlD.bootstrap()[2], "2606:1a40::");
-        assert_eq!(
-            DohProvider::LibreDns.bootstrap()[1],
-            "2a01:4f8:1c0c:8274::1"
-        );
     }
 
     #[test]

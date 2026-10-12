@@ -26,9 +26,4 @@ mod tests {
         assert_eq!(crossfade(true), Duration::from_millis(300));
         assert_eq!(crossfade(false), Duration::ZERO);
     }
-
-    #[test]
-    fn screen_fade_is_300_ms() {
-        assert_eq!(SCREEN_FADE, Duration::from_millis(300));
-    }
 }

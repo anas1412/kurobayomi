@@ -1,6 +1,6 @@
 //! The reader's bottom sheet (T-043a-079): the page actions. A revealer over a scrim inside the reader's overlay; Escape
 //! and a click outside the sheet dismiss it. The reader settings are a native window (`settings_window`). The confirm
-//! prompt uses `gtk::AlertDialog`. No libadwaita.
+//! prompt uses the shared dialog. No libadwaita.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -9,6 +9,7 @@ use gtk::glib;
 use gtk::prelude::*;
 
 use super::strings;
+use crate::ui::{DialogButton, Role};
 
 /// A bottom sheet over `base`. Only one content is shown at a time; `show` replaces it.
 pub struct Sheet {
@@ -139,19 +140,16 @@ fn first_focusable(root: &gtk::Widget) -> Option<gtk::Widget> {
     None
 }
 
-/// Asks a yes or no question with `gtk::AlertDialog`. `on_ok` runs only for OK. Cancel and outside dismissal do
+/// Asks a yes or no question with the shared dialog. `on_ok` runs only for OK. Cancel and outside dismissal do
 /// nothing.
 pub fn confirm(parent: &impl IsA<gtk::Window>, message: &str, on_ok: impl FnOnce() + 'static) {
-    let dialog = gtk::AlertDialog::builder()
-        .message(message)
-        .buttons([strings::ACTION_CANCEL, strings::ACTION_OK])
-        .cancel_button(0)
-        .default_button(1)
-        .modal(true)
-        .build();
-    dialog.choose(Some(parent.as_ref()), None::<&gtk::gio::Cancellable>, move |result| {
-        if result == Ok(1) {
+    let on_ok = std::cell::Cell::new(Some(on_ok));
+    let ok = DialogButton::new(strings::ACTION_OK, Role::Suggested, move || {
+        if let Some(on_ok) = on_ok.take() {
             on_ok();
         }
     });
+    let dialog = crate::ui::dialog(message, &gtk::Box::new(gtk::Orientation::Vertical, 0), 360, vec![DialogButton::cancel(strings::ACTION_CANCEL), ok]);
+    dialog.set_transient_for(Some(parent.as_ref()));
+    dialog.present();
 }

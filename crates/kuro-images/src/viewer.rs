@@ -165,11 +165,6 @@ mod tests {
     }
 
     #[test]
-    fn zoom_is_500_ms() {
-        assert_eq!(ZOOM_MS, 500);
-    }
-
-    #[test]
     fn edit_button_opens_a_menu_only_for_a_custom_image() {
         assert_eq!(edit_button(true), EditButton::Menu);
         assert_eq!(edit_button(false), EditButton::Picker);

@@ -18,8 +18,9 @@ pub const WARNING_ID: &str = "dl-warning";
 pub const ERROR_ID: &str = "dl-error";
 
 pub const DOWNLOADER_TITLE: &str = "Downloader";
-pub const PAUSED_TITLE: &str = "Paused";
-pub const PAUSED_TEXT: &str = "Chapter download paused";
+/// The one notice a finished download posts (user, 2026-10-12: only the end is announced, besides failures).
+pub const DONE_TITLE: &str = "Downloads finished";
+pub const DONE_TEXT: &str = "Chapters are ready to read offline";
 pub const UNKNOWN_ERROR_TEXT: &str = "Could not download chapter due to unexpected error";
 const MANGA_TITLE_CAP: usize = 15;
 const CONTENT_TITLE_CAP: usize = 30;
@@ -112,16 +113,19 @@ pub fn effect_for(event: &DownloadEvent, _hide_content: bool) -> Option<Effect> 
     match event {
         // no notification while downloading: the app's own Downloads item shows the progress; only the end is announced
         DownloadEvent::Progress { .. } => None,
-        DownloadEvent::Paused => Some(Effect::Show(Notice {
+        // no "Paused" notice either (user, 2026-10-12): only the end and failures are announced; the Downloads item
+        // shows a paused queue
+        DownloadEvent::Paused => None,
+        DownloadEvent::Complete => Some(Effect::Show(Notice {
             id: PROGRESS_ID,
             priority: Priority::Low,
-            title: PAUSED_TITLE.into(),
-            body: Some(PAUSED_TEXT.into()),
+            title: DONE_TITLE.into(),
+            body: Some(DONE_TEXT.into()),
             ongoing: false,
-            actions: vec![Action::Resume, Action::CancelAll],
+            actions: Vec::new(),
             expire_secs: None,
         })),
-        DownloadEvent::Complete | DownloadEvent::Dismiss => Some(Effect::Withdraw(PROGRESS_ID)),
+        DownloadEvent::Dismiss => Some(Effect::Withdraw(PROGRESS_ID)),
         DownloadEvent::Warning { text, timeout_secs, .. } => Some(Effect::Show(Notice {
             id: WARNING_ID,
             priority: Priority::Low,
@@ -261,18 +265,11 @@ mod tests {
     }
 
     #[test]
-    fn paused_replaces_progress_with_resume_and_cancel() {
-        let n = shown(&DownloadEvent::Paused, false);
-        assert_eq!(n.id, PROGRESS_ID);
-        assert_eq!(n.title, "Paused");
-        assert_eq!(n.body.as_deref(), Some("Chapter download paused"));
-        assert_eq!(n.actions, vec![Action::Resume, Action::CancelAll]);
-        assert!(!n.ongoing);
-    }
-
-    #[test]
-    fn complete_and_dismiss_withdraw_the_progress_notice() {
-        assert_eq!(effect_for(&DownloadEvent::Complete, false), Some(Effect::Withdraw(PROGRESS_ID)));
+    fn a_finished_queue_says_so_a_pause_says_nothing_and_a_dismiss_withdraws() {
+        let n = shown(&DownloadEvent::Complete, false);
+        assert_eq!((n.title.as_str(), n.body.as_deref()), (DONE_TITLE, Some(DONE_TEXT)));
+        assert!(!n.ongoing && n.actions.is_empty());
+        assert_eq!(effect_for(&DownloadEvent::Paused, false), None);
         assert_eq!(effect_for(&DownloadEvent::Dismiss, false), Some(Effect::Withdraw(PROGRESS_ID)));
     }
 
@@ -316,7 +313,7 @@ mod tests {
     #[test]
     fn every_downloader_notice_is_low_importance() {
         let events = [
-            DownloadEvent::Paused,
+            DownloadEvent::Complete,
             DownloadEvent::Warning { text: "w".into(), timeout_secs: None, help_url: None },
             DownloadEvent::Error { chapter_id: None, manga_id: None, manga_title: None, chapter_name: None, message: "e".into() },
         ];
@@ -330,16 +327,6 @@ mod tests {
         assert_eq!(effect_for(&DownloadEvent::Started, false), None);
         assert_eq!(effect_for(&DownloadEvent::QueueChanged, false), None);
         assert_eq!(effect_for(&DownloadEvent::Finished { chapter_id: 1 }, false), None);
-    }
-
-    #[derive(Default)]
-    struct FakeNotifier(Mutex<Vec<(String, String, Option<String>)>>);
-
-    impl Notifier for FakeNotifier {
-        fn show(&self, id: &str, title: &str, body: Option<&str>) {
-            self.0.lock().unwrap().push((id.into(), title.into(), body.map(str::to_owned)));
-        }
-        fn withdraw(&self, _id: &str) {}
     }
 
     #[derive(Default)]
@@ -362,8 +349,8 @@ mod tests {
         dispatch(&DownloadEvent::Complete, false, &sink);
         assert_eq!(
             *sink.0.lock().unwrap(),
-            vec![format!("show {PROGRESS_ID}"), format!("withdraw {PROGRESS_ID}")],
-            "progress shows nothing; pause shows, completion withdraws"
+            vec![format!("show {PROGRESS_ID}")],
+            "progress and pause show nothing; the end shows the done notice"
         );
     }
 }

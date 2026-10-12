@@ -35,20 +35,27 @@ pub fn downloads_summary(percents: &[u8]) -> Option<(usize, u8)> {
     Some((percents.len(), (sum / percents.len()) as u8))
 }
 
-/// The percent done of every unit in both queues, and a 0 for each saved row waiting for its source (the queue page
-/// lists those too). Empty when no download manager runs.
-fn queued_percents() -> Vec<u8> {
-    let Some(queues) = crate::downloads::live::queues() else { return Vec::new() };
+/// The percent done of every unit in both queues that is still going, and a 0 for each saved row waiting for its source
+/// (the queue page lists those too); then how many units failed. A failed unit is not "downloading": it waits for a
+/// retry on the Downloads page. Empty when no download manager runs.
+fn queued_percents() -> (Vec<u8>, usize) {
+    let Some(queues) = crate::downloads::live::queues() else { return (Vec::new(), 0) };
     let manga = queues.manga.snapshot();
     let mut units: Vec<(EntryKind, i64)> = manga.iter().map(|d| (EntryKind::Manga, d.chapter.id)).collect();
     if let Some(anime) = &queues.anime {
         units.extend(anime.snapshot().iter().map(|d| (EntryKind::Anime, d.episode.id)));
     }
-    let mut out: Vec<u8> = units.into_iter().map(|(kind, id)| crate::downloads::live::queued(&queues, kind, id).map_or(0, |(_, percent)| percent)).collect();
+    let states: Vec<_> = units.into_iter().map(|(kind, id)| crate::downloads::live::queued(&queues, kind, id)).collect();
+    let failed = states.iter().filter(|s| matches!(s, Some((kuro_downloads::DownloadState::Error, _)))).count();
+    let mut out: Vec<u8> = states
+        .into_iter()
+        .filter(|s| !matches!(s, Some((kuro_downloads::DownloadState::Error, _))))
+        .map(|s| s.map_or(0, |(_, percent)| percent))
+        .collect();
     // a waiting row that was queued again is already counted above
     let waiting = queues.waiting.read().unwrap_or_else(|e| e.into_inner()).iter().filter(|w| !manga.iter().any(|d| d.chapter.id == w.row.chapter_id)).count();
     out.resize(out.len() + waiting, 0);
-    out
+    (out, failed)
 }
 
 /// One panel row: the icon, the title, then `extra` (badges).
@@ -86,18 +93,22 @@ fn downloads_row(icon: &str, title: &str) -> gtk::ListBoxRow {
         move |area, cr, width, height| download_button::draw(area, cr, width, height, download_button::Look::Downloading(percent.get()))
     });
     let count = gtk::Label::builder().css_classes(["kb-nav-badge", "numeric"]).valign(gtk::Align::Center).build();
-    let row = nav_row(icon, title, &[ring.upcast_ref(), count.upcast_ref()]);
+    // failed downloads: a warning sign with their number, instead of a ring that would never fill
+    let warning = gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).valign(gtk::Align::Center).build();
+    let row = nav_row(icon, title, &[ring.upcast_ref(), warning.upcast_ref(), count.upcast_ref()]);
     let weak = row.downgrade();
     let tick = move || {
         if weak.upgrade().is_none() {
             return glib::ControlFlow::Break;
         }
         // the item is always there (user, 2026-10-12); only its circle and count follow the queue
-        let summary = downloads_summary(&queued_percents());
-        let (queued, done) = summary.unwrap_or((0, 0));
+        let (percents, failed) = queued_percents();
+        let (queued, done) = downloads_summary(&percents).unwrap_or((0, 0));
         ring.set_visible(queued > 0);
-        count.set_visible(queued > 0);
-        count.set_label(&queued.to_string());
+        warning.set_visible(queued == 0 && failed > 0);
+        warning.set_tooltip_text(Some(&format!("{failed} failed")));
+        count.set_visible(queued > 0 || failed > 0);
+        count.set_label(&(if queued > 0 { queued } else { failed }).to_string());
         if percent.replace(done) != done {
             ring.queue_draw();
         }
@@ -313,18 +324,6 @@ mod tests {
 
     fn labels(root: &gtk::Widget) -> Vec<String> {
         crate::screens::alone::descendants(root).iter().filter_map(|w| w.downcast_ref::<gtk::Label>().map(|l| l.label().to_string())).collect()
-    }
-
-    fn menu_labels(model: &gio::MenuModel) -> Vec<String> {
-        let mut out = Vec::new();
-        for i in 0..model.n_items() {
-            if let Some(section) = model.item_link(i, "section") {
-                out.extend(menu_labels(&section));
-            } else if let Some(label) = model.item_attribute_value(i, "label", Some(glib::VariantTy::STRING)).and_then(|v| v.get::<String>()) {
-                out.push(label);
-            }
-        }
-        out
     }
 
     #[test]

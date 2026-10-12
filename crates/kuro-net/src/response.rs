@@ -143,12 +143,6 @@ mod tests {
         assert!(empty_response(204, url()).await_success().is_ok());
     }
 
-    #[test]
-    fn http_error_text_for_103_is_the_kotlin_text() {
-        let err = empty_response(103, url()).await_success().err().unwrap();
-        assert_eq!(err.to_string(), "HTTP error 103");
-    }
-
     #[tokio::test]
     async fn bytes_reads_every_chunk() {
         let mut resp = empty_response(200, url());

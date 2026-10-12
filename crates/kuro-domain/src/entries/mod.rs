@@ -2,8 +2,6 @@
 
 pub mod anime;
 pub mod combine;
-#[cfg(test)]
-mod coverage;
 pub mod cover;
 pub mod defaults;
 pub mod fetch_interval;

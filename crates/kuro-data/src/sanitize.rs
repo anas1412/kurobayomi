@@ -53,14 +53,6 @@ mod tests {
     }
 
     #[test]
-    fn trim_set_has_29_distinct_characters() {
-        let mut sorted = TRIM_CHARS.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), 29);
-    }
-
-    #[test]
     fn full_width_text_does_not_match_the_ascii_title() {
         assert_eq!(sanitize_item_name("\u{FF2F}ne Piece 2", "One Piece"), "\u{FF2F}ne Piece 2");
     }

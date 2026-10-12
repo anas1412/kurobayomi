@@ -115,7 +115,7 @@ fn benchmark_db() -> Connection {
 }
 
 #[test]
-#[ignore = "timing benchmark: run with --ignored"]
+#[ignore = "slow: run on demand"]
 fn benchmark_url_lookup_and_library_query_stay_within_the_budget() {
     let c = benchmark_db();
     migrate_keeping_old_view(&c);

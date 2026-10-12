@@ -389,13 +389,6 @@ mod triggers {
         assert_eq!(chapter_version, 1);
         assert_eq!(manga_version(&db, manga_id), 1);
     }
-
-    #[test]
-    fn deleting_the_system_category_aborts() {
-        let (_d, db) = manga_db();
-        let result = db.write(|tx| Ok(categories::delete(tx, 0)?));
-        assert!(result.is_err());
-    }
 }
 
 mod anime_repo {

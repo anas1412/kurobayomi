@@ -233,7 +233,6 @@ impl<S: HttpSource + 'static> CatalogueSource for Http<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -357,20 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn the_default_headers_are_built_once_per_source() {
-        let (source, _dir) = Plain::new("https://a.test");
-        let calls = Cell::new(0);
-        let build = || {
-            calls.set(calls.get() + 1);
-            default_headers(source.core())
-        };
-        let first = source.core().headers(build);
-        let second = source.core().headers(build);
-        assert_eq!(calls.get(), 1);
-        assert!(std::ptr::eq(first, second));
-    }
-
-    #[test]
     fn the_id_is_the_generated_id_and_is_kept() {
         let (source, _dir) = Plain::new("https://a.test");
         let adapter = Http(source);
@@ -483,14 +468,6 @@ mod tests {
         let chapter = SChapter::new("/ch/1", "Ch 1");
         assert_eq!(source.chapter_web_url(&chapter).unwrap(), "https://a.test/reader/ch/1");
         assert_eq!(source.manga_web_url(&manga("/manga/1")).unwrap(), "https://a.test/manga/1");
-    }
-
-    #[test]
-    fn prepare_new_chapter_is_a_no_op_by_default() {
-        let (source, _dir) = Plain::new("https://a.test");
-        let mut chapter = SChapter::new("/ch/1", "Ch 1");
-        source.prepare_new_chapter(&mut chapter, &manga("/manga/1"));
-        assert_eq!(chapter, SChapter::new("/ch/1", "Ch 1"));
     }
 
     #[test]

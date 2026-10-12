@@ -28,6 +28,7 @@ use crate::backup_run::{LegacyImport, Library, run_restore};
 use crate::gio_notifier::GioNotifier;
 use crate::pref_model::backup_pages::{self, BackupHost};
 use crate::pref_model::net::BlockingHttp;
+use crate::ui::{DialogButton, Role};
 
 /// The action both Cancel buttons call: the banner and the notification (T-22a-046).
 const CANCEL_ACTION: &str = "cancel-restore";
@@ -224,33 +225,30 @@ fn finish(notifier: &GioNotifier, result: &Result<RestoreEnd, String>) {
 /// The close dialog of a window that is closing while a restore runs: Keep running or Cancel restore and close. Both
 /// close the window; Cancel also asks the job to stop (T-22a-046).
 fn ask_before_closing(win: &gtk::ApplicationWindow) {
-    let dialog = gtk::AlertDialog::builder()
-        .message(shown(text::RESTORING_BACKUP))
-        .buttons([shown(text::KEEP_RUNNING), shown(text::CANCEL_AND_CLOSE)])
-        .default_button(0)
-        .cancel_button(0)
-        .modal(true)
-        .build();
     debug_assert_eq!(CLOSE_CHOICES.len(), 2);
-    let win = win.clone();
-    dialog.choose(Some(&win.clone()), None::<&gio::Cancellable>, move |picked| {
-        let choice = match picked {
-            Ok(1) => CloseChoice::CancelAndClose,
-            Ok(_) => CloseChoice::KeepRunning,
-            // a dismissed dialog leaves the window open
-            Err(_) => return,
-        };
+    let owner = win.clone();
+    let answer = Rc::new(move |choice: CloseChoice| {
         let stop = SESSION.with(|s| s.borrow().as_ref().map(|session| session.stop.clone())).unwrap_or_default();
         if on_close_choice(choice, &stop) == CloseAction::Close {
             // the process lives until the job has ended, whichever button was pressed
             SESSION.with(|s| {
                 if let Some(session) = s.borrow_mut().as_mut() {
-                    session.hold = win.application().map(|app| app.hold());
+                    session.hold = owner.application().map(|app| app.hold());
                 }
             });
-            win.destroy();
+            owner.destroy();
         }
     });
+    let (cancel_and_close, keep) = (Rc::clone(&answer), Rc::clone(&answer));
+    // Keep running is the cancel button: Escape and the close button pick it too
+    let buttons = vec![
+        DialogButton::cancel(shown(text::KEEP_RUNNING)),
+        DialogButton::new(shown(text::CANCEL_AND_CLOSE), Role::Normal, move || cancel_and_close(CloseChoice::CancelAndClose)),
+    ];
+    let title = shown(text::RESTORING_BACKUP);
+    let dialog = crate::ui::dialog_or_dismiss(&title, &gtk::Box::new(gtk::Orientation::Vertical, 0), 360, buttons, move || keep(CloseChoice::KeepRunning));
+    dialog.set_transient_for(Some(win));
+    dialog.present();
 }
 
 #[cfg(test)]

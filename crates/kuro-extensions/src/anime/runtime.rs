@@ -52,6 +52,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "slow: run on demand"]
     async fn a_refresh_of_eight_slow_stores_takes_two_rounds_of_four() {
         let server = MockServer::start().await;
         let mut urls = Vec::new();

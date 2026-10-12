@@ -413,37 +413,23 @@ fn button_row(label: &str, css: &[&str], run: impl Fn() + 'static) -> gtk::ListB
 /// also removes the entry from AniList.
 fn confirm_stop(bound: &Bound, deletable: bool, redraw: Rc<dyn Fn()>) {
     let name = "AniList";
-    let column = ui::column();
+    let column = GBox::new(O::Vertical, 12);
     column.append(&Label::builder().label(tr(MsgKey::track_delete_text)).wrap(true).xalign(0.0).build());
     let also = gtk::CheckButton::builder().label(trf(MsgKey::track_delete_remote_text, &[("arg1", Arg::Str(name))])).active(remove::CHECKBOX_DEFAULT).build();
     also.set_visible(remove::checkbox_shown(deletable));
     column.append(&also);
-    let cancel = Button::with_label(&tr(MsgKey::action_cancel));
-    let stop = Button::builder().label("Stop tracking").css_classes(["destructive-action"]).build();
-    let buttons = GBox::new(O::Horizontal, 8);
-    buttons.set_halign(Align::End);
-    buttons.append(&cancel);
-    buttons.append(&stop);
-    column.append(&buttons);
-    let title = Label::builder().label(trf(MsgKey::track_delete_title, &[("arg1", Arg::Str(name))])).css_classes(["title"]).build();
-    let window = ui::modal(title.upcast_ref(), &column, 400, -1);
-    cancel.connect_clicked({
-        let window = window.clone();
-        move |_| window.close()
-    });
     let bound = bound.clone();
-    stop.connect_clicked({
-        let window = window.clone();
-        move |_| {
-            window.close();
+    let buttons = vec![
+        ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
+        ui::DialogButton::new("Stop tracking", ui::Role::Destructive, move || {
             let also_remote = remove::remote_delete(deletable, also.is_active());
             match &bound {
                 Bound::Anime(track) => finish(actions::remove_anime(track.clone(), also_remote), |key| english(&key), Rc::clone(&redraw)),
                 Bound::Manga(track) => finish(actions::remove_manga(track.clone(), also_remote), |key| english(&key), Rc::clone(&redraw)),
             }
-        }
-    });
-    window.present();
+        }),
+    ];
+    ui::dialog(&trf(MsgKey::track_delete_title, &[("arg1", Arg::Str(name))]), &column, 400, buttons).present();
 }
 
 /// Writes one edit to AniList at once. A success tells the details page and redraws the rows; a failure is a toast.

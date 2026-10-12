@@ -2,10 +2,10 @@
 //! manga and anime details pages.
 
 use gtk::prelude::*;
-use gtk::{Box as GBox, Label, Orientation as O};
+use gtk::Label;
 
 use super::shortcuts::HELP;
-use crate::ui;
+use crate::ui::{self, DialogButton, Role};
 
 /// Whether this key opens the help dialog.
 pub fn is_help_key(key: gtk::gdk::Key) -> bool {
@@ -15,7 +15,6 @@ pub fn is_help_key(key: gtk::gdk::Key) -> bool {
 /// The grid of the help list: the keys on the left, what they do on the right.
 pub fn grid() -> gtk::Grid {
     let grid = gtk::Grid::builder().row_spacing(8).column_spacing(24).build();
-    ui::margins(&grid, 18);
     for (row, (keys, what)) in HELP.iter().enumerate() {
         let keys = Label::builder().label(*keys).xalign(0.0).css_classes(["monospace"]).build();
         let what = Label::builder().label(*what).xalign(0.0).wrap(true).build();
@@ -27,10 +26,8 @@ pub fn grid() -> gtk::Grid {
 
 /// Opens the dialog.
 pub fn open() {
-    let title = Label::builder().label("Keyboard shortcuts").css_classes(["title"]).build();
-    let col = GBox::new(O::Vertical, 0);
-    col.append(&grid());
-    ui::modal(title.upcast_ref(), &col, 420, 460).present();
+    let buttons = vec![DialogButton::new("Close", Role::Suggested, || {})];
+    ui::dialog("Keyboard shortcuts", &grid(), 420, buttons).present();
 }
 
 #[cfg(test)]

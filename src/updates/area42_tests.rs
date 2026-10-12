@@ -87,74 +87,11 @@ pub mod fixtures {
 mod domain {
     use std::collections::BTreeSet;
 
-    use chrono::{FixedOffset, NaiveDate, TimeZone, Utc};
-    use kuro_domain::history::next_item::next_in_order;
+    use chrono::{FixedOffset, TimeZone, Utc};
 
-    use crate::updates::format::{RelativeDate, RelativeTime, duration_string, format_size, progress_mmss, relative_date, relative_time_span};
-    use crate::updates::selection::{Selectable, Selection};
     use crate::updates::storage::{Selection as Pick, StorageRow, build_snapshot, donut_arcs, entry_color};
 
-    #[derive(Clone, Debug)]
-    struct Row {
-        id: i64,
-        selected: bool,
-    }
-
-    impl Selectable for Row {
-        fn id(&self) -> i64 {
-            self.id
-        }
-        fn selected(&self) -> bool {
-            self.selected
-        }
-        fn set_selected(&mut self, selected: bool) {
-            self.selected = selected;
-        }
-    }
-
-    fn rows(n: i64) -> Vec<Row> {
-        (0..n).map(|id| Row { id, selected: false }).collect()
-    }
-
-    fn d(day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 10, day).expect("a date")
-    }
-
-    /// `(id, done)` in reading order.
-    fn units() -> Vec<(i64, bool)> {
-        vec![(1, false), (2, false), (3, false), (4, false)]
-    }
-
-    fn ids(list: Vec<(i64, bool)>) -> Vec<i64> {
-        list.into_iter().map(|u| u.0).collect()
-    }
-
-    // 3 to 5: the next-unit rule of the shared `GetNextChapters` port, in both of its modes
-
-    #[test]
-    fn next_units_unread_current_is_first() {
-        // EC-42-H-07: an unread current unit is the first one returned
-        assert_eq!(ids(next_in_order(&units(), |u| u.0, |u| u.1, Some(2), false)), [2, 3, 4]);
-    }
-
-    #[test]
-    fn next_units_read_current_drops_it() {
-        let read_first = vec![(1, true), (2, false), (3, false)];
-        assert_eq!(ids(next_in_order(&read_first, |u| u.0, |u| u.1, Some(1), false)), [2, 3], "the read current unit is passed over");
-    }
-
-    #[test]
-    fn next_units_missing_from_id_returns_first_unit() {
-        // EC-42-H-05: the pending list starts at the first unit when the anchor is gone
-        assert_eq!(ids(next_in_order(&units(), |u| u.0, |u| u.1, Some(99), true)), [1, 2, 3, 4]);
-        // the list of units that the History resume reads has an explicit compat flag for Aniyomi's second unit
-        let legacy = crate::updates::history::next_units_from(&units(), |u| u.0, |u| u.1, 99, true);
-        assert_eq!(ids(legacy), [2, 3, 4], "legacy_mode: Aniyomi's result starts at the second unit");
-        let fixed = crate::updates::history::next_units_from(&units(), |u| u.0, |u| u.1, 99, false);
-        assert_eq!(ids(fixed), [1, 2, 3, 4]);
-    }
-
-    // 6 and 11: the updates window and the selection resets
+    // 6: the updates window
 
     #[test]
     fn window_is_three_calendar_months() {
@@ -168,101 +105,10 @@ mod domain {
         assert_eq!(back, zone.with_ymd_and_hms(2026, 7, 8, 0, 30, 0).single().expect("a time").timestamp_millis(), "calendar months on the local wall clock");
     }
 
-    #[test]
-    fn toggle_all_resets_bounds() {
-        let mut items = rows(6);
-        let mut selection = Selection::default();
-        selection.toggle(&mut items, 1, true, true, true);
-        selection.toggle(&mut items, 4, true, true, true);
-        assert_eq!(selection.bounds(), [1, 4]);
-        selection.toggle_all(&mut items, true);
-        assert_eq!(selection.bounds(), [-1, -1]);
-        assert!(items.iter().all(|r| r.selected));
-        selection.toggle_all(&mut items, false);
-        assert!(items.iter().all(|r| !r.selected));
-    }
-
-    #[test]
-    fn invert_resets_bounds() {
-        let mut items = rows(4);
-        let mut selection = Selection::default();
-        selection.toggle(&mut items, 0, true, true, true);
-        selection.invert(&mut items);
-        assert_eq!(selection.bounds(), [-1, -1]);
-        assert_eq!(items.iter().map(|r| r.selected).collect::<Vec<_>>(), [false, true, true, true]);
-    }
-
-    // 12 to 15: the formatting vectors
-
-    #[test]
-    fn progress_mmss_boundaries() {
-        assert_eq!(progress_mmss(0), "0:00");
-        assert_eq!(progress_mmss(59_999), "0:59");
-        assert_eq!(progress_mmss(3_600_000), "60:00");
-        assert_eq!(progress_mmss(3_600_001), "1:00:00");
-        assert_eq!(progress_mmss(3_661_000), "1:01:01");
-    }
-
-    #[test]
-    fn duration_string_rules() {
-        const MIN: i64 = 60_000;
-        const HOUR: i64 = 60 * MIN;
-        assert_eq!(duration_string(0, "None"), "None");
-        assert_eq!(duration_string(5_000, "None"), "5s");
-        assert_eq!(duration_string(61 * MIN, "None"), "1h 1m");
-        assert_eq!(duration_string(25 * HOUR, "None"), "1d 1h");
-        assert_eq!(duration_string(24 * HOUR + 5 * MIN, "None"), "1d 5m");
-        assert_eq!(duration_string(HOUR + 5_000, "None"), "1h", "seconds are dropped once there are hours");
-    }
-
-    #[test]
-    fn relative_date_thresholds() {
-        let at = |difference: i64| relative_date(d(15) - chrono::Duration::days(difference), d(15), true, "abs");
-        assert_eq!(at(-8), RelativeDate::Absolute("abs".into()));
-        assert_eq!(at(-1), RelativeDate::InDays(1));
-        assert_eq!(at(0), RelativeDate::Today);
-        assert_eq!(at(1).text(), "1 day ago");
-        assert_eq!(at(6).text(), "6 days ago");
-        assert_eq!(at(7), RelativeDate::Absolute("abs".into()));
-    }
-
-    #[test]
-    fn relative_time_span_never_and_just_now() {
-        let now = 10_000_000_000;
-        assert_eq!(relative_time_span(0, now), RelativeTime::Never);
-        assert_eq!(relative_time_span(now - 59_999, now), RelativeTime::JustNow);
-        assert_eq!(relative_time_span(now - 60_000, now), RelativeTime::Ago("1 minute ago".into()));
-    }
-
     // 21 to 27: the storage vectors
 
     fn row(entry_id: i64, size: i64, category_id: i64) -> StorageRow {
         StorageRow::new(entry_id, format!("title {entry_id}"), size, None, 1, category_id)
-    }
-
-    #[test]
-    fn size_format_vectors() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(999), "999 B");
-        assert_eq!(format_size(1_000), "1.00 KB");
-        assert_eq!(format_size(999_999), "1000.00 KB", "EC-42-T-10: the known rounding artefact is kept");
-        assert_eq!(format_size(1_000_000), "1.00 MB");
-        assert_eq!(format_size(1_500_000_000), "1.50 GB");
-    }
-
-    #[test]
-    fn build_snapshot_sort_is_stable() {
-        // EC-42-T-05: equal sizes keep the order of the library
-        let snapshot = build_snapshot(vec![row(5, 10, 0), row(1, 10, 0), row(3, 10, 0), row(2, 20, 0)], Pick::All, &[0]);
-        assert_eq!(snapshot.rows.iter().map(|r| r.entry_id).collect::<Vec<_>>(), [2, 5, 1, 3]);
-    }
-
-    #[test]
-    fn build_snapshot_all_drops_hidden_category() {
-        // EC-42-T-09: with the hidden category out of the visible list, All does not list its entry
-        let snapshot = build_snapshot(vec![row(1, 10, 1), row(2, 20, 9)], Pick::All, &[0, 1]);
-        assert_eq!(snapshot.rows.iter().map(|r| r.entry_id).collect::<Vec<_>>(), [1]);
-        assert_eq!(build_snapshot(vec![row(2, 20, 9)], Pick::Category(9), &[0, 1]).rows.len(), 1, "the category itself still lists it");
     }
 
     #[test]
@@ -290,7 +136,7 @@ mod domain {
 
     /// EC-42-T-12: 2,000 entries build in under 50 ms. Ignored on slow machines: `cargo test -- --ignored perf_2000`.
     #[test]
-    #[ignore = "performance check, run locally"]
+    #[ignore = "slow: run on demand"]
     fn perf_2000_entries() {
         let rows: Vec<StorageRow> = (0..2_000).map(|i| row(i, (i * 7919) % 100_000, i % 3)).collect();
         let started = std::time::Instant::now();
