@@ -33,9 +33,10 @@ pub fn state_stack() -> gtk::Stack {
 }
 
 /// The item header over the list (`ItemHeader`): the count and the missing warning. It is a plain row: the list
-/// options live in the one menu button of the top bar (`list_options`).
+/// options live in the one menu button of the top bar (`list_options`). `row` has the width and inset of the list's cards,
+/// so on a wide window the count stays over the first card instead of at the window's edge.
 pub struct ItemHeaderRow {
-    pub row: GBox,
+    pub row: gtk::Widget,
     pub count: Label,
     pub missing: Label,
 }
@@ -44,14 +45,14 @@ pub fn item_header_row() -> ItemHeaderRow {
     let count = Label::builder().xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["heading"]).build();
     let missing = Label::builder().xalign(1.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
     let row = GBox::new(O::Horizontal, 8);
-    // the padding the flat button used to give, so the text stays where it was
     row.set_margin_top(6);
     row.set_margin_bottom(6);
-    row.set_margin_start(10);
-    row.set_margin_end(10);
+    // the inset of a card (`list_view`), so the count lines up with the first row
+    row.set_margin_start(16);
+    row.set_margin_end(16);
     row.append(&count);
     row.append(&missing);
-    ItemHeaderRow { row, count, missing }
+    ItemHeaderRow { row: crate::clamp::clamp(&row, crate::ui::PAGE_WIDTH).upcast(), count, missing }
 }
 
 /// The Start or Resume button: the play icon and its label. The page places it over the list.

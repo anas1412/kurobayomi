@@ -237,8 +237,6 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
 
     // the list head: the item header row, the refresh spinner and the empty line
     let page_shell::ItemHeaderRow { row: header_row, count, missing } = page_shell::item_header_row();
-    header_row.set_margin_start(18);
-    header_row.set_margin_end(18);
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
     let empty = ui::dim(&tr(MsgKey::no_episodes_error));
     empty.set_halign(Align::Center);
