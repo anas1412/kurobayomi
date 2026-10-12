@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use kuro_data::anime::{Anime, AnimeRepo};
-use kuro_data::episode::{Episode, EpisodeRepo};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
+use kuro_platform::kind::Kind;
 use kuro_player::mpv::MpvHandle;
 use kuro_player::options::{MpvSetting, PlayerPrefs, startup_settings};
 use kuro_testkit::{TempDir, TestDb};
@@ -60,19 +61,19 @@ fn wait_for(mut check: impl FnMut() -> bool) -> bool {
 /// One anime with one episode whose url is the clip. Returns the database and the episode id.
 fn library(dir: &TempDir, clip: &Path) -> (Arc<Db>, i64) {
     let db = TestDb::handle(dir);
-    let anime_id = AnimeRepo::new(Arc::clone(&db)).insert(&Anime::create()).expect("anime row");
-    let episode = Episode {
-        anime_id,
+    let anime_id = EntryRepo::new(Arc::clone(&db)).insert(&Entry::create(Kind::Anime)).expect("anime row");
+    let episode = Item {
+        entry_id: anime_id,
         url: clip.display().to_string(),
         name: "Episode 1".to_owned(),
-        ..Episode::create()
+        ..Item::create(Kind::Anime)
     };
-    let id = EpisodeRepo::new(Arc::clone(&db)).add_all(&[episode]).expect("episode row")[0].id;
+    let id = ItemRepo::new(Arc::clone(&db)).add_all(&[episode]).expect("episode row")[0].id;
     (db, id)
 }
 
-fn stored(db: &Arc<Db>, id: i64) -> Episode {
-    EpisodeRepo::new(Arc::clone(db)).by_id(id).expect("read").expect("row")
+fn stored(db: &Arc<Db>, id: i64) -> Item {
+    ItemRepo::new(Arc::clone(db)).by_id(id).expect("read").expect("row")
 }
 
 #[test]
@@ -108,17 +109,17 @@ fn a_clip_plays_seeks_pauses_and_its_progress_survives_a_reopen() {
     let position = playback.position_ms().unwrap();
     tracker.save(1_000, position, duration, true);
     let saved = stored(&db, id);
-    assert_eq!(saved.last_second_seen, position / 1000, "the forced save writes the playhead");
-    assert_eq!(saved.total_seconds, duration / 1000);
-    assert!(!saved.seen, "two thirds through is not finished");
+    assert_eq!(saved.progress, position / 1000, "the forced save writes the playhead");
+    assert_eq!(saved.total_seconds(), duration / 1000);
+    assert!(!saved.done, "two thirds through is not finished");
 
     let reopened = Tracker::open(Arc::clone(&db), id, false).expect("reopen");
-    assert_eq!(reopened.start_ms(0), saved.last_second_seen * 1000, "reopen restores the saved position");
+    assert_eq!(reopened.start_ms(0), saved.progress * 1000, "reopen restores the saved position");
 
     playback.seek_to_ms(3_800).expect("seek near the end");
     assert!(wait_for(|| playback.eof_reached()), "playback reaches the end of the clip");
     tracker.save(2_000, playback.duration_ms().unwrap(), playback.duration_ms().unwrap(), true);
-    assert!(stored(&db, id).seen, "reaching the end marks the episode seen");
+    assert!(stored(&db, id).done, "reaching the end marks the episode seen");
 
     let finished = Tracker::open(db, id, false).expect("reopen after finishing");
     assert_eq!(finished.start_ms(0), 0, "a seen episode restarts at zero");

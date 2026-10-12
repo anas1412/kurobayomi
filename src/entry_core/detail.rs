@@ -5,6 +5,8 @@
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
+use kuro_domain::entries::defaults::SessionFlags;
+
 use crate::entry_core::chapter::{ChapterRow, sort_rows};
 use crate::entry_core::dialog::DialogSlot;
 use crate::entry_core::errors::DetailError;
@@ -72,9 +74,32 @@ pub struct EntryState {
     /// The user categories (`id`, name) and the ids the manga belongs to. Reloaded after a category write.
     pub categories: Vec<(i64, String)>,
     pub category_membership: Vec<i64>,
+    /// The library defaults a manga outside the library shows for this session (decision 4): a snapshot puts them back over
+    /// the row, and a flag write the user makes goes into them too. `None` once the manga is in the library.
+    pub session_flags: Option<SessionFlags>,
+    /// The library's default item word read when the page opened, which the Reset item puts back.
+    pub library_defaults: ChapterFlags,
 }
 
 impl EntryState {
+    /// A flag write the user made on a manga that is not in the library. The row is written too, but the next snapshot puts
+    /// the session flags back over it, so the copy takes the change here or it would never show. A manga in the library has
+    /// no copy and follows its row.
+    pub fn note_flag_write(&mut self, flag: i64, mask: i64) {
+        if let Some(session) = &mut self.session_flags {
+            session.note_item_write(flag, mask);
+            self.manga.flags = ChapterFlags(session.item_flags);
+        }
+    }
+
+    /// The Reset item: the session copy goes back to the library defaults.
+    pub fn note_flags_reset(&mut self) {
+        if let Some(session) = &mut self.session_flags {
+            session.item_flags = self.library_defaults.0;
+            self.manga.flags = self.library_defaults;
+        }
+    }
+
     /// `getNextUnread` input: the filtered view when `skip_filtered`, else every row in the stored sort.
     pub fn next_unread(&self) -> Option<i64> {
         let flags = self.manga.flags;
@@ -117,8 +142,9 @@ pub struct Loaded {
     pub needs_chapters: bool,
 }
 
-/// The load pipeline (T-38b-003). A missing row is `NotFound`. A non-favorite gets the library's default chapter
-/// flags before the first paint, so the page never shows stale filters. Refreshing starts when info or chapters are missing.
+/// The load pipeline (T-38b-003). A missing row is `NotFound`. A non-favorite shows the library's default chapter flags
+/// from the first paint (a session copy, nothing is written), so the page never shows stale filters. Refreshing starts when
+/// info or chapters are missing.
 pub fn finish_load(
     manga: Option<MangaRow>,
     chapters: Vec<ChapterRow>,
@@ -132,8 +158,9 @@ pub fn finish_load(
             needs_chapters: false,
         };
     };
-    if !manga.favorite {
-        manga.flags = ctx.library_defaults;
+    let session_flags = (!manga.favorite).then(|| SessionFlags { item_flags: ctx.library_defaults.0, season_flags: None });
+    if let Some(session) = &session_flags {
+        manga.flags = ChapterFlags(session.item_flags);
     }
     let needs_info = !manga.initialized;
     let needs_chapters = chapters.is_empty();
@@ -155,6 +182,8 @@ pub fn finish_load(
         skip_filtered: ctx.skip_filtered,
         categories: Vec::new(),
         category_membership: Vec::new(),
+        session_flags,
+        library_defaults: ctx.library_defaults,
     };
     Loaded {
         state: LoadState::Ready(Box::new(state)),
@@ -164,9 +193,16 @@ pub fn finish_load(
 }
 
 /// Applies a store snapshot. Selection is owned by the page and survives snapshots. Only ids that still exist are kept.
-pub fn apply_snapshot(state: &mut EntryState, manga: MangaRow, chapters: Vec<ChapterRow>) {
+pub fn apply_snapshot(state: &mut EntryState, mut manga: MangaRow, chapters: Vec<ChapterRow>) {
     let ids: Vec<i64> = chapters.iter().map(|c| c.id).collect();
     state.selection.retain_existing(&ids);
+    // a manga that joined the library has its defaults written to the row: the session copy has done its job
+    if manga.favorite {
+        state.session_flags = None;
+    }
+    if let Some(session) = &state.session_flags {
+        manga.flags = ChapterFlags(session.item_flags);
+    }
     state.manga = manga;
     state.chapters = chapters;
 }
@@ -181,7 +217,7 @@ pub enum StoreCmd {
     SetFetchInterval { manga_id: i64, wheel: i32 },
     /// `fetchAllFromSource`. One refresh per manga runs at a time.
     FetchAll { manga_id: i64, manual: bool },
-    /// One masked UPDATE of `mangas.chapter_flags`.
+    /// One masked UPDATE of `entries.item_flags`.
     SetFlagBits { manga_id: i64, flag: i64, mask: i64 },
     MarkRead {
         manga_id: i64,
@@ -211,7 +247,7 @@ pub enum StoreCmd {
     CancelDownload { manga_id: i64, chapter_id: i64 },
     /// Deletes the downloads of these chapters.
     DeleteDownloads { manga_id: i64, chapter_ids: Vec<i64> },
-    /// Writes the library's default chapter flags to this manga (the Reset item of the settings sheet).
+    /// Writes the library's default item flags to this manga (the Reset item of the settings sheet).
     ResetFlags { manga_id: i64 },
     /// Reads the tracking count again, after the tracking page bound, edited or removed a tracker. Answered by
     /// `StoreEvent::Tracking`.
@@ -327,7 +363,7 @@ mod tests {
             initialized,
             favorite,
             local: false,
-            flags: ChapterFlags(0x100),
+            flags: ChapterFlags(kuro_db::flags::item::SORTING_NUMBER),
         }
     }
 
@@ -344,7 +380,7 @@ mod tests {
 
     #[test]
     fn non_favorite_gets_library_defaults_before_first_paint() {
-        let defaults = ChapterFlags(0x301);
+        let defaults = ChapterFlags(kuro_db::flags::item::SORTING_ALPHABET | kuro_db::flags::item::SORT_ASC);
         let loaded = load(
             Some(manga(true, false)),
             vec![chapter(1)],
@@ -359,18 +395,41 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_keeps_the_session_flags_for_a_non_favorite_and_a_flag_write_goes_into_them() {
+        use kuro_db::flags::item as c;
+        let defaults = ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC);
+        let LoadState::Ready(mut state) = load(Some(manga(true, false)), vec![chapter(1)], defaults, false, false).state else {
+            panic!("expected Ready")
+        };
+        let row = |flags| MangaRow { flags: ChapterFlags(flags), ..manga(true, false) };
+        apply_snapshot(&mut state, row(0), vec![chapter(1)]);
+        assert_eq!(state.manga.flags, defaults, "the row's own word does not show");
+        state.note_flag_write(c::SHOW_UNDONE, c::UNDONE_MASK);
+        assert_eq!(state.manga.flags, ChapterFlags(defaults.0 | c::SHOW_UNDONE));
+        apply_snapshot(&mut state, row(c::SHOW_UNDONE), vec![chapter(1)]);
+        assert_eq!(state.manga.flags, ChapterFlags(defaults.0 | c::SHOW_UNDONE), "the write survives the next snapshot");
+        state.note_flags_reset();
+        assert_eq!(state.manga.flags, defaults, "Reset puts the defaults back");
+        apply_snapshot(&mut state, row(c::SHOW_BOOKMARKED), vec![chapter(1)]);
+        assert_eq!(state.manga.flags, defaults);
+        apply_snapshot(&mut state, MangaRow { flags: ChapterFlags(c::SHOW_BOOKMARKED), ..manga(true, true) }, vec![chapter(1)]);
+        assert_eq!(state.manga.flags, ChapterFlags(c::SHOW_BOOKMARKED), "in the library the row shows again");
+        assert_eq!(state.session_flags, None);
+    }
+
+    #[test]
     fn favorite_keeps_its_own_flags() {
         let loaded = load(
             Some(manga(true, true)),
             vec![chapter(1)],
-            ChapterFlags(0x301),
+            ChapterFlags(kuro_db::flags::item::SORTING_ALPHABET | kuro_db::flags::item::SORT_ASC),
             false,
             false,
         );
         let LoadState::Ready(state) = loaded.state else {
             panic!("expected Ready")
         };
-        assert_eq!(state.manga.flags, ChapterFlags(0x100));
+        assert_eq!(state.manga.flags, ChapterFlags(kuro_db::flags::item::SORTING_NUMBER));
     }
 
     #[test]
@@ -486,7 +545,7 @@ mod tests {
         rows[0].read = true;
         rows[1].bookmark = true;
         let mut m = manga(true, true);
-        m.flags = ChapterFlags(0x1 | 0x20 | 0x100); // number ascending, bookmarked only
+        m.flags = ChapterFlags(0x1 | 0x20 | kuro_db::flags::item::SORTING_NUMBER); // number ascending, bookmarked only
         let ctx = |skip_filtered| LoadContext {
             skip_filtered,
             ..LoadContext::default()

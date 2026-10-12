@@ -238,14 +238,15 @@ fn fail(chapter: &ReaderChapter, failure: LoadFailure) -> Result<(), LoadFailure
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::chapter::Chapter;
+    use kuro_data::item::Item;
+    use kuro_platform::kind::Kind;
 
     fn chapter(read: bool, last_page_read: i64) -> Rc<ReaderChapter> {
-        let mut c = Chapter::create();
+        let mut c = Item::create(Kind::Manga);
         c.id = 1;
         c.url = "/c/1".into();
-        c.read = read;
-        c.last_page_read = last_page_read;
+        c.done = read;
+        c.progress = last_page_read;
         ReaderChapter::new(c)
     }
 
@@ -371,7 +372,6 @@ mod tests {
 mod fixture_tests {
     use super::*;
     use crate::reader::model::ChapterState;
-    use kuro_data::chapter::Chapter;
 
     fn fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/reader").join(name)
@@ -409,7 +409,7 @@ mod fixture_tests {
         })
         .unwrap();
         assert!(names(&loader).is_empty());
-        let chapter = ReaderChapter::new(Chapter::create());
+        let chapter = ReaderChapter::new(kuro_data::item::Item::create(kuro_platform::kind::Kind::Manga));
         let result = load_chapter(&chapter, || Ok(loader), false);
         assert!(matches!(result, Err(LoadFailure::Failed(ref e)) if e.message == "No pages found"));
         assert!(matches!(*chapter.state(), ChapterState::Error(ref e) if e.message == "No pages found"));

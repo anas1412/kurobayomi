@@ -9,6 +9,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
+use kuro_prefs::store::PrefStore;
 
 use super::sync::{self, Failure, Outcome};
 
@@ -34,21 +35,23 @@ pub fn add_folder(kind: Kind) {
     let dialog = gtk::FileDialog::builder().title(title).modal(true).build();
     dialog.select_folder(Some(&crate::ui::window()), gio::Cancellable::NONE, move |picked| {
         let Some(folder) = picked.ok().and_then(|file| file.path()) else { return };
-        run(kind, move |db, now| sync::add(db, kind, &folder, now));
+        run(kind, move |db, prefs, now| sync::add(db, prefs, kind, &folder, now));
     });
 }
 
 /// Rescans the local entries of `kind` already in the library.
 pub fn rescan(kind: Kind) {
-    run(kind, move |db, now| sync::rescan(db, kind, now));
+    run(kind, move |db, prefs, now| sync::rescan(db, prefs, kind, now));
 }
 
-/// Runs `job` on a worker thread with the database of `kind`, then shows its result as toasts and reloads the library.
-fn run(kind: Kind, job: impl FnOnce(&Arc<Db>, i64) -> Result<Vec<Outcome>, String> + Send + 'static) {
+/// Runs `job` on a worker thread with the database and the preferences (the library defaults of an add), then shows its
+/// result as toasts and reloads the library.
+fn run(kind: Kind, job: impl FnOnce(&Arc<Db>, &PrefStore, i64) -> Result<Vec<Outcome>, String> + Send + 'static) {
     let db = crate::data::app().db.clone();
+    let prefs = crate::data::app().base.store().clone();
     let (sender, receiver) = async_channel::bounded(1);
     std::thread::spawn(move || {
-        let _ = sender.send_blocking(job(&db, chrono::Utc::now().timestamp_millis()));
+        let _ = sender.send_blocking(job(&db, &prefs, chrono::Utc::now().timestamp_millis()));
     });
     glib::spawn_future_local(async move {
         let Ok(result) = receiver.recv().await else { return };

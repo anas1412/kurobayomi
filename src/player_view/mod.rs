@@ -26,8 +26,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use gtk::prelude::*;
 use gtk::glib::translate::IntoGlib;
 use gtk::{gdk, glib};
-use kuro_data::anime::AnimeRepo;
-use kuro_data::episode::EpisodeRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
 use kuro_i18n::{MsgKey, tr};
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths as _;
@@ -627,8 +627,8 @@ fn row_title(episode_id: i64) -> Option<String> {
         return None;
     }
     let db = &crate::data::app().db;
-    let episode = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
-    let anime = AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id).ok()?;
+    let episode = ItemRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
+    let anime = EntryRepo::new(Arc::clone(db)).by_id(episode.entry_id).ok()?;
     Some(episode_title(&anime.title, &episode.name))
 }
 

@@ -1,18 +1,19 @@
-//! Chapter flag word (`Manga.chapterFlags`) for the details page: typed reads and masked writes. The writes a list
-//! options pick sends come from `list_options`. Bit layout comes from `kuro_db::flags::chapter`; TriState rules from
-//! `kuro_domain::flags`.
+//! Item flag word (`Entry::item_flags`) of the manga details page: typed reads and masked writes. The writes a list
+//! options pick sends come from `list_options`. The bit layout is the one shared layout of both kinds
+//! (`kuro_db::flags::item`) and the reads are the domain's `ItemFlags`; TriState rules come from `kuro_domain::flags`.
 //! Upstream: `Manga.kt:37-103`, `SetMangaChapterFlags.kt:11-70`, `TriState.kt`.
 
-use kuro_db::flags::chapter as c;
+use kuro_db::flags::item as c;
 use kuro_db::flags::set_flag;
-use kuro_domain::flags::tri;
-use kuro_domain::items::sorter::{SortKey, chapter_key};
+use kuro_domain::app::items::downloaded_filter;
+use kuro_domain::entries::flags::ItemFlags;
+use kuro_domain::items::sorter::{SortKey, item_key};
 use kuro_prefs::tristate::TriState;
 
 /// A masked write: `new = (old & !mask) | (flag & mask)`.
 pub type Write = (i64, i64);
 
-/// The chapter flag word of one manga.
+/// The item flag word of one manga.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ChapterFlags(pub i64);
 
@@ -24,44 +25,32 @@ impl ChapterFlags {
 
     /// The sort key (`sorting`). The 2-bit field always maps to one of the four keys.
     pub fn sort_key(self) -> SortKey {
-        chapter_key(self.0 & c::SORTING_MASK)
+        item_key(ItemFlags(self.0).sorting())
     }
 
     /// `sortDescending()`: true when the direction bit is 0.
     pub fn sort_descending(self) -> bool {
-        self.0 & c::SORT_DIR_MASK == c::SORT_DESC
+        ItemFlags(self.0).sort_descending()
     }
 
     /// `displayMode`: true for the chapter-number display, false for the name display.
     pub fn display_number(self) -> bool {
-        self.0 & c::DISPLAY_MASK == c::DISPLAY_NUMBER
+        ItemFlags(self.0).display_mode() == c::DISPLAY_NUMBER
     }
 
     /// `unreadFilter`: raw 0x2 is `ENABLED_IS`, raw 0x4 is `ENABLED_NOT`, anything else is `DISABLED`.
     pub fn unread(self) -> TriState {
-        tri(self.0 & c::UNREAD_MASK, c::SHOW_UNREAD, c::SHOW_READ)
+        ItemFlags(self.0).undone_filter()
     }
 
     /// `bookmarkedFilter`.
     pub fn bookmarked(self) -> TriState {
-        tri(
-            self.0 & c::BOOKMARKED_MASK,
-            c::SHOW_BOOKMARKED,
-            c::SHOW_NOT_BOOKMARKED,
-        )
+        ItemFlags(self.0).bookmarked_filter()
     }
 
     /// `downloadedFilter`. The app-wide downloaded-only preference forces `ENABLED_IS` without touching the bits.
     pub fn downloaded(self, downloaded_only: bool) -> TriState {
-        if downloaded_only {
-            TriState::ENABLED_IS
-        } else {
-            tri(
-                self.0 & c::DOWNLOADED_MASK,
-                c::SHOW_DOWNLOADED,
-                c::SHOW_NOT_DOWNLOADED,
-            )
-        }
+        downloaded_filter(ItemFlags(self.0).downloaded_filter_raw(), c::SHOW_DOWNLOADED, c::SHOW_NOT_DOWNLOADED, downloaded_only)
     }
 
     /// `chaptersFiltered()`: any of the three filters is not `DISABLED` (the forced downloaded state counts).
@@ -81,7 +70,7 @@ pub fn scanlator_filter_active(available: &[String], excluded: &std::collections
 /// "Use as default for all titles": stores the groups of `flags` as the library's default chapter flags, and returns the
 /// text of the "Updated default chapter settings" message (`SetMangaDefaultChapterFlags`).
 pub fn save_as_default(store: &kuro_prefs::store::PrefStore, flags: ChapterFlags) -> String {
-    kuro_domain::entries::defaults::set_chapter_settings_default(store, flags.0);
+    kuro_domain::entries::defaults::set_item_settings_default(store, kuro_platform::kind::Kind::Manga, flags.0);
     kuro_i18n::tr(kuro_i18n::MsgKey::chapter_settings_updated)
 }
 
@@ -92,9 +81,9 @@ mod tests {
     #[test]
     fn set_as_default_stores_the_flags_and_says_so() {
         let store = kuro_prefs::store::PrefStore::in_memory();
-        let flags = ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNREAD | c::DISPLAY_NUMBER);
+        let flags = ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNDONE | c::DISPLAY_NUMBER);
         assert_eq!(save_as_default(&store, flags), "Updated default chapter settings");
-        let stored = ChapterFlags(kuro_domain::entries::defaults::chapter_default_word(&store));
+        let stored = ChapterFlags(kuro_domain::entries::defaults::item_default_word(&store, kuro_platform::kind::Kind::Manga));
         assert_eq!(stored, flags, "a new manga opens with what was saved");
     }
 
@@ -112,7 +101,7 @@ mod tests {
     fn flag_masks_are_disjoint() {
         let masks = [
             c::SORT_DIR_MASK,
-            c::UNREAD_MASK,
+            c::UNDONE_MASK,
             c::DOWNLOADED_MASK,
             c::BOOKMARKED_MASK,
             c::SORTING_MASK,
@@ -172,9 +161,9 @@ mod tests {
 
     #[test]
     fn sort_key_and_direction_bits() {
-        assert_eq!(ChapterFlags(0x100).sort_key(), SortKey::Number);
-        assert_eq!(ChapterFlags(0x200).sort_key(), SortKey::UploadDate);
-        assert_eq!(ChapterFlags(0x300).sort_key(), SortKey::Alphabet);
+        assert_eq!(ChapterFlags(c::SORTING_NUMBER).sort_key(), SortKey::Number);
+        assert_eq!(ChapterFlags(c::SORTING_UPLOAD_DATE).sort_key(), SortKey::UploadDate);
+        assert_eq!(ChapterFlags(c::SORTING_ALPHABET).sort_key(), SortKey::Alphabet);
         assert!(!ChapterFlags(0x1).sort_descending());
         assert!(ChapterFlags(0x0).sort_descending());
     }

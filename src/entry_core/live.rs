@@ -128,6 +128,8 @@ mod tests {
             skip_filtered: false,
             categories: vec![],
             category_membership: vec![],
+            session_flags: None,
+            library_defaults: ChapterFlags::default(),
         }))
     }
 

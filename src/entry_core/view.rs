@@ -60,7 +60,7 @@ pub fn next_unread(view: &[&ChapterRow], descending: bool) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_db::flags::chapter as c;
+    use kuro_db::flags::item as c;
 
     fn row(
         id: i64,
@@ -100,7 +100,7 @@ mod tests {
             TriState::ENABLED_NOT => not,
         };
         ChapterFlags(
-            group(unread, c::SHOW_UNREAD, c::SHOW_READ)
+            group(unread, c::SHOW_UNDONE, c::SHOW_DONE)
                 | group(downloaded, c::SHOW_DOWNLOADED, c::SHOW_NOT_DOWNLOADED)
                 | group(bookmarked, c::SHOW_BOOKMARKED, c::SHOW_NOT_BOOKMARKED),
         )

@@ -27,8 +27,10 @@ use std::sync::Arc;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_core::sources::SourceGate;
-use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::manga::{Manga, MangaRepo};
+use kuro_data::chapter::Chapter;
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::{Item, ItemRepo};
+use kuro_data::manga::Manga;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
 use kuro_downloads::index::DownloadIndex;
@@ -53,12 +55,14 @@ use super::writer::WriterHandle;
 /// The manga is a favourite with that title, else a read manga outside the library (History opens those); the chapter
 /// is the one with that name, else the one with that id.
 pub fn find_ids(db: &Arc<Db>, title: &str, chapter_name: &str) -> (i64, i64) {
-    let repo = MangaRepo::new(Arc::clone(db));
-    let titled = |list: Vec<Manga>| list.into_iter().find(|m| m.title == title);
-    let Some(manga) = titled(repo.favorites().unwrap_or_default()).or_else(|| titled(repo.read_not_in_library().unwrap_or_default())) else {
+    let repo = EntryRepo::new(Arc::clone(db));
+    let titled = |list: Vec<Entry>| list.into_iter().find(|m| m.title == title);
+    let Some(manga) = titled(repo.favorites(Kind::Manga).unwrap_or_default())
+        .or_else(|| titled(repo.watched_not_in_library(Kind::Manga).unwrap_or_default()))
+    else {
         return (0, 0);
     };
-    let chapters = ChapterRepo::new(Arc::clone(db)).by_manga_id(manga.id, false).unwrap_or_default();
+    let chapters = ItemRepo::new(Arc::clone(db)).by_entry_id(manga.id, false).unwrap_or_default();
     let by_id = chapter_name.parse::<i64>().ok().and_then(|id| chapters.iter().find(|c| c.id == id));
     (manga.id, chapters.iter().find(|c| c.name == chapter_name).or(by_id).map_or(0, |c| c.id))
 }
@@ -71,7 +75,7 @@ fn loader_for(chapter: &Rc<ReaderChapter>, downloads: Option<(&Path, &str)>, onl
     let source = match online {
         // asking the source here would wait on the network with the window, so a list that is not cached yet fails fast
         Some(prefetch) if download.is_none() && !prefetch.is_cached(url) => return Err(LoadError::new(prefetch.missing(url))),
-        Some(prefetch) => SourceKind::Http { source: prefetch.pages(), manga_id: chapter.chapter.manga_id, cache: prefetch.cache() },
+        Some(prefetch) => SourceKind::Http { source: prefetch.pages(), manga_id: chapter.chapter.entry_id, cache: prefetch.cache() },
         None => SourceKind::Unknown,
     };
     choose_loader(LoaderInputs { download, local: None, source, chapter_url: chapter.chapter.url.clone() })
@@ -81,8 +85,8 @@ fn loader_for(chapter: &Rc<ReaderChapter>, downloads: Option<(&Path, &str)>, onl
 /// to them reads the list from the cache.
 // ponytail: neighbours in source order, not in the reader's filtered list; a chapter the filter skips over is not
 // fetched ahead and takes the fail-fast path. Ask the session for its neighbours if that shows.
-fn warm_neighbours(db: &Arc<Db>, prefetch: &Arc<Prefetch>, chapter: &Chapter, on_disk: &dyn Fn(&Chapter) -> bool) {
-    let mut chapters = ChapterRepo::new(Arc::clone(db)).by_manga_id(chapter.manga_id, false).unwrap_or_default();
+fn warm_neighbours(db: &Arc<Db>, prefetch: &Arc<Prefetch>, chapter: &Item, on_disk: &dyn Fn(&Item) -> bool) {
+    let mut chapters = ItemRepo::new(Arc::clone(db)).by_entry_id(chapter.entry_id, false).unwrap_or_default();
     chapters.sort_by_key(|c| c.source_order);
     let Some(at) = chapters.iter().position(|c| c.id == chapter.id) else { return };
     for next in [at.checked_sub(1), Some(at + 1)].into_iter().flatten().filter_map(|i| chapters.get(i)) {
@@ -111,12 +115,19 @@ fn toaster() -> Toaster {
 
 /// The download lookup of one manga: a local manga has every chapter, and any other asks the index by the chapter's
 /// name and scanlator. Without an index (before the shell exists) nothing is downloaded.
-pub fn downloaded_lookup(index: Option<DownloadIndex>, manga: &Manga) -> Arc<dyn Fn(&Chapter) -> bool + Send + Sync> {
+pub fn downloaded_items(index: Option<DownloadIndex>, manga: &Entry) -> Arc<dyn Fn(&Item) -> bool + Send + Sync> {
     let (source, title, local) = (manga.source, manga.title.clone(), is_local_source(manga.source));
     match index {
         Some(index) => Arc::new(crate::entry_core::downloaded::downloaded_lookup(index, source, title, local)),
         None => Arc::new(move |_| local),
     }
+}
+
+/// [`downloaded_items`] for a caller outside the entry flow that still holds the legacy shapes (`library::mount`).
+// seam: deleted in phase E with `Manga` and `Chapter`
+pub fn downloaded_lookup(index: Option<DownloadIndex>, manga: &Manga) -> Arc<dyn Fn(&Chapter) -> bool + Send + Sync> {
+    let lookup = downloaded_items(index, &Entry::from(manga));
+    Arc::new(move |chapter| lookup(&Item::from(chapter)))
 }
 
 /// What closing the reader does with the chapters delete-after-read queued: a worker deletes their downloads.
@@ -139,21 +150,21 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let db = app.db.clone();
     let data_dir = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.data_dir());
     let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
-    let manga = MangaRepo::new(Arc::clone(&db)).by_id(manga_id).ok();
+    let manga = EntryRepo::new(Arc::clone(&db)).by_id(manga_id).ok();
 
     let mut writer = WriterHandle::spawn(Arc::clone(&db));
     if let Some(dir) = &data_dir {
         writer = writer.with_restore_in(dir);
     }
     let (lookup, manga_is_local, title) = match &manga {
-        Some(manga) => (downloaded_lookup(index.clone(), manga), is_local_source(manga.source), manga.title.clone()),
-        None => (Arc::new(|_: &Chapter| false) as Arc<dyn Fn(&Chapter) -> bool + Send + Sync>, false, String::new()),
+        Some(manga) => (downloaded_items(index.clone(), manga), is_local_source(manga.source), manga.title.clone()),
+        None => (Arc::new(|_: &Item| false) as Arc<dyn Fn(&Item) -> bool + Send + Sync>, false, String::new()),
     };
     let root = index.as_ref().map(|index| index.root().to_path_buf());
     let online = manga.as_ref().filter(|_| !manga_is_local).and_then(|m| super::source_pages::online(m.source, manga_id));
     // the opened chapter's page list is fetched before the reader asks for it, unless the chapter is on disk; Retry on
     // the failure card fetches it again and waits
-    let opened = ChapterRepo::new(Arc::clone(&db)).by_id(chapter_id).ok().flatten().filter(|c| !lookup(c));
+    let opened = ItemRepo::new(Arc::clone(&db)).by_id(chapter_id).ok().flatten().filter(|c| !lookup(c));
     let retry_gate: Option<Rc<dyn Fn() -> SourceGate>> = match (&online, opened) {
         (Some(prefetch), Some(chapter)) => {
             let prefetch = Arc::clone(prefetch);
@@ -224,28 +235,28 @@ mod tests {
     #[test]
     fn a_title_and_chapter_name_resolve_to_their_ids() {
         let (_dir, db) = db();
-        let mut manga = Manga::create();
+        let mut manga = Entry::create(Kind::Manga);
         manga.title = "Title 1".into();
         manga.favorite = true;
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&manga).unwrap();
-        let chapters: Vec<Chapter> = ["Chapter 1", "Chapter 2"]
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&manga).unwrap();
+        let chapters: Vec<Item> = ["Chapter 1", "Chapter 2"]
             .iter()
             .map(|name| {
-                let mut c = Chapter::create();
-                c.manga_id = manga_id;
+                let mut c = Item::create(Kind::Manga);
+                c.entry_id = manga_id;
                 c.name = (*name).into();
                 c.url = format!("/{name}");
                 c
             })
             .collect();
-        let added = ChapterRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
+        let added = ItemRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
         assert_eq!(find_ids(&db, "Title 1", "Chapter 2"), (manga_id, added[1].id));
         assert_eq!(find_ids(&db, "Title 1", "Chapter 9"), (manga_id, 0), "an unknown chapter keeps the manga");
         assert_eq!(find_ids(&db, "Nope", "Chapter 1"), (0, 0));
     }
 
-    fn plain(name: &str) -> Chapter {
-        let mut c = Chapter::create();
+    fn plain(name: &str) -> Item {
+        let mut c = Item::create(Kind::Manga);
         c.name = name.into();
         c.url = format!("/{name}");
         c
@@ -306,21 +317,21 @@ mod tests {
     #[test]
     fn a_loaded_chapter_fetches_its_neighbours_lists_ahead() {
         let (_dir, db) = db();
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&Manga::create()).unwrap();
-        let chapters: Vec<Chapter> = (0..4)
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&Entry::create(Kind::Manga)).unwrap();
+        let chapters: Vec<Item> = (0..4)
             .map(|n| {
                 let mut c = plain(&format!("Chapter {n}"));
-                c.manga_id = manga_id;
+                c.entry_id = manga_id;
                 c.source_order = n;
                 c
             })
             .collect();
-        let added = ChapterRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
+        let added = ItemRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let cache = Arc::new(DiskCache::open(dir.path(), super::super::cache::CACHE_LIMIT_BYTES).unwrap());
         let source = Arc::new(NoPages(AtomicUsize::new(0)));
         let prefetch = Prefetch::new(source.clone(), Arc::clone(&cache), manga_id);
-        warm_neighbours(&db, &prefetch, &added[1], &|c: &Chapter| c.name == "Chapter 0");
+        warm_neighbours(&db, &prefetch, &added[1], &|c: &Item| c.name == "Chapter 0");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !prefetch.is_cached("/Chapter 2") {
             assert!(std::time::Instant::now() < deadline, "the next chapter's list was never fetched");
@@ -334,20 +345,20 @@ mod tests {
     #[test]
     fn a_non_favourite_read_manga_and_a_chapter_id_resolve() {
         let (_dir, db) = db();
-        let mut manga = Manga::create();
+        let mut manga = Entry::create(Kind::Manga);
         manga.title = "Browsed".into();
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&manga).unwrap();
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&manga).unwrap();
         let mut chapter = plain("Chapter 1");
-        chapter.manga_id = manga_id;
-        chapter.last_page_read = 3;
-        let added = ChapterRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap();
+        chapter.entry_id = manga_id;
+        chapter.progress = 3;
+        let added = ItemRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap();
         assert_eq!(find_ids(&db, "Browsed", "Chapter 1"), (manga_id, added[0].id), "History opens a read manga outside the library");
         assert_eq!(find_ids(&db, "Browsed", &added[0].id.to_string()), (manga_id, added[0].id), "Continue passes the chapter id");
-        let mut favourite = Manga::create();
+        let mut favourite = Entry::create(Kind::Manga);
         favourite.title = "Browsed".into();
         favourite.url = "/favourite".into();
         favourite.favorite = true;
-        let favourite_id = MangaRepo::new(Arc::clone(&db)).insert(&favourite).unwrap();
+        let favourite_id = EntryRepo::new(Arc::clone(&db)).insert(&favourite).unwrap();
         assert_eq!(find_ids(&db, "Browsed", "Chapter 1"), (favourite_id, 0), "a favourite with the title comes first");
     }
 
@@ -356,16 +367,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let index = DownloadIndex::open(dir.path(), dir.path());
         index.add_chapter(7, "Source (EN)", "Title 1", "Chapter 1");
-        let mut manga = Manga::create();
+        let mut manga = Entry::create(Kind::Manga);
         manga.title = "Title 1".into();
         manga.source = 7;
-        let lookup = downloaded_lookup(Some(index.clone()), &manga);
+        let lookup = downloaded_items(Some(index.clone()), &manga);
         assert!(lookup(&plain("Chapter 1")));
         assert!(!lookup(&plain("Chapter 2")));
-        assert!(!downloaded_lookup(None, &manga)(&plain("Chapter 1")), "no index, nothing downloaded");
+        assert!(!downloaded_items(None, &manga)(&plain("Chapter 1")), "no index, nothing downloaded");
         manga.source = kuro_local::LOCAL_SOURCE_ID;
-        assert!(downloaded_lookup(Some(index), &manga)(&plain("Chapter 9")));
-        assert!(downloaded_lookup(None, &manga)(&plain("Chapter 9")));
+        assert!(downloaded_items(Some(index), &manga)(&plain("Chapter 9")));
+        assert!(downloaded_items(None, &manga)(&plain("Chapter 9")));
+        let legacy = downloaded_lookup(None, &Manga::from(manga));
+        assert!(legacy(&Chapter::from(plain("Chapter 9"))), "the seam for the library answers the same");
     }
 
     #[test]

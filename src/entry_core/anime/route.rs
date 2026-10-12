@@ -15,11 +15,12 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
-use kuro_data::anime::{AnimeRelationGroup, SeasonAnime};
+use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::entry::SeasonEntry;
 use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
-use kuro_domain::entries::anime::AnimeExt;
-use kuro_domain::entries::defaults::{set_episode_settings_default, set_season_settings_default};
+use kuro_domain::entries::defaults::{set_item_settings_default, set_season_settings_default};
+use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
@@ -412,7 +413,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     ready.append(&bottom);
     stack.add_named(&ready, Some("ready"));
 
-    let (episode_spec, season_spec) = (list_options::episode_spec(), list_options::season_spec());
+    let (episode_spec, season_spec) = (list_options::item_spec(Kind::Anime), list_options::season_spec());
     let options = ViewOptions::new(list_options::TOOLTIP, &episode_spec.sections());
     let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
     // the Download menu: shown for an entry that is not local, when the app can queue downloads
@@ -751,7 +752,7 @@ impl View {
         if self.two_pane.get() == Some(two) {
             // the layout is the same, but the automatic columns of the season grid follow the width (T-39a-034)
             if resized && let Some(m) = self.model.borrow().as_ref() {
-                self.show_seasons(m, m.anime.fetch_type == FetchType::Seasons);
+                self.show_seasons(m, m.anime.fetch_type() == FetchType::Seasons);
             }
             return;
         }
@@ -784,7 +785,7 @@ impl View {
             title.set_label(&m.anime.title);
         }
         let lines = self.list_rows(m);
-        let seasons_entry = m.anime.fetch_type == FetchType::Seasons;
+        let seasons_entry = m.anime.fetch_type() == FetchType::Seasons;
         let none_shown = if seasons_entry { m.seasons.is_empty() } else { lines.is_empty() };
         self.list.sync(lines);
         self.show_seasons(m, seasons_entry);
@@ -796,7 +797,7 @@ impl View {
         if self.options_seasons.replace(Some(seasons_entry)) != Some(seasons_entry) {
             self.options.set_sections(&self.spec_of(seasons_entry).sections());
         }
-        let word = if seasons_entry { m.anime.season_flags } else { m.anime.episode_flags };
+        let word = if seasons_entry { m.anime.season_flags() } else { m.anime.item_flags };
         self.spec_of(seasons_entry).sync(&self.options, word, m.downloaded_only);
         // a selection disables the menu, as it did the old header button
         self.options.widget.set_sensitive(header.enabled);
@@ -842,7 +843,7 @@ impl View {
             .episodes
             .iter()
             .filter(|e| m.selection.contains(e.id))
-            .map(|e| Selected { bookmark: e.bookmark, fillermark: e.fillermark, seen: e.seen, last_second_seen: e.last_second_seen, downloaded: m.downloaded.contains(&e.id) })
+            .map(|e| Selected { bookmark: e.bookmark, fillermark: e.fillermark, seen: e.done, last_second_seen: e.progress, downloaded: m.downloaded.contains(&e.id) })
             .collect();
         // Download and Delete show only when the app can queue downloads (`onDownloadEpisode != null`)
         let ctx = MenuContext { has_download_handler: self.env.backend.has_download_handler(), always_external: always_external(&self.env.prefs) };
@@ -922,7 +923,7 @@ impl View {
         let AnimeCmd::SetSeen { ids, seen: true } = cmd else { return };
         let model = self.model.borrow();
         let Some(m) = model.as_ref() else { return };
-        let numbers: Vec<f64> = m.episodes.iter().filter(|e| ids.contains(&e.id)).map(|e| e.episode_number).collect();
+        let numbers: Vec<f64> = m.episodes.iter().filter(|e| ids.contains(&e.id)).map(|e| e.number).collect();
         crate::entry_core::tracking::progress::marked(Kind::Anime, m.anime.id, true, &numbers, crate::data::app().base.incognito_mode.get());
     }
 
@@ -1023,7 +1024,7 @@ impl View {
         let (anime_id, interval, expected, favorite) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            let expected = (m.anime.status != kuro_domain::entries::manga::STATUS_COMPLETED).then_some(m.anime.next_update);
+            let expected = (m.anime.status != kuro_domain::entries::flags::STATUS_COMPLETED).then_some(m.anime.next_update);
             (m.anime.id, m.anime.fetch_interval, expected, m.anime.favorite)
         };
         if !interval_click_opens_dialog(favorite) {
@@ -1051,7 +1052,7 @@ impl View {
 
     /// The duplicate window of an add that found a same-named library entry. A row closes it first and then acts: Show
     /// opens the entry that is there, Migrate starts the migrate flow from it, Add anyway adds without the check.
-    fn show_duplicate(self: &Rc<Self>, existing: &[kuro_data::anime::Anime]) {
+    fn show_duplicate(self: &Rc<Self>, existing: &[kuro_data::entry::Entry]) {
         let (Some(duplicate), Some(anime_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.anime.id)) else { return };
         let runner = Rc::clone(&self.runner);
         let id = self.claim_slot(AnimeDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
@@ -1175,22 +1176,22 @@ impl View {
             *self.seasons_shown.borrow_mut() = None;
             return;
         }
-        let size = m.anime.season_display_grid_size();
-        let mode = m.anime.season_display_grid_mode();
+        let size = m.anime.season().grid_size();
+        let mode = m.anime.season().grid_mode();
         let width = self.grid_width();
         // the facts of a season are what the runner read for it; the filters, the sort and the overlays are the pipeline's
-        let seasons: Vec<(SeasonAnime, SeasonFacts)> = m
+        let seasons: Vec<(SeasonEntry, SeasonFacts)> = m
             .seasons
             .iter()
             .map(|s| {
-                let local = s.anime.source == kuro_source::local::LOCAL_SOURCE_ID;
-                (s.clone(), season_facts(s, m.season_extras.get(&s.id()), local))
+                let local = s.entry.source == kuro_source::local::LOCAL_SOURCE_ID;
+                (s.clone(), season_facts(s, m.season_extras.get(&s.entry.id), local))
             })
             .collect();
         let items: Vec<SeasonItem> = process_seasons(&m.anime, &seasons, m.downloaded_only);
         let layout = Layout {
             mode,
-            number_mode: m.anime.season_display_mode() == kuro_domain::entries::anime::season_flags::DISPLAY_MODE_NUMBER,
+            number_mode: m.anime.season().display_mode() == kuro_domain::entries::anime::season_flags::DISPLAY_MODE_NUMBER,
             // the page can continue watching: a tile shows the button when its season has an unseen episode
             has_continue: true,
             columns: Layout::columns_for(width, i64::from(size), mode),
@@ -1219,7 +1220,7 @@ impl View {
                 (
                     OverflowEntry {
                         favorite: m.anime.favorite,
-                        episodes: m.anime.fetch_type == FetchType::Episodes,
+                        episodes: m.anime.fetch_type() == FetchType::Episodes,
                         http_source: self.env.backend.is_http_source(source),
                         configurable_source: self.env.backend.is_configurable_source(source),
                     },
@@ -1257,7 +1258,7 @@ impl View {
         let (anime_id, stored, disabled) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            (m.anime.id, m.anime.skip_intro_length(), m.anime.skip_intro_disable())
+            (m.anime.id, m.anime.viewer().skip_intro_length(), m.anime.viewer().skip_intro_disable())
         };
         let default = DEFAULT_INTRO_LENGTH;
         let runner = self.runner.clone();
@@ -1625,7 +1626,7 @@ impl View {
             return;
         }
         let Some((anime_id, seasons)) =
-            self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| (m.anime.id, m.anime.fetch_type == FetchType::Seasons))
+            self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| (m.anime.id, m.anime.fetch_type() == FetchType::Seasons))
         else {
             return;
         };
@@ -1648,8 +1649,8 @@ impl View {
     /// settings (E-DEF-3, `AnimeEvent::DefaultsApplied`).
     fn use_as_default(self: &Rc<Self>) {
         let Some((seasons, word)) = self.model.borrow().as_ref().map(|m| {
-            let seasons = m.anime.fetch_type == FetchType::Seasons;
-            (seasons, if seasons { m.anime.season_flags } else { m.anime.episode_flags })
+            let seasons = m.anime.fetch_type() == FetchType::Seasons;
+            (seasons, if seasons { m.anime.season_flags() } else { m.anime.item_flags })
         }) else {
             return;
         };
@@ -1657,7 +1658,7 @@ impl View {
             set_season_settings_default(&self.env.prefs, word);
             Scope::Season
         } else {
-            set_episode_settings_default(&self.env.prefs, word);
+            set_item_settings_default(&self.env.prefs, Kind::Anime, word);
             Scope::Episode
         };
         self.runner.send(AnimeCmd::ApplyDefaultsToLibrary { scope });
@@ -1766,7 +1767,7 @@ mod tests {
     /// the info block moved to the left, and Missing with a Back button.
     #[test]
     fn anime_route_smoke() {
-        use kuro_domain::entries::anime::episode_flags as ep;
+        use kuro_db::flags::item as ep;
         crate::testing::with_display(|| {
             let ctx = glib::MainContext::default();
             let _owner = ctx.acquire().expect("main context");
@@ -1825,7 +1826,7 @@ mod tests {
             assert!(count_row.is_none_or(|l| l.ancestor(Button::static_type()).is_none()), "no second sort button above the list");
             // Unwatched writes the flag and leaves the two unwatched episodes; turning it off brings the third back
             let rows = &store;
-            let unseen = |on: bool| move || rows.anime(id).unwrap().is_some_and(|a| (a.episode_flags & ep::UNSEEN_MASK == ep::SHOW_UNSEEN) == on);
+            let unseen = |on: bool| move || rows.anime(id).unwrap().is_some_and(|a| (a.item_flags & ep::UNDONE_MASK == ep::SHOW_UNDONE) == on);
             options[0].activate_action("viewopt.unseen", None).expect("the Unwatched check");
             assert!(pump(&ctx, unseen(true)), "the check writes the flag");
             assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 4)), "two leading rows and two unwatched episodes, got {:?}", list.model().map(|m| m.n_items()));

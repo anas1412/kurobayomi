@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
-use kuro_domain::entries::defaults::chapter_default_word;
+use kuro_domain::entries::defaults::item_default_word;
 use kuro_platform::kind::Kind;
 use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
 
@@ -138,14 +138,14 @@ fn page_for(manga_id: i64) -> GBox {
     let db = app.db.clone();
     let store = app.base.store().clone();
     let ctx = LoadContext {
-        library_defaults: ChapterFlags(chapter_default_word(&store)),
+        library_defaults: ChapterFlags(item_default_word(&store, Kind::Manga)),
         from_source: false,
         downloaded_only: app.base.downloaded_only.get(),
         skip_filtered: crate::misc::diet_defaults::READER_SKIP_FILTERED,
     };
     let remove_after_read = crate::misc::diet_defaults::DOWNLOAD_REMOVE_AFTER_MARKED_READ;
     let handle = tokio::runtime::Handle::current();
-    let runner = Rc::new(runner::spawn(&handle, DbStore::new(Arc::clone(&db)), Arc::new(SourceBackend::live(db, &store)), ctx));
+    let runner = Rc::new(runner::spawn(&handle, DbStore::new(Arc::clone(&db)), store.clone(), Arc::new(SourceBackend::live(db, &store)), ctx));
     runner.send(StoreCmd::Load { manga_id });
     let mut page = Page::new(manga_id, remove_after_read);
     page.default_category = i64::from(app.library.default_manga_category.get());
@@ -282,7 +282,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
 
     // the header bar: created disabled, enabled when the page is Ready
     let download_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).build());
-    let list_spec = list_options::chapter_spec();
+    let list_spec = list_options::item_spec(Kind::Manga);
     let options = ViewOptions::new(list_options::TOOLTIP, &list_spec.sections());
     let overflow = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").build());
     let select_all = ui::icon_button("edit-select-all-symbolic", &tr(MsgKey::action_select_all));
@@ -1160,11 +1160,11 @@ impl View {
             self.toast(message);
             return;
         };
-        let repo = kuro_data::manga::MangaRepo::new(app.db.clone());
+        let repo = kuro_data::entry::EntryRepo::new(app.db.clone());
         let (done, count) = async_channel::bounded::<usize>(1);
         // detached: closing the page does not stop the run (`withNonCancellableContext`)
         handle.spawn(async move {
-            match kuro_domain::entries::defaults::chapter_defaults_to_library_detached(repo, store).await {
+            match kuro_domain::entries::defaults::defaults_to_library_detached(repo, store, Kind::Manga).await {
                 Ok(updated) => {
                     let _ = done.send(updated).await;
                 }
@@ -1198,7 +1198,7 @@ impl View {
             ui::DialogButton::new(tr(MsgKey::action_migrate_duplicate), ui::Role::Normal, move || {
                 if let Some(view) = weak_migrate.upgrade() {
                     // one primary-key read names the old entry for the migrate dialog
-                    let title = kuro_data::manga::MangaRepo::new(data::app().db.clone()).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
+                    let title = kuro_data::entry::EntryRepo::new(data::app().db.clone()).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
                     view.migrate_entry(duplicate_id, title);
                 }
             }),
@@ -1281,8 +1281,8 @@ mod tests {
         assert_eq!(super::applied_to_library_text("Updated default chapter settings", 3), "Updated default chapter settings (3)");
     }
 
-    use kuro_data::chapter::{Chapter, ChapterRepo};
-    use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
+    use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
+    use kuro_data::item::{Item, ItemRepo};
     use kuro_db::handle::Db;
 
     use super::*;
@@ -1301,16 +1301,16 @@ mod tests {
             let path = dir.path().join("test.db");
             let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
             let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
-            let mangas = MangaRepo::new(Arc::clone(&db));
-            let id = mangas.insert(&Manga { source: 7, url: "/m".into(), title: "Berserk".into(), favorite: true, ..Manga::create() }).unwrap();
-            mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();
-            let chapters: Vec<Chapter> = (1..=3)
-                .map(|n| Chapter { manga_id: id, url: format!("/c{n}"), name: format!("Chapter {n}"), chapter_number: f64::from(n), source_order: i64::from(3 - n), ..Chapter::create() })
+            let mangas = EntryRepo::new(Arc::clone(&db));
+            let id = mangas.insert(&Entry { source: 7, url: "/m".into(), title: "Berserk".into(), favorite: true, ..Entry::create(Kind::Manga) }).unwrap();
+            mangas.update(&EntryUpdate { initialized: Some(true), ..EntryUpdate::new(id) }).unwrap();
+            let chapters: Vec<Item> = (1..=3)
+                .map(|n| Item { entry_id: id, url: format!("/c{n}"), name: format!("Chapter {n}"), number: f64::from(n), source_order: i64::from(3 - n), ..Item::create(Kind::Manga) })
                 .collect();
-            ChapterRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
+            ItemRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
 
             let spawn = |manga_id| {
-                let runner = Rc::new(runner::spawn(rt.handle(), DbStore::new(Arc::clone(&db)), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
+                let runner = Rc::new(runner::spawn(rt.handle(), DbStore::new(Arc::clone(&db)), kuro_prefs::store::PrefStore::in_memory(), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
                 let page = assemble(Page::new(manga_id, false), Rc::clone(&runner));
                 runner.send(StoreCmd::Load { manga_id });
                 page
@@ -1427,13 +1427,13 @@ mod tests {
             crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
             let (nav, _window) = crate::testing::nav();
             let db = crate::data::app().db.clone();
-            let mangas = MangaRepo::new(Arc::clone(&db));
-            let id = mangas.insert(&Manga { source: kuro_source::generate_id("Fixture", "en", 1), url: "/series/1".into(), title: "Browsed".into(), ..Manga::create() }).unwrap();
-            mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();
-            let chapter = Chapter { manga_id: id, url: "/chapters/1".into(), name: "Chapter 1".into(), chapter_number: 1.0, ..Chapter::create() };
-            ChapterRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap();
+            let mangas = EntryRepo::new(Arc::clone(&db));
+            let id = mangas.insert(&Entry { source: kuro_source::generate_id("Fixture", "en", 1), url: "/series/1".into(), title: "Browsed".into(), ..Entry::create(Kind::Manga) }).unwrap();
+            mangas.update(&EntryUpdate { initialized: Some(true), ..EntryUpdate::new(id) }).unwrap();
+            let chapter = Item { entry_id: id, url: "/chapters/1".into(), name: "Chapter 1".into(), number: 1.0, ..Item::create(Kind::Manga) };
+            ItemRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap();
 
-            let runner = Rc::new(runner::spawn(runtime.handle(), DbStore::new(Arc::clone(&db)), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
+            let runner = Rc::new(runner::spawn(runtime.handle(), DbStore::new(Arc::clone(&db)), kuro_prefs::store::PrefStore::in_memory(), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
             let page = assemble(Page::new(id, false), Rc::clone(&runner));
             runner.send(StoreCmd::Load { manga_id: id });
             ui::push(&page);

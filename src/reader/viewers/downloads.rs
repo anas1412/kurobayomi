@@ -4,13 +4,13 @@
 
 use std::sync::Arc;
 
-use kuro_data::chapter::Chapter;
+use kuro_data::item::Item;
 
 /// Looks a chapter up in the download index. Cheap to clone, and `Send + Sync` because the lookup runs on a worker.
 #[derive(Clone)]
 pub struct DownloadCheck {
     pub manga_is_local: bool,
-    pub lookup: Arc<dyn Fn(&Chapter) -> bool + Send + Sync>,
+    pub lookup: Arc<dyn Fn(&Item) -> bool + Send + Sync>,
 }
 
 impl Default for DownloadCheck {
@@ -20,7 +20,7 @@ impl Default for DownloadCheck {
 }
 
 impl DownloadCheck {
-    pub fn new(manga_is_local: bool, lookup: Arc<dyn Fn(&Chapter) -> bool + Send + Sync>) -> Self {
+    pub fn new(manga_is_local: bool, lookup: Arc<dyn Fn(&Item) -> bool + Send + Sync>) -> Self {
         Self { manga_is_local, lookup }
     }
 }

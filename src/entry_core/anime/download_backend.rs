@@ -7,7 +7,9 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use kuro_data::anime::Anime;
+use kuro_data::entry::Entry;
 use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_downloads::anime::manager::{AnimeQueue, Command, QueueEntry};
 use kuro_downloads::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
@@ -39,29 +41,45 @@ pub fn split_source_name(shown: &str) -> (String, String) {
     (shown.to_owned(), String::new())
 }
 
-pub(crate) fn source_of(anime: &Anime, info: &SourceInfo) -> AnimeSource {
+/// The downloads source of an entry, named by its source line.
+pub(crate) fn entry_source(anime: &Entry, info: &SourceInfo) -> AnimeSource {
     let (name, lang) = split_source_name(&info.name);
     AnimeSource { id: anime.source, name, lang, is_http: !info.stub, unmetered: false }
 }
 
-pub(crate) fn anime_ref(anime: &Anime) -> AnimeRef {
+pub(crate) fn entry_ref(anime: &Entry) -> AnimeRef {
     AnimeRef { id: anime.id, source_id: anime.source, url: anime.url.clone(), title: anime.title.clone() }
 }
 
-pub(crate) fn episode_ref(e: &Episode) -> EpisodeRef {
+pub(crate) fn item_ref(e: &Item) -> EpisodeRef {
     EpisodeRef {
         id: e.id,
-        anime_id: e.anime_id,
+        anime_id: e.entry_id,
         url: e.url.clone(),
         name: e.name.clone(),
         scanlator: e.scanlator.clone(),
-        seen: e.seen,
+        seen: e.done,
         bookmark: e.bookmark,
         fillermark: e.fillermark,
         source_order: e.source_order,
         upload_date: e.date_upload,
-        episode_number: e.episode_number,
+        episode_number: e.number,
     }
+}
+
+// The three functions below are the seam of the download queue (`downloads::anime_queue`), which still holds the legacy
+// `Anime` and `Episode`. Phase E deletes them with the shapes.
+
+pub(crate) fn source_of(anime: &Anime, info: &SourceInfo) -> AnimeSource {
+    entry_source(&Entry::from(anime), info)
+}
+
+pub(crate) fn anime_ref(anime: &Anime) -> AnimeRef {
+    entry_ref(&Entry::from(anime))
+}
+
+pub(crate) fn episode_ref(e: &Episode) -> EpisodeRef {
+    item_ref(&Item::from(e))
 }
 
 /// The downloads folder and, when the app has one, the queue.
@@ -81,22 +99,22 @@ impl AnimeDownloads {
     }
 
     /// The ids of the episodes that have a finished folder in the downloads folder.
-    pub fn downloaded(&self, anime: &Anime, episodes: &[Episode], info: &SourceInfo) -> HashSet<i64> {
-        let (source, anime) = (source_of(anime, info), anime_ref(anime));
-        episodes.iter().filter(|e| self.layout.find_episode_dir(&source, &anime, &episode_ref(e)).is_some()).map(|e| e.id).collect()
+    pub fn downloaded(&self, anime: &Entry, episodes: &[Item], info: &SourceInfo) -> HashSet<i64> {
+        let (source, anime) = (entry_source(anime, info), entry_ref(anime));
+        episodes.iter().filter(|e| self.layout.find_episode_dir(&source, &anime, &item_ref(e)).is_some()).map(|e| e.id).collect()
     }
 
     /// Queues the episodes and starts the run when the queue was empty. `false` when there is no queue. `start_now`
     /// puts the one episode at the front and starts the run.
-    pub fn enqueue(&self, anime: &Anime, episodes: &[Episode], info: &SourceInfo, start_now: bool) -> bool {
+    pub fn enqueue(&self, anime: &Entry, episodes: &[Item], info: &SourceInfo, start_now: bool) -> bool {
         let Some(queue) = &self.queue else { return false };
-        let (source, anime) = (source_of(anime, info), anime_ref(anime));
+        let (source, anime) = (entry_source(anime, info), entry_ref(anime));
         let sent = if start_now {
-            let Some(episode) = episodes.first().map(episode_ref) else { return false };
+            let Some(episode) = episodes.first().map(item_ref) else { return false };
             let (reply, _answer) = tokio::sync::oneshot::channel();
             queue.send(Command::StartNow { entry: QueueEntry { source, anime, episode, alt: false, video: None }, reply })
         } else {
-            let episodes = episodes.iter().map(episode_ref).collect();
+            let episodes = episodes.iter().map(item_ref).collect();
             let (reply, _answer) = tokio::sync::oneshot::channel();
             queue.send(Command::Enqueue { source, anime, episodes, auto_start: true, alt: false, video: None, reply })
         };
@@ -105,9 +123,9 @@ impl AnimeDownloads {
 
     /// Deletes the downloads of these episodes: through the queue, which applies the delete rules and keeps its index,
     /// or straight from the folder when there is none. `categories` are the entry's, for the rules.
-    pub fn delete(&self, anime: &Anime, episodes: &[Episode], categories: Vec<i64>, info: &SourceInfo) {
-        let (source, anime) = (source_of(anime, info), anime_ref(anime));
-        let episodes: Vec<EpisodeRef> = episodes.iter().map(episode_ref).collect();
+    pub fn delete(&self, anime: &Entry, episodes: &[Item], categories: Vec<i64>, info: &SourceInfo) {
+        let (source, anime) = (entry_source(anime, info), entry_ref(anime));
+        let episodes: Vec<EpisodeRef> = episodes.iter().map(item_ref).collect();
         if let Some(queue) = &self.queue {
             let (reply, _answer) = tokio::sync::oneshot::channel();
             let _ = queue.send(Command::DeleteEpisodes { source, anime, episodes, categories, reply });
@@ -124,18 +142,28 @@ impl AnimeDownloads {
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
+
     use super::*;
 
     fn info() -> SourceInfo {
         SourceInfo { name: "Reader (EN)".into(), stub: false }
     }
 
-    fn anime() -> Anime {
-        Anime { id: 1, source: 7, title: "Frieren".into(), ..Anime::create() }
+    fn anime() -> Entry {
+        Entry { id: 1, source: 7, title: "Frieren".into(), ..Entry::create(Kind::Anime) }
     }
 
-    fn episodes(n: i64) -> Vec<Episode> {
-        (1..=n).map(|id| Episode { id, anime_id: 1, name: format!("Episode {id}"), url: format!("/e{id}"), ..Episode::create() }).collect()
+    fn episodes(n: i64) -> Vec<Item> {
+        (1..=n).map(|id| Item { id, entry_id: 1, name: format!("Episode {id}"), url: format!("/e{id}"), ..Item::create(Kind::Anime) }).collect()
+    }
+
+    #[test]
+    fn the_queue_seam_answers_like_the_shared_refs() {
+        let (entry, item) = (anime(), episodes(1).remove(0));
+        assert_eq!(anime_ref(&Anime::from(entry.clone())).id, entry_ref(&entry).id);
+        assert_eq!(episode_ref(&Episode::from(item.clone())).anime_id, item_ref(&item).anime_id);
+        assert_eq!(source_of(&Anime::from(entry.clone()), &info()).id, entry_source(&entry, &info()).id);
     }
 
     /// A downloads folder with the finished folders of `names` for `Frieren`.

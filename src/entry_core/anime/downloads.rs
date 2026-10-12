@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 
 /// The entries of the Download menu: the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,8 +27,8 @@ pub fn menu_visible(local: bool, has_download_handler: bool) -> bool {
 /// The episodes a menu entry queues. `processed` is the displayed list, `descending` its direction.
 // ponytail: an episode that is queued but not yet on disk is not told apart from a missing one; the model keeps no
 // queue state, so it can be queued twice (the queue ignores a duplicate).
-pub fn download_targets(processed: &[Episode], descending: bool, downloaded: &HashSet<i64>, menu: DownloadMenu) -> Vec<i64> {
-    let mut unseen: Vec<i64> = processed.iter().filter(|e| !e.seen && !downloaded.contains(&e.id)).map(|e| e.id).collect();
+pub fn download_targets(processed: &[Item], descending: bool, downloaded: &HashSet<i64>, menu: DownloadMenu) -> Vec<i64> {
+    let mut unseen: Vec<i64> = processed.iter().filter(|e| !e.done && !downloaded.contains(&e.id)).map(|e| e.id).collect();
     if let DownloadMenu::Next(n) = menu {
         if descending {
             unseen.reverse();
@@ -39,12 +39,12 @@ pub fn download_targets(processed: &[Episode], descending: bool, downloaded: &Ha
 }
 
 /// The ids of the selected episodes the bar's Download row queues: those not on disk.
-pub fn selection_to_download(selected: &[Episode], downloaded: &HashSet<i64>) -> Vec<i64> {
+pub fn selection_to_download(selected: &[Item], downloaded: &HashSet<i64>) -> Vec<i64> {
     selected.iter().filter(|e| !downloaded.contains(&e.id)).map(|e| e.id).collect()
 }
 
 /// The ids of the selected episodes the bar's Delete row removes: those on disk.
-pub fn selection_to_delete(selected: &[Episode], downloaded: &HashSet<i64>) -> Vec<i64> {
+pub fn selection_to_delete(selected: &[Item], downloaded: &HashSet<i64>) -> Vec<i64> {
     selected.iter().filter(|e| downloaded.contains(&e.id)).map(|e| e.id).collect()
 }
 
@@ -52,8 +52,8 @@ pub fn selection_to_delete(selected: &[Episode], downloaded: &HashSet<i64>) -> V
 mod tests {
     use super::*;
 
-    fn ep(id: i64, seen: bool) -> Episode {
-        Episode { id, seen, ..Episode::create() }
+    fn ep(id: i64, seen: bool) -> Item {
+        Item { id, done: seen, ..Item::create(kuro_platform::kind::Kind::Anime) }
     }
 
     fn set(ids: &[i64]) -> HashSet<i64> {

@@ -5,6 +5,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
+use crate::entry_core::numbered::AutoDownloadItem;
+
 /// A zero-episode entry is fetched again on open only after this long (fix 23.24).
 pub const EMPTY_OPEN_REFRESH_GAP_MS: i64 = 10 * 60 * 1000;
 
@@ -57,13 +59,15 @@ pub fn auto_download_targets(
     enabled: bool,
     eligible: bool,
     unseen_only: bool,
-    new_episodes: &[kuro_data::episode::Episode],
-    existing: &[kuro_data::episode::Episode],
-) -> Vec<kuro_data::episode::Episode> {
+    new_episodes: &[kuro_data::item::Item],
+    existing: &[kuro_data::item::Item],
+) -> Vec<kuro_data::item::Item> {
     if !auto_download_allowed(trigger) {
         return Vec::new();
     }
-    kuro_domain::download::filter::filter_new(enabled, eligible, unseen_only, new_episodes, existing)
+    let new: Vec<AutoDownloadItem> = new_episodes.iter().cloned().map(AutoDownloadItem).collect();
+    let existing: Vec<AutoDownloadItem> = existing.iter().cloned().map(AutoDownloadItem).collect();
+    kuro_domain::download::filter::filter_new(enabled, eligible, unseen_only, &new, &existing).into_iter().map(|e| e.0).collect()
 }
 
 /// An open-time refresh of an entry with no episodes waits for the 10-minute guard. A manual refresh always runs,
@@ -105,14 +109,14 @@ mod tests {
 
     #[test]
     fn the_open_refresh_never_auto_downloads_and_a_manual_one_follows_the_filter() {
-        use kuro_data::episode::Episode;
-        let ep = |number: f64, seen: bool| Episode { episode_number: number, seen, ..Episode::create() };
+        use kuro_data::item::Item;
+        let ep = |number: f64, seen: bool| Item { number, done: seen, ..Item::create(kuro_platform::kind::Kind::Anime) };
         let new = [ep(3.0, false), ep(2.0, false)];
         let existing = [ep(2.0, true)];
         assert!(auto_download_targets(Trigger::Open, true, true, false, &new, &existing).is_empty(), "E-REF-5");
         assert_eq!(auto_download_targets(Trigger::Manual, true, true, false, &new, &existing).len(), 2);
         let only_unseen = auto_download_targets(Trigger::Manual, true, true, true, &new, &existing);
-        assert_eq!(only_unseen.iter().map(|e| e.episode_number).collect::<Vec<_>>(), [3.0], "a seen duplicate is skipped");
+        assert_eq!(only_unseen.iter().map(|e| e.number).collect::<Vec<_>>(), [3.0], "a seen duplicate is skipped");
         assert!(auto_download_targets(Trigger::Manual, false, true, false, &new, &existing).is_empty(), "the preference is off");
         assert!(auto_download_targets(Trigger::Manual, true, false, false, &new, &existing).is_empty(), "an excluded category");
     }

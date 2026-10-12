@@ -7,20 +7,24 @@
 //! entry syncs its season list through the domain's `SyncSeasons`, and with "update seasons on refresh" on, the episodes
 //! of its seasons are fetched after it (`season_fetch`).
 //!
-//! Known gap: no cover cache is wired, so a changed cover is stamped but its file is not deleted.
+//! Known gap: no cover cache is wired, so a changed cover is stamped but its file is not deleted. The domain's remote
+//! update still holds the legacy `Anime` and `Episode` (its season sync is not moved yet), so the list sync and the results
+//! cross that seam with `From`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use kuro_data::anime::Anime;
+use kuro_data::entry::Entry;
 use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::error::DomainError;
 use async_trait::async_trait;
-use kuro_domain::items::episode_sync::{EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
 use kuro_domain::items::season_sync::SyncSeasons;
-use kuro_domain::items::source_sync::MangaSyncLocks;
+use kuro_domain::items::source_sync::EntrySyncLocks;
+use kuro_domain::items::sync::{NoRenames, SourceItem, SyncItems, SyncItemsError, SyncOptions, source_item_from_episode};
 use kuro_domain::source::remote_update::{AnimeRemote, CacheFiles, DbRemoteStore, FetchFlags, ListSync, RemoteError, RemoteStore, UpdateFromRemote};
 use kuro_prefs::store::PrefStore;
 use kuro_source::SourceError;
@@ -34,6 +38,7 @@ use super::runner::{AnimeBackend, AnimeFetch, StubAnimeBackend};
 use super::season_fetch::fetch_episodes_of;
 use super::store::AnimeStore;
 use crate::browse::errors::limited;
+use crate::entry_core::backend::NoCoverFiles;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 
@@ -128,9 +133,7 @@ impl AnimeSourceLookup for LiveSources {
     }
 }
 
-/// No cover cache is wired: an entry never has a custom cover file, and no file is deleted.
-struct NoCoverFiles;
-
+/// The domain's remote update still asks its own `CacheFiles` for the legacy `Anime`; the shared no-files port answers it too.
 impl CacheFiles for NoCoverFiles {
     fn has_custom_cover(&self, _anime: &Anime) -> bool {
         false
@@ -145,26 +148,30 @@ impl CacheFiles for NoCoverFiles {
 /// The list sync of `UpdateFromRemote` over the domain's async episode sync and its season sync. It runs on a tokio
 /// worker, so the wait for the episode sync is `block_in_place`.
 struct EpisodeListSync {
-    sync: SyncEpisodes,
+    sync: SyncItems,
     seasons: SyncSeasons,
     handle: Handle,
-    mark_duplicate_as_seen: bool,
+    mark_duplicate_done: bool,
 }
 
 impl ListSync for EpisodeListSync {
     fn sync_episodes(&self, raw: &[SEpisode], anime: &Anime, manual: bool, window: (i64, i64)) -> Result<Vec<Episode>, DomainError> {
-        let opts = EpisodeSyncOptions {
+        let opts = SyncOptions {
             now_ms: chrono::Utc::now().timestamp_millis(),
             manual,
             window,
-            mark_duplicate_as_seen: self.mark_duplicate_as_seen,
+            mark_duplicate_done: self.mark_duplicate_done,
             is_local: anime.source == kuro_source::local::LOCAL_SOURCE_ID,
         };
-        let run = self.sync.run(raw.to_vec(), anime, opts);
-        tokio::task::block_in_place(|| self.handle.block_on(run)).map_err(|e| match e {
-            kuro_domain::items::episode_sync::EpisodeSyncError::Db(e) => DomainError::Db(e),
-            kuro_domain::items::episode_sync::EpisodeSyncError::NoEpisodes(_) => DomainError::Invalid("the source returned no episodes"),
-        })
+        let items: Vec<SourceItem> = raw.iter().map(source_item_from_episode).collect();
+        let entry = Entry::from(anime);
+        let run = self.sync.run(items, &entry, opts, None);
+        tokio::task::block_in_place(|| self.handle.block_on(run))
+            .map(|new| new.into_iter().map(Episode::from).collect())
+            .map_err(|e| match e {
+                SyncItemsError::Db(e) => DomainError::Db(e),
+                SyncItemsError::NoItems => DomainError::Invalid("the source returned no episodes"),
+            })
     }
 
     fn sync_seasons(&self, raw: &[SAnime], anime: &Anime, manual: bool, window: (i64, i64)) -> Result<Vec<Anime>, DomainError> {
@@ -185,9 +192,9 @@ pub struct RemoteAnimeBackend {
 impl RemoteAnimeBackend {
     /// `handle` is the runtime the fetches run on, which must be a multi-threaded one.
     pub fn new(db: Arc<Db>, _prefs: &PrefStore, lookup: Arc<dyn AnimeSourceLookup>, handle: Handle) -> Self {
-        let mark_duplicate_as_seen = crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_EPISODE_SEEN;
-        let sync = SyncEpisodes::new(Arc::clone(&db), Arc::new(MangaSyncLocks::default()), Arc::new(NoEpisodeRenames));
-        let list_sync = EpisodeListSync { sync, seasons: SyncSeasons::new(Arc::clone(&db)), handle, mark_duplicate_as_seen };
+        let mark_duplicate_done = crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_EPISODE_SEEN;
+        let sync = SyncItems::new(Arc::clone(&db), Arc::new(EntrySyncLocks::default()), Arc::new(NoRenames));
+        let list_sync = EpisodeListSync { sync, seasons: SyncSeasons::new(Arc::clone(&db)), handle, mark_duplicate_done };
         let store = Arc::new(DbRemoteStore::new(Arc::clone(&db)));
         let update = Arc::new(UpdateFromRemote::new(store.clone(), Arc::new(list_sync), Arc::new(NoCoverFiles)));
         Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None }
@@ -200,9 +207,9 @@ impl RemoteAnimeBackend {
     }
 
     /// The entry and the episodes with these ids (all of them when `ids` is `None`), with the source line.
-    fn entry_episodes(&self, anime_id: i64, ids: Option<&[i64]>) -> Option<(Anime, Vec<Episode>, SourceInfo)> {
+    fn entry_episodes(&self, anime_id: i64, ids: Option<&[i64]>) -> Option<(Entry, Vec<Item>, SourceInfo)> {
         let anime = self.episodes.anime(anime_id).ok().flatten()?;
-        let episodes: Vec<Episode> = self.episodes.episodes(anime_id).ok()?.into_iter().filter(|e| ids.is_none_or(|ids| ids.contains(&e.id))).collect();
+        let episodes: Vec<Item> = self.episodes.episodes(anime_id).ok()?.into_iter().filter(|e| ids.is_none_or(|ids| ids.contains(&e.id))).collect();
         let info = self.source_info(anime.source);
         Some((anime, episodes, info))
     }
@@ -233,7 +240,11 @@ impl AnimeBackend for RemoteAnimeBackend {
                 fetch_window: (0, 0),
             };
             match anime.fetch_type {
-                FetchType::Episodes => update.episodes(&anime, &*remote, flags).await.map(|r| r.new_episodes).map_err(|e| detail_error(e, &name)),
+                FetchType::Episodes => update
+                    .episodes(&anime, &*remote, flags)
+                    .await
+                    .map(|r| r.new_episodes.iter().map(Item::from).collect())
+                    .map_err(|e| detail_error(e, &name)),
                 FetchType::Seasons => {
                     let seasons = update.seasons(&anime, &*remote, flags).await.map_err(|e| detail_error(e, &name))?.new_seasons;
                     // behaviour 6.4.1: with "update seasons on refresh" on, the episodes of the unfinished seasons follow
@@ -390,7 +401,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, false, 1, 0);
         let backend = backend(store.db(), FakeSource::new(vec![s_episode("/e1", 1.0), s_episode("/e2", 2.0)]), rt.handle().clone());
         let new = rt.block_on(backend.fetch(id, PLAN, Trigger::Manual)).expect("the fetch works");
-        assert_eq!(new.iter().map(|e| e.episode_number).collect::<Vec<_>>(), [2.0], "the one that was not stored before");
+        assert_eq!(new.iter().map(|e| e.number).collect::<Vec<_>>(), [2.0], "the one that was not stored before");
         assert_eq!(store.episodes(id).unwrap().len(), 2);
         assert!(store.anime(id).unwrap().unwrap().initialized, "the metadata write marks it initialized");
     }
@@ -422,7 +433,7 @@ mod tests {
         let backend = RemoteAnimeBackend::new(store.db(), &prefs, Arc::new(One(source.clone())), rt.handle().clone());
         let plan = RefreshPlan { info: true, episodes: false, seasons: true };
         rt.block_on(backend.fetch(id, plan, Trigger::Manual)).expect("the refresh works");
-        let ids = kuro_data::anime::AnimeRepo::new(store.db()).seasons_by_parent(id).unwrap().into_iter().map(|s| s.anime.id).collect();
+        let ids = kuro_data::entry::EntryRepo::new(store.db()).seasons_by_parent(id).unwrap().into_iter().map(|s| s.entry.id).collect();
         (dir, ids, store)
     }
 

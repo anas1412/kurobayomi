@@ -177,27 +177,27 @@ mod tests {
     #[test]
     fn the_resume_button_reads_the_processed_list_for_unread_and_the_whole_list_for_its_label() {
         // chapter 1 is read and the rest are not: the processed list has unread, and the unfiltered one has a read row
-        let shown = page(0x1 | 0x100, true, rows());
+        let shown = page(0x1 | 0x200, true, rows());
         assert_eq!(fab_state(&shown), ResumeFab { visible: true, resume: true });
         // a bookmarked filter that keeps only an unread row still shows it; hiding all unread rows hides the button
         let mut all_read = rows();
         all_read.iter_mut().for_each(|r| r.read = true);
-        assert!(!fab_state(&page(0x1 | 0x100, true, all_read)).visible);
-        let mut selected = page(0x1 | 0x100, true, rows());
+        assert!(!fab_state(&page(0x1 | 0x200, true, all_read)).visible);
+        let mut selected = page(0x1 | 0x200, true, rows());
         selected.selection.set_all(&[4], true);
         assert!(!fab_state(&selected).visible, "hidden while selecting");
     }
 
     #[test]
     fn unread_download_targets_skip_read_downloaded_and_queued_rows() {
-        let p = page(0x1 | 0x100, true, rows());
+        let p = page(0x1 | 0x200, true, rows());
         assert_eq!(download_targets(&p, DownloadAction::Unread), vec![4, 5, 6]);
         assert_eq!(download_targets(&p, DownloadAction::Next(2)), vec![4, 5]);
     }
 
     #[test]
     fn next_n_takes_the_oldest_first_for_a_descending_sort_too() {
-        let p = page(0x100, true, rows()); // number descending
+        let p = page(0x200, true, rows()); // number descending
         assert_eq!(download_targets(&p, DownloadAction::Next(2)), vec![4, 5], "oldest unread first (6.9.6)");
         assert_eq!(download_targets(&p, DownloadAction::Unread), vec![6, 5, 4], "unread keeps the list order");
     }
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn skip_filtered_decides_between_the_view_and_every_chapter() {
         // the bookmarked filter shows only chapter 6
-        let flags = 0x1 | 0x100 | kuro_db::flags::chapter::SHOW_BOOKMARKED;
+        let flags = 0x1 | 0x200 | kuro_db::flags::item::SHOW_BOOKMARKED;
         assert_eq!(download_targets(&page(flags, true, rows()), DownloadAction::Unread), vec![6]);
         assert_eq!(download_targets(&page(flags, false, rows()), DownloadAction::Unread), vec![4, 5, 6]);
     }

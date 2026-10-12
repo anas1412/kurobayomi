@@ -50,7 +50,7 @@ impl ChapterSnap {
         };
         Self {
             key: chapter.key(),
-            number: chapter.chapter.chapter_number,
+            number: chapter.chapter.number,
             state: LoadState::of(&chapter.state()),
             page_count,
             requested_page: chapter.requested_page.get().max(0) as u32,

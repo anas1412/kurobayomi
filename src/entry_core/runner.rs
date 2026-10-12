@@ -9,6 +9,9 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
+use kuro_prefs::store::PrefStore;
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
@@ -19,7 +22,7 @@ use crate::entry_core::detail::{
     LatestWins, LoadContext, LoadState, MangaRow, StoreCmd, StoreEvent, finish_load,
 };
 use crate::entry_core::errors::DetailError;
-use crate::entry_core::favorite::{AddRoute, find_duplicate, route_add};
+use crate::entry_core::favorite::{AddRoute, route_add};
 use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};
 use crate::entry_core::store::{DbStore, chapter_rows, manga_row};
 
@@ -30,10 +33,11 @@ pub type Snapshot = (Box<MangaRow>, Vec<ChapterRow>);
 pub type Runner = RunnerHandle<StoreCmd, StoreEvent>;
 
 /// Starts the runner on `handle`.
-pub fn spawn(handle: &Handle, store: DbStore, backend: Arc<dyn Backend>, ctx: LoadContext) -> Runner {
+pub fn spawn(handle: &Handle, store: DbStore, prefs: PrefStore, backend: Arc<dyn Backend>, ctx: LoadContext) -> Runner {
     let (runner, cmd_rx, event_tx, cancel) = Runner::new(|| StoreCmd::Shutdown);
     let shared = Arc::new(Shared {
         store,
+        prefs,
         backend,
         ctx,
         events: event_tx,
@@ -65,6 +69,8 @@ pub fn collect(first: StoreEvent, rest: &Receiver<StoreEvent>, latest: &LatestWi
 
 struct Shared {
     store: DbStore,
+    /// The library defaults an add to the library writes (`entry_ops::add_to_library`).
+    prefs: PrefStore,
     backend: Arc<dyn Backend>,
     ctx: LoadContext,
     events: Sender<StoreEvent>,
@@ -124,17 +130,14 @@ impl Shared {
         }));
     }
 
-    /// Load order: the manga row, the library defaults for a non-favorite, the chapters, then `Ready`.
+    /// Load order: the manga row, the chapters, then `Ready`. A manga outside the library gets the library defaults as the
+    /// page's session copy (`finish_load`); the row is not written until the user changes a flag or adds it.
     async fn load(self: Arc<Self>, manga_id: i64) {
-        let defaults = self.ctx.library_defaults;
         let read = self
             .blocking(move |store, backend| {
-                let Some(manga) = store.manga(manga_id)? else {
+                let Some(_manga) = store.manga(manga_id)? else {
                     return Ok((None, Vec::new(), Default::default(), Default::default(), Default::default(), Default::default(), false));
                 };
-                if !manga.favorite {
-                    store.write_defaults(manga_id, defaults)?;
-                }
                 let downloads = backend.downloads(manga_id);
                 let (manga, chapters) = store.read_page(manga_id, &downloads)?;
                 let source = manga.as_ref().map(|m| backend.source_info(m.source)).unwrap_or_default();
@@ -180,7 +183,7 @@ impl Shared {
     /// The manga row and its chapters as one snapshot (`watch_pair`), and the two scanlator sets.
     fn subscribe(self: &Arc<Self>, manga_id: i64) {
         let shared = Arc::clone(self);
-        let pair = watch_pair(self.store.watch_manga(manga_id), self.store.watch_chapters(manga_id), move |m: &kuro_data::manga::Manga, c: &[kuro_data::chapter::Chapter]| {
+        let pair = watch_pair(self.store.watch_manga(manga_id), self.store.watch_chapters(manga_id), move |m: &Entry, c: &[Item]| {
             let downloads = shared.backend.downloads(manga_id);
             shared.emit(StoreEvent::Snapshot { manga: Box::new(manga_row(m)), chapters: chapter_rows(c, &downloads) });
         });
@@ -317,7 +320,7 @@ impl Shared {
             }
             StoreCmd::ResetFlags { manga_id } => {
                 let defaults = self.ctx.library_defaults;
-                self.write_result(move |s, _| s.write_defaults(manga_id, defaults).map(drop)).await;
+                self.write_result(move |s, _| s.reset_flags(manga_id, defaults).map(drop)).await;
             }
             StoreCmd::ReadTracking { manga_id, source_id } => match self.blocking(move |store, _| store.track_summary(manga_id, source_id)).await {
                 Ok(summary) => self.emit(StoreEvent::Tracking { count: summary.count, logged_in: summary.has_logged_in }),
@@ -331,7 +334,8 @@ impl Shared {
     /// default category, no categories, and the category dialog's confirm (`bindEnhancedTrackers`, behaviour 4.2 step 6).
     async fn add_to_library(&self, manga_id: i64, category_ids: Vec<i64>) {
         let now = chrono::Utc::now().timestamp_millis();
-        if self.write_result(move |s, _| s.add_to_library(manga_id, &category_ids, now)).await {
+        let prefs = self.prefs.clone();
+        if self.write_result(move |s, _| s.add_to_library(manga_id, &category_ids, &prefs, now)).await {
             self.blocking(move |_, backend| backend.bind_enhanced(manga_id)).await;
         }
         self.reload_categories(manga_id).await;
@@ -364,12 +368,9 @@ impl Shared {
             }
             return;
         }
-        let title = manga.title;
         let read = self
             .blocking(move |store, _| {
-                let titles = store.favorite_titles()?;
-                let refs: Vec<(i64, &str)> = titles.iter().map(|(id, t)| (*id, t.as_str())).collect();
-                let duplicate = if skip_duplicate { None } else { find_duplicate(manga_id, &title, &refs) };
+                let duplicate = if skip_duplicate { None } else { store.duplicates(manga_id)?.first().map(|d| d.id) };
                 kuro_data::DataResult::Ok((duplicate, store.user_categories()?))
             })
             .await;
@@ -411,7 +412,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use kuro_db::flags::chapter as c;
+    use kuro_db::flags::item as c;
 
     use super::*;
     use crate::entry_core::backend::Fetch;
@@ -532,7 +533,7 @@ mod tests {
         store.mark_initialized_for_test(id);
         let backend = Fake::ok();
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store, backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store, PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(StoreCmd::Load { manga_id: id });
             let rx = runner.events();
             let StoreEvent::Loaded(loaded) = until(&rx, |e| matches!(e, StoreEvent::Loaded(_))).await else {
@@ -548,11 +549,28 @@ mod tests {
     }
 
     #[test]
+    fn opening_a_manga_outside_the_library_writes_nothing_and_shows_the_library_defaults() {
+        let rt = rt();
+        let (_dir, store, id) = store(false, 1);
+        store.mark_initialized_for_test(id);
+        let defaults = crate::entry_core::flags::ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC);
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), Fake::ok(), LoadContext { library_defaults: defaults, ..ctx() });
+            runner.send(StoreCmd::Load { manga_id: id });
+            let rx = runner.events();
+            let StoreEvent::Loaded(loaded) = until(&rx, |e| matches!(e, StoreEvent::Loaded(_))).await else { unreachable!() };
+            let LoadState::Ready(page) = loaded.state else { panic!("ready") };
+            assert_eq!(page.manga.flags, defaults, "the page shows the defaults");
+            assert_eq!(store.manga(id).unwrap().unwrap().flags.0, 0, "the row is not written by opening (decision 4)");
+        });
+    }
+
+    #[test]
     fn a_missing_row_loads_not_found_instead_of_staying_loading() {
         let rt = rt();
         let (_dir, store, _id) = store(true, 0);
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store, Fake::ok(), ctx());
+            let runner = spawn(rt.handle(), store, PrefStore::in_memory(), Fake::ok(), ctx());
             runner.send(StoreCmd::Load { manga_id: 4242 });
             let StoreEvent::Loaded(loaded) = next(&runner.events()).await else { panic!("loaded first") };
             assert_eq!(loaded.state, LoadState::NotFound);
@@ -568,7 +586,7 @@ mod tests {
             ..Arc::into_inner(Fake::ok()).unwrap()
         });
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store, backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store, PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(StoreCmd::Load { manga_id: id });
             // a manual refresh while the first one runs is dropped
             runner.send(StoreCmd::FetchAll { manga_id: id, manual: true });
@@ -595,7 +613,7 @@ mod tests {
             ..Arc::into_inner(Fake::ok()).unwrap()
         });
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store, backend, ctx());
+            let runner = spawn(rt.handle(), store, PrefStore::in_memory(), backend, ctx());
             runner.send(StoreCmd::FetchAll { manga_id: id, manual: true });
             let rx = runner.events();
             let mut seen = Vec::new();
@@ -628,18 +646,18 @@ mod tests {
         let (_dir, store, id) = store(true, 1);
         store.mark_initialized_for_test(id);
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), Fake::ok(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), Fake::ok(), ctx());
             runner.send(StoreCmd::Load { manga_id: id });
             let rx = runner.events();
             until(&rx, |e| matches!(e, StoreEvent::Loaded(_))).await;
             runner.send(StoreCmd::SetFlagBits {
                 manga_id: id,
-                flag: c::SHOW_UNREAD,
-                mask: c::UNREAD_MASK,
+                flag: c::SHOW_UNDONE,
+                mask: c::UNDONE_MASK,
             });
-            let event = until(&rx, |e| matches!(e, StoreEvent::Snapshot { manga, .. } if manga.flags.0 & c::UNREAD_MASK == c::SHOW_UNREAD)).await;
+            let event = until(&rx, |e| matches!(e, StoreEvent::Snapshot { manga, .. } if manga.flags.0 & c::UNDONE_MASK == c::SHOW_UNDONE)).await;
             let StoreEvent::Snapshot { manga, .. } = event else { unreachable!() };
-            assert_eq!(manga.flags.0 & c::UNREAD_MASK, c::SHOW_UNREAD, "the view reads the store, not a local copy");
+            assert_eq!(manga.flags.0 & c::UNDONE_MASK, c::SHOW_UNDONE, "the view reads the store, not a local copy");
         });
     }
 
@@ -649,7 +667,7 @@ mod tests {
         let (_dir, store, id) = store(true, 1);
         store.mark_initialized_for_test(id);
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), Fake::ok(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), Fake::ok(), ctx());
             runner.send(StoreCmd::Load { manga_id: id });
             let rx = runner.events();
             until(&rx, |e| matches!(e, StoreEvent::Snapshot { .. })).await;
@@ -688,7 +706,7 @@ mod tests {
         });
         let finished = Arc::clone(&backend.finished);
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), ctx());
             let rx = runner.events();
             runner.send(StoreCmd::FetchAll { manga_id: id, manual: true });
             until(&rx, |e| matches!(e, StoreEvent::Refreshing(true))).await;
@@ -721,7 +739,7 @@ mod tests {
         let rt = rt();
         let (_dir, store, id) = store(false, 0);
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), Fake::ok(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), Fake::ok(), ctx());
             runner.send(StoreCmd::AddToLibrary {
                 manga_id: id,
                 category_ids: vec![],
@@ -746,7 +764,7 @@ mod tests {
         let cat = store.insert_category_for_test("Reading");
         let backend = Fake::ok();
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(toggle(id, cat, false));
             let rx = runner.events();
             let StoreEvent::Categories { membership, .. } = until(&rx, |e| matches!(e, StoreEvent::Categories { .. })).await else { unreachable!() };
@@ -764,7 +782,7 @@ mod tests {
         store.insert_category_for_test("Reading");
         let backend = Fake::ok();
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(toggle(id, 0, false));
             let rx = runner.events();
             let StoreEvent::Categories { membership, .. } = until(&rx, |e| matches!(e, StoreEvent::Categories { .. })).await else { unreachable!() };
@@ -781,7 +799,7 @@ mod tests {
         let cat = store.insert_category_for_test("Reading");
         let backend = Fake::ok();
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(toggle(id, -1, false));
             let rx = runner.events();
             until(&rx, |e| matches!(e, StoreEvent::ChooseCategory)).await;
@@ -802,7 +820,7 @@ mod tests {
         let other = store.insert_manga_for_test("TITLE", true); // same title, other case, other source
         let backend = Fake::ok();
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(toggle(id, 0, false));
             let rx = runner.events();
             let StoreEvent::Duplicate { duplicate_id } = until(&rx, |e| matches!(e, StoreEvent::Duplicate { .. })).await else { unreachable!() };
@@ -824,7 +842,7 @@ mod tests {
             ..Arc::into_inner(Fake::ok()).unwrap()
         });
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), ctx());
             runner.send(toggle(id, 0, false));
             let rx = runner.events();
             let StoreEvent::Removed { ask_delete_downloads } = until(&rx, |e| matches!(e, StoreEvent::Removed { .. })).await else { unreachable!() };
@@ -841,7 +859,7 @@ mod tests {
         let (_dir, store, id) = store(true, 2);
         let backend = Fake::ok();
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store, backend.clone(), ctx());
+            let runner = spawn(rt.handle(), store, PrefStore::in_memory(), backend.clone(), ctx());
             let rx = runner.events();
             runner.send(StoreCmd::Download { manga_id: id, chapter_ids: vec![7], start_now: true });
             until(&rx, |e| matches!(e, StoreEvent::Queued)).await;
@@ -863,10 +881,10 @@ mod tests {
     fn reset_writes_the_library_defaults_to_the_manga() {
         let rt = rt();
         let (_dir, store, id) = store(true, 0);
-        store.set_flag_bits(id, c::SHOW_UNREAD, c::UNREAD_MASK).unwrap();
+        store.set_flag_bits(id, c::SHOW_UNDONE, c::UNDONE_MASK).unwrap();
         let defaults = crate::entry_core::flags::ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC);
         rt.block_on(async {
-            let runner = spawn(rt.handle(), store.clone(), Fake::ok(), LoadContext { library_defaults: defaults, ..ctx() });
+            let runner = spawn(rt.handle(), store.clone(), PrefStore::in_memory(), Fake::ok(), LoadContext { library_defaults: defaults, ..ctx() });
             runner.send(StoreCmd::ResetFlags { manga_id: id });
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             while store.manga(id).unwrap().unwrap().flags != defaults {

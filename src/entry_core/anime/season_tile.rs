@@ -2,10 +2,10 @@
 //! `AnimeSeasonItem.kt` (the `-1` defaults that hide a badge) and `AnimeScreen.kt` (grid cells). The rules are pure; the
 //! grid widget is `season_grid`.
 
-use kuro_data::anime::{Anime, SeasonAnime};
-use kuro_data::episode::Episode;
+use kuro_data::entry::{Entry, SeasonEntry};
+use kuro_data::item::Item;
 use kuro_db::schema_anime::FetchType;
-use kuro_domain::entries::anime::AnimeExt;
+use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_i18n::{Arg, MsgKey, trf};
 
@@ -49,13 +49,14 @@ pub struct Overlays {
 }
 
 impl Overlays {
-    pub fn of(parent: &Anime) -> Self {
+    pub fn of(parent: &Entry) -> Self {
+        let season = parent.season();
         Self {
-            downloaded: parent.season_downloaded_overlay(),
-            unseen: parent.season_unseen_overlay(),
-            local: parent.season_local_overlay(),
-            language: parent.season_lang_overlay(),
-            continue_watching: parent.season_continue_overlay(),
+            downloaded: season.downloaded_overlay(),
+            unseen: season.unseen_overlay(),
+            local: season.local_overlay(),
+            language: season.lang_overlay(),
+            continue_watching: season.continue_overlay(),
         }
     }
 }
@@ -94,23 +95,23 @@ pub struct SeasonExtra {
 
 /// The facts of one season: the runner's extras when they have arrived, else none (a season with no extras shows
 /// no download count and no language, which the overlays then hide). Only a season that lists episodes can continue.
-pub fn season_facts(season: &SeasonAnime, extra: Option<&SeasonExtra>, is_local: bool) -> SeasonFacts {
+pub fn season_facts(season: &SeasonEntry, extra: Option<&SeasonExtra>, is_local: bool) -> SeasonFacts {
     SeasonFacts {
         download_count: extra.map_or(0, |e| e.download_count),
         is_local,
         source_language: extra.map(|e| e.source_language.clone()).unwrap_or_default(),
-        fetches_episodes: season.anime.fetch_type == FetchType::Episodes,
+        fetches_episodes: season.entry.fetch_type() == FetchType::Episodes,
     }
 }
 
 /// `applySeasonFilters` overlay mapping: each overlay gates its own fact, and the continue overlay needs an unseen
 /// episode and an episode-fetching season.
-pub fn season_item(season: &SeasonAnime, overlays: Overlays, facts: &SeasonFacts) -> SeasonItem {
-    let unseen_count = season.unseen_count();
+pub fn season_item(season: &SeasonEntry, overlays: Overlays, facts: &SeasonFacts) -> SeasonItem {
+    let unseen_count = season.pending();
     SeasonItem {
-        id: season.id(),
-        source_title: season.anime.title.clone(),
-        season_number: season.anime.season_number,
+        id: season.entry.id,
+        source_title: season.entry.title.clone(),
+        season_number: season.entry.season_number(),
         download_count: if overlays.downloaded { facts.download_count } else { -1 },
         unseen_count: if overlays.unseen { unseen_count } else { -1 },
         is_local: overlays.local && facts.is_local,
@@ -121,8 +122,8 @@ pub fn season_item(season: &SeasonAnime, overlays: Overlays, facts: &SeasonFacts
 
 /// What the continue button of a season plays: the unseen episode with the lowest number, the same one the page's FAB
 /// picks for an entry with no filters (`getNextUnseen`).
-pub fn continue_episode(episodes: &[Episode]) -> Option<&Episode> {
-    episodes.iter().filter(|e| !e.seen).min_by(|a, b| a.episode_number.total_cmp(&b.episode_number))
+pub fn continue_episode(episodes: &[Item]) -> Option<&Item> {
+    episodes.iter().filter(|e| !e.done).min_by(|a, b| a.number.total_cmp(&b.number))
 }
 
 /// The language badge of a season: a folder for a local season, else the uppercase source language when one is set.
@@ -216,18 +217,20 @@ pub fn tile(item: &SeasonItem, mode: SeasonDisplayMode, number_mode: bool, has_c
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
+
     use super::*;
 
-    fn season(id: i64, number: f64, title: &str, total: i64, seen: i64) -> SeasonAnime {
-        SeasonAnime {
-            anime: Anime { id, title: title.into(), season_number: number, ..Anime::create() },
-            total_count: total,
-            seen_count: seen,
-            bookmark_count: 0,
-            fillermark_count: 0,
+    fn season(id: i64, number: f64, title: &str, total: i64, seen: i64) -> SeasonEntry {
+        SeasonEntry {
+            entry: Entry { id, title: title.into(), season_number: Some(number), ..Entry::create(Kind::Anime) },
+            total,
+            done: seen,
+            bookmarks: 0,
+            fillermarks: 0,
             latest_upload: 0,
             fetched_at: 0,
-            last_seen: 0,
+            last_activity: 0,
         }
     }
 
@@ -283,7 +286,7 @@ mod tests {
         let facts = season_facts(&one, Some(&extra), false);
         assert_eq!((facts.download_count, facts.source_language.as_str(), facts.is_local), (4, "ja", false));
         let none = season_facts(&one, None, true);
-        let nested = SeasonAnime { anime: Anime { fetch_type: FetchType::Seasons, ..one.anime.clone() }, ..one.clone() };
+        let nested = SeasonEntry { entry: Entry { fetch_type: Some(FetchType::Seasons), ..one.entry.clone() }, ..one.clone() };
         assert!(facts.fetches_episodes && !season_facts(&nested, None, false).fetches_episodes);
         assert_eq!((none.download_count, none.source_language.as_str(), none.is_local), (0, "", true));
         let item = season_item(&one, all_on(), &facts);
@@ -292,7 +295,7 @@ mod tests {
 
     #[test]
     fn continue_plays_the_lowest_numbered_unseen_episode() {
-        let ep = |id: i64, number: f64, seen: bool| Episode { id, episode_number: number, seen, ..Episode::create() };
+        let ep = |id: i64, number: f64, seen: bool| Item { id, number, done: seen, ..Item::create(Kind::Anime) };
         let list = [ep(1, 3.0, false), ep(2, 1.0, true), ep(3, 2.0, false), ep(4, 4.0, false)];
         assert_eq!(continue_episode(&list).map(|e| e.id), Some(3));
         assert_eq!(continue_episode(&[ep(1, 1.0, true)]), None);

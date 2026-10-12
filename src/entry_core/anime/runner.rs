@@ -11,13 +11,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
 use kuro_data::DataResult;
-use kuro_data::anime::{Anime, AnimeRelationGroup};
-use kuro_data::episode::Episode;
-use kuro_data::source::{AnimeStubSourceRepo, StubSource};
+use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
+use kuro_data::source::StubSourceRepo;
 use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::download::filter::{CategoryDecision, should_download_new};
 use kuro_domain::download::prefs::DownloadPrefs;
+use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore;
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
@@ -32,13 +34,14 @@ use super::refresh::{Begin, RefreshGate, Trigger, auto_download_targets, last_em
 use super::season_tile::SeasonExtra;
 use super::set_default::Scope;
 use super::store::AnimeStore;
+use crate::entry_core::backend::stub_source_info;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::favorite::AddRoute;
 use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};
 
 /// What a fetch hands back: the episodes the sync added, which a manual refresh queues for download (T-REF-4).
-pub type AnimeFetch = Pin<Box<dyn Future<Output = Result<Vec<Episode>, DetailError>> + Send>>;
+pub type AnimeFetch = Pin<Box<dyn Future<Output = Result<Vec<Item>, DetailError>> + Send>>;
 
 /// What the page needs from outside its own database: the source line and the source fetch.
 pub trait AnimeBackend: Send + Sync + 'static {
@@ -49,7 +52,7 @@ pub trait AnimeBackend: Send + Sync + 'static {
     fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> AnimeFetch;
     /// Queues new episodes for download. Only a manual refresh reaches this (E-REF-5). The app has no anime download
     /// queue wired yet, so the default does nothing.
-    fn enqueue_new_episodes(&self, _anime_id: i64, _episodes: &[Episode]) {}
+    fn enqueue_new_episodes(&self, _anime_id: i64, _episodes: &[Item]) {}
     /// Deletes the cover files of an entry that just left the library (`removeCovers`), after the write succeeded.
     /// `true` when a file was removed.
     fn remove_cover(&self, _anime_id: i64) -> bool {
@@ -110,13 +113,13 @@ pub trait AnimeBackend: Send + Sync + 'static {
 /// The backend of an app with no anime source registry yet: every source reads as not installed, the local source
 /// reads as installed, and every fetch reports that the source is missing.
 pub struct StubAnimeBackend {
-    stubs: AnimeStubSourceRepo,
+    stubs: StubSourceRepo,
 }
 
 impl StubAnimeBackend {
     pub fn new(db: Arc<Db>) -> Self {
         Self {
-            stubs: AnimeStubSourceRepo::new(db),
+            stubs: StubSourceRepo::new(db, Kind::Anime),
         }
     }
 }
@@ -126,22 +129,7 @@ impl AnimeBackend for StubAnimeBackend {
         crate::entry_core::tracking::session::has_logged_in()
     }
     fn source_info(&self, source_id: i64) -> SourceInfo {
-        if source_id == kuro_source::local::LOCAL_SOURCE_ID {
-            return SourceInfo {
-                name: kuro_source::local::LOCAL_ANIME_NAME.to_owned(),
-                stub: false,
-            };
-        }
-        let stub = self
-            .stubs
-            .get(source_id)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| StubSource::fallback(source_id));
-        SourceInfo {
-            name: stub.display_name(),
-            stub: true,
-        }
+        stub_source_info(&self.stubs, Kind::Anime, source_id)
     }
 
     fn fetch(&self, _anime_id: i64, _plan: RefreshPlan, _trigger: Trigger) -> AnimeFetch {
@@ -200,7 +188,7 @@ pub enum AnimeEvent {
     /// The load finished: the model, or `None` when the row does not exist.
     Loaded(Option<Box<AnimeEntryModel>>),
     /// The live subscription published a newer entry and episode list.
-    Snapshot { anime: Box<Anime>, episodes: Vec<Episode> },
+    Snapshot { anime: Box<Entry>, episodes: Vec<Item> },
     /// The refresh started by the first open ended, with or without an error.
     RefreshEnded(Result<(), DetailError>),
     /// The entry joined the library, with the library defaults written to its flags.
@@ -214,7 +202,7 @@ pub enum AnimeEvent {
     /// The result of `ApplyDefaultsToLibrary`: how many entries took the defaults.
     DefaultsApplied { scope: Scope, updated: usize },
     /// The entry being added has the same title as these library entries.
-    Duplicate { existing: Vec<Anime> },
+    Duplicate { existing: Vec<Entry> },
     /// The download count and source language of each season, for the tiles of a `Seasons` entry.
     SeasonFacts(Vec<SeasonExtra>),
     /// The ids of the episodes on disk changed (a download finished or a delete ran).
@@ -338,7 +326,7 @@ impl Shared {
                 if plan.episodes {
                     record_empty_open_fetch(anime_id, ctx.now_ms);
                 }
-                let seasons = model.anime.fetch_type == FetchType::Seasons;
+                let seasons = model.anime.fetch_type() == FetchType::Seasons;
                 self.emit(AnimeEvent::Loaded(Some(Box::new(model))));
                 self.subscribe(anime_id);
                 if seasons {
@@ -396,9 +384,9 @@ impl Shared {
                     .seasons(anime_id)?
                     .iter()
                     .map(|season| SeasonExtra {
-                        id: season.id(),
-                        download_count: i64::try_from(backend.downloaded_count(season.id())).unwrap_or(i64::MAX),
-                        source_language: backend.source_language(season.anime.source),
+                        id: season.entry.id,
+                        download_count: i64::try_from(backend.downloaded_count(season.entry.id)).unwrap_or(i64::MAX),
+                        source_language: backend.source_language(season.entry.source),
                     })
                     .collect::<Vec<_>>())
             })
@@ -412,13 +400,13 @@ impl Shared {
 
     /// Queues the new episodes of a manual refresh when the preferences and the entry's categories allow it (T-REF-4).
     /// The open-time refresh never gets here with episodes to queue (E-REF-5).
-    async fn auto_download(&self, anime_id: i64, trigger: Trigger, new_episodes: Vec<Episode>) {
+    async fn auto_download(&self, anime_id: i64, trigger: Trigger, new_episodes: Vec<Item>) {
         if new_episodes.is_empty() {
             return;
         }
         let prefs = self.prefs.clone();
         let targets = self
-            .blocking(move |store| -> DataResult<Vec<Episode>> {
+            .blocking(move |store| -> DataResult<Vec<Item>> {
                 let downloads = DownloadPrefs::new(&prefs);
                 let favorite = store.anime(anime_id)?.is_some_and(|a| a.favorite);
                 // the episode category lists are cut from the settings: every category is eligible
@@ -539,7 +527,7 @@ impl Shared {
     /// The entry and its episodes as one snapshot (`watch_pair`), and the related groups.
     fn subscribe(self: &Arc<Self>, anime_id: i64) {
         let shared = Arc::clone(self);
-        let pair = watch_pair(self.store.watch_anime(anime_id), self.store.watch_episodes(anime_id), move |anime: &Anime, episodes: &[Episode]| {
+        let pair = watch_pair(self.store.watch_anime(anime_id), self.store.watch_episodes(anime_id), move |anime: &Entry, episodes: &[Item]| {
             shared.emit(AnimeEvent::Snapshot { anime: Box::new(anime.clone()), episodes: episodes.to_vec() });
         });
         let mut related_sub = self.store.watch_related(anime_id);
@@ -628,7 +616,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use kuro_domain::entries::anime::episode_flags as ep;
+    use kuro_db::flags::item as ep;
 
     use super::super::entry_state::LoadState;
     use super::super::store::fixture::with_episodes;
@@ -640,7 +628,7 @@ mod tests {
         started: AtomicUsize,
         finished: Arc<AtomicUsize>,
         /// The episodes every fetch reports as new.
-        new_episodes: Vec<Episode>,
+        new_episodes: Vec<Item>,
         triggers: Mutex<Vec<Trigger>>,
         queued: Mutex<Vec<Vec<f64>>>,
         covers: AtomicUsize,
@@ -680,8 +668,8 @@ mod tests {
             })
         }
 
-        fn enqueue_new_episodes(&self, _: i64, episodes: &[Episode]) {
-            self.queued.lock().unwrap().push(episodes.iter().map(|e| e.episode_number).collect());
+        fn enqueue_new_episodes(&self, _: i64, episodes: &[Item]) {
+            self.queued.lock().unwrap().push(episodes.iter().map(|e| e.number).collect());
         }
 
         fn remove_cover(&self, _: i64) -> bool {
@@ -786,8 +774,8 @@ mod tests {
             runner.send(AnimeCmd::Load { anime_id: id });
             let rx = runner.events();
             until(&rx, |e| matches!(e, AnimeEvent::Loaded(_))).await;
-            runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNSEEN, mask: ep::UNSEEN_MASK });
-            let event = until(&rx, |e| matches!(e, AnimeEvent::Snapshot { anime, .. } if anime.episode_flags & ep::UNSEEN_MASK == ep::SHOW_UNSEEN)).await;
+            runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNDONE, mask: ep::UNDONE_MASK });
+            let event = until(&rx, |e| matches!(e, AnimeEvent::Snapshot { anime, .. } if anime.item_flags & ep::UNDONE_MASK == ep::SHOW_UNDONE)).await;
             let AnimeEvent::Snapshot { episodes, .. } = event else { unreachable!() };
             assert_eq!(episodes.len(), 2);
         });
@@ -815,7 +803,7 @@ mod tests {
             runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_BOOKMARKED, mask: ep::BOOKMARKED_MASK });
             drop(runner); // the page was popped while the fetch is held open
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            while store.anime(id).unwrap().unwrap().episode_flags & ep::BOOKMARKED_MASK != ep::SHOW_BOOKMARKED {
+            while store.anime(id).unwrap().unwrap().item_flags & ep::BOOKMARKED_MASK != ep::SHOW_BOOKMARKED {
                 assert!(std::time::Instant::now() < deadline, "the queued write never landed");
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
@@ -825,8 +813,8 @@ mod tests {
         });
     }
 
-    fn episode(number: f64) -> Episode {
-        Episode { episode_number: number, ..Episode::create() }
+    fn episode(number: f64) -> Item {
+        Item { number, ..Item::create(Kind::Anime) }
     }
 
     #[test]
@@ -898,7 +886,7 @@ mod tests {
         let rt = rt();
         let (_dir, store, id) = with_episodes(false, true, 1, 0);
         let prefs = PrefStore::in_memory();
-        kuro_domain::entries::defaults::set_episode_settings_default(&prefs, ep::SHOW_UNSEEN);
+        kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Anime, ep::SHOW_UNDONE);
         rt.block_on(async {
             let runner = spawn(rt.handle(), store.clone(), prefs, Fake::new(0), AnimeLoadContext::default());
             let rx = runner.events();
@@ -906,7 +894,7 @@ mod tests {
             until(&rx, |e| matches!(e, AnimeEvent::Added)).await;
             let row = store.anime(id).unwrap().unwrap();
             assert!(row.favorite);
-            assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "defaults are written at add time");
+            assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE, "defaults are written at add time");
         });
     }
 
@@ -924,7 +912,7 @@ mod tests {
             loop {
                 let rows = store.episodes(id).unwrap();
                 let a = rows.iter().find(|e| e.id == ids[0]).unwrap().fillermark;
-                let b = rows.iter().find(|e| e.id == ids[1]).unwrap().seen;
+                let b = rows.iter().find(|e| e.id == ids[1]).unwrap().done;
                 if a && b {
                     break;
                 }
@@ -940,7 +928,7 @@ mod tests {
         let path = dir.path().join("test.db");
         let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
-        AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(7, "en", "Player").unwrap();
+        StubSourceRepo::new(Arc::clone(&db), Kind::Anime).upsert(7, "en", "Player").unwrap();
         let backend = StubAnimeBackend::new(db);
         assert_eq!(backend.source_info(7), SourceInfo { name: "Player (EN)".into(), stub: true });
         assert!(backend.source_info(99).stub);
@@ -958,7 +946,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         store.set_season_flag_bits(id, sf::SHOW_STARTED, sf::STARTED_MASK).unwrap();
         let prefs = PrefStore::in_memory();
-        kuro_domain::entries::defaults::set_episode_settings_default(&prefs, ep::SHOW_SEEN | ep::SORT_ASC | ep::SORTING_NUMBER);
+        kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Anime, ep::SHOW_DONE | ep::SORT_ASC | ep::SORTING_NUMBER);
         rt.block_on(async {
             let runner = spawn(rt.handle(), store.clone(), prefs, Fake::new(0), AnimeLoadContext::default());
             runner.send(AnimeCmd::ApplyDefaultsToLibrary { scope: Scope::Episode });
@@ -966,17 +954,17 @@ mod tests {
             let AnimeEvent::DefaultsApplied { scope, updated } = event else { unreachable!() };
             assert_eq!((scope, updated), (Scope::Episode, 1));
             let row = store.anime(id).unwrap().unwrap();
-            assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN);
-            assert_eq!(row.season_flags & sf::STARTED_MASK, sf::SHOW_STARTED, "the episode scope leaves the season flags alone");
+            assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_DONE);
+            assert_eq!(row.season_flags() & sf::STARTED_MASK, sf::SHOW_STARTED, "the episode scope leaves the season flags alone");
         });
     }
 
     #[test]
     fn an_add_with_a_same_named_library_entry_waits_for_the_answer_and_add_anyway_adds() {
-        use kuro_data::anime::AnimeRepo;
+        use kuro_data::entry::EntryRepo;
         let rt = rt();
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
-        let twin = AnimeRepo::new(store.db()).insert(&Anime { source: 8, url: "/b".into(), title: "frieren".into(), favorite: true, ..Anime::create() }).unwrap();
+        let twin = EntryRepo::new(store.db()).insert(&Entry { source: 8, url: "/b".into(), title: "frieren".into(), favorite: true, ..Entry::create(Kind::Anime) }).unwrap();
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
             let rx = runner.events();
@@ -1004,11 +992,12 @@ mod tests {
 
     #[test]
     fn related_groups_are_published_after_the_load_and_again_when_they_change() {
-        use kuro_data::anime::AnimeRepo;
+        use kuro_data::anime::Anime;
         use kuro_data::anime_relation::AnimeRelationRepo;
+        use kuro_data::entry::EntryRepo;
         let rt = rt();
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
-        let other = AnimeRepo::new(store.db()).insert(&Anime { source: 8, url: "/b".into(), title: "Other".into(), ..Anime::create() }).unwrap();
+        let other = EntryRepo::new(store.db()).insert(&Entry { source: 8, url: "/b".into(), title: "Other".into(), ..Entry::create(Kind::Anime) }).unwrap();
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
             let rx = runner.events();
@@ -1023,12 +1012,12 @@ mod tests {
 
     #[test]
     fn a_seasons_entry_gets_the_download_count_and_language_of_each_season() {
-        use kuro_data::anime::AnimeRepo;
+        use kuro_data::entry::EntryRepo;
         let rt = rt();
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
         store.set_fetch_type_for_test(id, FetchType::Seasons);
-        let season = AnimeRepo::new(store.db())
-            .insert(&Anime { source: 7, url: "/s1".into(), title: "S1".into(), parent_id: Some(id), season_number: 1.0, ..Anime::create() })
+        let season = EntryRepo::new(store.db())
+            .insert(&Entry { source: 7, url: "/s1".into(), title: "S1".into(), parent_id: Some(id), season_number: Some(1.0), ..Entry::create(Kind::Anime) })
             .unwrap();
         rt.block_on(async {
             let mut fake = Fake::new(0);

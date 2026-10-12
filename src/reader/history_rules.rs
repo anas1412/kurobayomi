@@ -1,5 +1,6 @@
-//! Pure rules of the reader's history and duplicate handling: the read time of a session (T-43a-033), the
-//! duplicate chapters of a completed one (T-43a-031) and the wall clock the session stamps with.
+//! Pure rules of the reader's duplicate handling and its clock: the duplicate chapters of a completed one
+//! (T-43a-031) and the wall clock the session stamps with. The read time of a session is `SessionTimer::flush`
+//! (T-43a-033).
 //!
 //! The session keeps the start time on the UI thread (E-HIST-2). The rules here take plain numbers, so they are
 //! tested without a database or a display.
@@ -14,25 +15,19 @@ pub fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// The read time to add for a session that started at `started_at`, at `now`. No running session adds nothing, and a
-/// clock that stepped backwards adds nothing either (`max(0, now - start)`, as `HistoryRecorder::flush`).
-pub fn history_duration(started_at: Option<i64>, now: i64) -> i64 {
-    started_at.map_or(0, |start| (now - start).max(0))
-}
-
 /// Indices of the chapters that the completed chapter's duplicates are: the other unread chapters of the list with
 /// the same chapter number (E-DUP-1). The comparison is the float equality of the numbers (E-DUP-2). A completed
 /// chapter with an unrecognised number (below 0) has no duplicates.
 pub fn duplicate_indices(chapters: &[Rc<ReaderChapter>], completed: usize) -> Vec<usize> {
     let Some(done) = chapters.get(completed) else { return Vec::new() };
-    let number = done.chapter.chapter_number;
+    let number = done.chapter.number;
     if number < 0.0 {
         return Vec::new();
     }
     chapters
         .iter()
         .enumerate()
-        .filter(|(index, chapter)| *index != completed && !chapter.read.get() && chapter.chapter.chapter_number == number)
+        .filter(|(index, chapter)| *index != completed && !chapter.read.get() && chapter.chapter.number == number)
         .map(|(index, _)| index)
         .collect()
 }
@@ -40,26 +35,16 @@ pub fn duplicate_indices(chapters: &[Rc<ReaderChapter>], completed: usize) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::chapter::Chapter;
+    use kuro_data::item::Item;
+    use kuro_platform::kind::Kind;
 
     fn chapter(id: i64, number: f64, read: bool) -> Rc<ReaderChapter> {
-        let mut c = Chapter::create();
+        let mut c = Item::create(Kind::Manga);
         c.id = id;
         c.url = format!("/c/{id}");
-        c.chapter_number = number;
-        c.read = read;
+        c.number = number;
+        c.done = read;
         ReaderChapter::new(c)
-    }
-
-    #[test]
-    fn a_session_adds_the_time_since_its_start_and_nothing_without_one() {
-        assert_eq!(history_duration(Some(1_000), 4_000), 3_000);
-        assert_eq!(history_duration(None, 4_000), 0);
-    }
-
-    #[test]
-    fn a_clock_that_stepped_back_never_subtracts_time() {
-        assert_eq!(history_duration(Some(5_000), 4_000), 0);
     }
 
     #[test]

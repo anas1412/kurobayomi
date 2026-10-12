@@ -43,6 +43,7 @@ pub mod description_view;
 pub mod detail;
 pub mod dialog;
 pub mod downloaded;
+pub mod entry_ops;
 pub mod errors;
 pub mod favorite;
 pub mod flags;
@@ -57,6 +58,7 @@ pub mod list_view;
 pub mod live;
 pub mod message;
 pub mod markdown;
+pub mod numbered;
 pub mod numfmt;
 pub mod page;
 /// The GTK pieces both details pages build the same way (the state stack, the item header row, the Start button, Back,

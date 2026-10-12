@@ -120,7 +120,7 @@ mod tests {
     }
 
     fn fetched_page(file: Option<PathBuf>) -> (Rc<crate::reader::model::ReaderChapter>, Rc<ReaderPage>) {
-        let chapter = crate::reader::model::ReaderChapter::new(kuro_data::chapter::Chapter::create());
+        let chapter = crate::reader::model::ReaderChapter::new(kuro_data::item::Item::create(kuro_platform::kind::Kind::Manga));
         chapter.set_loader(Box::new(Fake(std::cell::Cell::new(file))));
         let page = ReaderPage::new(0, "p0", None, PageSource::Http);
         chapter.finish_loading(vec![Rc::clone(&page)]).unwrap();

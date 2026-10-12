@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_data::anime::AnimeRepo;
-use kuro_data::episode::EpisodeRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::episode::Episode;
+use kuro_data::item::ItemRepo;
 use kuro_domain::source::remote_update::to_s_episode;
 use kuro_i18n::{MsgKey, tr};
 use kuro_source::SourceError;
@@ -163,10 +164,10 @@ fn online_episode(episode_id: i64) -> Option<(Arc<dyn AnimeSource>, SEpisode)> {
         return None;
     }
     let db = &crate::data::app().db;
-    let episode = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
-    let anime = AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id).ok()?;
+    let episode = ItemRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
+    let anime = EntryRepo::new(Arc::clone(db)).by_id(episode.entry_id).ok()?;
     let source = crate::screens::anime_sources().into_iter().find(|s| s.id() == anime.source)?;
-    Some((source, to_s_episode(&episode)))
+    Some((source, to_s_episode(&Episode::from(episode))))
 }
 
 /// Reopening the menu while the servers load shows the spinner again but does not ask the source twice.

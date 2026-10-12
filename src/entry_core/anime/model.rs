@@ -19,12 +19,13 @@
 use std::collections::{HashMap, HashSet};
 
 use kuro_data::DataResult;
-use kuro_data::anime::{Anime, SeasonAnime};
-use kuro_data::episode::Episode;
+use kuro_data::entry::{Entry, SeasonEntry};
+use kuro_data::item::Item;
+use kuro_db::flags::item;
 use kuro_db::schema_anime::FetchType;
-use kuro_domain::app::items::{ListFilters, apply_filters, episode_filters};
-use kuro_domain::entries::defaults::{episode_default_word, season_default_word};
-use kuro_domain::entries::anime::AnimeExt;
+use kuro_domain::app::items::{ListFilters, apply_filters, item_filters};
+use kuro_domain::entries::defaults::SessionFlags;
+use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::items::missing::{ListRow, insert_missing_separators};
 use kuro_domain::items::sorter::{SortKey, compare_items};
 use kuro_downloads::DownloadState;
@@ -43,6 +44,7 @@ use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::list_model::RowItem;
+use crate::entry_core::numbered::NumberedItem;
 
 /// What the load reads besides the rows: values read once at open (behaviour 2.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,11 +60,11 @@ pub struct AnimeLoadContext {
 #[derive(Clone, Debug)]
 pub struct AnimeEntryModel {
     pub flow: EntryFlow,
-    pub anime: Anime,
+    pub anime: Entry,
     pub source: SourceInfo,
     /// Every stored episode, before any filter.
-    pub episodes: Vec<Episode>,
-    pub seasons: Vec<SeasonAnime>,
+    pub episodes: Vec<Item>,
+    pub seasons: Vec<SeasonEntry>,
     /// Which parts the first open refreshes from the source.
     pub plan: RefreshPlan,
     pub from_source: bool,
@@ -72,8 +74,8 @@ pub struct AnimeEntryModel {
     pub summaries: SummaryExpansion,
     /// The error the last refresh ended with, shown by the page; `None` after a successful one.
     pub refresh_error: Option<DetailError>,
-    /// The in-memory library defaults of a non-library entry, `(episode, season)`. A snapshot re-applies them.
-    pub session_flags: Option<(i64, i64)>,
+    /// The in-memory library defaults of a non-library entry (decision 4). A snapshot re-applies them.
+    pub session_flags: Option<SessionFlags>,
     /// The ids of the episodes on disk. The runner fills it after the load and after a download or a delete.
     pub downloaded: HashSet<i64>,
     /// The queue state and percent of the queued episodes, from the live download adapter (`downloads::live`).
@@ -98,15 +100,14 @@ impl AnimeEntryModel {
             return Ok(None);
         };
         let source = source_of(anime.source);
-        let episode_list = anime.fetch_type == FetchType::Episodes;
-        let season_list = anime.fetch_type == FetchType::Seasons;
+        let episode_list = anime.fetch_type() == FetchType::Episodes;
+        let season_list = anime.fetch_type() == FetchType::Seasons;
         let episodes = if season_list { Vec::new() } else { store.episodes(anime_id)? };
         let seasons = if episode_list { Vec::new() } else { store.seasons(anime_id)? };
         // A non-library entry shows the library defaults for this session only (T-39b-012): nothing is written to its row.
-        let session_flags = (!anime.favorite).then(|| (episode_default_word(prefs), season_default_word(prefs)));
-        if let Some((episode_flags, season_flags)) = session_flags {
-            anime.episode_flags = episode_flags;
-            anime.season_flags = season_flags;
+        let session_flags = SessionFlags::for_entry(prefs, &anime);
+        if let Some(session) = &session_flags {
+            session.overlay(&mut anime);
         }
         let plan = refresh_on_open(anime.initialized, episodes.is_empty(), episode_list, seasons.is_empty(), season_list);
         // An entry with no episodes refreshes on open at most once per 10 minutes (fix 23.24).
@@ -148,17 +149,16 @@ impl AnimeEntryModel {
     }
 
     /// The subscription delivered a newer entry and episode list. A `Seasons` entry keeps an empty episode list.
-    pub fn apply_snapshot(&mut self, mut anime: Anime, episodes: Vec<Episode>) {
-        if anime.fetch_type == FetchType::Episodes {
+    pub fn apply_snapshot(&mut self, mut anime: Entry, episodes: Vec<Item>) {
+        if anime.fetch_type() == FetchType::Episodes {
             self.episodes = episodes;
         }
         // an entry that joined the library has its defaults written to the row: the session copy has done its job
         if anime.favorite {
             self.session_flags = None;
         }
-        if let Some((episode_flags, season_flags)) = self.session_flags {
-            anime.episode_flags = episode_flags;
-            anime.season_flags = season_flags;
+        if let Some(session) = &self.session_flags {
+            session.overlay(&mut anime);
         }
         self.anime = anime;
     }
@@ -167,17 +167,19 @@ impl AnimeEntryModel {
     /// puts the session flags back over it (T-39b-012), so the session copy takes the change here or it would never
     /// show. An entry in the library has no session copy and follows its row.
     pub fn note_flag_write(&mut self, flag: i64, mask: i64) {
-        if let Some((episode_flags, _)) = &mut self.session_flags {
-            *episode_flags = (*episode_flags & !mask) | (flag & mask);
-            self.anime.episode_flags = *episode_flags;
+        if let Some(session) = &mut self.session_flags {
+            session.note_item_write(flag, mask);
+            self.anime.item_flags = session.item_flags;
         }
     }
 
     /// The same for a masked write of the season flag word (the season list options).
     pub fn note_season_write(&mut self, flag: i64, mask: i64) {
-        if let Some((_, season_flags)) = &mut self.session_flags {
-            *season_flags = (*season_flags & !mask) | (flag & mask);
-            self.anime.season_flags = *season_flags;
+        if let Some(session) = &mut self.session_flags {
+            session.note_season_write(flag, mask);
+            if session.season_flags.is_some() {
+                self.anime.season_flags = session.season_flags;
+            }
         }
     }
 
@@ -193,7 +195,7 @@ impl AnimeEntryModel {
 
     /// The filters and sort of the entry's flag word. An unknown sorting value shows the list unfiltered.
     pub fn filters(&self) -> Option<ListFilters> {
-        episode_filters(&self.anime, self.downloaded_only).ok()
+        item_filters(&self.anime, self.downloaded_only).ok()
     }
 
     /// The entry is the local source's.
@@ -202,7 +204,7 @@ impl AnimeEntryModel {
     }
 
     /// The filtered and sorted list. A local entry counts every episode as downloaded.
-    pub fn processed(&self) -> Vec<Episode> {
+    pub fn processed(&self) -> Vec<Item> {
         match self.filters() {
             Some(filters) => apply_filters(self.episodes.clone(), &filters, self.is_local(), |e| self.downloaded.contains(&e.id)),
             None => self.episodes.clone(),
@@ -210,7 +212,7 @@ impl AnimeEntryModel {
     }
 
     /// The selected episodes, in stored order.
-    pub fn selected_episodes(&self) -> Vec<Episode> {
+    pub fn selected_episodes(&self) -> Vec<Item> {
         self.episodes.iter().filter(|e| self.selection.contains(e.id)).cloned().collect()
     }
 
@@ -261,8 +263,8 @@ impl AnimeEntryModel {
 
     /// The row of one episode with the list settings, its selection, its summary state and its download state. A local
     /// entry has no download button, and the button is off while anything is selected.
-    fn row_of(&self, ep: &Episode) -> RowItem {
-        let number = self.anime.display_mode() == kuro_domain::entries::anime::episode_flags::DISPLAY_NUMBER;
+    fn row_of(&self, ep: &Item) -> RowItem {
+        let number = self.anime.display_mode() == item::DISPLAY_NUMBER;
         let (download, progress) = self.download_of(ep.id);
         RowItem {
             summary_expanded: self.summaries.is_expanded(ep.id),
@@ -281,11 +283,12 @@ impl AnimeEntryModel {
         let shown = self.processed();
         // a gap is only a missing episode when no filter hides any: a hidden episode is not missing
         let complete = shown.len() == self.episodes.len();
-        insert_missing_separators(shown, descending)
+        let numbered: Vec<NumberedItem> = shown.iter().map(NumberedItem).collect();
+        insert_missing_separators(numbered, descending)
             .into_iter()
             .filter(|row| complete || matches!(row, ListRow::Item(_)))
-            .map(|item| match item {
-                ListRow::Item(ep) => self.row_of(&ep),
+            .map(|row| match row {
+                ListRow::Item(ep) => self.row_of(ep.0),
                 ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(MsgKey::missing_items, i64::from(count), &[])),
             })
             .collect()
@@ -309,16 +312,16 @@ impl AnimeEntryModel {
 
     /// The FAB reads the unfiltered list (behaviour 9).
     pub fn fab(&self) -> Fab {
-        let seen: Vec<bool> = self.episodes.iter().map(|e| e.seen).collect();
+        let seen: Vec<bool> = self.episodes.iter().map(|e| e.done).collect();
         fab(&seen, self.selection.is_active())
     }
 
     /// The item header over the processed list. The missing count reads the unfiltered numbers (behaviour 8).
     pub fn item_header(&self) -> ItemHeader {
-        let seasons = self.anime.fetch_type == FetchType::Seasons;
+        let seasons = self.anime.fetch_type() == FetchType::Seasons;
         let count = if seasons { self.seasons.len() } else { self.processed().len() };
-        let episode_numbers: Vec<f64> = self.episodes.iter().map(|e| e.episode_number).collect();
-        let season_numbers: Vec<f64> = self.seasons.iter().map(|s| s.anime.season_number).collect();
+        let episode_numbers: Vec<f64> = self.episodes.iter().map(|e| e.number).collect();
+        let season_numbers: Vec<f64> = self.seasons.iter().map(|s| s.entry.season_number()).collect();
         let missing = header_missing_count(&episode_numbers, &season_numbers);
         item_header(seasons, count, missing, self.selection.is_active())
     }
@@ -326,13 +329,14 @@ impl AnimeEntryModel {
 
 /// `getNextUnseen` over a list in ascending order: the first unseen episode, for either display order (upstream's
 /// `findLast` over the descending list lands on the same one). The list is already filtered.
-pub fn next_unseen_in(ascending: &[Episode]) -> Option<i64> {
-    ascending.iter().find(|e| !e.seen).map(|e| e.id)
+pub fn next_unseen_in(ascending: &[Item]) -> Option<i64> {
+    ascending.iter().find(|e| !e.done).map(|e| e.id)
 }
 
 #[cfg(test)]
 mod tests {
-    use kuro_domain::entries::anime::episode_flags as ep;
+    use kuro_db::flags::item as ep;
+    use kuro_platform::kind::Kind;
 
     use super::super::entry_state::LoadState;
     use super::super::refresh::EMPTY_OPEN_REFRESH_GAP_MS;
@@ -410,20 +414,20 @@ mod tests {
     #[test]
     fn a_non_favourite_opens_with_the_library_defaults_not_its_stored_flags() {
         let (_dir, store, id) = with_episodes(false, true, 2, 0);
-        store.set_flag_bits(id, ep::SHOW_SEEN, ep::UNSEEN_MASK).unwrap();
-        assert_eq!(load(&store, id).anime.episode_flags & ep::UNSEEN_MASK, 0);
+        store.set_flag_bits(id, ep::SHOW_DONE, ep::UNDONE_MASK).unwrap();
+        assert_eq!(load(&store, id).anime.item_flags & ep::UNDONE_MASK, 0);
         let row = store.anime(id).unwrap().unwrap();
-        assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN, "the open writes nothing to the row (T-39b-012)");
+        assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_DONE, "the open writes nothing to the row (T-39b-012)");
 
         let (_dir, store, id) = with_episodes(true, true, 2, 0);
-        store.set_flag_bits(id, ep::SHOW_SEEN, ep::UNSEEN_MASK).unwrap();
-        assert_eq!(load(&store, id).anime.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN);
+        store.set_flag_bits(id, ep::SHOW_DONE, ep::UNDONE_MASK).unwrap();
+        assert_eq!(load(&store, id).anime.item_flags & ep::UNDONE_MASK, ep::SHOW_DONE);
     }
 
     #[test]
     fn a_filter_that_hides_an_episode_adds_no_missing_marker() {
         let (_dir, store, id) = with_episodes(true, true, 3, 1);
-        store.set_flag_bits(id, ep::SHOW_UNSEEN, ep::UNSEEN_MASK).unwrap();
+        store.set_flag_bits(id, ep::SHOW_UNDONE, ep::UNDONE_MASK).unwrap();
         let lines = load(&store, id).lines();
         assert_eq!(lines.len(), 2, "the two unseen episodes and no \"1 missing\" line for the hidden one");
     }
@@ -431,7 +435,7 @@ mod tests {
     #[test]
     fn filters_the_list_but_the_fab_and_header_read_the_whole_one() {
         let (_dir, store, id) = with_episodes(true, true, 3, 3);
-        store.set_flag_bits(id, ep::SHOW_UNSEEN, ep::UNSEEN_MASK).unwrap();
+        store.set_flag_bits(id, ep::SHOW_UNDONE, ep::UNDONE_MASK).unwrap();
         let model = load(&store, id);
         assert!(model.rows().is_empty(), "every episode is seen, so the unseen filter hides all");
         assert!(!model.fab().visible, "nothing is unseen");
@@ -439,7 +443,7 @@ mod tests {
         assert_eq!(model.item_header().count, "0 episodes");
 
         let (_dir, store, id) = with_episodes(true, true, 3, 1);
-        store.set_flag_bits(id, ep::SHOW_SEEN, ep::UNSEEN_MASK).unwrap();
+        store.set_flag_bits(id, ep::SHOW_DONE, ep::UNDONE_MASK).unwrap();
         let mut model = load(&store, id);
         assert_eq!(model.rows().len(), 1, "only the seen episode shows");
         assert!(model.fab().visible, "an unseen episode exists in the unfiltered list");
@@ -451,11 +455,11 @@ mod tests {
 
     #[test]
     fn next_unseen_is_the_first_unseen_of_the_ascending_list() {
-        let list: Vec<Episode> = (1..=4)
+        let list: Vec<Item> = (1..=4)
             .map(|id| {
-                let mut e = Episode::create();
+                let mut e = Item::create(Kind::Anime);
                 e.id = id;
-                e.seen = id <= 2;
+                e.done = id <= 2;
                 e
             })
             .collect();
@@ -468,7 +472,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 4, 2);
         store.set_flag_bits(id, ep::SORT_ASC, ep::SORT_DIR_MASK).unwrap();
         let model = load(&store, id);
-        let by_number = |n: f64| model.episodes.iter().find(|e| e.episode_number == n).unwrap().id;
+        let by_number = |n: f64| model.episodes.iter().find(|e| e.number == n).unwrap().id;
         assert_eq!(model.next_unseen(), Some(by_number(3.0)), "ascending: the oldest unseen (T-EPS-NEXT-1)");
         store.set_flag_bits(id, ep::SORT_DESC, ep::SORT_DIR_MASK).unwrap();
         assert_eq!(load(&store, id).next_unseen(), Some(by_number(3.0)), "descending: findLast of the display list is the oldest unseen (T-EPS-NEXT-2)");
@@ -480,14 +484,14 @@ mod tests {
     fn a_flag_or_sort_change_on_an_entry_outside_the_library_survives_the_next_snapshot() {
         let (_dir, store, id) = with_episodes(false, true, 3, 1);
         let mut model = load(&store, id);
-        model.note_flag_write(ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
+        model.note_flag_write(ep::SHOW_UNDONE, ep::UNDONE_MASK);
         let (anime, episodes) = (model.anime.clone(), model.episodes.clone());
-        model.apply_snapshot(Anime { episode_flags: 0, ..anime }, episodes);
-        assert_eq!(model.anime.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the session copy took the write");
+        model.apply_snapshot(Entry { item_flags: 0, ..anime }, episodes);
+        assert_eq!(model.anime.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE, "the session copy took the write");
         assert_eq!(model.rows().len(), 2, "only the unseen episodes show");
         model.note_flag_write(ep::SORTING_NUMBER, ep::SORTING_MASK);
-        assert_eq!(model.anime.episode_flags & ep::SORTING_MASK, ep::SORTING_NUMBER);
-        assert_eq!(model.anime.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the sort leaves the filter alone");
+        assert_eq!(model.anime.item_flags & ep::SORTING_MASK, ep::SORTING_NUMBER);
+        assert_eq!(model.anime.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE, "the sort leaves the filter alone");
     }
 
     #[test]
@@ -495,19 +499,19 @@ mod tests {
         use kuro_domain::entries::anime::season_flags as sf;
         let (_dir, store, id) = with_episodes(false, true, 1, 0);
         let mut model = load(&store, id);
-        let episode_word = model.anime.episode_flags;
+        let episode_word = model.anime.item_flags;
         model.note_season_write(sf::SHOW_STARTED, sf::STARTED_MASK);
         model.note_season_write(sf::SORT_UPLOAD, sf::SORT_MASK);
         let (anime, episodes) = (model.anime.clone(), model.episodes.clone());
-        model.apply_snapshot(Anime { season_flags: 0, ..anime }, episodes);
-        assert_eq!(model.anime.season_flags & sf::STARTED_MASK, sf::SHOW_STARTED);
-        assert_eq!(model.anime.season_flags & sf::SORT_MASK, sf::SORT_UPLOAD);
-        assert_eq!(model.anime.episode_flags, episode_word);
+        model.apply_snapshot(Entry { season_flags: Some(0), ..anime }, episodes);
+        assert_eq!(model.anime.season_flags() & sf::STARTED_MASK, sf::SHOW_STARTED);
+        assert_eq!(model.anime.season_flags() & sf::SORT_MASK, sf::SORT_UPLOAD);
+        assert_eq!(model.anime.item_flags, episode_word);
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         let mut model = load(&store, id);
-        let before = model.anime.season_flags;
+        let before = model.anime.season_flags();
         model.note_season_write(sf::SHOW_STARTED, sf::STARTED_MASK);
-        assert_eq!(model.anime.season_flags, before, "an entry in the library follows its row");
+        assert_eq!(model.anime.season_flags(), before, "an entry in the library follows its row");
     }
 
     #[test]
@@ -524,10 +528,10 @@ mod tests {
     fn an_entry_in_the_library_has_no_session_copy_to_change() {
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         let mut model = load(&store, id);
-        let before = model.anime.episode_flags;
-        model.note_flag_write(ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
+        let before = model.anime.item_flags;
+        model.note_flag_write(ep::SHOW_UNDONE, ep::UNDONE_MASK);
         model.note_flag_write(ep::SORTING_NUMBER, ep::SORTING_MASK);
-        assert_eq!(model.anime.episode_flags, before, "the row's own value shows");
+        assert_eq!(model.anime.item_flags, before, "the row's own value shows");
     }
 
     #[test]
@@ -536,13 +540,13 @@ mod tests {
         let mut model = load(&store, id);
         assert!(model.session_flags.is_some());
         let mut stored = model.anime.clone();
-        stored.episode_flags = ep::SHOW_UNSEEN;
+        stored.item_flags = ep::SHOW_UNDONE;
         model.apply_snapshot(stored.clone(), model.episodes.clone());
-        assert_eq!(model.anime.episode_flags, 0, "still a non-favorite: the session flags win over the row");
+        assert_eq!(model.anime.item_flags, 0, "still a non-favorite: the session flags win over the row");
         stored.favorite = true;
         model.apply_snapshot(stored, model.episodes.clone());
         assert!(model.session_flags.is_none());
-        assert_eq!(model.anime.episode_flags, ep::SHOW_UNSEEN, "now the stored defaults show");
+        assert_eq!(model.anime.item_flags, ep::SHOW_UNDONE, "now the stored defaults show");
     }
 
     #[test]
@@ -575,7 +579,7 @@ mod tests {
         use super::super::downloads::DownloadMenu;
         let (_dir, store, id) = with_episodes(true, true, 4, 1);
         let mut model = load(&store, id);
-        let by_number = |model: &AnimeEntryModel, n: f64| model.episodes.iter().find(|e| e.episode_number == n).unwrap().id;
+        let by_number = |model: &AnimeEntryModel, n: f64| model.episodes.iter().find(|e| e.number == n).unwrap().id;
         model.downloaded.insert(by_number(&model, 3.0));
         // the default list is descending; episode 1 is seen and episode 3 is on disk
         assert_eq!(model.download_targets(DownloadMenu::Unseen), vec![by_number(&model, 4.0), by_number(&model, 2.0)]);
@@ -586,7 +590,7 @@ mod tests {
     fn the_tracker_count_counts_only_logged_in_trackers() {
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         assert_eq!(load(&store, id).tracking_count, 0);
-        kuro_data::track::AnimeTrackRepo::new(store.db()).insert(&kuro_data::track::AnimeTrack { anime_id: id, ..kuro_data::track::AnimeTrack::new(2) }).unwrap();
+        kuro_data::track::TrackRepo::new(store.db()).insert(&kuro_data::track::Track { entry_id: id, ..kuro_data::track::Track::new(Kind::Anime, 2) }).unwrap();
         assert_eq!(load(&store, id).tracking_count, 0, "a binding of a tracker that is not logged in does not count (T-TRK-12)");
     }
 
@@ -595,7 +599,7 @@ mod tests {
         // T-39a-015: episodes 1, 3 and 4 miss episode 2, so one separator sits between 1 and 3
         let (_dir, store, id) = with_episodes(true, true, 4, 0);
         let mut model = load(&store, id);
-        model.episodes.retain(|e| e.episode_number != 2.0);
+        model.episodes.retain(|e| e.number != 2.0);
         let lines = model.lines();
         assert_eq!(lines.len(), 4, "three episodes and one separator");
         assert_eq!(lines[2].missing, Some(1), "{lines:?}");

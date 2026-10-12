@@ -6,8 +6,9 @@
 use std::sync::Arc;
 
 use gtk::glib;
-use kuro_data::anime::AnimeRepo;
-use kuro_data::episode::{Episode, EpisodeRepo};
+use kuro_data::entry::EntryRepo;
+use kuro_data::episode::Episode;
+use kuro_data::item::{Item, ItemRepo};
 use kuro_domain::source::remote_update::to_s_episode;
 use kuro_i18n::{MsgKey, tr};
 use kuro_player::load::http_header_fields;
@@ -52,7 +53,7 @@ pub fn open_source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) ->
 /// A source episode ready to resolve: its source, its row and the title it plays under.
 pub struct SourceEpisode {
     source: Arc<dyn AnimeSource>,
-    episode: Episode,
+    episode: Item,
     title: String,
 }
 
@@ -60,9 +61,9 @@ pub struct SourceEpisode {
 /// that is not installed, or a failed read (logged).
 pub fn source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) -> Option<SourceEpisode> {
     let db = &crate::data::app().db;
-    let found = EpisodeRepo::new(Arc::clone(db))
+    let found = ItemRepo::new(Arc::clone(db))
         .by_id(episode_id)
-        .and_then(|episode| episode.map(|e| AnimeRepo::new(Arc::clone(db)).by_id(e.anime_id).map(|a| (a, e))).transpose());
+        .and_then(|episode| episode.map(|e| EntryRepo::new(Arc::clone(db)).by_id(e.entry_id).map(|a| (a, e))).transpose());
     let (anime, episode) = match found {
         Ok(Some(found)) => found,
         Ok(None) => return None,
@@ -84,7 +85,7 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
         return false;
     };
     let SourceEpisode { source, episode, title } = found;
-    let s_episode = to_s_episode(&episode);
+    let s_episode = to_s_episode(&Episode::from(episode));
     let preferred = super::stored_text("pref_subtitle_lang");
     let preferred_audio = super::stored_text("pref_audio_lang");
     let (tx, rx) = async_channel::bounded(1);

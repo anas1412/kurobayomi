@@ -2,7 +2,7 @@
 //! hands in the model and the preferences it read, and gets the commands back. Upstream: `AnimeScreenModel.kt`
 //! (`markEpisodesSeen`, `runEpisodeDownloadActions`, `markPreviousEpisodeSeen`).
 
-use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 
 use crate::entry_core::list_model::RowAction;
 
@@ -15,7 +15,7 @@ use super::seen::{previous_to_mark, seen_effects};
 
 /// The commands of marking `episodes` seen or unseen: the write, and with `remove_after_seen`
 /// (`pref_remove_after_marked_as_read`) the delete of the downloads of the episodes it changed.
-pub fn seen_cmds(m: &AnimeEntryModel, episodes: &[Episode], seen: bool, remove_after_seen: bool) -> Vec<AnimeCmd> {
+pub fn seen_cmds(m: &AnimeEntryModel, episodes: &[Item], seen: bool, remove_after_seen: bool) -> Vec<AnimeCmd> {
     let effects = seen_effects(seen, episodes, remove_after_seen, &m.downloaded);
     let mut cmds = Vec::new();
     if !effects.write_ids.is_empty() {
@@ -66,7 +66,7 @@ pub fn bottom_cmds(m: &AnimeEntryModel, effect: Effect, remove_after_seen: bool)
 /// Marks every episode before `pointer`, in list order, as seen. Only the unseen ones change.
 fn previous_seen_cmds(m: &AnimeEntryModel, pointer: i64, remove_after_seen: bool) -> Vec<AnimeCmd> {
     let ids = previous_to_mark(&m.processed_ids(), pointer, m.filters().is_some_and(|f| f.descending));
-    let before: Vec<Episode> = m.episodes.iter().filter(|e| ids.contains(&e.id) && !e.seen).cloned().collect();
+    let before: Vec<Item> = m.episodes.iter().filter(|e| ids.contains(&e.id) && !e.done).cloned().collect();
     seen_cmds(m, &before, true, remove_after_seen)
 }
 
@@ -105,13 +105,13 @@ mod tests {
     fn select(m: &mut AnimeEntryModel, numbers: &[f64]) {
         let view = m.processed_ids();
         for n in numbers {
-            let id = m.episodes.iter().find(|e| e.episode_number == *n).unwrap().id;
+            let id = m.episodes.iter().find(|e| e.number == *n).unwrap().id;
             m.selection.long_press(&view, id);
         }
     }
 
     fn id_of(m: &AnimeEntryModel, n: f64) -> i64 {
-        m.episodes.iter().find(|e| e.episode_number == n).unwrap().id
+        m.episodes.iter().find(|e| e.number == n).unwrap().id
     }
 
     #[test]

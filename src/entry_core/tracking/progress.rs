@@ -37,11 +37,10 @@ pub fn marked(kind: Kind, entry_id: i64, read: bool, numbers: &[f64], incognito:
         return;
     }
     let Some(ctx) = crate::settings_ui::tracker_host::ctx() else { return };
-    let progress: Vec<f64> = match kind {
-        Kind::Manga => kuro_data::track::MangaTrackRepo::new(crate::data::app().db.clone()).by_entry(entry_id).map(|t| t.iter().map(|t| t.last_chapter_read).collect()),
-        Kind::Anime => kuro_data::track::AnimeTrackRepo::new(crate::data::app().db.clone()).by_entry(entry_id).map(|t| t.iter().map(|t| t.last_episode_seen).collect()),
-    }
-    .unwrap_or_default();
+    let progress: Vec<f64> = kuro_data::track::TrackRepo::new(crate::data::app().db.clone())
+        .by_entry(entry_id)
+        .map(|tracks| tracks.iter().map(|t| t.last_item).collect())
+        .unwrap_or_default();
     let plan = mark_plan(kind, read, super::session::has_logged_in(), numbers, &progress, ctx.prefs.auto_update_on_mark_read.get());
     match plan {
         MarkReadPlan::Nothing => {}

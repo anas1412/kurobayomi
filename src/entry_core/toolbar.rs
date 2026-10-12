@@ -121,12 +121,12 @@ mod tests {
     #[test]
     fn the_bar_follows_the_page() {
         let rows = vec![ChapterRow::new(1, "a", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "b", 2.0) }];
-        let mut p = page(0x100, false, true, rows.clone());
+        let mut p = page(0x200, false, true, rows.clone());
         let bar = bar_state(&p, false, false);
         assert_eq!((bar.menu, bar.download_menu, bar.filter_active), (ActionMenu::Normal, true, false));
         assert_eq!(bar.overflow, vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate]);
         // the Download menu is not offered for a local manga, and a library filter tints the Filter button
-        let local = page(0x100 | kuro_db::flags::chapter::SHOW_UNREAD, true, true, rows);
+        let local = page(0x200 | kuro_db::flags::item::SHOW_UNDONE, true, true, rows);
         let bar = bar_state(&local, true, true);
         assert!(!bar.download_menu && bar.filter_active);
         assert_eq!(bar.overflow, vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate, Overflow::Share, Overflow::Settings]);
@@ -134,7 +134,7 @@ mod tests {
         p.selection.set_all(&[1, 2], true);
         let bar = bar_state(&p, false, false);
         assert_eq!((bar.menu, bar.selected_total, bar.selected_visible), (ActionMenu::Selection, 2, 2));
-        let mut hidden = page(0x100 | kuro_db::flags::chapter::SHOW_UNREAD, false, true, vec![ChapterRow { read: true, ..ChapterRow::new(2, "b", 2.0) }]);
+        let mut hidden = page(0x200 | kuro_db::flags::item::SHOW_UNDONE, false, true, vec![ChapterRow { read: true, ..ChapterRow::new(2, "b", 2.0) }]);
         hidden.selection.set_all(&[2], true);
         let bar = bar_state(&hidden, false, false);
         assert_eq!((bar.menu, bar.selected_total, bar.selected_visible), (ActionMenu::Normal, 1, 0));

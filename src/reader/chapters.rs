@@ -2,14 +2,12 @@
 //! sort (`ReaderViewModel.kt:154-223`, `ChapterRemoveDuplicates.kt`, `ChapterFilterDownloaded.kt`). T-43a-018,
 //! T-43a-019, T-43a-020. The gap rule (T-43a-021) is `kuro_domain::items::missing`, used by the transition card.
 
-use kuro_data::chapter::Chapter;
-use kuro_domain::entries::manga::chapter_flags::SORTING_MASK;
-use kuro_domain::items::sorter::chapter_cmp;
-use kuro_prefs::flags::{
-    CHAPTER_BOOKMARKED_MASK, CHAPTER_DOWNLOADED_MASK, CHAPTER_SHOW_BOOKMARKED, CHAPTER_SHOW_DOWNLOADED,
-    CHAPTER_SHOW_NOT_BOOKMARKED, CHAPTER_SHOW_NOT_DOWNLOADED, CHAPTER_SHOW_READ, CHAPTER_SHOW_UNREAD,
-    CHAPTER_UNREAD_MASK,
+use kuro_data::item::Item;
+use kuro_db::flags::item::{
+    BOOKMARKED_MASK, DOWNLOADED_MASK, SHOW_BOOKMARKED, SHOW_DONE, SHOW_DOWNLOADED, SHOW_NOT_BOOKMARKED,
+    SHOW_NOT_DOWNLOADED, SHOW_UNDONE, SORTING_MASK, UNDONE_MASK,
 };
+use kuro_domain::items::sorter::item_cmp;
 
 /// The preferences and manga flags the list depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,8 +20,8 @@ pub struct ListOptions {
     pub skip_dupe: bool,
     /// Downloaded-only mode (`basePreferences.downloadedOnly`).
     pub downloaded_only: bool,
-    /// The manga's `chapter_flags`, which hold the three filters and the sort.
-    pub chapter_flags: i64,
+    /// The manga's `item_flags`, which hold the three filters and the sort.
+    pub item_flags: i64,
 }
 
 /// Why the list could not be built. `ChapterNotFound` is the upstream `error(...)` at `ReaderViewModel.kt:158`.
@@ -35,33 +33,33 @@ pub enum ListError {
 }
 
 /// The removal predicate (`when` with three arms, in order). `true` removes the chapter.
-pub fn is_filtered_out(chapter: &Chapter, opts: &ListOptions, is_downloaded: impl Fn(&Chapter) -> bool) -> bool {
-    if opts.skip_read && chapter.read {
+pub fn is_filtered_out(chapter: &Item, opts: &ListOptions, is_downloaded: impl Fn(&Item) -> bool) -> bool {
+    if opts.skip_read && chapter.done {
         return true;
     }
     if !opts.skip_filtered {
         return false;
     }
-    let flags = opts.chapter_flags;
-    let unread = flags & CHAPTER_UNREAD_MASK;
-    let downloaded = flags & CHAPTER_DOWNLOADED_MASK;
-    let bookmarked = flags & CHAPTER_BOOKMARKED_MASK;
-    (unread == CHAPTER_SHOW_READ && !chapter.read)
-        || (unread == CHAPTER_SHOW_UNREAD && chapter.read)
-        || (downloaded == CHAPTER_SHOW_DOWNLOADED && !is_downloaded(chapter))
-        || (downloaded == CHAPTER_SHOW_NOT_DOWNLOADED && is_downloaded(chapter))
-        || (bookmarked == CHAPTER_SHOW_BOOKMARKED && !chapter.bookmark)
-        || (bookmarked == CHAPTER_SHOW_NOT_BOOKMARKED && chapter.bookmark)
+    let flags = opts.item_flags;
+    let unread = flags & UNDONE_MASK;
+    let downloaded = flags & DOWNLOADED_MASK;
+    let bookmarked = flags & BOOKMARKED_MASK;
+    (unread == SHOW_DONE && !chapter.done)
+        || (unread == SHOW_UNDONE && chapter.done)
+        || (downloaded == SHOW_DOWNLOADED && !is_downloaded(chapter))
+        || (downloaded == SHOW_NOT_DOWNLOADED && is_downloaded(chapter))
+        || (bookmarked == SHOW_BOOKMARKED && !chapter.bookmark)
+        || (bookmarked == SHOW_NOT_BOOKMARKED && chapter.bookmark)
 }
 
 /// `removeDuplicates(currentChapter)`: groups by chapter number in first-appearance order and keeps, per group,
 /// the current chapter, else the same scanlator, else the first. Unknown numbers (`-1`) form one group.
-pub fn remove_duplicates(chapters: &[Chapter], current: &Chapter) -> Vec<Chapter> {
-    let mut groups: Vec<(f64, Vec<&Chapter>)> = Vec::new();
+pub fn remove_duplicates(chapters: &[Item], current: &Item) -> Vec<Item> {
+    let mut groups: Vec<(f64, Vec<&Item>)> = Vec::new();
     for chapter in chapters {
-        match groups.iter_mut().find(|(number, _)| *number == chapter.chapter_number) {
+        match groups.iter_mut().find(|(number, _)| *number == chapter.number) {
             Some((_, members)) => members.push(chapter),
-            None => groups.push((chapter.chapter_number, vec![chapter])),
+            None => groups.push((chapter.number, vec![chapter])),
         }
     }
     groups
@@ -80,19 +78,19 @@ pub fn remove_duplicates(chapters: &[Chapter], current: &Chapter) -> Vec<Chapter
 /// The reader list for a manga. `chapters` is the manga's list (already scanlator-filtered by the repository),
 /// `current_id` the requested chapter, `is_downloaded` the download lookup (`skipCache` false).
 pub fn build_reader_list(
-    chapters: &[Chapter],
+    chapters: &[Item],
     current_id: i64,
     opts: &ListOptions,
-    is_downloaded: impl Fn(&Chapter) -> bool,
-) -> Result<Vec<Chapter>, ListError> {
+    is_downloaded: impl Fn(&Item) -> bool,
+) -> Result<Vec<Item>, ListError> {
     let selected = chapters
         .iter()
         .find(|c| c.id == current_id)
         .cloned()
         .ok_or(ListError::ChapterNotFound(current_id))?;
 
-    let mut list: Vec<Chapter> = if opts.skip_read || opts.skip_filtered {
-        let mut kept: Vec<Chapter> =
+    let mut list: Vec<Item> = if opts.skip_read || opts.skip_filtered {
+        let mut kept: Vec<Item> =
             chapters.iter().filter(|c| !is_filtered_out(c, opts, &is_downloaded)).cloned().collect();
         // the current chapter stays reachable even when a filter removed it (E-LIST-1)
         if !kept.iter().any(|c| c.id == current_id) {
@@ -103,7 +101,7 @@ pub fn build_reader_list(
         chapters.to_vec()
     };
 
-    list.sort_by(chapter_cmp(opts.chapter_flags & SORTING_MASK, false));
+    list.sort_by(item_cmp(opts.item_flags & SORTING_MASK, false));
 
     if opts.skip_dupe {
         list = remove_duplicates(&list, &selected);
@@ -121,30 +119,31 @@ pub fn build_reader_list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_prefs::flags::CHAPTER_SHOW_NOT_DOWNLOADED;
+    use kuro_db::flags::item as flag;
+    use kuro_platform::kind::Kind;
 
     /// A chapter with the given id, number, read flag and scanlator. `source_order` follows the id.
-    fn ch(id: i64, number: f64, read: bool, scanlator: Option<&str>) -> Chapter {
-        let mut c = Chapter::create();
+    fn ch(id: i64, number: f64, read: bool, scanlator: Option<&str>) -> Item {
+        let mut c = Item::create(Kind::Manga);
         c.id = id;
         c.url = format!("/c/{id}");
         c.name = format!("Chapter {number}");
-        c.chapter_number = number;
-        c.read = read;
+        c.number = number;
+        c.done = read;
         c.source_order = id;
         c.scanlator = scanlator.map(String::from);
         c
     }
 
     fn opts(flags: i64) -> ListOptions {
-        ListOptions { skip_read: false, skip_filtered: false, skip_dupe: false, downloaded_only: false, chapter_flags: flags }
+        ListOptions { skip_read: false, skip_filtered: false, skip_dupe: false, downloaded_only: false, item_flags: flags }
     }
 
-    fn ids(list: &[Chapter]) -> Vec<i64> {
+    fn ids(list: &[Item]) -> Vec<i64> {
         list.iter().map(|c| c.id).collect()
     }
 
-    const NO_DOWNLOADS: fn(&Chapter) -> bool = |_| false;
+    const NO_DOWNLOADS: fn(&Item) -> bool = |_| false;
 
     #[test]
     fn list_skip_read_removes_read_chapters_only() {
@@ -156,7 +155,7 @@ mod tests {
     #[test]
     fn list_skip_filtered_applies_the_unread_filter() {
         let chapters = [ch(1, 1.0, true, None), ch(2, 2.0, false, None), ch(3, 3.0, true, None)];
-        let flags = CHAPTER_SHOW_UNREAD;
+        let flags = flag::SHOW_UNDONE;
         let list = build_reader_list(&chapters, 2, &ListOptions { skip_filtered: true, ..opts(flags) }, NO_DOWNLOADS)
             .unwrap();
         assert_eq!(ids(&list), [2], "read chapters are removed by the show-unread filter");
@@ -165,7 +164,7 @@ mod tests {
     #[test]
     fn list_skip_filtered_keeps_the_current_chapter_even_when_filtered_out() {
         let chapters = [ch(1, 1.0, false, None), ch(2, 2.0, true, None), ch(3, 3.0, false, None)];
-        let flags = CHAPTER_SHOW_UNREAD;
+        let flags = flag::SHOW_UNDONE;
         let list = build_reader_list(&chapters, 2, &ListOptions { skip_filtered: true, ..opts(flags) }, NO_DOWNLOADS)
             .unwrap();
         assert_eq!(ids(&list), [3, 2, 1], "the removed current chapter is re-appended, then sorted by source order");
@@ -179,7 +178,7 @@ mod tests {
         let not_bookmarked = build_reader_list(
             &chapters,
             1,
-            &ListOptions { skip_filtered: true, ..opts(0x100 | CHAPTER_SHOW_NOT_BOOKMARKED) },
+            &ListOptions { skip_filtered: true, ..opts(flag::SORTING_NUMBER | flag::SHOW_NOT_BOOKMARKED) },
             NO_DOWNLOADS,
         )
         .unwrap();
@@ -188,7 +187,7 @@ mod tests {
         let downloaded_only_filter = build_reader_list(
             &chapters,
             1,
-            &ListOptions { skip_filtered: true, ..opts(0x100 | CHAPTER_SHOW_NOT_DOWNLOADED) },
+            &ListOptions { skip_filtered: true, ..opts(flag::SORTING_NUMBER | flag::SHOW_NOT_DOWNLOADED) },
             |c| c.id == 3,
         )
         .unwrap();
@@ -205,7 +204,7 @@ mod tests {
             ch(14, 2.0, false, Some("C")),
         ];
         let list =
-            build_reader_list(&chapters, 11, &ListOptions { skip_dupe: true, ..opts(0x100) }, NO_DOWNLOADS).unwrap();
+            build_reader_list(&chapters, 11, &ListOptions { skip_dupe: true, ..opts(flag::SORTING_NUMBER) }, NO_DOWNLOADS).unwrap();
         assert_eq!(ids(&list), [11, 13], "group 1 keeps the current id; group 2 has no current id, so the same scanlator (B) wins");
         let missing = build_reader_list(&chapters, 99, &ListOptions { skip_dupe: true, ..opts(0) }, NO_DOWNLOADS);
         assert_eq!(missing.err(), Some(ListError::ChapterNotFound(99)));
@@ -215,7 +214,7 @@ mod tests {
     fn all_unknown_numbers_collapse_into_one_entry_with_dedupe() {
         let chapters = [ch(1, -1.0, false, None), ch(2, -1.0, false, None), ch(3, 4.0, false, None)];
         let list =
-            build_reader_list(&chapters, 1, &ListOptions { skip_dupe: true, ..opts(0x100) }, NO_DOWNLOADS).unwrap();
+            build_reader_list(&chapters, 1, &ListOptions { skip_dupe: true, ..opts(flag::SORTING_NUMBER) }, NO_DOWNLOADS).unwrap();
         assert_eq!(ids(&list), [1, 3]);
     }
 
@@ -236,9 +235,9 @@ mod tests {
     #[test]
     fn sort_is_ascending_for_number_and_reversed_for_source() {
         let chapters = [ch(1, 3.0, false, None), ch(2, -1.0, false, None), ch(3, 1.0, false, None)];
-        let by_number = build_reader_list(&chapters, 1, &opts(0x100), NO_DOWNLOADS).unwrap();
+        let by_number = build_reader_list(&chapters, 1, &opts(flag::SORTING_NUMBER), NO_DOWNLOADS).unwrap();
         assert_eq!(ids(&by_number), [2, 3, 1], "unknown numbers sort before known ones");
-        let by_source = build_reader_list(&chapters, 1, &opts(0x0), NO_DOWNLOADS).unwrap();
+        let by_source = build_reader_list(&chapters, 1, &opts(flag::SORTING_SOURCE), NO_DOWNLOADS).unwrap();
         assert_eq!(ids(&by_source), [3, 2, 1], "source order reads oldest first (descending source_order)");
     }
 
@@ -250,10 +249,15 @@ mod tests {
             c.date_upload = date;
             c.name = name.to_owned();
         }
-        let expected = [(0x100, [2, 3, 1]), (0x200, [2, 3, 1]), (0x300, [2, 3, 1]), (0x0, [3, 2, 1])];
+        let expected = [
+            (flag::SORTING_NUMBER, [2, 3, 1]),
+            (flag::SORTING_UPLOAD_DATE, [2, 3, 1]),
+            (flag::SORTING_ALPHABET, [2, 3, 1]),
+            (flag::SORTING_SOURCE, [3, 2, 1]),
+        ];
         for (mode, order) in expected {
             // the manga's own direction bit never reverses the reader list
-            for direction in [0x0, 0x1] {
+            for direction in [flag::SORT_DESC, flag::SORT_ASC] {
                 let list = build_reader_list(&chapters, 1, &opts(mode | direction), NO_DOWNLOADS).unwrap();
                 assert_eq!(ids(&list), order, "sorting {mode:#x} direction {direction:#x}");
             }

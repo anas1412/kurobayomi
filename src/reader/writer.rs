@@ -1,7 +1,7 @@
 //! The database writer (T-43a-088). One thread owns the write path. Commands arrive on a channel, are coalesced
 //! per chapter before the write, and run through the repositories. Nothing here runs on the GTK thread.
 //!
-//! Progress and bookmark writes use the chapter repository. Viewer flags use the manga repository's
+//! Progress and bookmark writes use the item repository. Viewer flags use the entry repository's
 //! `set_viewer_bits`, which merges under the mask inside one transaction.
 //!
 //! Reader preferences do not go through this actor: `Pref::set` updates the preference store's memory at once and
@@ -13,9 +13,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
-use kuro_data::chapter::{ChapterRepo, ChapterUpdate};
-use kuro_data::history::MangaHistoryRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::entry_history::HistoryRepo;
+use kuro_data::item::{ItemRepo, ItemUpdate};
 use kuro_db::Db;
 
 use super::restore::{self, SavedSession};
@@ -163,29 +163,29 @@ fn split(batch: Vec<Msg>) -> Split {
 }
 
 /// Runs one write through its repository.
-fn execute(chapters: &ChapterRepo, histories: &MangaHistoryRepo, mangas: &MangaRepo, command: &Command) -> Result<(), String> {
+fn execute(items: &ItemRepo, histories: &HistoryRepo, entries: &EntryRepo, command: &Command) -> Result<(), String> {
     let result = match command {
         Command::Progress { chapter_id, last_page_read, read } => {
-            let mut update = ChapterUpdate::new(*chapter_id);
-            update.read = Some(*read);
-            update.last_page_read = Some(*last_page_read);
-            chapters.update(&update).map(|_| ()).map_err(|e| e.to_string())
+            let mut update = ItemUpdate::new(*chapter_id);
+            update.done = Some(*read);
+            update.progress = Some(*last_page_read);
+            items.update(&update).map_err(|e| e.to_string())
         }
         Command::Bookmark { chapter_id, bookmark } => {
-            let mut update = ChapterUpdate::new(*chapter_id);
+            let mut update = ItemUpdate::new(*chapter_id);
             update.bookmark = Some(*bookmark);
-            chapters.update(&update).map(|_| ()).map_err(|e| e.to_string())
+            items.update(&update).map_err(|e| e.to_string())
         }
         Command::MarkRead { chapter_id } => {
-            let mut update = ChapterUpdate::new(*chapter_id);
-            update.read = Some(true);
-            chapters.update(&update).map(|_| ()).map_err(|e| e.to_string())
+            let mut update = ItemUpdate::new(*chapter_id);
+            update.done = Some(true);
+            items.update(&update).map_err(|e| e.to_string())
         }
         Command::History { chapter_id, read_at, duration } => {
-            histories.try_upsert(*chapter_id, *read_at, *duration).map_err(|e| e.to_string())
+            histories.upsert(*chapter_id, *read_at, *duration).map_err(|e| e.to_string())
         }
         Command::ViewerBits { manga_id, value, mask } => {
-            mangas.set_viewer_bits(*manga_id, *value, *mask).map(|_| ()).map_err(|e| e.to_string())
+            entries.set_viewer_bits(*manga_id, *value, *mask).map(|_| ()).map_err(|e| e.to_string())
         }
         Command::Restore { file, session } => restore::save(file, session).map_err(|e| e.to_string()),
     };
@@ -196,9 +196,9 @@ fn execute(chapters: &ChapterRepo, histories: &MangaHistoryRepo, mangas: &MangaR
 }
 
 fn run(db: Arc<Db>, rx: Receiver<Msg>) {
-    let chapters = ChapterRepo::new(Arc::clone(&db));
-    let histories = MangaHistoryRepo::new(Arc::clone(&db));
-    let mangas = MangaRepo::new(db);
+    let items = ItemRepo::new(Arc::clone(&db));
+    let histories = HistoryRepo::new(Arc::clone(&db));
+    let entries = EntryRepo::new(db);
     while let Ok(first) = rx.recv() {
         let mut batch = vec![first];
         while let Ok(next) = rx.try_recv() {
@@ -206,10 +206,10 @@ fn run(db: Arc<Db>, rx: Receiver<Msg>) {
         }
         let (writes, checked, acks) = split(batch);
         for command in coalesce(writes) {
-            let _ = execute(&chapters, &histories, &mangas, &command);
+            let _ = execute(&items, &histories, &entries, &command);
         }
         for (command, reply) in checked {
-            let _ = reply.send(execute(&chapters, &histories, &mangas, &command));
+            let _ = reply.send(execute(&items, &histories, &entries, &command));
         }
         for ack in acks {
             let _ = ack.send(());
@@ -220,6 +220,7 @@ fn run(db: Arc<Db>, rx: Receiver<Msg>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_platform::kind::Kind;
 
     #[test]
     fn progress_is_coalesced_per_chapter_to_the_last_write() {
@@ -270,17 +271,17 @@ mod tests {
         let path = kuro_db::schema_unified::db_path(dir.path());
         let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&kuro_data::manga::Manga::create()).unwrap();
-        let mut chapter = kuro_data::chapter::Chapter::create();
-        chapter.manga_id = manga_id;
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&kuro_data::entry::Entry::create(Kind::Manga)).unwrap();
+        let mut chapter = kuro_data::item::Item::create(Kind::Manga);
+        chapter.entry_id = manga_id;
         chapter.url = "/c/1".into();
-        let chapter_id = ChapterRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap()[0].id;
+        let chapter_id = ItemRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap()[0].id;
 
         let handle = WriterHandle::spawn(Arc::clone(&db));
         handle.save_progress(chapter_id, 4, true);
         handle.flush();
-        let stored = ChapterRepo::new(db).by_id(chapter_id).unwrap().unwrap();
-        assert_eq!((stored.last_page_read, stored.read), (4, true));
+        let stored = ItemRepo::new(db).by_id(chapter_id).unwrap().unwrap();
+        assert_eq!((stored.progress, stored.done), (4, true));
     }
 
     #[test]

@@ -12,16 +12,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use kuro_data::category::CategoryRepo;
-use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
 use kuro_platform::kind::Kind;
 use kuro_db::Db;
 use kuro_downloads::index::DownloadIndex;
 use kuro_downloads::manager::{DeleteRules, chapters_to_delete};
-use kuro_downloads::model::ChapterRef;
 use kuro_local::is_local_source;
 
 use super::delete_queue::{Pending, QueueFile};
+use crate::entry_core::downloaded::chapter_ref;
 use super::download_paths::find_downloads;
 
 /// The delete settings read when the reader closes.
@@ -37,21 +37,6 @@ pub struct DiskDeleter {
     pub index: DownloadIndex,
     pub queue: QueueFile,
     pub settings: Settings,
-}
-
-fn chapter_ref(c: &Chapter) -> ChapterRef {
-    ChapterRef {
-        id: c.id,
-        manga_id: c.manga_id,
-        url: c.url.clone(),
-        name: c.name.clone(),
-        scanlator: c.scanlator.clone(),
-        read: c.read,
-        bookmark: c.bookmark,
-        source_order: c.source_order,
-        chapter_number: c.chapter_number,
-        date_upload: c.date_upload,
-    }
 }
 
 fn remove(path: &Path) -> std::io::Result<()> {
@@ -81,10 +66,10 @@ impl DiskDeleter {
 
     /// `Ok(true)` when a download was removed, `Ok(false)` when there was nothing to remove.
     fn delete_one(&self, entry: &Pending) -> Result<bool, String> {
-        let Some(chapter) = ChapterRepo::new(Arc::clone(&self.db)).by_id(entry.chapter_id).map_err(|e| e.to_string())? else {
+        let Some(chapter) = ItemRepo::new(Arc::clone(&self.db)).by_id(entry.chapter_id).map_err(|e| e.to_string())? else {
             return Ok(false);
         };
-        let manga = MangaRepo::new(Arc::clone(&self.db)).by_id(entry.manga_id).map_err(|e| e.to_string())?;
+        let manga = EntryRepo::new(Arc::clone(&self.db)).by_id(entry.manga_id).map_err(|e| e.to_string())?;
         if is_local_source(manga.source) {
             return Ok(false);
         }
@@ -119,7 +104,8 @@ impl DiskDeleter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::manga::Manga;
+    use kuro_data::entry::Entry;
+    use kuro_data::item::Item;
 
     struct Fixture {
         dir: tempfile::TempDir,
@@ -134,10 +120,10 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
-        let mut manga = Manga::create();
+        let mut manga = Entry::create(Kind::Manga);
         manga.title = "Manga Title".into();
         manga.source = source;
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&manga).unwrap();
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&manga).unwrap();
         let downloads = dir.path().join("downloads");
         std::fs::create_dir_all(&downloads).unwrap();
         let index = DownloadIndex::open(&downloads, dir.path());
@@ -145,13 +131,13 @@ mod tests {
     }
 
     fn add_chapter(f: &Fixture, name: &str, bookmark: bool) -> i64 {
-        let mut c = Chapter::create();
-        c.manga_id = f.manga_id;
+        let mut c = Item::create(Kind::Manga);
+        c.entry_id = f.manga_id;
         c.name = name.into();
         c.url = format!("/{name}");
-        c.read = true;
+        c.done = true;
         c.bookmark = bookmark;
-        ChapterRepo::new(Arc::clone(&f.db)).add_all(&[c]).unwrap()[0].id
+        ItemRepo::new(Arc::clone(&f.db)).add_all(&[c]).unwrap()[0].id
     }
 
     fn download(f: &Fixture, source_dir: &str, chapter: &str) -> PathBuf {

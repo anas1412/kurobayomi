@@ -117,12 +117,13 @@ impl QueueFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::chapter::Chapter;
+    use kuro_data::item::Item;
+    use kuro_platform::kind::Kind;
 
     fn list(n: usize) -> Vec<Rc<ReaderChapter>> {
         (0..n)
             .map(|i| {
-                let mut c = Chapter::create();
+                let mut c = Item::create(Kind::Manga);
                 c.id = i as i64;
                 ReaderChapter::new(c)
             })

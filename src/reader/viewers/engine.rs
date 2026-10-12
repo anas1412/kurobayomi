@@ -1751,7 +1751,8 @@ mod tests {
     use super::*;
     use crate::reader::model::PageSource;
     use crate::reader::viewers::ViewerContext;
-    use kuro_data::chapter::Chapter;
+    use kuro_data::item::Item;
+    use kuro_platform::kind::Kind;
     use kuro_prefs::reader::ReaderPrefs;
     use kuro_prefs::store::PrefStore;
     use std::path::PathBuf;
@@ -1772,7 +1773,7 @@ mod tests {
 
     /// A loaded chapter whose pages are ready files (a path that does not exist is a page that fails).
     fn chapter(id: i64, files: &[PathBuf]) -> Rc<ReaderChapter> {
-        let mut data = Chapter::create();
+        let mut data = Item::create(Kind::Manga);
         data.id = id;
         data.url = format!("/c/{id}");
         let chapter = ReaderChapter::new(data);

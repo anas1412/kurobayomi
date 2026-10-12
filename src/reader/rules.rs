@@ -1,7 +1,7 @@
 //! Pure reader rules of the behaviour tables (`p1-edge-cases-and-tests.md` sections 7 and 10): the remove-after-read
 //! target (E-DEL-1, E-DEL-2), the page-change flash (E-FLASH-1, E-FLASH-2) and the saved-page file name (E-PATH-1).
 //!
-//! The history rule (E-HIST-1) lives in `kuro-data` (`MangaHistoryRepo::upsert` adds the session time and a zero
+//! The history rule (E-HIST-1) lives in `kuro-data` (`HistoryRepo::upsert` adds the session time and a zero
 //! session adds nothing), so the test here runs the real repository. Nothing in this file touches GTK.
 
 use std::time::Duration;
@@ -49,12 +49,13 @@ pub fn flash_phases(colour: FlashColor, duration: Duration) -> Vec<FlashPhase> {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
 
-    use kuro_data::chapter::{Chapter, ChapterRepo};
-    use kuro_data::history::{HistoryRecorder, MangaHistoryRepo};
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
+    use kuro_data::entry_history::HistoryRepo;
+    use kuro_data::item::{Item, ItemRepo};
     use kuro_db::Db;
+    use kuro_domain::history::recorder::SessionTimer;
+    use kuro_platform::kind::Kind;
 
     #[test]
     fn delete_slots_negative_other_than_minus_one() {
@@ -97,18 +98,22 @@ mod tests {
     #[test]
     fn history_duration_not_overwritten_by_zero() {
         let (_dir, db) = db();
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&Manga::create()).unwrap();
-        let mut chapter = Chapter::create();
-        chapter.manga_id = manga_id;
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&Entry::create(Kind::Manga)).unwrap();
+        let mut chapter = Item::create(Kind::Manga);
+        chapter.entry_id = manga_id;
         chapter.url = "/c/1".into();
-        let chapter_id = ChapterRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap()[0].id;
-        let repo = MangaHistoryRepo::new(db);
-        let mut timer = HistoryRecorder::new(Arc::new(AtomicBool::new(false)));
+        let chapter_id = ItemRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap()[0].id;
+        let repo = HistoryRepo::new(db);
+        let mut timer = SessionTimer::default();
+        let flush = |timer: &mut SessionTimer, now| {
+            let update = timer.flush(now, Kind::Manga, chapter_id, false).unwrap();
+            repo.upsert(update.item_id, update.at, update.session_ms).unwrap();
+        };
         timer.start(1_000);
-        timer.flush(&repo, chapter_id, 6_000);
+        flush(&mut timer, 6_000);
         // a pause flush and a page change flush in a row: the second has no start time, so it writes zero
-        timer.flush(&repo, chapter_id, 6_100);
-        assert_eq!(repo.total_read_duration().unwrap(), 5_000);
-        assert_eq!(repo.by_manga_id(manga_id).unwrap()[0].last_read, 6_100, "last_read still moves forward");
+        flush(&mut timer, 6_100);
+        assert_eq!(repo.total_duration(Kind::Manga).unwrap(), 5_000);
+        assert_eq!(repo.by_entry_id(manga_id).unwrap()[0].last_at, 6_100, "last_read still moves forward");
     }
 }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::Receiver;
-use kuro_domain::entries::anime::episode_flags as ep;
+use kuro_db::flags::item as ep;
 use kuro_prefs::store::PrefStore;
 
 use super::bottom::BottomAction;
@@ -54,15 +54,15 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         assert!(!model.anime.favorite);
 
         // the filter sheet: Unseen. The entry is not in the library, so the store holds the flags it was given.
-        model.note_flag_write(ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
-        runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNSEEN, mask: ep::UNSEEN_MASK });
+        model.note_flag_write(ep::SHOW_UNDONE, ep::UNDONE_MASK);
+        runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNDONE, mask: ep::UNDONE_MASK });
         runner.send(AnimeCmd::SetSeen { ids: vec![model.episodes[0].id], seen: true });
-        settle(&rx, &mut model, |m| m.episodes.iter().filter(|e| e.seen).count() == 1).await;
+        settle(&rx, &mut model, |m| m.episodes.iter().filter(|e| e.done).count() == 1).await;
         assert_eq!(model.rows().len(), 2, "the filter hides the seen episode");
         assert_eq!(model.item_header().count, "2 episodes");
 
         // select the episode that is left and press "Mark as seen" on the bar
-        let unseen_ids: Vec<i64> = model.episodes.iter().filter(|e| !e.seen).map(|e| e.id).collect();
+        let unseen_ids: Vec<i64> = model.episodes.iter().filter(|e| !e.done).map(|e| e.id).collect();
         let view = model.processed_ids();
         model.selection.long_press(&view, unseen_ids[0]);
         let dispatch = bottom_cmds(&model, BottomAction::MarkViewed.effect(), false);
@@ -71,7 +71,7 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         for cmd in dispatch.cmds {
             runner.send(cmd);
         }
-        settle(&rx, &mut model, |m| m.episodes.iter().filter(|e| e.seen).count() == 2).await;
+        settle(&rx, &mut model, |m| m.episodes.iter().filter(|e| e.done).count() == 2).await;
         assert_eq!(model.rows().len(), 1, "two are seen and hidden");
         assert!(model.fab().visible, "an unseen episode is left");
 
@@ -79,6 +79,6 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         runner.send(AnimeCmd::ToggleFavorite { anime_id: id });
         settle(&rx, &mut model, |m| m.anime.favorite).await;
         assert!(model.anime.favorite, "added to the library");
-        assert_eq!(model.episodes.iter().filter(|e| e.seen).count(), 2, "the seen marks stay");
+        assert_eq!(model.episodes.iter().filter(|e| e.done).count(), 2, "the seen marks stay");
     });
 }

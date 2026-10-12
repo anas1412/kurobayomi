@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
-use kuro_data::chapter::Chapter;
+use kuro_data::item::Item;
 use tokio::sync::watch;
 
 /// A value many watchers follow (a `StateFlow`): `set` wakes the receivers only when the value changed, and a
@@ -95,14 +95,14 @@ pub enum ChapterState {
 
 /// A chapter open in the reader.
 pub struct ReaderChapter {
-    pub chapter: Chapter,
+    pub chapter: Item,
     state: watch::Sender<ChapterState>,
     loader: RefCell<Option<Box<dyn PageLoader>>>,
     /// The page the viewer scrolls to when the chapter is shown.
     pub requested_page: Cell<i64>,
-    /// The read flag as the reader sees it. Starts from `chapter.read` and only the reader changes it.
+    /// The read flag as the reader sees it. Starts from `chapter.done` and only the reader changes it.
     pub read: Cell<bool>,
-    /// The last page the reader saw, 0-based. Starts from `chapter.last_page_read`.
+    /// The last page the reader saw, 0-based. Starts from `chapter.progress`.
     pub last_page_read: Cell<i64>,
     /// The bookmark flag as the reader sees it. Starts from `chapter.bookmark`; the top bar's toggle changes it.
     pub bookmark: Cell<bool>,
@@ -110,10 +110,10 @@ pub struct ReaderChapter {
 }
 
 impl ReaderChapter {
-    pub fn new(chapter: Chapter) -> Rc<Self> {
+    pub fn new(chapter: Item) -> Rc<Self> {
         Rc::new(Self {
-            read: Cell::new(chapter.read),
-            last_page_read: Cell::new(chapter.last_page_read),
+            read: Cell::new(chapter.done),
+            last_page_read: Cell::new(chapter.progress),
             bookmark: Cell::new(chapter.bookmark),
             chapter,
             state: watch::channel(ChapterState::Wait).0,
@@ -418,7 +418,7 @@ mod tests {
     use super::*;
 
     fn chapter(id: i64) -> Rc<ReaderChapter> {
-        ReaderChapter::new(Chapter { id, url: format!("/c/{id}"), ..Chapter::create() })
+        ReaderChapter::new(Item { id, url: format!("/c/{id}"), ..Item::create(kuro_platform::kind::Kind::Manga) })
     }
 
     fn hash_of(t: &ChapterTransition) -> u64 {

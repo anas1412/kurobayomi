@@ -6,12 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use kuro_archive::CbzWriter;
-use kuro_data::anime::{AnimeRepo, AnimeUpdate};
-use kuro_data::chapter::{ChapterRepo, ChapterUpdate};
-use kuro_data::episode::{EpisodeRepo, EpisodeUpdate};
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::{EntryRepo, EntryUpdate};
+use kuro_data::item::{ItemRepo, ItemUpdate};
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
+use kuro_prefs::store::PrefStore;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::repo::LibraryRepo;
 use kuro_local::LOCAL_SOURCE_ID;
@@ -90,7 +89,12 @@ fn counts(outcomes: &[Outcome]) -> (usize, usize, usize) {
 
 fn anime_id(db: &Arc<Db>, root: &Path, series: &str) -> i64 {
     let url = root.join(series).to_string_lossy().into_owned();
-    AnimeRepo::new(Arc::clone(db)).by_url_and_source(&url, LOCAL_SOURCE_ID).expect("query").expect("row").id
+    EntryRepo::new(Arc::clone(db)).by_url_and_source(Kind::Anime, &url, LOCAL_SOURCE_ID).expect("query").expect("row").id
+}
+
+/// The preferences of an add: the library defaults come from the registry.
+fn prefs() -> PrefStore {
+    PrefStore::in_memory()
 }
 
 #[test]
@@ -105,10 +109,10 @@ fn a_folder_is_stored_once_with_its_chapters_and_cover() {
     let cover = scanned.cover.clone().unwrap_or_default();
     assert!(cover.starts_with("file://") && cover.ends_with("/Ch%201/001.png"), "{cover}");
 
-    let done = sync(&db, Kind::Manga, &scanned, 1_000).expect("sync");
+    let done = sync(&db, &prefs(), Kind::Manga, &scanned, 1_000).expect("sync");
     assert_eq!((done.added, done.updated), (2, 0));
-    let manga = MangaRepo::new(Arc::clone(&db))
-        .by_url_and_source(&series.to_string_lossy(), LOCAL_SOURCE_ID)
+    let manga = EntryRepo::new(Arc::clone(&db))
+        .by_url_and_source(Kind::Manga, &series.to_string_lossy(), LOCAL_SOURCE_ID)
         .expect("lookup")
         .expect("the entry is stored under the local source");
     assert!(manga.favorite, "a local folder joins the library");
@@ -121,23 +125,23 @@ fn a_rescan_adds_new_chapters_and_keeps_read_state() {
     let root = tempfile::tempdir().expect("temp dir");
     let db = db_in(root.path());
     let series = series(root.path());
-    let done = sync(&db, Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
+    let done = sync(&db, &prefs(), Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
 
-    let chapters = ChapterRepo::new(Arc::clone(&db));
-    let ch1 = chapters.by_manga_id(done.entry_id, false).expect("list").into_iter().find(|c| c.name == "Ch 1").expect("Ch 1");
-    let update = ChapterUpdate { read: Some(true), last_page_read: Some(1), ..ChapterUpdate::new(ch1.id) };
+    let chapters = ItemRepo::new(Arc::clone(&db));
+    let ch1 = chapters.by_entry_id(done.entry_id, false).expect("list").into_iter().find(|c| c.name == "Ch 1").expect("Ch 1");
+    let update = ItemUpdate { done: Some(true), progress: Some(1), ..ItemUpdate::new(ch1.id) };
     chapters.update(&update).expect("mark read");
 
     folder_chapter(&series.join("Ch 3"), 1);
-    let again = rescan(&db, Kind::Manga, 2_000).expect("rescan");
+    let again = rescan(&db, &prefs(), Kind::Manga, 2_000).expect("rescan");
     assert_eq!(again.len(), 1, "one local manga in the library");
     let again = again[0].result.clone().expect("sync again");
     assert_eq!((again.added, again.updated), (1, 0), "only Ch 3 is new");
 
     let after = chapters.by_id(ch1.id).expect("read").expect("Ch 1 still there");
-    assert!(after.read, "read state survives the rescan");
-    assert_eq!(after.last_page_read, 1, "the saved page survives the rescan");
-    assert_eq!(chapters.by_manga_id(done.entry_id, false).expect("list").len(), 3);
+    assert!(after.done, "read state survives the rescan");
+    assert_eq!(after.progress, 1, "the saved page survives the rescan");
+    assert_eq!(chapters.by_entry_id(done.entry_id, false).expect("list").len(), 3);
     assert_eq!(library_rows(&db, Kind::Manga)[0].total, 3, "the new chapter is counted");
 }
 
@@ -148,7 +152,7 @@ fn the_reader_loads_the_pages_of_a_folder_and_an_archive() {
     for chapter in ["Ch 1", "Ch 2.cbz"] {
         let url = series.join(chapter).to_string_lossy().into_owned();
         assert!(local_format(&url).is_some(), "{url} is a local chapter");
-        let mut row = kuro_data::chapter::Chapter::create();
+        let mut row = kuro_data::item::Item::create(Kind::Manga);
         row.url = url;
         let rc = crate::reader::model::ReaderChapter::new(row);
         let loader = build_loader(&rc).unwrap_or_else(|e| panic!("{chapter}: {}", e.message));
@@ -162,10 +166,10 @@ fn a_title_and_chapter_name_find_the_local_entry_and_its_chapter() {
     let root = tempfile::tempdir().expect("temp dir");
     let db = db_in(root.path());
     let series = series(root.path());
-    let done = sync(&db, Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
+    let done = sync(&db, &prefs(), Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
 
-    let chapter_id = ChapterRepo::new(Arc::clone(&db))
-        .by_manga_id(done.entry_id, false)
+    let chapter_id = ItemRepo::new(Arc::clone(&db))
+        .by_entry_id(done.entry_id, false)
         .expect("list")
         .iter()
         .find(|c| c.name == "Ch 2")
@@ -184,12 +188,12 @@ fn a_chapter_id_from_the_library_and_a_preferred_entry_pick_the_right_rows() {
     fs::create_dir_all(&other_parent).expect("other parent");
     let second = other_parent.join("Series");
     folder_chapter(&second.join("Ch 1"), 1);
-    let a = sync(&db, Kind::Manga, &scan(Kind::Manga, &first).expect("scan"), 1_000).expect("sync a");
-    let b = sync(&db, Kind::Manga, &scan(Kind::Manga, &second).expect("scan"), 1_000).expect("sync b");
+    let a = sync(&db, &prefs(), Kind::Manga, &scan(Kind::Manga, &first).expect("scan"), 1_000).expect("sync a");
+    let b = sync(&db, &prefs(), Kind::Manga, &scan(Kind::Manga, &second).expect("scan"), 1_000).expect("sync b");
     assert_ne!(a.entry_id, b.entry_id, "two folders with one name are two entries");
 
-    let chapters = ChapterRepo::new(Arc::clone(&db));
-    let in_b = chapters.by_manga_id(b.entry_id, false).expect("list")[0].id;
+    let chapters = ItemRepo::new(Arc::clone(&db));
+    let in_b = chapters.by_entry_id(b.entry_id, false).expect("list")[0].id;
     assert_eq!(find_local_ids(&db, "Series", "Ch 1", Some(b.entry_id)), Some((b.entry_id, in_b)), "the open entry wins");
     assert_eq!(find_local_ids(&db, "Series", &in_b.to_string(), Some(b.entry_id)), Some((b.entry_id, in_b)), "a chapter id works as the name");
     assert_eq!(find_local_ids(&db, "Series", "Ch 1", Some(9_999)).map(|ids| ids.0), Some(a.entry_id), "an unknown preferred id falls back to the title");
@@ -215,16 +219,16 @@ fn an_anime_folder_adds_each_series_with_its_episodes() {
     video(root.path(), "Other", "Other 01.mp4");
     fs::create_dir(root.path().join("Empty")).expect("empty series");
 
-    let outcomes = add(&db, Kind::Anime, root.path(), 1_000).expect("scan");
+    let outcomes = add(&db, &prefs(), Kind::Anime, root.path(), 1_000).expect("scan");
     assert_eq!(counts(&outcomes), (2, 3, 0), "the folder without episodes is skipped");
 
     let shown = library_rows(&db, Kind::Anime);
     let show = shown.iter().find(|a| a.title == "Show").expect("Show in the library");
     assert_eq!((show.source, show.total), (LOCAL_SOURCE_ID, 2));
-    let row = AnimeRepo::new(Arc::clone(&db)).by_id(show.id).expect("row");
+    let row = EntryRepo::new(Arc::clone(&db)).by_id(show.id).expect("row");
     assert!(row.favorite);
     assert_eq!(row.url, root.path().join("Show").to_string_lossy());
-    let rows = EpisodeRepo::new(db).by_anime_id(row.id).expect("episodes");
+    let rows = ItemRepo::new(db).by_entry_id(row.id, false).expect("episodes");
     let mut urls: Vec<String> = rows.iter().map(|e| e.url.clone()).collect();
     urls.sort();
     assert_eq!(urls.len(), 2);
@@ -240,19 +244,19 @@ fn an_anime_rescan_keeps_seen_state_and_position_and_follows_the_files() {
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
     video(root.path(), "Show", "Show - 2.mkv");
-    add(&db, Kind::Anime, root.path(), 1_000).expect("first scan");
-    let episodes = EpisodeRepo::new(Arc::clone(&db));
+    add(&db, &prefs(), Kind::Anime, root.path(), 1_000).expect("first scan");
+    let episodes = ItemRepo::new(Arc::clone(&db));
     let anime_id = anime_id(&db, root.path(), "Show");
-    let first = episodes.by_anime_id(anime_id).expect("rows").into_iter().find(|e| e.name == "Show - 1").expect("episode 1");
-    episodes.update(&EpisodeUpdate { seen: Some(true), last_second_seen: Some(612), ..EpisodeUpdate::new(first.id) }).expect("mark seen");
+    let first = episodes.by_entry_id(anime_id, false).expect("rows").into_iter().find(|e| e.name == "Show - 1").expect("episode 1");
+    episodes.update(&ItemUpdate { done: Some(true), progress: Some(612), ..ItemUpdate::new(first.id) }).expect("mark seen");
 
     fs::remove_file(root.path().join("Show").join("Show - 2.mkv")).expect("remove episode 2");
     video(root.path(), "Show", "Show - 3.mkv");
-    assert_eq!(counts(&add(&db, Kind::Anime, root.path(), 2_000).expect("rescan")), (1, 1, 1));
+    assert_eq!(counts(&add(&db, &prefs(), Kind::Anime, root.path(), 2_000).expect("rescan")), (1, 1, 1));
 
-    let rows = episodes.by_anime_id(anime_id).expect("rows");
+    let rows = episodes.by_entry_id(anime_id, false).expect("rows");
     let kept = rows.iter().find(|e| e.name == "Show - 1").expect("episode 1 still there");
-    assert_eq!((kept.id, kept.seen, kept.last_second_seen), (first.id, true, 612), "the row and its position survive");
+    assert_eq!((kept.id, kept.done, kept.progress), (first.id, true, 612), "the row and its position survive");
     assert!(rows.iter().any(|e| e.name == "Show - 3"));
     assert!(!rows.iter().any(|e| e.name == "Show - 2"));
 }
@@ -262,14 +266,14 @@ fn an_anime_folder_without_episodes_is_not_added_and_an_existing_row_loses_its_e
     let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     fs::create_dir(root.path().join("Bare")).expect("folder without episodes");
-    assert!(add(&db, Kind::Anime, root.path(), 1_000).expect("scan").is_empty());
+    assert!(add(&db, &prefs(), Kind::Anime, root.path(), 1_000).expect("scan").is_empty());
     assert!(library_rows(&db, Kind::Anime).is_empty());
 
     video(root.path(), "Show", "Show - 1.mkv");
-    add(&db, Kind::Anime, root.path(), 1_000).expect("first scan");
+    add(&db, &prefs(), Kind::Anime, root.path(), 1_000).expect("first scan");
     fs::remove_file(root.path().join("Show").join("Show - 1.mkv")).expect("remove");
-    assert_eq!(counts(&add(&db, Kind::Anime, root.path(), 2_000).expect("rescan")).2, 1);
-    assert!(EpisodeRepo::new(Arc::clone(&db)).by_anime_id(anime_id(&db, root.path(), "Show")).expect("rows").is_empty());
+    assert_eq!(counts(&add(&db, &prefs(), Kind::Anime, root.path(), 2_000).expect("rescan")).2, 1);
+    assert!(ItemRepo::new(Arc::clone(&db)).by_entry_id(anime_id(&db, root.path(), "Show"), false).expect("rows").is_empty());
 }
 
 #[test]
@@ -278,17 +282,17 @@ fn an_anime_library_rescan_follows_its_series_and_leaves_removed_ones_out() {
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
     video(root.path(), "Gone", "Gone - 1.mkv");
-    add(&db, Kind::Anime, root.path(), 1_000).expect("first scan");
-    let repo = AnimeRepo::new(Arc::clone(&db));
+    add(&db, &prefs(), Kind::Anime, root.path(), 1_000).expect("first scan");
+    let repo = EntryRepo::new(Arc::clone(&db));
     let gone = anime_id(&db, root.path(), "Gone");
-    repo.update(&AnimeUpdate { favorite: Some(false), ..AnimeUpdate::new(gone) }).expect("unfavourite");
+    repo.update(&EntryUpdate { favorite: Some(false), ..EntryUpdate::new(gone) }).expect("unfavourite");
     video(root.path(), "Show", "Show - 2.mkv");
     video(root.path(), "New", "New - 1.mkv");
 
-    assert_eq!(counts(&rescan(&db, Kind::Anime, 5).expect("rescan")), (1, 1, 0));
+    assert_eq!(counts(&rescan(&db, &prefs(), Kind::Anime, 5).expect("rescan")), (1, 1, 0));
     assert!(!repo.by_id(gone).expect("row").favorite, "a removed series stays out of the library");
     assert!(library_rows(&db, Kind::Anime).iter().all(|a| a.title != "New"), "a folder that was never added is not picked up");
-    assert_eq!(EpisodeRepo::new(Arc::clone(&db)).by_anime_id(anime_id(&db, root.path(), "Show")).expect("rows").len(), 2);
+    assert_eq!(ItemRepo::new(Arc::clone(&db)).by_entry_id(anime_id(&db, root.path(), "Show"), false).expect("rows").len(), 2);
 }
 
 #[test]
@@ -296,12 +300,26 @@ fn choosing_an_anime_folder_again_puts_its_series_back_in_the_library() {
     let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
-    add(&db, Kind::Anime, root.path(), 1_000).expect("first scan");
-    let repo = AnimeRepo::new(Arc::clone(&db));
+    add(&db, &prefs(), Kind::Anime, root.path(), 1_000).expect("first scan");
+    let repo = EntryRepo::new(Arc::clone(&db));
     let id = anime_id(&db, root.path(), "Show");
-    repo.update(&AnimeUpdate { favorite: Some(false), ..AnimeUpdate::new(id) }).expect("unfavourite");
+    repo.update(&EntryUpdate { favorite: Some(false), ..EntryUpdate::new(id) }).expect("unfavourite");
 
-    add(&db, Kind::Anime, root.path(), 2_000).expect("second scan");
+    add(&db, &prefs(), Kind::Anime, root.path(), 2_000).expect("second scan");
     assert!(repo.by_id(id).expect("row").favorite);
     assert_eq!(anime_id(&db, root.path(), "Show"), id, "no duplicate row");
+}
+
+#[test]
+fn a_local_folder_joins_the_library_with_the_library_defaults_of_its_kind() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let db = db_in(root.path());
+    let series = series(root.path());
+    let defaults = kuro_db::flags::item::SORTING_NUMBER | kuro_db::flags::item::SORT_ASC;
+    let prefs = prefs();
+    kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Manga, defaults);
+    let done = sync(&db, &prefs, Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
+    let row = EntryRepo::new(Arc::clone(&db)).by_id(done.entry_id).expect("row");
+    assert!(row.favorite);
+    assert_eq!(row.item_flags, defaults, "an add writes the defaults");
 }

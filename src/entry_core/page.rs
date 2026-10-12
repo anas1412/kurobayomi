@@ -261,7 +261,10 @@ impl Page {
         };
         match action {
             UiAction::Refresh => out.cmds.push(StoreCmd::FetchAll { manga_id, manual: true }),
-            UiAction::SetFlagBits((flag, mask)) => out.cmds.push(StoreCmd::SetFlagBits { manga_id, flag, mask }),
+            UiAction::SetFlagBits((flag, mask)) => {
+                page.note_flag_write(flag, mask);
+                out.cmds.push(StoreCmd::SetFlagBits { manga_id, flag, mask });
+            }
             UiAction::SetFetchInterval(wheel) => out.cmds.push(StoreCmd::SetFetchInterval { manga_id, wheel }),
             UiAction::SetExcludedScanlators(excluded) => out.cmds.push(StoreCmd::SetExcludedScanlators { manga_id, excluded }),
             UiAction::MarkRead(read) => {
@@ -313,7 +316,10 @@ impl Page {
                 page.dialog.dismiss();
                 out.cmds.push(StoreCmd::ToggleFavorite { manga_id, default_category, skip_duplicate });
             }
-            UiAction::ResetFlags => out.cmds.push(StoreCmd::ResetFlags { manga_id }),
+            UiAction::ResetFlags => {
+                page.note_flags_reset();
+                out.cmds.push(StoreCmd::ResetFlags { manga_id });
+            }
             UiAction::DownloadMenu(menu) => {
                 let chapter_ids = download_targets(page, menu);
                 if !chapter_ids.is_empty() {
@@ -436,7 +442,7 @@ fn take_selection(page: &mut EntryState) -> Option<Vec<i64>> {
 
 #[cfg(test)]
 mod tests {
-    use kuro_db::flags::chapter as c;
+    use kuro_db::flags::item as c;
     use kuro_downloads::DownloadState;
 
     use super::*;
@@ -470,7 +476,7 @@ mod tests {
     /// A ready page with chapters 1..=n, number ascending.
     fn ready(n: i64) -> Page {
         let rows = (1..=n).map(|i| ChapterRow::new(i, &format!("c{i}"), i as f64)).collect();
-        let loaded = finish_load(Some(manga(0x101)), rows, SourceInfo::default(), &LoadContext::default());
+        let loaded = finish_load(Some(manga(0x201)), rows, SourceInfo::default(), &LoadContext::default());
         let mut page = Page::new(1, false);
         page.apply(StoreEvent::Loaded(Box::new(loaded)), 0);
         page
@@ -585,16 +591,16 @@ mod tests {
     fn setters_become_masked_store_writes_and_never_touch_the_local_state() {
         let mut page = ready(1);
         let before = page.ready().unwrap().manga.flags;
-        let out = page.act(UiAction::SetFlagBits((c::SHOW_UNREAD, c::UNREAD_MASK)));
-        assert_eq!(out.cmds, vec![StoreCmd::SetFlagBits { manga_id: 1, flag: c::SHOW_UNREAD, mask: c::UNREAD_MASK }]);
+        let out = page.act(UiAction::SetFlagBits((c::SHOW_UNDONE, c::UNDONE_MASK)));
+        assert_eq!(out.cmds, vec![StoreCmd::SetFlagBits { manga_id: 1, flag: c::SHOW_UNDONE, mask: c::UNDONE_MASK }]);
         let out = page.act(UiAction::SetFlagBits((c::DISPLAY_NUMBER, c::DISPLAY_MASK)));
         assert_eq!(out.cmds, vec![StoreCmd::SetFlagBits { manga_id: 1, flag: c::DISPLAY_NUMBER, mask: c::DISPLAY_MASK }]);
         assert_eq!(page.ready().unwrap().manga.flags, before, "the view changes only when the store snapshot arrives");
         page.apply(
-            StoreEvent::Snapshot { manga: Box::new(manga(0x101 | c::SHOW_UNREAD)), chapters: vec![ChapterRow::new(1, "c1", 1.0)] },
+            StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: vec![ChapterRow::new(1, "c1", 1.0)] },
             0,
         );
-        assert_eq!(page.ready().unwrap().manga.flags.0, 0x101 | c::SHOW_UNREAD);
+        assert_eq!(page.ready().unwrap().manga.flags.0, 0x201 | c::SHOW_UNDONE);
     }
 
     #[test]
@@ -689,7 +695,7 @@ mod tests {
         // the snapshot reads chapter 2, and the new flags hide read rows
         let rows = vec![ChapterRow::new(1, "c1", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "c2", 2.0) }, ChapterRow::new(3, "c3", 3.0)];
         let moved = page.apply(
-            StoreEvent::Snapshot { manga: Box::new(manga(0x101 | c::SHOW_UNREAD)), chapters: rows },
+            StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: rows },
             0,
         );
         assert_eq!(moved, Some(3), "focus goes to a visible neighbour");
@@ -715,7 +721,7 @@ mod tests {
         // chapter 2 is selected, then a filter hides every read row, and 2 is read
         page.act(UiAction::Key { key: Key::Space, mods: Mods::default(), focused: Some(2) });
         let rows = vec![ChapterRow::new(1, "c1", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "c2", 2.0) }, ChapterRow::new(3, "c3", 3.0)];
-        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x101 | c::SHOW_UNREAD)), chapters: rows }, 0);
+        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: rows }, 0);
         assert_eq!(page.rows().iter().filter(|r| r.selected).count(), 0, "the selected row is hidden");
         assert!(!page.act(UiAction::Back).pop, "a hidden selection still counts (E-04)");
         assert!(page.ready().unwrap().selection.is_empty());
@@ -756,15 +762,15 @@ mod tests {
 
     #[test]
     fn mark_previous_follows_the_view_order() {
-        // number ascending (0x101): the earlier chapters are the ones above
+        // number ascending (0x201): the earlier chapters are the ones above
         let mut page = ready(4);
         let out = page.act(UiAction::MarkPrevious(3));
         assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![1, 2], read: true, remove_after_read: false }]);
         assert!(page.act(UiAction::MarkPrevious(1)).cmds.is_empty(), "nothing is before the first");
         assert!(page.act(UiAction::MarkPrevious(99)).cmds.is_empty(), "a pointer outside the view marks nothing (E-PREV-1)");
-        // number descending (0x100): the earlier chapters are the ones below, in chronological order
+        // number descending (0x200): the earlier chapters are the ones below, in chronological order
         let rows = (1..=4).map(|i| ChapterRow::new(i, &format!("c{i}"), i as f64)).collect();
-        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x100)), chapters: rows }, 0);
+        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x200)), chapters: rows }, 0);
         let out = page.act(UiAction::MarkPrevious(3));
         assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![1, 2], read: true, remove_after_read: false }]);
     }
@@ -807,7 +813,7 @@ mod tests {
     #[test]
     fn the_first_queued_download_of_a_non_favorite_offers_to_add_it_once() {
         let mut page = ready(1);
-        page.state = finish_load(Some(MangaRow { favorite: false, ..manga(0x101) }), vec![ChapterRow::new(1, "c1", 1.0)], SourceInfo::default(), &LoadContext::default()).state;
+        page.state = finish_load(Some(MangaRow { favorite: false, ..manga(0x201) }), vec![ChapterRow::new(1, "c1", 1.0)], SourceInfo::default(), &LoadContext::default()).state;
         page.apply(StoreEvent::Queued, 0);
         let banner = page.banners.current().expect("the add prompt");
         assert_eq!(banner.text, "Add manga to library?");
@@ -830,6 +836,19 @@ mod tests {
             page.apply_download(DownloadEvent::Status { chapter_id: id, state: DownloadState::Downloaded }, 0);
         }
         assert!(page.act(UiAction::DownloadMenu(DownloadAction::Unread)).cmds.is_empty());
+    }
+
+    #[test]
+    fn a_flag_write_on_a_manga_outside_the_library_shows_at_once_and_reset_puts_the_defaults_back() {
+        let defaults = ChapterFlags(c::SORTING_NUMBER);
+        let rows = vec![ChapterRow::new(1, "c1", 1.0)];
+        let ctx = LoadContext { library_defaults: defaults, ..LoadContext::default() };
+        let mut page = Page::new(1, false);
+        page.state = finish_load(Some(MangaRow { favorite: false, ..manga(0) }), rows, SourceInfo::default(), &ctx).state;
+        page.act(UiAction::SetFlagBits((c::SHOW_UNDONE, c::UNDONE_MASK)));
+        assert_eq!(page.ready().unwrap().manga.flags, ChapterFlags(c::SORTING_NUMBER | c::SHOW_UNDONE), "the session copy takes the write");
+        page.act(UiAction::ResetFlags);
+        assert_eq!(page.ready().unwrap().manga.flags, defaults);
     }
 
     #[test]

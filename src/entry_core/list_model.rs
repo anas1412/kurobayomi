@@ -320,7 +320,7 @@ mod tests {
         let mut a = ChapterRow::new(1, "One", 1.0);
         a.download = DownloadState::Downloaded;
         let b = ChapterRow::new(2, "Two", 2.0);
-        let mut page = page(0x1 | 0x100, vec![a, b]); // number ascending
+        let mut page = page(0x1 | 0x200, vec![a, b]); // number ascending
         page.selection.set_all(&[2], true);
         let rows = row_items(&page);
         assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), [1, 2]);
@@ -364,7 +364,7 @@ mod tests {
     fn a_gap_in_the_numbers_inserts_a_keyed_marker_and_the_header_counts_the_processed_list() {
         // ascending by number: 1, 2, 5 -> two chapters missing between 2 and 5
         let rows = vec![ChapterRow::new(1, "a", 1.0), ChapterRow::new(2, "b", 2.0), ChapterRow::new(3, "c", 5.0)];
-        let page = page(0x1 | 0x100, rows);
+        let page = page(0x1 | 0x200, rows);
         let items = row_items(&page);
         assert_eq!(items.iter().map(|r| r.missing).collect::<Vec<_>>(), [None, None, Some(2), None]);
         let marker = &items[2];
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn a_descending_list_puts_the_marker_after_the_higher_chapter() {
         let rows = vec![ChapterRow::new(1, "a", 1.0), ChapterRow::new(2, "b", 4.0)];
-        let items = row_items(&page(0x100, rows)); // number, descending
+        let items = row_items(&page(0x200, rows)); // number, descending
         assert_eq!(items.iter().map(|r| r.id).collect::<Vec<_>>(), [2, -2, 1]);
         assert_eq!(items[1].key(), "missing-count-1-2");
     }
@@ -390,7 +390,7 @@ mod tests {
         read.read = true;
         let one = page(0, vec![ChapterRow::new(1, "a", 1.0)]);
         assert_eq!(list_header(&one).count, "1 chapter");
-        let mut page = page(0x1 | 0x100 | kuro_db::flags::chapter::SHOW_UNREAD, vec![read]);
+        let mut page = page(0x1 | 0x200 | kuro_db::flags::item::SHOW_UNDONE, vec![read]);
         let header = list_header(&page);
         assert_eq!((header.count.as_str(), header.missing), ("0 chapters", None));
         assert!(row_items(&page).is_empty(), "no rows and no markers (E-02)");

@@ -2,8 +2,8 @@
 //! always derived from the absolute airing time, so a refreshed airing time shows on the next tick (behaviour 3.8).
 //! The text "Airing in ..." is hard-coded English upstream and here (behaviour 3.9).
 
-use kuro_data::anime::Anime;
-use kuro_domain::entries::anime::AnimeExt;
+use kuro_data::entry::Entry;
+use kuro_domain::entries::flags::EntryFlags;
 use kuro_i18n::{Arg, MsgKey, trf};
 
 use super::format::format_episode_number;
@@ -21,10 +21,10 @@ pub struct Airing {
 
 impl Airing {
     /// `None` when the entry has no airing time (`airingTime > 0`).
-    pub fn of(anime: &Anime) -> Option<Self> {
-        let at = anime.next_episode_airing_at();
+    pub fn of(anime: &Entry) -> Option<Self> {
+        let at = anime.viewer().next_episode_airing_at();
         (at > 0).then(|| Self {
-            episode: anime.next_episode_to_air(),
+            episode: anime.viewer().next_episode_to_air(),
             at_ms: at.saturating_mul(1000),
         })
     }
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn airing_reads_the_viewer_flags_and_the_remaining_time_follows_the_absolute_target() {
-        let mut anime = Anime::create();
+        let mut anime = Entry::create(kuro_platform::kind::Kind::Anime);
         assert_eq!(Airing::of(&anime), None);
         anime.set_next_episode_airing(7, 1_700_000_000);
         let airing = Airing::of(&anime).unwrap();

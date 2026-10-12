@@ -2,7 +2,7 @@
 //! (T-39b-017). Upstream: `AnimeScreenModel.kt` (`onMultiBookmarkClicked`, `onMultiFillermarkClicked`) and
 //! `AnimeScreen.kt:136-144`. Behaviour 11.2 and 17.4 and 17.5. The caller writes the flags and clears the selection.
 
-use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 
 use crate::entry_core::list_model::RowAction;
 
@@ -13,7 +13,7 @@ pub enum Mark {
     Fillermark,
 }
 
-fn flag(episode: &Episode, mark: Mark) -> bool {
+fn flag(episode: &Item, mark: Mark) -> bool {
     match mark {
         Mark::Bookmark => episode.bookmark,
         Mark::Fillermark => episode.fillermark,
@@ -22,7 +22,7 @@ fn flag(episode: &Episode, mark: Mark) -> bool {
 
 /// The ids to write `on` for. Only episodes whose flag differs are written (behaviour 11.2); an episode already at
 /// `on` is left out, so a bulk call never writes a row that does not change.
-pub fn bulk_mark_targets(selected: &[Episode], mark: Mark, on: bool) -> Vec<i64> {
+pub fn bulk_mark_targets(selected: &[Item], mark: Mark, on: bool) -> Vec<i64> {
     selected.iter().filter(|e| flag(e, mark) != on).map(|e| e.id).collect()
 }
 
@@ -44,9 +44,9 @@ pub fn starts_torrent_server(is_torrent: bool) -> bool {
 /// The write of a row menu item on one episode, or `None` for the items that are not a flag write (Mark previous,
 /// Download and Select, which the caller runs). Bookmark goes through `bulk_mark_targets`, as the bottom bar does, so
 /// a menu item and a bulk action write the same way.
-pub fn menu_effect(action: RowAction, episode: &Episode) -> Option<MenuEffect> {
+pub fn menu_effect(action: RowAction, episode: &Item) -> Option<MenuEffect> {
     match action {
-        RowAction::ToggleRead => Some(MenuEffect::Seen { id: episode.id, seen: !episode.seen }),
+        RowAction::ToggleRead => Some(MenuEffect::Seen { id: episode.id, seen: !episode.done }),
         RowAction::ToggleBookmark => {
             let on = !episode.bookmark;
             Some(MenuEffect::Mark { ids: bulk_mark_targets(std::slice::from_ref(episode), Mark::Bookmark, on), mark: Mark::Bookmark, on })
@@ -109,8 +109,8 @@ mod tests {
         assert!(continue_plan(false, true, true).torrent_server);
     }
 
-    fn ep(id: i64, bookmark: bool, fillermark: bool) -> Episode {
-        let mut e = Episode::create();
+    fn ep(id: i64, bookmark: bool, fillermark: bool) -> Item {
+        let mut e = Item::create(kuro_platform::kind::Kind::Anime);
         e.id = id;
         e.bookmark = bookmark;
         e.fillermark = fillermark;

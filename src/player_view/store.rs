@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
-use kuro_data::history::AnimeHistoryRepo;
+use kuro_data::entry_history::HistoryRepo;
+use kuro_data::item::{Item, ItemRepo, ItemUpdate};
 use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;
 use kuro_player::progress::{self, EpisodeChanges, EpisodeProgress, SaveContext, WriteThrottle, HISTORY_INTERVAL_MS};
@@ -14,30 +14,30 @@ pub const COMPLETION_THRESHOLD: f64 = 0.85;
 
 /// Where playback starts, in milliseconds. An explicit position above zero wins. Otherwise the saved position is
 /// used, and a seen episode restarts at zero (`preserve watching position` is off by default).
-pub fn start_ms(explicit_ms: i64, episode: &Episode) -> i64 {
+pub fn start_ms(explicit_ms: i64, episode: &Item) -> i64 {
     progress::resume_position_ms(
         (explicit_ms > 0).then_some(explicit_ms),
-        episode.seen,
+        episode.done,
         false,
-        episode.last_second_seen * 1000,
+        episode.progress * 1000,
     )
 }
 
 /// The progress fields of an episode row.
-fn progress_of(episode: &Episode) -> EpisodeProgress {
+fn progress_of(episode: &Item) -> EpisodeProgress {
     EpisodeProgress {
-        seen: episode.seen,
+        seen: episode.done,
         bookmark: episode.bookmark,
         fillermark: episode.fillermark,
-        last_second_seen: episode.last_second_seen,
-        total_seconds: episode.total_seconds,
+        last_second_seen: episode.progress,
+        total_seconds: episode.total_seconds(),
     }
 }
 
 /// Keeps the in-memory row in step with the write that just happened.
-fn apply(stored: &mut Episode, changes: &EpisodeChanges) {
+fn apply(stored: &mut Item, changes: &EpisodeChanges) {
     if let Some(seen) = changes.seen {
-        stored.seen = seen;
+        stored.done = seen;
     }
     if let Some(bookmark) = changes.bookmark {
         stored.bookmark = bookmark;
@@ -46,19 +46,19 @@ fn apply(stored: &mut Episode, changes: &EpisodeChanges) {
         stored.fillermark = fillermark;
     }
     if let Some(position) = changes.last_second_seen {
-        stored.last_second_seen = position;
+        stored.progress = position;
     }
     if let Some(total) = changes.total_seconds {
-        stored.total_seconds = total;
+        stored.total_seconds = Some(total);
     }
 }
 
 /// Progress of one open episode. Holds the row as last read or written, so a save only writes what changed.
 pub struct Tracker {
-    episodes: EpisodeRepo,
-    history: AnimeHistoryRepo,
+    episodes: ItemRepo,
+    history: HistoryRepo,
     episode_id: i64,
-    stored: Episode,
+    stored: Item,
     incognito: bool,
     throttle: WriteThrottle,
     /// Called once with the anime id and the episode number when an episode crosses the threshold.
@@ -68,7 +68,7 @@ pub struct Tracker {
 impl Tracker {
     /// Reads the episode row. `None` when no row has `episode_id` or the read fails, and then nothing is saved.
     pub fn open(db: Arc<Db>, episode_id: i64, incognito: bool) -> Option<Self> {
-        let episodes = EpisodeRepo::new(Arc::clone(&db));
+        let episodes = ItemRepo::new(Arc::clone(&db));
         let stored = match episodes.by_id(episode_id) {
             Ok(Some(row)) => row,
             Ok(None) => {
@@ -82,7 +82,7 @@ impl Tracker {
         };
         Some(Self {
             episodes,
-            history: AnimeHistoryRepo::new(db),
+            history: HistoryRepo::new(db),
             episode_id,
             stored,
             incognito,
@@ -129,24 +129,25 @@ impl Tracker {
             &episode,
         );
         if let Some(changes) = plan.episode {
-            let update = EpisodeUpdate {
-                seen: changes.seen,
-                last_second_seen: changes.last_second_seen,
+            let update = ItemUpdate {
+                done: changes.seen,
+                progress: changes.last_second_seen,
                 total_seconds: changes.total_seconds,
-                ..EpisodeUpdate::new(self.episode_id)
+                ..ItemUpdate::new(self.episode_id)
             };
             match self.episodes.update(&update) {
                 Ok(()) => {
                     apply(&mut self.stored, &changes);
                     if changes.seen == Some(true) {
-                        (self.on_seen)(self.stored.anime_id, self.stored.episode_number);
+                        (self.on_seen)(self.stored.entry_id, self.stored.number);
                     }
                 }
                 Err(e) => tracing::error!(episode_id = self.episode_id, error = %e, "progress write failed"),
             }
         }
         if let Some(seen_at) = plan.history_seen_at {
-            if let Err(e) = self.history.try_upsert(self.episode_id, seen_at) {
+            // no playback time yet: `WatchTicker` hands the watched time over when the player is wired to it
+            if let Err(e) = self.history.upsert(self.episode_id, seen_at, 0) {
                 tracing::error!(episode_id = self.episode_id, error = %e, "history write failed");
             }
         }
@@ -154,36 +155,36 @@ impl Tracker {
 
     /// Whether the stored row is seen, after the saves so far.
     pub fn seen(&self) -> bool {
-        self.stored.seen
+        self.stored.done
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::anime::{Anime, AnimeRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
     use kuro_testkit::{TempDir, TestDb};
 
     /// One anime with one episode in a fresh anime database. Returns the database and the episode id.
     fn seeded(dir: &TempDir) -> (Arc<Db>, i64) {
         let db = TestDb::handle(dir);
-        let anime_id = AnimeRepo::new(Arc::clone(&db)).insert(&Anime::create()).expect("anime row");
-        let episode = Episode {
-            anime_id,
+        let anime_id = EntryRepo::new(Arc::clone(&db)).insert(&Entry::create(Kind::Anime)).expect("anime row");
+        let episode = Item {
+            entry_id: anime_id,
             url: "/episode-1".to_owned(),
             name: "Episode 1".to_owned(),
-            ..Episode::create()
+            ..Item::create(Kind::Anime)
         };
-        let id = EpisodeRepo::new(Arc::clone(&db)).add_all(&[episode]).expect("episode row")[0].id;
+        let id = ItemRepo::new(Arc::clone(&db)).add_all(&[episode]).expect("episode row")[0].id;
         (db, id)
     }
 
-    fn row(db: &Arc<Db>, id: i64) -> Episode {
-        EpisodeRepo::new(Arc::clone(db)).by_id(id).expect("read").expect("row")
+    fn row(db: &Arc<Db>, id: i64) -> Item {
+        ItemRepo::new(Arc::clone(db)).by_id(id).expect("read").expect("row")
     }
 
-    fn fresh(seen: bool, last_second_seen: i64) -> Episode {
-        Episode { seen, last_second_seen, total_seconds: 0, ..Episode::create() }
+    fn fresh(seen: bool, last_second_seen: i64) -> Item {
+        Item { done: seen, progress: last_second_seen, total_seconds: Some(0), ..Item::create(Kind::Anime) }
     }
 
     #[test]
@@ -205,12 +206,12 @@ mod tests {
         let (db, id) = seeded(&dir);
         let mut tracker = Tracker::open(Arc::clone(&db), id, false).expect("tracker");
         tracker.save(0, 2_000, 600_000, false);
-        assert_eq!(row(&db, id).last_second_seen, 2);
+        assert_eq!(row(&db, id).progress, 2);
         tracker.save(1_000, 3_000, 600_000, false);
-        assert_eq!(row(&db, id).last_second_seen, 2, "a save inside the interval is skipped");
+        assert_eq!(row(&db, id).progress, 2, "a save inside the interval is skipped");
         tracker.save(1_000, 3_500, 600_000, true);
-        assert_eq!(row(&db, id).last_second_seen, 3, "a forced save is written at once");
-        assert_eq!(row(&db, id).total_seconds, 600);
+        assert_eq!(row(&db, id).progress, 3, "a forced save is written at once");
+        assert_eq!(row(&db, id).total_seconds(), 600);
 
         let reopened = Tracker::open(db, id, false).expect("reopen");
         assert_eq!(reopened.start_ms(0), 3_000);
@@ -222,9 +223,9 @@ mod tests {
         let (db, id) = seeded(&dir);
         let mut tracker = Tracker::open(Arc::clone(&db), id, false).expect("tracker");
         tracker.save(0, 50_000, 100_000, true);
-        assert!(!row(&db, id).seen, "50 of 100 seconds is below 85 percent");
+        assert!(!row(&db, id).done, "50 of 100 seconds is below 85 percent");
         tracker.save(10_000, 90_000, 100_000, true);
-        assert!(row(&db, id).seen);
+        assert!(row(&db, id).done);
         assert!(tracker.seen());
         assert!(Tracker::open(db, id, false).unwrap().seen());
     }
@@ -241,8 +242,8 @@ mod tests {
         assert!(calls.borrow().is_empty(), "below the threshold");
         tracker.save(10_000, 90_000, 100_000, true);
         tracker.save(20_000, 95_000, 100_000, true);
-        let anime_id = row(&db, id).anime_id;
-        assert_eq!(*calls.borrow(), vec![(anime_id, row(&db, id).episode_number)]);
+        let anime_id = row(&db, id).entry_id;
+        assert_eq!(*calls.borrow(), vec![(anime_id, row(&db, id).number)]);
     }
 
     #[test]
@@ -251,12 +252,12 @@ mod tests {
         let (db, id) = seeded(&dir);
         let mut private = Tracker::open(Arc::clone(&db), id, true).expect("tracker");
         private.save(0, 2_000, 4_000, true);
-        assert_eq!(row(&db, id).last_second_seen, 0, "incognito keeps no progress for an untracked source");
-        assert!(AnimeHistoryRepo::new(Arc::clone(&db)).by_anime_id(row(&db, id).anime_id).unwrap().is_empty());
+        assert_eq!(row(&db, id).progress, 0, "incognito keeps no progress for an untracked source");
+        assert!(HistoryRepo::new(Arc::clone(&db)).by_entry_id(row(&db, id).entry_id).unwrap().is_empty());
 
         let mut open = Tracker::open(Arc::clone(&db), id, false).expect("tracker");
         open.save(0, 2_000, 4_000, true);
-        let history = AnimeHistoryRepo::new(Arc::clone(&db)).by_anime_id(row(&db, id).anime_id).unwrap();
+        let history = HistoryRepo::new(Arc::clone(&db)).by_entry_id(row(&db, id).entry_id).unwrap();
         assert_eq!(history.len(), 1);
     }
 
@@ -273,6 +274,6 @@ mod tests {
         let (db, id) = seeded(&dir);
         let mut tracker = Tracker::open(Arc::clone(&db), id, false).expect("tracker");
         tracker.save(0, 2_000, 0, true);
-        assert_eq!(row(&db, id).last_second_seen, 0);
+        assert_eq!(row(&db, id).progress, 0);
     }
 }

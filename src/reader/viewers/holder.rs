@@ -24,7 +24,7 @@ use super::status::{PageView, StatusBranch};
 use crate::reader::error_card;
 use crate::reader::transition::{self, Metrics};
 use crate::reader::model::ChapterTransition;
-use kuro_data::chapter::Chapter;
+use kuro_data::item::Item;
 use crate::reader::model::{ChapterState, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use crate::reader::page_decode::LoadState;
 use crate::reader::page_transform;
@@ -616,7 +616,7 @@ impl TransitionCard {
     /// downloaded. An answer for an older binding is dropped.
     fn lookup_downloaded(self: &Rc<Self>, generation: u64) {
         let downloads = &self.host.downloads;
-        let to: Option<Chapter> = self.transition.borrow().as_ref().and_then(|t| t.to().map(|c| c.chapter.clone()));
+        let to: Option<Item> = self.transition.borrow().as_ref().and_then(|t| t.to().map(|c| c.chapter.clone()));
         let has_destination = to.is_some();
         let weak = Rc::downgrade(self);
         transition::going_to_downloaded_off_thread(downloads.manga_is_local, to, Arc::clone(&downloads.lookup), move |found| {
@@ -763,7 +763,7 @@ mod tests {
 
     /// A fetched page of a chapter whose loader is the fake. The chapter must be kept alive by the caller.
     fn fetched(fetch: &Rc<Fetch>) -> (Rc<ReaderChapter>, Rc<ReaderPage>) {
-        let chapter = ReaderChapter::new(kuro_data::chapter::Chapter::create());
+        let chapter = ReaderChapter::new(kuro_data::item::Item::create(kuro_platform::kind::Kind::Manga));
         chapter.set_loader(Box::new(FakeLoader(Rc::clone(fetch))));
         let page = ReaderPage::new(0, "p0", Some("https://img/p0.png".into()), PageSource::Http);
         chapter.finish_loading(vec![Rc::clone(&page)]).unwrap();

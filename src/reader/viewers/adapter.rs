@@ -101,7 +101,8 @@ mod tests {
     use crate::reader::model::ReaderChapter;
     use crate::reader::viewers::settings::ViewerSettings;
     use crate::reader::viewers::{Emitter, ViewerContext, make_viewer};
-    use kuro_data::chapter::Chapter;
+    use kuro_data::item::Item;
+    use kuro_platform::kind::Kind;
     use kuro_prefs::reader::ReaderPrefs;
     use kuro_prefs::store::PrefStore;
     use std::cell::RefCell;
@@ -118,7 +119,7 @@ mod tests {
     }
 
     fn chapters() -> ViewerChapters {
-        ViewerChapters { curr: ReaderChapter::new(Chapter::create()), prev: None, next: None }
+        ViewerChapters { curr: ReaderChapter::new(Item::create(Kind::Manga)), prev: None, next: None }
     }
 
     #[test]

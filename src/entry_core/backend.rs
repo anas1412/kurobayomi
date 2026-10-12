@@ -8,25 +8,29 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use kuro_data::chapter::ChapterRepo;
-use kuro_data::manga::{Manga, MangaRepo};
-use kuro_data::source::{MangaStubSourceRepo, StubSource};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::ItemRepo;
+use kuro_data::manga::Manga;
+use kuro_data::source::{StubSource, StubSourceRepo};
 use kuro_db::handle::Db;
-use kuro_domain::entries::source_convert::{refresh_update, to_s_manga};
-use kuro_domain::items::chapter_sync::{ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
-use kuro_domain::items::source_sync::MangaSyncLocks;
+use kuro_domain::entries::source_convert::to_s_manga;
+use kuro_domain::entries::update::{CacheFiles, UpdateEntry, remote_from_manga};
+use kuro_domain::items::source_sync::EntrySyncLocks;
+use kuro_domain::items::sync::{NoRenames, SourceItem, SyncItems, SyncItemsError, SyncOptions, source_item_from_chapter};
 use kuro_downloads::DownloadState;
 use kuro_downloads::downloader::Command;
 use kuro_downloads::engine::{MangaEngine, QueueEngine};
 use kuro_downloads::manager::{DeleteRules, DownloadManager};
 use kuro_downloads::model::{ChapterRef, SourceRef};
 use kuro_downloads::source::FolderOnlySource;
-use kuro_source::model::SChapter;
+use kuro_platform::kind::Kind;
+use kuro_source::model::{SChapter, SManga};
 use kuro_source::MangaSource;
 
 use crate::browse::errors::limited;
-use crate::downloads::manga_io::{LiveChapterSource, chapter_ref, manga_ref};
+use crate::downloads::manga_io::LiveChapterSource;
 use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::downloaded::{chapter_ref, manga_ref};
 use crate::entry_core::errors::DetailError;
 
 pub type Fetch = Pin<Box<dyn Future<Output = Result<(), DetailError>> + Send>>;
@@ -69,43 +73,42 @@ pub trait Backend: Send + Sync + 'static {
     }
 }
 
+const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
+
+/// The source line of a source the registry does not know, for either kind: the local source reads as installed under its
+/// own name, any other as a stub named by its stored row (or by its id when no row is stored).
+pub fn stub_source_info(stubs: &StubSourceRepo, kind: Kind, source_id: i64) -> SourceInfo {
+    if source_id == LOCAL_SOURCE_ID {
+        let name = match kind {
+            Kind::Manga => kuro_source::local::LOCAL_MANGA_NAME,
+            Kind::Anime => kuro_source::local::LOCAL_ANIME_NAME,
+        };
+        return SourceInfo { name: name.to_owned(), stub: false };
+    }
+    let stub = stubs.get(source_id).ok().flatten().unwrap_or_else(|| StubSource::fallback(source_id));
+    SourceInfo { name: stub.display_name(), stub: true }
+}
+
 /// The backend of an app with no source registry yet: every source reads as not installed, the local source reads
 /// as installed and has nothing to fetch.
 pub struct StubBackend {
-    stubs: MangaStubSourceRepo,
+    stubs: StubSourceRepo,
 }
 
 impl StubBackend {
     pub fn new(db: Arc<Db>) -> Self {
         Self {
-            stubs: MangaStubSourceRepo::new(db),
+            stubs: StubSourceRepo::new(db, Kind::Manga),
         }
     }
 }
-
-const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
 
 impl Backend for StubBackend {
     fn has_logged_in_tracker(&self) -> bool {
         crate::entry_core::tracking::session::has_logged_in()
     }
     fn source_info(&self, source_id: i64) -> SourceInfo {
-        if source_id == LOCAL_SOURCE_ID {
-            return SourceInfo {
-                name: kuro_source::local::LOCAL_MANGA_NAME.to_owned(),
-                stub: false,
-            };
-        }
-        let stub = self
-            .stubs
-            .get(source_id)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| StubSource::fallback(source_id));
-        SourceInfo {
-            name: stub.display_name(),
-            stub: true,
-        }
+        stub_source_info(&self.stubs, Kind::Manga, source_id)
     }
 
     fn fetch_details(&self, manga_id: i64) -> Fetch {
@@ -126,16 +129,50 @@ impl StubBackend {
 /// Finds the live manga source of an id; `None` when it is not installed.
 pub type MangaLookup = Arc<dyn Fn(i64) -> Option<Arc<dyn MangaSource>> + Send + Sync>;
 
+/// No cover cache is wired: an entry never has a custom cover file, and no file is deleted. The cover rule
+/// (`image_action`) still decides and stamps the timestamp, so a changed cover reloads.
+pub struct NoCoverFiles;
+
+impl CacheFiles for NoCoverFiles {
+    fn has_custom_cover(&self, _e: &Entry) -> bool {
+        false
+    }
+    fn has_custom_background(&self, _e: &Entry) -> bool {
+        false
+    }
+    fn delete_cover(&self, _e: &Entry) {}
+    fn delete_background(&self, _e: &Entry) {}
+}
+
+/// The source's `prepareNewChapter` hook as the item sync calls it: on the source shape of one item.
+fn prepare_hook<'a>(source: &'a dyn MangaSource, listed: &'a SManga) -> impl Fn(&mut SourceItem) + Sync + 'a {
+    move |item: &mut SourceItem| {
+        let mut chapter = SChapter {
+            url: item.url.clone(),
+            name: item.name.clone(),
+            date_upload: item.date_upload,
+            chapter_number: item.number,
+            scanlator: item.scanlator.clone(),
+        };
+        source.prepare_new_chapter(&mut chapter, listed);
+        item.url = chapter.url;
+        item.name = chapter.name;
+        item.date_upload = chapter.date_upload;
+        item.number = chapter.chapter_number;
+        item.scanlator = chapter.scanlator;
+    }
+}
+
 /// The backend over the live manga sources (`awaitUpdateFromSource` and `syncChaptersWithSource`): the details are
-/// written with the library refresh rules (`refresh_update`), the chapter list through the domain's chapter sync, both on
-/// the row the Browse listing inserted with its source id. A source the lookup does not know reads as [`StubBackend`].
+/// written with the shared refresh rules (`UpdateEntry::update_from_source`), the chapter list through the domain's item
+/// sync, both on the row the Browse listing inserted with its source id. A source the lookup does not know reads as [`StubBackend`].
 /// Source calls run under `limited` (the panic guard and the 30 second limit), so a panicking or silent source is an error
 /// on the page, not a crash or an endless refresh.
 pub struct SourceBackend {
     stub: StubBackend,
     db: Arc<Db>,
     lookup: MangaLookup,
-    chapters: Arc<SyncChapters>,
+    chapters: SyncItems,
     mark_duplicate_read: bool,
     /// The manga download manager. `None` when the app runs no download managers: nothing can be queued then.
     downloads: Option<Arc<DownloadManager>>,
@@ -143,7 +180,7 @@ pub struct SourceBackend {
 
 impl SourceBackend {
     pub fn new(db: Arc<Db>, lookup: MangaLookup, mark_duplicate_read: bool) -> Self {
-        let chapters = Arc::new(SyncChapters::new(Arc::clone(&db), Arc::new(MangaSyncLocks::default()), Arc::new(NoRenames)));
+        let chapters = SyncItems::new(Arc::clone(&db), Arc::new(EntrySyncLocks::default()), Arc::new(NoRenames));
         Self { stub: StubBackend::new(Arc::clone(&db)), db, lookup, chapters, mark_duplicate_read, downloads: None }
     }
 
@@ -165,9 +202,9 @@ impl SourceBackend {
     }
 
     /// The chapters of a manga that the ids name, and the manga, read from the database. `None` when the manga is gone.
-    fn chapters_of(&self, manga_id: i64, ids: &[i64]) -> Option<(Manga, Vec<ChapterRef>)> {
-        let manga = MangaRepo::new(Arc::clone(&self.db)).by_id(manga_id).ok()?;
-        let chapters = ChapterRepo::new(Arc::clone(&self.db)).by_manga_id(manga_id, false).ok()?;
+    fn chapters_of(&self, manga_id: i64, ids: &[i64]) -> Option<(Entry, Vec<ChapterRef>)> {
+        let manga = EntryRepo::new(Arc::clone(&self.db)).by_id(manga_id).ok()?;
+        let chapters = ItemRepo::new(Arc::clone(&self.db)).by_entry_id(manga_id, false).ok()?;
         let picked = chapters.iter().filter(|c| ids.contains(&c.id)).map(chapter_ref).collect();
         Some((manga, picked))
     }
@@ -184,8 +221,8 @@ fn db_error(error: impl std::fmt::Display) -> DetailError {
 }
 
 /// The stored manga and its live source. The row is read on the blocking pool.
-async fn target(db: Arc<Db>, lookup: MangaLookup, manga_id: i64) -> Result<(Manga, Arc<dyn MangaSource>), DetailError> {
-    let manga = tokio::task::spawn_blocking(move || MangaRepo::new(db).by_id(manga_id)).await.map_err(db_error)?.map_err(db_error)?;
+async fn target(db: Arc<Db>, lookup: MangaLookup, manga_id: i64) -> Result<(Entry, Arc<dyn MangaSource>), DetailError> {
+    let manga = tokio::task::spawn_blocking(move || EntryRepo::new(db).by_id(manga_id)).await.map_err(db_error)?.map_err(db_error)?;
     let source = lookup(manga.source).ok_or(DetailError::SourceNotInstalled)?;
     Ok((manga, source))
 }
@@ -206,23 +243,28 @@ impl Backend for SourceBackend {
         let (db, lookup) = (Arc::clone(&self.db), Arc::clone(&self.lookup));
         Box::pin(async move {
             let (manga, source) = target(Arc::clone(&db), lookup, manga_id).await?;
-            let remote = limited(source.get_manga_details(&to_s_manga(&manga))).await.map_err(|error| DetailError::from_source(source.name(), error))?;
-            let update = refresh_update(manga.id, manga.favorite, &remote, manga.thumbnail_url.as_deref(), chrono::Utc::now().timestamp_millis());
-            tokio::task::spawn_blocking(move || MangaRepo::new(db).update(&update)).await.map_err(db_error)?.map_err(db_error)
+            let remote = limited(source.get_manga_details(&to_s_manga(&Manga::from(manga.clone())))).await.map_err(|error| DetailError::from_source(source.name(), error))?;
+            let remote = remote_from_manga(&remote);
+            let update = UpdateEntry::new(EntryRepo::new(Arc::clone(&db)), ItemRepo::new(db));
+            tokio::task::spawn_blocking(move || update.update_from_source(&manga, &remote, false, &NoCoverFiles, &chrono::Local::now()))
+                .await
+                .map_err(db_error)?
+                .map_err(db_error)
         })
     }
 
     fn fetch_chapters(&self, manga_id: i64) -> Fetch {
-        let (db, lookup, sync, mark_duplicate_as_read) = (Arc::clone(&self.db), Arc::clone(&self.lookup), Arc::clone(&self.chapters), self.mark_duplicate_read);
+        let (db, lookup, sync, mark_duplicate_done) = (Arc::clone(&self.db), Arc::clone(&self.lookup), self.chapters.clone(), self.mark_duplicate_read);
         Box::pin(async move {
             let (manga, source) = target(db, lookup, manga_id).await?;
-            let listed = to_s_manga(&manga);
+            let listed = to_s_manga(&Manga::from(manga.clone()));
             let raw = limited(source.get_chapter_list(&listed)).await.map_err(|error| DetailError::from_source(source.name(), error))?;
-            let options = ChapterSyncOptions { now_ms: chrono::Utc::now().timestamp_millis(), manual: true, window: (0, 0), mark_duplicate_as_read, is_local: false };
-            let prepare = |chapter: &mut SChapter| source.prepare_new_chapter(chapter, &listed);
-            sync.run(raw, &manga, options, &prepare).await.map(drop).map_err(|error| match error {
-                ChapterSyncError::NoChapters(_) => DetailError::NoChapters,
-                ChapterSyncError::Db(error) => db_error(error),
+            let options = SyncOptions { now_ms: chrono::Utc::now().timestamp_millis(), manual: true, window: (0, 0), mark_duplicate_done, is_local: false };
+            let items: Vec<SourceItem> = raw.iter().map(source_item_from_chapter).collect();
+            let prepare = prepare_hook(source.as_ref(), &listed);
+            sync.run(items, &manga, options, Some(&prepare)).await.map(drop).map_err(|error| match error {
+                SyncItemsError::NoItems => DetailError::NoChapters,
+                SyncItemsError::Db(error) => db_error(error),
             })
         })
     }
@@ -232,8 +274,8 @@ impl Backend for SourceBackend {
     /// no manager has no states.
     fn downloads(&self, manga_id: i64) -> HashMap<i64, DownloadState> {
         let Some(manager) = &self.downloads else { return HashMap::new() };
-        let Ok(manga) = MangaRepo::new(Arc::clone(&self.db)).by_id(manga_id) else { return HashMap::new() };
-        let Ok(chapters) = ChapterRepo::new(Arc::clone(&self.db)).by_manga_id(manga_id, false) else { return HashMap::new() };
+        let Ok(manga) = EntryRepo::new(Arc::clone(&self.db)).by_id(manga_id) else { return HashMap::new() };
+        let Ok(chapters) = ItemRepo::new(Arc::clone(&self.db)).by_entry_id(manga_id, false) else { return HashMap::new() };
         let queued: HashMap<i64, DownloadState> = manager.snapshot().iter().map(|d| (d.chapter.id, d.status)).collect();
         chapters
             .iter()
@@ -315,7 +357,6 @@ mod tests {
     fn browse_then_details_then_add_to_library_lists_the_entry_with_its_chapters() {
         use kuro_data::category::CategoryRepo;
         use kuro_platform::kind::Kind;
-        use kuro_data::chapter::ChapterRepo;
         use kuro_domain::source::browse::BrowseQuery;
         use kuro_source::filter_list::FilterList;
 
@@ -343,7 +384,7 @@ mod tests {
         let page = rt.block_on(loader.load(BrowseQuery::Popular, FilterList::default(), 1)).expect("a page");
         assert_eq!(page.items.len(), 2);
         let id = page.items[0].id;
-        let listed = MangaRepo::new(Arc::clone(&db)).by_id(id).unwrap();
+        let listed = EntryRepo::new(Arc::clone(&db)).by_id(id).unwrap();
         assert_eq!((listed.source, listed.url.as_str(), listed.favorite, listed.initialized), (41, "/m/one", false, false));
 
         // details: the page's backend fills the row and its chapters
@@ -352,19 +393,19 @@ mod tests {
         assert_eq!(backend.source_info(41), SourceInfo { name: "Fake Central (EN)".into(), stub: false });
         rt.block_on(backend.fetch_details(id)).expect("details");
         rt.block_on(backend.fetch_chapters(id)).expect("chapters");
-        let manga = MangaRepo::new(Arc::clone(&db)).by_id(id).unwrap();
+        let manga = EntryRepo::new(Arc::clone(&db)).by_id(id).unwrap();
         assert_eq!(manga.description.as_deref(), Some("A story."));
         assert_eq!(manga.genre, Some(vec!["Action".to_owned(), "Drama".to_owned()]));
         assert_eq!((manga.status, manga.initialized, manga.title.as_str()), (1, true, "Remote title"));
         assert_eq!(manga.author.as_deref(), Some("Author A"));
-        let chapters = ChapterRepo::new(Arc::clone(&db)).by_manga_id(id, false).unwrap();
+        let chapters = ItemRepo::new(Arc::clone(&db)).by_entry_id(id, false).unwrap();
         let mut urls: Vec<_> = chapters.iter().map(|c| c.url.as_str()).collect();
         urls.sort_unstable();
         assert_eq!(urls, ["/m/one/c1", "/m/one/c2"]);
 
         // add to library, then the library lists it
         store.write_favorite(id, FavoriteWrite { favorite: true, date_added: 5 }).unwrap();
-        let favorites = MangaRepo::new(Arc::clone(&db)).favorites().unwrap();
+        let favorites = EntryRepo::new(Arc::clone(&db)).favorites(Kind::Manga).unwrap();
         assert_eq!(favorites.iter().map(|m| (m.id, m.source)).collect::<Vec<_>>(), [(id, 41)]);
 
         // a failing source and an unknown one are errors the page shows
@@ -373,8 +414,8 @@ mod tests {
             let text = failed.expect_err("the source is down").user_message();
             assert!(text.starts_with("Fake Central ") && text.contains("isn't working right now") && !text.contains("503"), "{text}");
         }
-        assert_eq!(ChapterRepo::new(Arc::clone(&db)).by_manga_id(id, false).unwrap().len(), 2, "a failed refresh keeps the chapters");
-        let other = MangaRepo::new(Arc::clone(&db)).insert(&Manga { source: 99, url: "/x".into(), title: "X".into(), ..Manga::create() }).unwrap();
+        assert_eq!(ItemRepo::new(Arc::clone(&db)).by_entry_id(id, false).unwrap().len(), 2, "a failed refresh keeps the chapters");
+        let other = EntryRepo::new(Arc::clone(&db)).insert(&Entry { source: 99, url: "/x".into(), title: "X".into(), ..Entry::create(Kind::Manga) }).unwrap();
         assert_eq!(rt.block_on(backend.fetch_details(other)), Err(DetailError::SourceNotInstalled));
         assert!(backend.source_info(99).stub);
     }
@@ -383,7 +424,7 @@ mod tests {
     fn a_known_stub_shows_its_name_and_an_unknown_one_its_id() {
         let dir = tempfile::tempdir().unwrap();
         let db = db_of(&dir.path().join("test.db"));
-        MangaStubSourceRepo::new(Arc::clone(&db)).upsert(7, "en", "Reader").unwrap();
+        StubSourceRepo::new(Arc::clone(&db), Kind::Manga).upsert(7, "en", "Reader").unwrap();
         let backend = StubBackend::new(db);
         assert_eq!(
             backend.source_info(7),
@@ -435,9 +476,9 @@ mod tests {
         let source: Arc<dyn MangaSource> = fake.clone();
         let backend = SourceBackend::new(Arc::clone(&db), Arc::new(move |sid| (sid == 41).then(|| Arc::clone(&source))), false).with_downloads(manager);
 
-        let id = MangaRepo::new(Arc::clone(&db)).insert(&Manga { source: 41, url: "/m/one".into(), title: "Remote title".into(), ..Manga::create() }).unwrap();
+        let id = EntryRepo::new(Arc::clone(&db)).insert(&Entry { source: 41, url: "/m/one".into(), title: "Remote title".into(), ..Entry::create(Kind::Manga) }).unwrap();
         rt.block_on(backend.fetch_chapters(id)).expect("chapters");
-        let ids: Vec<i64> = ChapterRepo::new(Arc::clone(&db)).by_manga_id(id, false).unwrap().iter().map(|c| c.id).collect();
+        let ids: Vec<i64> = ItemRepo::new(Arc::clone(&db)).by_entry_id(id, false).unwrap().iter().map(|c| c.id).collect();
         assert_eq!(ids.len(), 2);
         assert!(backend.downloads(id).is_empty(), "nothing is queued or on disk yet");
         assert!(!backend.enqueue_downloads(id, &[-1], false), "an unknown chapter queues nothing");

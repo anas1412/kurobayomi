@@ -9,11 +9,11 @@
 //! default (newest first). The Downloaded check is held on, and greyed out, while the app-wide downloaded-only mode is on.
 
 use gtk::prelude::*;
-use kuro_db::flags::chapter as c;
-use kuro_domain::entries::anime::episode_flags as ep;
+use kuro_db::flags::item as c;
 use kuro_domain::entries::anime::season_flags as sf;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_i18n::{MsgKey, tr};
+use kuro_platform::kind::Kind;
 
 use crate::entry_core::flags::Write;
 use crate::ui::{self, DialogButton, Role};
@@ -85,20 +85,31 @@ fn default_group() -> Group {
     Group { title: None, filter: false, entries: vec![Entry::Action(DEFAULT, "Use as default for all titles".to_owned())] }
 }
 
-/// The manga chapter list (`Manga.chapterFlags`).
-pub fn chapter_spec() -> Spec {
+/// The item list of an entry (`Entry::item_flags`): the manga chapter list or the anime episode list. The two kinds differ
+/// in the unseen label, the number label, the scanlator exclusion list (manga) and the Filler check and the summaries
+/// toggle (anime); everything else is one description over the one flag layout.
+pub fn item_spec(kind: Kind) -> Spec {
+    let anime = kind.is_anime();
+    let unseen = if anime { "Unwatched".to_owned() } else { tr(MsgKey::action_filter_unread) };
+    let number = if anime { tr(MsgKey::show_episode_number) } else { tr(MsgKey::show_chapter_number) };
+    let mut show_only = vec![
+        check(DOWNLOADED, tr(MsgKey::label_downloaded), c::SHOW_DOWNLOADED, c::DOWNLOADED_MASK),
+        check("unseen", unseen, c::SHOW_UNDONE, c::UNDONE_MASK),
+        check("bookmarked", tr(MsgKey::action_filter_bookmarked), c::SHOW_BOOKMARKED, c::BOOKMARKED_MASK),
+    ];
+    show_only.push(if anime {
+        check("filler", "Filler".to_owned(), c::SHOW_FILLERMARKED, c::FILLERMARKED_MASK)
+    } else {
+        Entry::Action(SCANLATORS, format!("{}…", tr(MsgKey::scanlator)))
+    });
+    // Episode summaries stay a Display toggle: the rows follow it.
+    let mut display = vec![choice("display", c::DISPLAY_MASK, vec![(c::DISPLAY_NAME, tr(MsgKey::show_title)), (c::DISPLAY_NUMBER, number)])];
+    if anime {
+        display.push(Entry::Bit(Bit { name: "summaries", label: tr(MsgKey::show_episode_summaries), on: c::SHOW_SUMMARIES, off: c::SHOW_NOT_SUMMARIES, mask: c::SUMMARIES_MASK }));
+    }
     Spec {
         groups: vec![
-            Group {
-                title: Some("Show only"),
-                filter: true,
-                entries: vec![
-                    check(DOWNLOADED, tr(MsgKey::label_downloaded), c::SHOW_DOWNLOADED, c::DOWNLOADED_MASK),
-                    check("unseen", tr(MsgKey::action_filter_unread), c::SHOW_UNREAD, c::UNREAD_MASK),
-                    check("bookmarked", tr(MsgKey::action_filter_bookmarked), c::SHOW_BOOKMARKED, c::BOOKMARKED_MASK),
-                    Entry::Action(SCANLATORS, format!("{}…", tr(MsgKey::scanlator))),
-                ],
-            },
+            Group { title: Some("Show only"), filter: true, entries: show_only },
             Group {
                 title: Some("Sort by"),
                 filter: false,
@@ -111,50 +122,7 @@ pub fn chapter_spec() -> Spec {
                     reverse(c::SORT_ASC, c::SORT_DESC, c::SORT_DIR_MASK),
                 ],
             },
-            Group {
-                title: Some("Display"),
-                filter: false,
-                entries: vec![choice("display", c::DISPLAY_MASK, vec![(c::DISPLAY_NAME, tr(MsgKey::show_title)), (c::DISPLAY_NUMBER, tr(MsgKey::show_chapter_number))])],
-            },
-            default_group(),
-        ],
-    }
-}
-
-/// The anime episode list (`Anime.episodeFlags`). Episode summaries stay a Display toggle: the rows follow it.
-pub fn episode_spec() -> Spec {
-    Spec {
-        groups: vec![
-            Group {
-                title: Some("Show only"),
-                filter: true,
-                entries: vec![
-                    check(DOWNLOADED, tr(MsgKey::label_downloaded), ep::SHOW_DOWNLOADED, ep::DOWNLOADED_MASK),
-                    check("unseen", "Unwatched".to_owned(), ep::SHOW_UNSEEN, ep::UNSEEN_MASK),
-                    check("bookmarked", tr(MsgKey::action_filter_bookmarked), ep::SHOW_BOOKMARKED, ep::BOOKMARKED_MASK),
-                    check("filler", "Filler".to_owned(), ep::SHOW_FILLERMARKED, ep::FILLERMARKED_MASK),
-                ],
-            },
-            Group {
-                title: Some("Sort by"),
-                filter: false,
-                entries: vec![
-                    choice(
-                        "sort",
-                        ep::SORTING_MASK,
-                        vec![(ep::SORTING_SOURCE, "Source order".to_owned()), (ep::SORTING_NUMBER, "Number".to_owned()), (ep::SORTING_UPLOAD_DATE, "Upload date".to_owned())],
-                    ),
-                    reverse(ep::SORT_ASC, ep::SORT_DESC, ep::SORT_DIR_MASK),
-                ],
-            },
-            Group {
-                title: Some("Display"),
-                filter: false,
-                entries: vec![
-                    choice("display", ep::DISPLAY_MASK, vec![(ep::DISPLAY_NAME, tr(MsgKey::show_title)), (ep::DISPLAY_NUMBER, tr(MsgKey::show_episode_number))]),
-                    Entry::Bit(Bit { name: "summaries", label: tr(MsgKey::show_episode_summaries), on: ep::SHOW_SUMMARIES, off: ep::SHOW_NOT_SUMMARIES, mask: ep::SUMMARIES_MASK }),
-                ],
-            },
+            Group { title: Some("Display"), filter: false, entries: display },
             default_group(),
         ],
     }
@@ -315,7 +283,7 @@ mod tests {
 
     #[test]
     fn every_toggle_and_radio_round_trips_through_the_word() {
-        for spec in [chapter_spec(), episode_spec(), season_spec()] {
+        for spec in [item_spec(Kind::Manga), item_spec(Kind::Anime), season_spec()] {
             for entry in spec.entries() {
                 match entry {
                     Entry::Bit(bit) => {
@@ -338,17 +306,17 @@ mod tests {
 
     #[test]
     fn a_check_is_include_or_off_and_an_old_exclude_reads_as_off() {
-        let spec = chapter_spec();
-        assert_eq!(spec.write(&Pick::Toggle("unseen", true)), Some((c::SHOW_UNREAD, c::UNREAD_MASK)));
-        assert_eq!(spec.write(&Pick::Toggle("unseen", false)), Some((0, c::UNREAD_MASK)));
-        assert_eq!(shown_of(&spec, c::SHOW_READ, false, "unseen"), Shown::Toggle { on: false, enabled: true });
+        let spec = item_spec(Kind::Manga);
+        assert_eq!(spec.write(&Pick::Toggle("unseen", true)), Some((c::SHOW_UNDONE, c::UNDONE_MASK)));
+        assert_eq!(spec.write(&Pick::Toggle("unseen", false)), Some((0, c::UNDONE_MASK)));
+        assert_eq!(shown_of(&spec, c::SHOW_DONE, false, "unseen"), Shown::Toggle { on: false, enabled: true });
         let seasons = season_spec();
         assert_eq!(seasons.write(&Pick::Toggle("completed", true)), Some((sf::SHOW_COMPLETED, sf::COMPLETED_MASK)));
     }
 
     #[test]
     fn downloaded_only_holds_the_downloaded_check_on_without_touching_the_bits() {
-        for spec in [chapter_spec(), episode_spec(), season_spec()] {
+        for spec in [item_spec(Kind::Manga), item_spec(Kind::Anime), season_spec()] {
             assert_eq!(shown_of(&spec, 0, true, DOWNLOADED), Shown::Toggle { on: true, enabled: false });
             assert_eq!(shown_of(&spec, 0, false, DOWNLOADED), Shown::Toggle { on: false, enabled: true });
         }
@@ -356,18 +324,18 @@ mod tests {
 
     #[test]
     fn reverse_is_the_ascending_bit_and_a_new_key_keeps_the_direction() {
-        let spec = episode_spec();
+        let spec = item_spec(Kind::Anime);
         assert_eq!(shown_of(&spec, 0, false, "reverse"), Shown::Toggle { on: false, enabled: true }, "the default is newest first");
         let reversed = apply(0, spec.write(&Pick::Toggle("reverse", true)).expect("a write"));
-        assert_eq!(reversed & ep::SORT_DIR_MASK, ep::SORT_ASC);
-        let by_number = apply(reversed, spec.write(&Pick::Radio("sort", ep::SORTING_NUMBER.to_string())).expect("a write"));
-        assert_eq!(by_number & ep::SORTING_MASK, ep::SORTING_NUMBER);
-        assert_eq!(by_number & ep::SORT_DIR_MASK, ep::SORT_ASC, "picking a key keeps Reverse order");
+        assert_eq!(reversed & c::SORT_DIR_MASK, c::SORT_ASC);
+        let by_number = apply(reversed, spec.write(&Pick::Radio("sort", c::SORTING_NUMBER.to_string())).expect("a write"));
+        assert_eq!(by_number & c::SORTING_MASK, c::SORTING_NUMBER);
+        assert_eq!(by_number & c::SORT_DIR_MASK, c::SORT_ASC, "picking a key keeps Reverse order");
     }
 
     #[test]
     fn an_unknown_radio_value_writes_nothing_and_an_old_alphabet_sort_shows_no_radio() {
-        let spec = chapter_spec();
+        let spec = item_spec(Kind::Manga);
         assert_eq!(spec.write(&Pick::Radio("sort", "12345".into())), None);
         assert_eq!(spec.write(&Pick::Radio("sort", "x".into())), None);
         assert_eq!(spec.write(&Pick::Toggle("nope", true)), None);
@@ -379,9 +347,9 @@ mod tests {
     #[test]
     fn the_menus_hold_what_the_user_asked_for() {
         let names = |spec: &Spec| -> Vec<&'static str> { spec.shown(0, false).into_iter().map(|(n, _)| n).collect() };
-        assert_eq!(names(&chapter_spec()), vec!["downloaded", "unseen", "bookmarked", "sort", "reverse", "display"]);
-        assert_eq!(names(&episode_spec()), vec!["downloaded", "unseen", "bookmarked", "filler", "sort", "reverse", "display", "summaries"]);
-        for spec in [chapter_spec(), episode_spec(), season_spec()] {
+        assert_eq!(names(&item_spec(Kind::Manga)), vec!["downloaded", "unseen", "bookmarked", "sort", "reverse", "display"]);
+        assert_eq!(names(&item_spec(Kind::Anime)), vec!["downloaded", "unseen", "bookmarked", "filler", "sort", "reverse", "display", "summaries"]);
+        for spec in [item_spec(Kind::Manga), item_spec(Kind::Anime), season_spec()] {
             let sections = spec.sections();
             assert_eq!(sections[0].title.as_deref(), Some("Show only"));
             assert!(sections[0].filter && !sections[1].filter);

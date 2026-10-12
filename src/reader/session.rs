@@ -8,9 +8,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::manga::{Manga, MangaRepo};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::{Item, ItemRepo};
 use kuro_db::Db;
+use kuro_domain::history::recorder::SessionTimer;
+use kuro_platform::kind::Kind;
 use kuro_prefs::reader::{READING_MODE_MASK, ReadingMode};
 
 use super::chapters::{ListError, ListOptions, build_reader_list};
@@ -81,7 +83,7 @@ pub fn list_error_message(error: &ListError) -> String {
 /// What opening the reader needs from the database: the manga, its reader list and the initial index
 /// (T-43a-023). A missing manga gives "Unknown err" (E-INIT-3). `Err` carries the message the card shows.
 pub struct OpenedList {
-    pub manga: Manga,
+    pub manga: Entry,
     pub chapters: Vec<Rc<ReaderChapter>>,
     pub index: usize,
 }
@@ -90,11 +92,11 @@ pub fn open_list(
     db: Arc<Db>,
     manga_id: i64,
     requested: i64,
-    opts: impl FnOnce(&Manga) -> ListOptions,
-    is_downloaded: impl Fn(&Chapter) -> bool,
+    opts: impl FnOnce(&Entry) -> ListOptions,
+    is_downloaded: impl Fn(&Item) -> bool,
 ) -> Result<OpenedList, String> {
-    let manga = MangaRepo::new(Arc::clone(&db)).by_id(manga_id).map_err(|_| strings::UNKNOWN_ERR.to_owned())?;
-    let all = ChapterRepo::new(db).by_manga_id(manga_id, true).map_err(|e| e.to_string())?;
+    let manga = EntryRepo::new(Arc::clone(&db)).by_id(manga_id).map_err(|_| strings::UNKNOWN_ERR.to_owned())?;
+    let all = ItemRepo::new(db).by_entry_id(manga_id, true).map_err(|e| e.to_string())?;
     let list = build_reader_list(&all, requested, &opts(&manga), is_downloaded).map_err(|e| list_error_message(&e))?;
     let ids: Vec<i64> = list.iter().map(|c| c.id).collect();
     let index = initial_index(&ids, requested)?;
@@ -116,8 +118,10 @@ pub struct ReaderSession {
     current_page: u32,
     /// `mark_duplicate_read_chapter_read` contains `existing` (T-43a-031). Off unless the caller turns it on.
     mark_duplicates_read: bool,
-    /// When the current read session started, in ms. Owned by the UI thread (E-HIST-2).
-    history_started: Option<i64>,
+    /// The read session timer (T-43a-033). Owned by the UI thread (E-HIST-2).
+    history: SessionTimer,
+    /// Whether `history` has a start, for [`Self::resume_history`]: the timer does not say.
+    history_running: bool,
     /// The delete-after-read rule, when the app can delete downloads (T-43a-032).
     delete_after_read: Option<DeleteAfterRead>,
     /// Sends the completed chapter's number to the trackers (T-43a-030). Off unless the caller sets it.
@@ -132,7 +136,7 @@ pub type TrackUpdate = Rc<dyn Fn(i64, f64)>;
 /// The download-ahead amount of a session and the lookup that says which chapters are downloaded.
 struct AheadRule {
     amount: i32,
-    is_downloaded: Rc<dyn Fn(&Chapter) -> bool>,
+    is_downloaded: Rc<dyn Fn(&Item) -> bool>,
 }
 
 /// The delete-after-read state of a session: the slot count read when the reader opened, the chapters queued so far
@@ -167,7 +171,8 @@ impl ReaderSession {
             adjacent_busy: false,
             current_page: 1,
             mark_duplicates_read: false,
-            history_started: None,
+            history: SessionTimer::default(),
+            history_running: false,
             delete_after_read: None,
             track_update: None,
             ahead: None,
@@ -181,7 +186,7 @@ impl ReaderSession {
 
     /// Turns on download-ahead (T-43a-034). `amount` is the preference value read when the reader opened; zero or less
     /// leaves it off.
-    pub fn set_download_ahead(&mut self, amount: i32, is_downloaded: Rc<dyn Fn(&Chapter) -> bool>) {
+    pub fn set_download_ahead(&mut self, amount: i32, is_downloaded: Rc<dyn Fn(&Item) -> bool>) {
         self.ahead = (amount > 0).then_some(AheadRule { amount, is_downloaded });
     }
 
@@ -218,27 +223,27 @@ impl ReaderSession {
 
     /// Starts the read timer for the current chapter (T-43a-033). Incognito never writes history.
     pub fn start_history(&mut self, now: i64) {
-        self.history_started = Some(now);
+        self.history.start(now);
+        self.history_running = true;
     }
 
     /// Starts the timer again when the reader is shown after a pause, unless one is already running (E-HIST-1).
     pub fn resume_history(&mut self, now: i64) {
-        if self.history_started.is_none() {
-            self.history_started = Some(now);
+        if !self.history_running {
+            self.start_history(now);
         }
     }
 
     /// Writes the read time since the timer started for the current chapter and stops the timer (E-HIST-1). A flush
-    /// with no running timer writes nothing new. Incognito writes nothing and keeps the timer.
+    /// with no running timer writes nothing new. Incognito writes nothing, and the timer stops there too
+    /// (`SessionTimer::flush`: the session is clamped to 12 h and the start is cleared on every path).
     pub fn flush_history(&mut self, now: i64) {
-        if self.incognito {
-            return;
+        let item_id = self.current_chapter().map(|c| c.chapter.id);
+        let update = self.history.flush(now, Kind::Manga, item_id.unwrap_or(-1), self.incognito);
+        self.history_running = false;
+        if let (Some(_), Some(update)) = (item_id, update) {
+            self.store.upsert_history(update.item_id, update.at, update.session_ms);
         }
-        if let Some(chapter) = self.current_chapter() {
-            let duration = history_rules::history_duration(self.history_started, now);
-            self.store.upsert_history(chapter.chapter.id, now, duration);
-        }
-        self.history_started = None;
     }
 
     pub fn chapters(&self) -> &[Rc<ReaderChapter>] {
@@ -332,7 +337,7 @@ impl ReaderSession {
                 // the hook order is: track update, delete-after-read, then duplicate marking (T-43a-030, T-43a-031,
                 // T-43a-032). The chapter number goes as a double; the tracker skips one it is already at or past.
                 if newly_read && let Some(update) = &self.track_update {
-                    update(self.manga_id, chapter.chapter.chapter_number);
+                    update(self.manga_id, chapter.chapter.number);
                 }
                 self.queue_delete_after(chapter_index);
                 if newly_read && self.mark_duplicates_read {
@@ -518,7 +523,7 @@ mod tests {
     use super::*;
     use crate::reader::chapters::ListError;
     use crate::reader::model::{ChapterState, PageSource};
-    use kuro_data::chapter::Chapter;
+    use kuro_data::item::Item;
     use std::cell::RefCell;
     use std::sync::mpsc;
 
@@ -566,10 +571,10 @@ mod tests {
     }
 
     fn chapter(id: i64, read: bool) -> Rc<ReaderChapter> {
-        let mut c = Chapter::create();
+        let mut c = Item::create(Kind::Manga);
         c.id = id;
         c.url = format!("/c/{id}");
-        c.read = read;
+        c.done = read;
         let ch = ReaderChapter::new(c);
         let pages = (0..3)
             .map(|i| ReaderPage::new(i, format!("p{i}"), None, PageSource::Http))
@@ -638,22 +643,35 @@ mod tests {
     }
 
     #[test]
-    fn incognito_writes_no_history_and_keeps_the_timer() {
+    fn incognito_writes_no_history_and_stops_the_timer() {
         let rec = Rc::new(Recorder::default());
         let (mut s, _rx) = session(Rc::clone(&rec), vec![chapter(4, false)], 0, true);
         s.start_history(1_000);
         s.flush_history(4_000);
         assert!(rec.history.borrow().is_empty());
+        s.resume_history(10_000);
+        s.flush_history(15_000);
+        assert!(rec.history.borrow().is_empty(), "the second session is incognito too, and starts at its own resume");
+    }
+
+    #[test]
+    fn a_session_never_counts_more_than_twelve_hours() {
+        use kuro_domain::history::recorder::MAX_SESSION_MS;
+        let rec = Rc::new(Recorder::default());
+        let (mut s, _rx) = session(Rc::clone(&rec), vec![chapter(4, false)], 0, false);
+        s.start_history(0);
+        s.flush_history(MAX_SESSION_MS * 3);
+        assert_eq!(rec.history.borrow().as_slice(), [(4, MAX_SESSION_MS * 3, MAX_SESSION_MS)]);
     }
 
     #[test]
     fn completing_a_chapter_marks_its_unread_duplicates_read_when_the_rule_is_on() {
         let rec = Rc::new(Recorder::default());
         let numbered = |id: i64, number: f64| {
-            let mut c = Chapter::create();
+            let mut c = Item::create(Kind::Manga);
             c.id = id;
             c.url = format!("/c/{id}");
-            c.chapter_number = number;
+            c.number = number;
             let ch = ReaderChapter::new(c);
             let pages = (0..3).map(|i| ReaderPage::new(i, format!("p{i}"), None, PageSource::Http)).collect::<Vec<_>>();
             ch.finish_loading(pages).unwrap();
@@ -797,7 +815,7 @@ mod tests {
     fn the_previous_chapters_writes_are_flushed_before_the_new_chapter_is_built() {
         let rec = Rc::new(Recorder::default());
         let a = chapter(1, false);
-        let b = ReaderChapter::new(Chapter::create());
+        let b = ReaderChapter::new(Item::create(Kind::Manga));
         let (mut s, _rx) = session(Rc::clone(&rec), vec![Rc::clone(&a), b], 0, false);
         let order = Rc::clone(&rec);
         let _ = s.switch_chapter(1, |_| {
@@ -811,7 +829,7 @@ mod tests {
     fn a_failed_adjacent_load_keeps_the_current_chapter() {
         let rec = Rc::new(Recorder::default());
         let a = chapter(1, false);
-        let b = ReaderChapter::new(Chapter::create());
+        let b = ReaderChapter::new(Item::create(Kind::Manga));
         let (mut s, _rx) = session(rec, vec![Rc::clone(&a), b], 0, false);
         let outcome = s.load_adjacent(Step::Next, |_| Err(LoadError::new("Source not found")));
         assert_eq!(outcome, AdjacentOutcome::Failed("Source not found".into()));
@@ -822,7 +840,7 @@ mod tests {
     fn preload_of_a_loaded_or_loading_chapter_does_nothing_and_a_failed_preload_is_silent() {
         let rec = Rc::new(Recorder::default());
         let a = chapter(1, false);
-        let b = ReaderChapter::new(Chapter::create());
+        let b = ReaderChapter::new(Item::create(Kind::Manga));
         let (mut s, rx) = session(rec, vec![Rc::clone(&a), Rc::clone(&b)], 0, false);
         s.preload(0, false, never_built);
         assert!(rx.try_recv().is_err());
@@ -878,10 +896,10 @@ mod tests {
     }
 
     fn chapter_numbered(id: i64, number: f64) -> Rc<ReaderChapter> {
-        let mut c = Chapter::create();
+        let mut c = Item::create(Kind::Manga);
         c.id = id;
         c.url = format!("/c/{id}");
-        c.chapter_number = number;
+        c.number = number;
         let ch = ReaderChapter::new(c);
         let pages = (0..3).map(|i| ReaderPage::new(i, format!("p{i}"), None, PageSource::Http)).collect::<Vec<_>>();
         ch.finish_loading(pages).unwrap();
@@ -934,7 +952,7 @@ mod tests {
     fn a_preload_request_for_a_chapter_in_the_list_reaches_the_preload() {
         let rec = Rc::new(Recorder::default());
         let a = chapter(1, false);
-        let b = ReaderChapter::new(Chapter::create());
+        let b = ReaderChapter::new(Item::create(Kind::Manga));
         let (mut s, rx) = session(rec, vec![Rc::clone(&a), Rc::clone(&b)], 0, false);
         s.on_request_preload(&b, false, |_| Err(LoadError::new("offline")));
         assert!(matches!(*b.state(), ChapterState::Error(_)));

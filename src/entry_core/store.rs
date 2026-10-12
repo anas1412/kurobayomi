@@ -1,6 +1,6 @@
 //! The database side of the details page: the page read, the masked flag writes, the read and bookmark writes,
 //! the category writes and the live subscriptions. Every method is synchronous; `runner.rs` calls them on the
-//! tokio blocking pool. Nothing here imports GTK.
+//! tokio blocking pool. Nothing here imports GTK. The writes both pages make the same way are `entry_ops`.
 //! Upstream: `MangaScreenModel.kt:173-256` (load), `SetMangaChapterFlags.kt`, `UpdateChapter`, `UpdateManga`.
 
 use std::collections::{BTreeSet, HashMap};
@@ -8,43 +8,27 @@ use std::sync::Arc;
 
 use kuro_data::DataResult;
 use kuro_data::category::CategoryRepo;
-use kuro_data::chapter::{Chapter, ChapterRepo, ChapterUpdate};
-use kuro_data::manga::{Manga, MangaRepo};
-use kuro_db::flags::chapter as c;
-use kuro_domain::entries::fetch_interval::{get_window, set_manga_fetch_interval};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::{Item, ItemRepo, ItemUpdate};
+use kuro_data::track::TrackRepo;
 use kuro_db::handle::Db;
-use kuro_db::models::MangaPatch;
-use kuro_db::statements_manga as sm;
 use kuro_db::subscribe::Subscription;
 use kuro_downloads::DownloadState;
+use kuro_platform::kind::Kind;
+use kuro_prefs::store::PrefStore;
 
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::detail::MangaRow;
+use crate::entry_core::entry_ops;
 use crate::entry_core::flags::ChapterFlags;
-use crate::entry_core::readstate::{ReadPlan, plan_mark_read};
+use crate::entry_core::readstate::{ReadPlan, plan_bookmark, plan_done};
 use crate::entry_core::tracking::facts::Summary;
-use crate::entry_core::tracking::session;
-use kuro_platform::kind::Kind;
 
 /// `LocalSource.ID`: rows of the local source are always downloaded.
 const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
 
-/// The flags column holds the unified layout, so the manga flag and mask are translated in SQL:
-/// `tr(x) = (x & ~768) | ((x & 768) << 1)` moves the sorting bits up one place.
-const MASKED_WRITE: &str = "UPDATE entries SET item_flags = (item_flags & ~((?2 & ~768) | ((?2 & 768) << 1))) \
-     | (((?1 & ~768) | ((?1 & 768) << 1)) & ((?2 & ~768) | ((?2 & 768) << 1))), version = version + 1 \
-     WHERE _id = ?3 AND kind = 'manga'";
-
-/// Every chapter-flag bit the library defaults write (`SetMangaDefaultChapterFlags`).
-pub const ALL_CHAPTER_FLAG_BITS: i64 = c::SORT_DIR_MASK
-    | c::UNREAD_MASK
-    | c::DOWNLOADED_MASK
-    | c::BOOKMARKED_MASK
-    | c::SORTING_MASK
-    | c::DISPLAY_MASK;
-
 /// The manga row fields the page reads.
-pub fn manga_row(m: &Manga) -> MangaRow {
+pub fn manga_row(m: &Entry) -> MangaRow {
     MangaRow {
         id: m.id,
         source: m.source,
@@ -62,23 +46,23 @@ pub fn manga_row(m: &Manga) -> MangaRow {
         next_update: m.next_update,
         fetch_interval: m.fetch_interval,
         local: m.source == LOCAL_SOURCE_ID,
-        flags: ChapterFlags(m.chapter_flags),
+        flags: ChapterFlags(m.item_flags),
     }
 }
 
 /// The chapter rows, each with the download state of its chapter (rows with no entry are not downloaded).
-pub fn chapter_rows(chapters: &[Chapter], downloads: &HashMap<i64, DownloadState>) -> Vec<ChapterRow> {
+pub fn chapter_rows(chapters: &[Item], downloads: &HashMap<i64, DownloadState>) -> Vec<ChapterRow> {
     chapters
         .iter()
         .map(|ch| ChapterRow {
             id: ch.id,
             name: ch.name.clone(),
-            number: ch.chapter_number,
+            number: ch.number,
             source_order: ch.source_order,
             date_upload: ch.date_upload,
-            read: ch.read,
+            read: ch.done,
             bookmark: ch.bookmark,
-            last_page_read: ch.last_page_read,
+            last_page_read: ch.progress,
             scanlator: ch.scanlator.clone(),
             download: downloads.get(&ch.id).copied().unwrap_or(DownloadState::NotDownloaded),
             download_progress: 0,
@@ -96,34 +80,34 @@ pub struct Scanlators {
 /// Typed access to the tables of one manga page. Cheap to clone: it shares one `Db`.
 #[derive(Clone)]
 pub struct DbStore {
-    mangas: MangaRepo,
-    chapters: ChapterRepo,
+    entries: EntryRepo,
+    items: ItemRepo,
     categories: CategoryRepo,
+    tracks: TrackRepo,
+    #[cfg(test)]
     db: Arc<Db>,
 }
 
 impl DbStore {
     pub fn new(db: Arc<Db>) -> Self {
         Self {
-            mangas: MangaRepo::new(Arc::clone(&db)),
-            chapters: ChapterRepo::new(Arc::clone(&db)),
+            entries: EntryRepo::new(Arc::clone(&db)),
+            items: ItemRepo::new(Arc::clone(&db)),
             categories: CategoryRepo::new(Arc::clone(&db), Kind::Manga),
+            tracks: TrackRepo::new(Arc::clone(&db)),
+            #[cfg(test)]
             db,
         }
     }
 
     /// The row, or `None` when it does not exist.
     pub fn manga(&self, id: i64) -> DataResult<Option<MangaRow>> {
-        match self.mangas.by_id(id) {
-            Ok(m) => Ok(Some(manga_row(&m))),
-            Err(kuro_data::DataError::NotFound) => Ok(None),
-            Err(e) => Err(e),
-        }
+        Ok(entry_ops::entry_or_none(&self.entries, id)?.map(|m| manga_row(&m)))
     }
 
     /// The chapter list with the scanlator exclusions applied.
     pub fn chapter_list(&self, manga_id: i64, downloads: &HashMap<i64, DownloadState>) -> DataResult<Vec<ChapterRow>> {
-        Ok(chapter_rows(&self.chapters.by_manga_id(manga_id, true)?, downloads))
+        Ok(chapter_rows(&self.items.by_entry_id(manga_id, true)?, downloads))
     }
 
     /// The manga row, then its chapters. A missing row reads as `(None, [])`.
@@ -141,47 +125,42 @@ impl DbStore {
     #[cfg(test)]
     /// How many trackers the manga is bound to, for the tracking button of the action row.
     pub fn track_count(&self, manga_id: i64) -> DataResult<usize> {
-        Ok(kuro_data::track::MangaTrackRepo::new(Arc::clone(&self.db)).by_entry(manga_id)?.len())
+        Ok(self.tracks.by_entry(manga_id)?.len())
     }
 
     /// The tracking count and the logged-in flag of the manga, through the same filter as the sheet (T-TRK-12, D-10).
     pub fn track_summary(&self, manga_id: i64, source_id: i64) -> DataResult<Summary> {
-        let bound: Vec<i64> = kuro_data::track::MangaTrackRepo::new(Arc::clone(&self.db)).by_entry(manga_id)?.iter().map(|t| t.tracker_id).collect();
-        Ok(session::summary(Kind::Manga, source_id, &bound))
+        entry_ops::track_summary(&self.tracks, Kind::Manga, manga_id, source_id)
     }
 
     pub fn scanlators(&self, manga_id: i64) -> DataResult<Scanlators> {
         Ok(Scanlators {
-            available: self.mangas.available_scanlators(manga_id)?.into_iter().collect(),
-            excluded: self.mangas.excluded_scanlators(manga_id)?,
+            available: self.entries.available_scanlators(manga_id)?.into_iter().collect(),
+            excluded: self.entries.excluded_scanlators(manga_id)?,
         })
     }
 
     /// Every category (the default row `0` included, the dialog drops it) and the ids the manga is linked to.
     pub fn categories(&self, manga_id: i64) -> DataResult<(Vec<(i64, String)>, Vec<i64>)> {
-        let all = self.categories.all()?.into_iter().map(|cat| (cat.id, cat.name)).collect();
-        let membership = self.categories.by_entry(manga_id)?.into_iter().map(|cat| cat.id).collect();
-        Ok((all, membership))
+        entry_ops::categories(&self.categories, manga_id)
     }
 
-    /// Library defaults for a manga that is not in the library (`SetMangaDefaultChapterFlags`): one masked write.
-    pub fn write_defaults(&self, manga_id: i64, defaults: ChapterFlags) -> DataResult<bool> {
-        self.set_flag_bits(manga_id, defaults.0, ALL_CHAPTER_FLAG_BITS)
+    /// The Reset item of the settings sheet: the library's default item word replaces the manga's own (what
+    /// `apply_item_defaults` writes). Opening the page never writes it: `SessionFlags` shows the defaults of a manga that
+    /// is not in the library. `Ok(false)` when the row is gone.
+    pub fn reset_flags(&self, manga_id: i64, defaults: ChapterFlags) -> DataResult<bool> {
+        self.entries.update_item_flags(manga_id, |_| defaults.0)
     }
 
     /// `setFetchInterval`: stores `-wheel` (0 is automatic) and recomputes the next update through the domain (T-38b-022).
     pub fn set_fetch_interval(&self, manga_id: i64, wheel: i32) -> DataResult<()> {
-        let manga = self.mangas.by_id(manga_id)?;
-        let now = chrono::Local::now();
-        let window = get_window(&now);
-        set_manga_fetch_interval(&self.mangas, &self.chapters, &manga, wheel, &now, window, now.timestamp_millis())
+        entry_ops::set_fetch_interval(&self.entries, &self.items, manga_id, wheel)
     }
 
-    /// One masked UPDATE of `entries.item_flags` (the unified layout, see `MASKED_WRITE`): `(old & !mask) | (flag & mask)`. The schema trigger bumps
-    /// `mangas.version` only for url, description and favorite changes, so the statement bumps it itself: every flag
-    /// write is a versioned write (E-DB-1). `Ok(false)` when the row is gone.
+    /// One masked UPDATE of `entries.item_flags`: `(old & !mask) | (flag & mask)`. A flag write is a versioned write for
+    /// both kinds (E-DB-1, decision 11a). `Ok(false)` when the row is gone.
     pub fn set_flag_bits(&self, manga_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
-        self.db.write(|tx| Ok(tx.execute(MASKED_WRITE, (flag, mask, manga_id))? > 0))
+        self.entries.set_item_flags_masked(manga_id, flag, mask)
     }
 
     /// Marks the given chapters read or unread in one transaction. Returns the plan that ran, or `None` when no row
@@ -193,106 +172,80 @@ impl DbStore {
         read: bool,
         remove_after_read: bool,
     ) -> DataResult<Option<ReadPlan>> {
-        let rows = self.chosen_rows(manga_id, chapter_ids)?;
-        let Some(plan) = plan_mark_read(read, &rows, remove_after_read) else {
+        let rows = self.chosen_items(manga_id, chapter_ids)?;
+        let Some(plan) = plan_done(read, &rows, remove_after_read) else {
             return Ok(None);
         };
-        let updates: Vec<ChapterUpdate> = plan
-            .writes
-            .iter()
-            .map(|w| ChapterUpdate {
-                read: Some(w.read),
-                last_page_read: w.last_page_read,
-                ..ChapterUpdate::new(w.id)
-            })
-            .collect();
-        self.chapters.update_all(&updates)?;
+        entry_ops::mark_done(&self.items, &rows, read)?;
         Ok(Some(plan))
     }
 
     /// Sets the bookmark of the given chapters in one transaction. Returns how many rows changed.
     pub fn set_bookmark(&self, manga_id: i64, chapter_ids: &[i64], bookmark: bool) -> DataResult<usize> {
-        let rows = self.chosen_rows(manga_id, chapter_ids)?;
-        let updates: Vec<ChapterUpdate> = crate::entry_core::readstate::plan_bookmark(bookmark, &rows)
+        let rows = self.chosen_items(manga_id, chapter_ids)?;
+        let updates: Vec<ItemUpdate> = plan_bookmark(bookmark, &rows)
             .into_iter()
-            .map(|(id, on)| ChapterUpdate {
-                bookmark: Some(on),
-                ..ChapterUpdate::new(id)
-            })
+            .map(|(id, on)| ItemUpdate { bookmark: Some(on), ..ItemUpdate::new(id) })
             .collect();
         if !updates.is_empty() {
-            self.chapters.update_all(&updates)?;
+            self.items.update_all(&updates)?;
         }
         Ok(updates.len())
     }
 
-    /// Adds the manga to the library and links its categories in one transaction (`CategoryConfirm::AddToLibrary`).
-    pub fn add_to_library(&self, manga_id: i64, category_ids: &[i64], now_ms: i64) -> DataResult<()> {
-        let patch = MangaPatch {
-            id: manga_id,
-            favorite: Some(true),
-            date_added: Some(now_ms),
-            ..MangaPatch::default()
-        };
-        self.db.write(|tx| {
-            sm::mangas::update(tx, &patch)?;
-            sm::mangas_categories::set_categories(tx, manga_id, category_ids)?;
-            Ok(())
-        })
+    /// Adds the manga to the library and links its categories (`CategoryConfirm::AddToLibrary`), then writes the library
+    /// defaults to its chapter flags (`entry_ops::add_to_library`).
+    pub fn add_to_library(&self, manga_id: i64, category_ids: &[i64], prefs: &PrefStore, now_ms: i64) -> DataResult<()> {
+        entry_ops::add_to_library(&self.entries, prefs, manga_id, category_ids, now_ms).map(drop)
     }
 
     /// Removes the manga from the library: `favorite = false` and `date_added = 0` in one write (E-FAV-7). The cover is
     /// deleted by the caller after this succeeds. `Ok(false)` when the row is gone.
     pub fn remove_from_library(&self, manga_id: i64) -> DataResult<bool> {
-        let patch = MangaPatch {
-            id: manga_id,
-            favorite: Some(false),
-            date_added: Some(0),
-            ..MangaPatch::default()
-        };
-        self.db.write(|tx| Ok(sm::mangas::update(tx, &patch)? > 0))
+        entry_ops::set_favorite(&self.entries, manga_id, false, 0)
     }
 
-    /// `(id, title)` of every favorite, for the duplicate check.
-    pub fn favorite_titles(&self) -> DataResult<Vec<(i64, String)>> {
-        Ok(self.mangas.favorites()?.into_iter().map(|m| (m.id, m.title)).collect())
+    /// The library entries other than this one with the same title (the duplicate check of an add).
+    pub fn duplicates(&self, manga_id: i64) -> DataResult<Vec<Entry>> {
+        entry_ops::duplicates(&self.entries, manga_id)
     }
 
     /// The user categories (the default row `0` is left out), for the default-category routing.
     pub fn user_categories(&self) -> DataResult<Vec<kuro_data::category::Category>> {
-        Ok(self.categories.all()?.into_iter().filter(|c| c.id != 0).collect())
+        entry_ops::user_categories(&self.categories)
     }
 
     /// Replaces the category links in one transaction (`CategoryConfirm::SetCategories`).
     pub fn set_categories(&self, manga_id: i64, category_ids: &[i64]) -> DataResult<()> {
-        self.mangas.set_categories(manga_id, category_ids)
+        self.entries.set_categories(manga_id, category_ids)
     }
 
     /// `SetExcludedScanlators`: the excluded set becomes exactly `wanted`, in one transaction.
     pub fn set_excluded_scanlators(&self, manga_id: i64, wanted: &BTreeSet<String>) -> DataResult<()> {
-        self.mangas.set_excluded_scanlators(manga_id, wanted)
+        self.entries.set_excluded_scanlators(manga_id, wanted)
     }
 
     /// The distinct scanlators of the chapters, published again after each change of the chapters.
     pub fn watch_available(&self, manga_id: i64) -> Subscription<BTreeSet<String>> {
-        self.mangas.subscribe_available_scanlators(manga_id)
+        self.entries.subscribe_available_scanlators(manga_id)
     }
 
     /// The excluded set, published again after each change of the exclusions.
     pub fn watch_excluded(&self, manga_id: i64) -> Subscription<BTreeSet<String>> {
-        self.mangas.subscribe_excluded_scanlators(manga_id)
+        self.entries.subscribe_excluded_scanlators(manga_id)
     }
 
-    pub fn watch_manga(&self, manga_id: i64) -> Subscription<Option<Manga>> {
-        self.mangas.subscribe_by_id(manga_id)
+    pub fn watch_manga(&self, manga_id: i64) -> Subscription<Option<Entry>> {
+        self.entries.subscribe_by_id(manga_id)
     }
 
-    pub fn watch_chapters(&self, manga_id: i64) -> Subscription<Vec<Chapter>> {
-        self.chapters.subscribe_by_manga_id(manga_id, true)
+    pub fn watch_chapters(&self, manga_id: i64) -> Subscription<Vec<Item>> {
+        self.items.subscribe_by_entry_id(manga_id, true)
     }
 
-    fn chosen_rows(&self, manga_id: i64, chapter_ids: &[i64]) -> DataResult<Vec<ChapterRow>> {
-        let rows = self.chapter_list(manga_id, &HashMap::new())?;
+    /// The scanlator-filtered chapters that the ids name.
+    fn chosen_items(&self, manga_id: i64, chapter_ids: &[i64]) -> DataResult<Vec<Item>> {
+        let rows = self.items.by_entry_id(manga_id, true)?;
         Ok(rows.into_iter().filter(|r| chapter_ids.contains(&r.id)).collect())
     }
 }
@@ -308,45 +261,45 @@ pub(crate) mod fixture {
         let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
         let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
         let store = DbStore::new(Arc::clone(&db));
-        let manga_id = MangaRepo::new(Arc::clone(&db))
-            .insert(&Manga {
+        let manga_id = EntryRepo::new(Arc::clone(&db))
+            .insert(&Entry {
                 source: 7,
                 url: "/m".into(),
                 title: "Title".into(),
                 favorite,
-                ..Manga::create()
+                ..Entry::create(Kind::Manga)
             })
             .expect("insert manga");
-        let list: Vec<Chapter> = (1..=chapters)
-            .map(|n| Chapter {
-                manga_id,
+        let list: Vec<Item> = (1..=chapters)
+            .map(|n| Item {
+                entry_id: manga_id,
                 url: format!("/c{n}"),
                 name: format!("Chapter {n}"),
-                chapter_number: n as f64,
+                number: n as f64,
                 source_order: n as i64,
-                ..Chapter::create()
+                ..Item::create(Kind::Manga)
             })
             .collect();
-        ChapterRepo::new(db).add_all(&list).expect("insert chapters");
+        ItemRepo::new(db).add_all(&list).expect("insert chapters");
         (dir, store, manga_id)
     }
 
     impl DbStore {
         /// Marks the details as fetched, so a load starts no fetch for it.
         pub fn mark_initialized_for_test(&self, manga_id: i64) {
-            let update = kuro_data::manga::MangaUpdate {
+            let update = kuro_data::entry::EntryUpdate {
                 initialized: Some(true),
-                ..kuro_data::manga::MangaUpdate::new(manga_id)
+                ..kuro_data::entry::EntryUpdate::new(manga_id)
             };
-            self.mangas.update(&update).expect("update");
+            self.entries.update(&update).expect("update");
         }
     }
 
     impl DbStore {
         /// Another manga in the same database, with the given title and favorite flag.
         pub fn insert_manga_for_test(&self, title: &str, favorite: bool) -> i64 {
-            self.mangas
-                .insert(&Manga { source: 8, url: format!("/{title}"), title: title.into(), favorite, ..Manga::create() })
+            self.entries
+                .insert(&Entry { source: 8, url: format!("/{title}"), title: title.into(), favorite, ..Entry::create(Kind::Manga) })
                 .expect("insert manga")
         }
 
@@ -359,12 +312,14 @@ pub(crate) mod fixture {
     }
 
     pub fn version(store: &DbStore, manga_id: i64) -> i64 {
-        store.mangas.by_id(manga_id).expect("row").version
+        store.entries.by_id(manga_id).expect("row").version
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use kuro_db::flags::item as c;
+
     use super::fixture::{store, version};
     use super::*;
 
@@ -380,11 +335,11 @@ mod tests {
     /// The store with chapters 1, 2 and 3 by scanlators `A`, `B` and none.
     fn store_with_scanlators() -> (tempfile::TempDir, DbStore, i64) {
         let (dir, store, id) = store(true, 3);
-        let rows = store.chapters.by_manga_id(id, false).unwrap();
+        let rows = store.items.by_entry_id(id, false).unwrap();
         let by = ["A", "B"];
         for (i, chapter) in rows.iter().enumerate() {
             let scanlator = by.get(i).map(|s| (*s).to_owned());
-            store.chapters.update_all(&[ChapterUpdate { scanlator, ..ChapterUpdate::new(chapter.id) }]).unwrap();
+            store.items.update_all(&[ItemUpdate { scanlator, ..ItemUpdate::new(chapter.id) }]).unwrap();
         }
         (dir, store, id)
     }
@@ -414,12 +369,13 @@ mod tests {
     #[test]
     fn set_flag_bits_is_one_masked_update_that_bumps_the_version() {
         let (_dir, store, id) = store(true, 0);
-        store.set_flag_bits(id, 0x1234, i64::MAX).unwrap();
+        // a word of the six manga groups: the shared write cuts a manga's mask to them
+        store.set_flag_bits(id, 0x234, i64::MAX).unwrap();
         let before = version(&store, id);
-        assert!(store.set_flag_bits(id, 0x2, c::UNREAD_MASK).unwrap());
+        assert!(store.set_flag_bits(id, 0x2, c::UNDONE_MASK).unwrap());
         let row = store.manga(id).unwrap().unwrap();
-        assert_eq!(row.flags.0, (0x1234 & !c::UNREAD_MASK) | 0x2);
-        assert_eq!(version(&store, id), before + 1, "every write bumps mangas.version");
+        assert_eq!(row.flags.0, (0x234 & !c::UNDONE_MASK) | 0x2);
+        assert_eq!(version(&store, id), before + 1, "every write bumps entries.version");
         assert!(!store.set_flag_bits(999, 1, 1).unwrap(), "a missing row changes nothing");
     }
 
@@ -437,7 +393,7 @@ mod tests {
         let (_dir, store, id) = store(true, 0);
         store.set_flag_bits(id, 0, i64::MAX).unwrap();
         std::thread::scope(|scope| {
-            for (flag, mask) in [(c::SHOW_UNREAD, c::UNREAD_MASK), (c::SHOW_BOOKMARKED, c::BOOKMARKED_MASK)] {
+            for (flag, mask) in [(c::SHOW_UNDONE, c::UNDONE_MASK), (c::SHOW_BOOKMARKED, c::BOOKMARKED_MASK)] {
                 let store = store.clone();
                 scope.spawn(move || {
                     for _ in 0..20 {
@@ -448,7 +404,7 @@ mod tests {
         });
         assert_eq!(
             store.manga(id).unwrap().unwrap().flags.0,
-            c::SHOW_UNREAD | c::SHOW_BOOKMARKED,
+            c::SHOW_UNDONE | c::SHOW_BOOKMARKED,
             "neither write lost the other's bits"
         );
     }
@@ -458,7 +414,7 @@ mod tests {
         let (_dir, store, id) = store(true, 3);
         let ids: Vec<i64> = store.chapter_list(id, &HashMap::new()).unwrap().iter().map(|r| r.id).collect();
         let plan = store.mark_read(id, &ids[..2], true, true).unwrap().expect("two rows change");
-        assert_eq!(plan.writes.len(), 2);
+        assert_eq!(plan.changed.len(), 2);
         assert_eq!(plan.delete_downloads.len(), 2);
         assert!(store.mark_read(id, &ids[..2], true, false).unwrap().is_none(), "nothing left to mark");
         let rows = store.chapter_list(id, &HashMap::new()).unwrap();
@@ -477,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn add_to_library_sets_favorite_and_categories_together_and_rolls_back_together() {
+    fn add_to_library_sets_favorite_and_categories_together_and_a_failed_link_leaves_it_out() {
         let (_dir, store, id) = store(false, 0);
         let cat = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), Kind::Manga)
             .insert(&kuro_data::category::Category {
@@ -488,23 +444,34 @@ mod tests {
                 hidden: false,
             })
             .unwrap();
-        store.add_to_library(id, &[cat], 1_000).unwrap();
+        let prefs = PrefStore::in_memory();
+        store.add_to_library(id, &[cat], &prefs, 1_000).unwrap();
         assert!(store.manga(id).unwrap().unwrap().favorite);
         assert_eq!(store.categories(id).unwrap().1, vec![cat]);
 
         let (_dir2, store2, id2) = store_fresh();
-        assert!(store2.add_to_library(id2, &[4242], 1_000).is_err(), "unknown category");
-        assert!(!store2.manga(id2).unwrap().unwrap().favorite, "the favorite write rolled back too");
+        assert!(store2.add_to_library(id2, &[4242], &prefs, 1_000).is_err(), "unknown category");
+        assert!(!store2.manga(id2).unwrap().unwrap().favorite, "the favorite was not written either");
+    }
+
+    #[test]
+    fn adding_writes_the_library_defaults_and_opening_does_not() {
+        let (_dir, store, id) = store(false, 0);
+        let prefs = PrefStore::in_memory();
+        kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Manga, c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNDONE);
+        assert_eq!(store.manga(id).unwrap().unwrap().flags.0, 0, "the stored word is untouched until the add");
+        store.add_to_library(id, &[], &prefs, 1_000).unwrap();
+        assert_eq!(store.manga(id).unwrap().unwrap().flags.0, c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNDONE);
     }
 
     #[test]
     fn remove_from_library_clears_favorite_and_date_added_in_one_write() {
         let (_dir, store, id) = store(false, 0);
-        store.add_to_library(id, &[], 5_000).unwrap();
-        assert_eq!(store.mangas.by_id(id).unwrap().date_added, 5_000);
+        store.add_to_library(id, &[], &PrefStore::in_memory(), 5_000).unwrap();
+        assert_eq!(store.entries.by_id(id).unwrap().date_added, 5_000);
         let before = version(&store, id);
         assert!(store.remove_from_library(id).unwrap());
-        let row = store.mangas.by_id(id).unwrap();
+        let row = store.entries.by_id(id).unwrap();
         assert!(!row.favorite);
         assert_eq!(row.date_added, 0, "E-FAV-7");
         assert!(version(&store, id) > before);
@@ -512,14 +479,15 @@ mod tests {
     }
 
     #[test]
-    fn favorite_titles_and_user_categories_feed_the_add_routing() {
-        let (_dir, store, id) = store(true, 0);
-        let other = store.insert_manga_for_test("Other", false);
-        assert_eq!(store.favorite_titles().unwrap(), vec![(id, "Title".to_owned())], "only favorites are checked for duplicates");
+    fn duplicates_and_user_categories_feed_the_add_routing() {
+        let (_dir, store, id) = store(false, 0);
+        let other = store.insert_manga_for_test("TITLE", true);
+        store.insert_manga_for_test("Another", false);
+        assert_eq!(store.duplicates(id).unwrap().iter().map(|m| m.id).collect::<Vec<_>>(), vec![other], "only favorites are duplicates");
+        assert!(store.duplicates(other).unwrap().is_empty(), "the entry is never its own duplicate");
         let cat = store.insert_category_for_test("Reading");
         let users = store.user_categories().unwrap();
         assert_eq!(users.iter().map(|c| c.id).collect::<Vec<_>>(), vec![cat], "the default row 0 is left out");
-        let _ = other;
     }
 
     fn store_fresh() -> (tempfile::TempDir, DbStore, i64) {
@@ -547,9 +515,11 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_written_for_a_non_favorite() {
-        let (_dir, store, id) = store(false, 0);
-        store.write_defaults(id, ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC)).unwrap();
+    fn reset_writes_the_defaults_over_the_manga_word() {
+        let (_dir, store, id) = store(true, 0);
+        store.set_flag_bits(id, c::SHOW_BOOKMARKED, c::BOOKMARKED_MASK).unwrap();
+        assert!(store.reset_flags(id, ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC)).unwrap());
         assert_eq!(store.manga(id).unwrap().unwrap().flags.0, c::SORTING_NUMBER | c::SORT_ASC);
+        assert!(!store.reset_flags(999, ChapterFlags(0)).unwrap());
     }
 }

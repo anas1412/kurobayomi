@@ -4,10 +4,10 @@
 
 use std::collections::HashMap;
 
-use kuro_data::anime::{Anime, SeasonAnime};
+use kuro_data::entry::{Entry, SeasonEntry};
 use kuro_domain::app::items::downloaded_filter;
-use kuro_domain::entries::anime::{AnimeExt, season_flags};
-use kuro_domain::entries::manga::STATUS_COMPLETED;
+use kuro_domain::entries::anime::season_flags;
+use kuro_domain::entries::flags::{EntryFlags, STATUS_COMPLETED};
 use kuro_domain::items::sorter::sort_seasons;
 use kuro_prefs::tristate::TriState;
 
@@ -24,71 +24,74 @@ pub struct SeasonFilters {
 }
 
 impl SeasonFilters {
-    pub fn of(anime: &Anime, downloaded_only: bool) -> Self {
+    pub fn of(anime: &Entry, downloaded_only: bool) -> Self {
+        let season = anime.season();
         Self {
-            unseen: anime.season_unseen_filter(),
+            unseen: season.unseen_filter(),
             downloaded: downloaded_filter(
-                anime.season_downloaded_filter_raw(),
+                season.downloaded_filter_raw(),
                 season_flags::SHOW_DOWNLOADED,
                 season_flags::SHOW_NOT_DOWNLOADED,
                 downloaded_only,
             ),
-            started: anime.season_started_filter(),
-            completed: anime.season_completed_filter(),
-            bookmarked: anime.season_bookmarked_filter(),
-            fillermarked: anime.season_fillermarked_filter(),
+            started: season.started_filter(),
+            completed: season.completed_filter(),
+            bookmarked: season.bookmarked_filter(),
+            fillermarked: season.fillermarked_filter(),
         }
     }
 
     /// Whether a season passes every filter.
-    pub fn keeps(&self, season: &SeasonAnime, facts: &SeasonFacts) -> bool {
-        self.unseen.apply_filter(|| !season.seen())
-            && self.started.apply_filter(|| season.has_started())
-            && self.completed.apply_filter(|| season.anime.status == STATUS_COMPLETED)
-            && self.bookmarked.apply_filter(|| season.has_bookmarks())
-            && self.fillermarked.apply_filter(|| season.has_fillermarks())
+    pub fn keeps(&self, season: &SeasonEntry, facts: &SeasonFacts) -> bool {
+        self.unseen.apply_filter(|| !season.is_done())
+            && self.started.apply_filter(|| season.done > 0)
+            && self.completed.apply_filter(|| season.entry.status == STATUS_COMPLETED)
+            && self.bookmarked.apply_filter(|| season.bookmarks > 0)
+            && self.fillermarked.apply_filter(|| season.fillermarks > 0)
             && self.downloaded.apply_filter(|| facts.download_count > 0 || facts.is_local)
     }
 }
 
 /// The cards of the season grid: the seasons that pass the filters, sorted by the season sort (the alphabetical tie-break
 /// is always ascending), each with the overlays of the parent applied. `seasons` pairs each season with its facts.
-pub fn process_seasons(anime: &Anime, seasons: &[(SeasonAnime, SeasonFacts)], downloaded_only: bool) -> Vec<SeasonItem> {
+pub fn process_seasons(anime: &Entry, seasons: &[(SeasonEntry, SeasonFacts)], downloaded_only: bool) -> Vec<SeasonItem> {
     let overlays = Overlays::of(anime);
     let filters = SeasonFilters::of(anime, downloaded_only);
-    let facts: HashMap<i64, &SeasonFacts> = seasons.iter().map(|(s, f)| (s.id(), f)).collect();
-    let mut kept: Vec<SeasonAnime> =
+    let facts: HashMap<i64, &SeasonFacts> = seasons.iter().map(|(s, f)| (s.entry.id, f)).collect();
+    let mut kept: Vec<SeasonEntry> =
         seasons.iter().filter(|(s, f)| filters.keeps(s, f)).map(|(s, _)| s.clone()).collect();
     sort_seasons(&mut kept, anime);
-    kept.iter().map(|s| season_item(s, overlays, facts[&s.id()])).collect()
+    kept.iter().map(|s| season_item(s, overlays, facts[&s.entry.id])).collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
+
     use super::*;
 
-    fn season(id: i64, title: &str, total: i64, seen: i64, bookmarks: i64) -> (SeasonAnime, SeasonFacts) {
-        let mut anime = Anime::create();
+    fn season(id: i64, title: &str, total: i64, seen: i64, bookmarks: i64) -> (SeasonEntry, SeasonFacts) {
+        let mut anime = Entry::create(Kind::Anime);
         anime.id = id;
         anime.title = title.into();
         (
-            SeasonAnime {
-                anime,
-                total_count: total,
-                seen_count: seen,
-                bookmark_count: bookmarks,
-                fillermark_count: 0,
+            SeasonEntry {
+                entry: anime,
+                total,
+                done: seen,
+                bookmarks,
+                fillermarks: 0,
                 latest_upload: 0,
                 fetched_at: 0,
-                last_seen: 0,
+                last_activity: 0,
             },
             SeasonFacts { download_count: 0, is_local: false, source_language: String::new(), fetches_episodes: true },
         )
     }
 
-    fn parent(flags: i64) -> Anime {
-        let mut anime = Anime::create();
-        anime.season_flags = flags;
+    fn parent(flags: i64) -> Entry {
+        let mut anime = Entry::create(Kind::Anime);
+        anime.season_flags = Some(flags);
         anime
     }
 
@@ -113,7 +116,7 @@ mod tests {
     fn the_alphabetical_tie_break_is_ascending_even_when_the_sort_is_reversed() {
         let mut seasons = vec![season(1, "b", 1, 0, 0), season(2, "a", 1, 0, 0)];
         for (s, _) in &mut seasons {
-            s.anime.season_source_order = 0;
+            s.entry.season_source_order = Some(0);
         }
         // the default sort is descending: the title still decides ascending
         let titles: Vec<String> = process_seasons(&parent(season_flags::SORT_DESC), &seasons, false)

@@ -9,9 +9,9 @@ use std::rc::Rc;
 
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_data::anime::AnimeRepo;
-use kuro_data::episode::EpisodeRepo;
-use kuro_data::track::{AnimeTrack, AnimeTrackRepo};
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
+use kuro_data::track::{Track, TrackRepo};
 use kuro_player::aniskip::{self, TrackerRef};
 use kuro_player::chapters::{self, Segment};
 use kuro_player::mpv::MpvHandle;
@@ -165,7 +165,7 @@ pub fn next_label(current: Option<String>, label: Label) -> Option<String> {
 }
 
 /// The tracker bindings of an anime as AniSkip's MAL lookup reads them, in the bindings' order.
-pub fn tracker_refs(tracks: &[AnimeTrack]) -> Vec<TrackerRef> {
+pub fn tracker_refs(tracks: &[Track]) -> Vec<TrackerRef> {
     tracks
         .iter()
         .map(|track| match track.tracker_id {
@@ -194,15 +194,15 @@ fn aniskip_request(episode_id: i64, load: u64, duration_s: f32) -> Option<Reques
         return None;
     }
     let db = crate::data::app().db.clone();
-    let episode = EpisodeRepo::new(db.clone()).by_id(episode_id).ok()??;
-    let title = AnimeRepo::new(db.clone()).by_id(episode.anime_id).ok().map(|anime| anime.title);
-    let tracks = AnimeTrackRepo::new(db).by_entry(episode.anime_id).ok()?;
+    let episode = ItemRepo::new(db.clone()).by_id(episode_id).ok()??;
+    let title = EntryRepo::new(db.clone()).by_id(episode.entry_id).ok().map(|anime| anime.title);
+    let tracks = TrackRepo::new(db).by_entry(episode.entry_id).ok()?;
     Some(Request {
         episode_id,
-        anime_id: episode.anime_id,
+        anime_id: episode.entry_id,
         title,
         load,
-        episode_number: episode.episode_number,
+        episode_number: episode.number,
         tracks: tracker_refs(&tracks),
         duration_s: f64::from(duration_s),
     })
@@ -340,9 +340,9 @@ mod tests {
     #[test]
     fn tracker_bindings_map_to_the_mal_lookup_in_order() {
         let tracks = [
-            AnimeTrack { remote_id: 21, ..AnimeTrack::new(TrackerId::MYANIMELIST.0) },
-            AnimeTrack { remote_id: 5, ..AnimeTrack::new(TrackerId::ANILIST.0) },
-            AnimeTrack { remote_id: 9, ..AnimeTrack::new(7) },
+            Track { remote_id: 21, ..Track::new(kuro_platform::kind::Kind::Anime, TrackerId::MYANIMELIST.0) },
+            Track { remote_id: 5, ..Track::new(kuro_platform::kind::Kind::Anime, TrackerId::ANILIST.0) },
+            Track { remote_id: 9, ..Track::new(kuro_platform::kind::Kind::Anime, 7) },
         ];
         assert_eq!(
             tracker_refs(&tracks),

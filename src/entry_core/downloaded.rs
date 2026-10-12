@@ -1,22 +1,55 @@
 //! The downloaded lookup of a manga's chapters (T-38b-007). Upstream: `List<Chapter>.filterDownloadedChapters(manga)`. The
-//! reader's skip paths ask the same question of a chapter (`Fn(&Chapter) -> bool`), so `downloaded_lookup` has the shape of
+//! reader's skip paths ask the same question of a chapter (`Fn(&Item) -> bool`), so `downloaded_lookup` has the shape of
 //! the reader's `is_downloaded` argument. A local manga counts every chapter as downloaded and is never looked up.
 
-use kuro_data::chapter::Chapter;
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
 use kuro_downloads::index::DownloadIndex;
+use kuro_downloads::model::{ChapterRef, MangaRef};
 
 /// The lookup of one manga over the download index, with the local passthrough: it is true for every chapter of a local
 /// manga and otherwise asks the index for the chapter's name and scanlator.
-pub fn downloaded_lookup(index: DownloadIndex, source_id: i64, manga_title: String, local: bool) -> impl Fn(&Chapter) -> bool {
+pub fn downloaded_lookup(index: DownloadIndex, source_id: i64, manga_title: String, local: bool) -> impl Fn(&Item) -> bool {
     move |chapter| local || index.is_chapter_downloaded(source_id, &manga_title, &chapter.name, chapter.scanlator.as_deref())
+}
+
+/// The downloads layer's view of a chapter.
+pub fn chapter_ref(chapter: &Item) -> ChapterRef {
+    ChapterRef {
+        id: chapter.id,
+        manga_id: chapter.entry_id,
+        url: chapter.url.clone(),
+        name: chapter.name.clone(),
+        scanlator: chapter.scanlator.clone(),
+        read: chapter.done,
+        bookmark: chapter.bookmark,
+        source_order: chapter.source_order,
+        chapter_number: chapter.number,
+        date_upload: chapter.date_upload,
+    }
+}
+
+/// The downloads layer's view of a manga.
+pub fn manga_ref(manga: &Entry) -> MangaRef {
+    MangaRef {
+        id: manga.id,
+        url: manga.url.clone(),
+        title: manga.title.clone(),
+        source_id: manga.source,
+        description: manga.description.clone(),
+        author: manga.author.clone(),
+        artist: manga.artist.clone(),
+        genre: manga.genre.clone(),
+        status: manga.status,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn chapter(id: i64, name: &str, scanlator: Option<&str>) -> Chapter {
-        Chapter { id, name: name.into(), scanlator: scanlator.map(str::to_owned), ..Chapter::create() }
+    fn chapter(id: i64, name: &str, scanlator: Option<&str>) -> Item {
+        Item { id, name: name.into(), scanlator: scanlator.map(str::to_owned), ..Item::create(kuro_platform::kind::Kind::Manga) }
     }
 
     #[test]

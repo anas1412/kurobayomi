@@ -22,10 +22,10 @@ use kuro_core::sources::SourceGate;
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_track::policy::auto_update_allowed;
 use kuro_track::prefs::TrackPrefs;
-use kuro_data::chapter::Chapter;
+use kuro_data::item::Item;
 use kuro_db::Db;
 use kuro_platform::toast::{ToastLength, Toaster};
-use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
+use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
 use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
 
@@ -72,7 +72,7 @@ pub struct ReaderDeps {
     pub prefs: ReaderPrefs,
     pub store: Rc<dyn ReaderStore>,
     pub build: BuildLoader,
-    pub is_downloaded: Rc<dyn Fn(&Chapter) -> bool>,
+    pub is_downloaded: Rc<dyn Fn(&Item) -> bool>,
     pub downloaded_only: bool,
     pub incognito: bool,
     /// The store behind `prefs`. Its change feed applies live settings to the open reader.
@@ -211,13 +211,13 @@ impl ReaderCore {
     }
 
     /// The chapter list rules, from the skip preferences of the reader.
-    fn list_options(&self, manga: &Manga) -> ListOptions {
+    fn list_options(&self, manga: &Entry) -> ListOptions {
         ListOptions {
             skip_read: diet::READER_SKIP_READ,
             skip_filtered: diet::READER_SKIP_FILTERED,
             skip_dupe: diet::READER_SKIP_DUPE,
             downloaded_only: self.deps.downloaded_only,
-            chapter_flags: manga.chapter_flags,
+            item_flags: manga.item_flags,
         }
     }
 
@@ -353,7 +353,7 @@ impl ReaderCore {
 
     /// The folder of the manga when it is a local one (its url is the folder's absolute path). `None` for any other source.
     pub fn local_folder(&self) -> Option<PathBuf> {
-        let manga = MangaRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id).ok()?;
+        let manga = EntryRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id).ok()?;
         kuro_local::is_local_source(manga.source).then(|| PathBuf::from(manga.url))
     }
 
@@ -361,12 +361,12 @@ impl ReaderCore {
     /// reads its cover from.
     pub fn local_cover_result(&self, written: Result<kuro_local::images::CoverWrite, String>) -> &'static str {
         let Ok(cover) = written else { return strings::NOTIFICATION_COVER_UPDATE_FAILED };
-        let update = MangaUpdate {
+        let update = EntryUpdate {
             thumbnail_url: Some(cover.thumbnail_url),
             cover_last_modified: Some(cover.cover_last_modified),
-            ..MangaUpdate::new(self.deps.manga_id)
+            ..EntryUpdate::new(self.deps.manga_id)
         };
-        match MangaRepo::new(Arc::clone(&self.deps.db)).update(&update) {
+        match EntryRepo::new(Arc::clone(&self.deps.db)).update(&update) {
             Ok(()) => strings::COVER_UPDATED,
             Err(_) => strings::NOTIFICATION_COVER_UPDATE_FAILED,
         }
@@ -377,15 +377,15 @@ impl ReaderCore {
         if written.is_err() {
             return strings::NOTIFICATION_COVER_UPDATE_FAILED;
         }
-        let manga = match MangaRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id) {
+        let manga = match EntryRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id) {
             Ok(manga) => manga,
             Err(_) => return strings::NOTIFICATION_COVER_UPDATE_FAILED,
         };
         if !manga.favorite {
             return strings::NOTIFICATION_FIRST_ADD_TO_LIBRARY;
         }
-        let update = MangaUpdate { id: self.deps.manga_id, cover_last_modified: Some(history_rules::now_ms()), ..Default::default() };
-        match MangaRepo::new(Arc::clone(&self.deps.db)).update(&update) {
+        let update = EntryUpdate { id: self.deps.manga_id, cover_last_modified: Some(history_rules::now_ms()), ..Default::default() };
+        match EntryRepo::new(Arc::clone(&self.deps.db)).update(&update) {
             Ok(()) => strings::COVER_UPDATED,
             Err(_) => strings::NOTIFICATION_COVER_UPDATE_FAILED,
         }
@@ -1494,8 +1494,8 @@ mod tests {
     use crate::reader::cache::{CACHE_LIMIT_BYTES, DiskCache};
     use crate::reader::loader::PageEntry;
     use crate::reader::loader::http::{HttpLoader, HttpPageSource};
-    use kuro_data::chapter::ChapterRepo;
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::item::ItemRepo;
+    use kuro_platform::kind::Kind;
     use kuro_prefs::store::PrefStore;
     use kuro_prefs::reader::ReadingMode;
     use crate::reader::delete_queue::Pending;
@@ -1540,18 +1540,18 @@ mod tests {
         let path = kuro_db::schema_unified::db_path(dir.path());
         let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
-        let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&Manga::create()).unwrap();
-        let new: Vec<Chapter> = (0..chapters)
+        let manga_id = EntryRepo::new(Arc::clone(&db)).insert(&Entry::create(Kind::Manga)).unwrap();
+        let new: Vec<Item> = (0..chapters)
             .map(|i| {
-                let mut c = Chapter::create();
-                c.manga_id = manga_id;
+                let mut c = Item::create(Kind::Manga);
+                c.entry_id = manga_id;
                 c.url = format!("/c/{i}");
-                c.chapter_number = (i + 1) as f64;
+                c.number = (i + 1) as f64;
                 c.source_order = (chapters - i) as i64;
                 c
             })
             .collect();
-        let chapter_ids = ChapterRepo::new(Arc::clone(&db)).add_all(&new).unwrap().iter().map(|c| c.id).collect();
+        let chapter_ids = ItemRepo::new(Arc::clone(&db)).add_all(&new).unwrap().iter().map(|c| c.id).collect();
         Fixture { _dir: dir, db, manga_id, chapter_ids }
     }
 
@@ -1789,7 +1789,7 @@ mod tests {
     #[test]
     fn a_webtoon_manga_flips_the_same_crop_switch() {
         let f = fixture(1);
-        MangaRepo::new(Arc::clone(&f.db)).set_viewer_bits(f.manga_id, i64::from(ReadingMode::Webtoon.flag_value()), 0x7).unwrap();
+        EntryRepo::new(Arc::clone(&f.db)).set_viewer_bits(f.manga_id, i64::from(ReadingMode::Webtoon.flag_value()), 0x7).unwrap();
         let core = core(&f, 0, http_build("crop-webtoon"));
         core.initial_load().unwrap();
         assert_eq!(core.toggle_crop().toast, "On");
@@ -1830,7 +1830,7 @@ mod tests {
     fn a_chapter_leaving_the_viewer_is_released_and_one_that_stays_is_kept() {
         let held = RefCell::new(None);
         let chapter = |name: &str| {
-            let mut c = kuro_data::chapter::Chapter::create();
+            let mut c = Item::create(Kind::Manga);
             c.name = name.into();
             ReaderChapter::new(c)
         };
@@ -1846,8 +1846,8 @@ mod tests {
     #[test]
     fn the_top_bar_shows_the_manga_the_chapter_the_bookmark_and_the_source_kind() {
         let f = fixture(2);
-        MangaRepo::new(Arc::clone(&f.db))
-            .update(&kuro_data::manga::MangaUpdate { title: Some("My Manga".into()), ..kuro_data::manga::MangaUpdate::new(f.manga_id) })
+        EntryRepo::new(Arc::clone(&f.db))
+            .update(&EntryUpdate { title: Some("My Manga".into()), ..EntryUpdate::new(f.manga_id) })
             .unwrap();
         let core = core(&f, 1, http_build("top-bar"));
         assert!(core.top_bar().is_none(), "no bar before the initial load");

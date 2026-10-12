@@ -11,8 +11,10 @@ use gtk::glib;
 use gtk::pango;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use kuro_data::chapter::Chapter;
+use kuro_data::item::Item;
 use kuro_domain::items::missing::item_gap;
+
+use crate::entry_core::numbered::NumberedItem;
 
 use super::model::{ChapterState, ChapterTransition};
 use super::strings;
@@ -51,7 +53,7 @@ impl Content {
     }
 }
 
-fn line(header: &'static str, chapter: &Chapter, downloaded: bool) -> ChapterLine {
+fn line(header: &'static str, chapter: &Item, downloaded: bool) -> ChapterLine {
     ChapterLine {
         header,
         name: chapter.name.clone(),
@@ -72,7 +74,7 @@ pub fn content(transition: &ChapterTransition, from_downloaded: bool, to_downloa
             },
             bottom: Slot::Chapter(line(strings::TRANSITION_CURRENT, from, from_downloaded)),
             // calculateChapterGap(currChapter, goingToChapter)
-            gap: item_gap(Some(from), to),
+            gap: item_gap(Some(&NumberedItem(from)), to.map(NumberedItem).as_ref()),
         },
         ChapterTransition::Next { .. } => Content {
             top: Slot::Chapter(line(strings::TRANSITION_FINISHED, from, from_downloaded)),
@@ -81,7 +83,7 @@ pub fn content(transition: &ChapterTransition, from_downloaded: bool, to_downloa
                 None => Slot::NoChapter(strings::TRANSITION_NO_NEXT),
             },
             // calculateChapterGap(goingToChapter, currChapter)
-            gap: item_gap(to, Some(from)),
+            gap: item_gap(to.map(NumberedItem).as_ref(), Some(&NumberedItem(from))),
         },
     }
 }
@@ -237,7 +239,7 @@ pub const WEBTOON_METRICS: Metrics = Metrics { side: 32, top: 128, bottom: 128, 
 
 /// The destination's downloaded flag (B§11.2). A local manga is always downloaded and needs no lookup. Otherwise
 /// the lookup decides for the destination chapter, and a missing destination is not downloaded.
-pub fn going_to_downloaded(manga_is_local: bool, to: Option<&Chapter>, lookup: impl FnOnce(&Chapter) -> bool) -> bool {
+pub fn going_to_downloaded(manga_is_local: bool, to: Option<&Item>, lookup: impl FnOnce(&Item) -> bool) -> bool {
     manga_is_local || to.is_some_and(lookup)
 }
 
@@ -255,8 +257,8 @@ pub fn status_text(state: &ChapterState) -> Option<String> {
 /// flag. Only the chapter and the lookup cross the thread; the GTK side keeps its own state.
 pub fn going_to_downloaded_off_thread(
     manga_is_local: bool,
-    to: Option<Chapter>,
-    lookup: Arc<dyn Fn(&Chapter) -> bool + Send + Sync>,
+    to: Option<Item>,
+    lookup: Arc<dyn Fn(&Item) -> bool + Send + Sync>,
     done: impl FnOnce(bool) + 'static,
 ) {
     let (tx, rx) = async_channel::bounded(1);
@@ -304,11 +306,11 @@ mod tests {
     use std::rc::Rc;
 
     fn chapter(id: i64, number: f64, name: &str, scanlator: Option<&str>) -> Rc<ReaderChapter> {
-        let mut c = Chapter::create();
+        let mut c = Item::create(kuro_platform::kind::Kind::Manga);
         c.id = id;
         c.url = format!("/c/{id}");
         c.name = name.into();
-        c.chapter_number = number;
+        c.number = number;
         c.scanlator = scanlator.map(String::from);
         ReaderChapter::new(c)
     }

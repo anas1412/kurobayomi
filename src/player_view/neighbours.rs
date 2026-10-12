@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use kuro_data::episode::EpisodeRepo;
+use kuro_data::item::ItemRepo;
 use kuro_db::handle::Db;
 
 /// Which neighbour to find.
@@ -17,12 +17,12 @@ pub enum Step {
 /// The row id of the episode before or after `episode_id` in its entry. `None` at either end, and for a row that does
 /// not exist.
 pub fn adjacent(db: &Arc<Db>, episode_id: i64, step: Step) -> Result<Option<i64>, String> {
-    let repo = EpisodeRepo::new(Arc::clone(db));
+    let repo = ItemRepo::new(Arc::clone(db));
     let Some(current) = repo.by_id(episode_id).map_err(|e| e.to_string())? else {
         return Ok(None);
     };
-    let mut episodes = repo.by_anime_id(current.anime_id).map_err(|e| e.to_string())?;
-    episodes.sort_by(|a, b| a.episode_number.total_cmp(&b.episode_number).then(a.id.cmp(&b.id)));
+    let mut episodes = repo.by_entry_id(current.entry_id, false).map_err(|e| e.to_string())?;
+    episodes.sort_by(|a, b| a.number.total_cmp(&b.number).then(a.id.cmp(&b.id)));
     let Some(at) = episodes.iter().position(|e| e.id == episode_id) else {
         return Ok(None);
     };
@@ -34,8 +34,9 @@ pub fn adjacent(db: &Arc<Db>, episode_id: i64, step: Step) -> Result<Option<i64>
 
 #[cfg(test)]
 mod tests {
-    use kuro_data::anime::{Anime, AnimeRepo};
-    use kuro_data::episode::Episode;
+    use kuro_data::entry::{Entry, EntryRepo};
+    use kuro_data::item::Item;
+    use kuro_platform::kind::Kind;
     use kuro_testkit::{TempDir, TestDb};
 
     use super::*;
@@ -44,13 +45,13 @@ mod tests {
     fn the_neighbours_follow_the_episode_numbers_and_stop_at_the_ends() {
         let dir = TempDir::new().unwrap();
         let db = TestDb::handle(&dir);
-        let anime_id = AnimeRepo::new(Arc::clone(&db)).insert(&Anime::create()).expect("anime row");
-        let episodes: Vec<Episode> = [3.0, 1.0, 2.0]
+        let anime_id = EntryRepo::new(Arc::clone(&db)).insert(&Entry::create(Kind::Anime)).expect("anime row");
+        let episodes: Vec<Item> = [3.0, 1.0, 2.0]
             .iter()
-            .map(|&n| Episode { anime_id, url: format!("/{n}"), name: format!("E{n}"), episode_number: n, ..Episode::create() })
+            .map(|&n| Item { entry_id: anime_id, url: format!("/{n}"), name: format!("E{n}"), number: n, ..Item::create(Kind::Anime) })
             .collect();
-        let rows = EpisodeRepo::new(Arc::clone(&db)).add_all(&episodes).expect("rows");
-        let id_of = |n: f64| rows.iter().find(|e| e.episode_number == n).expect("row").id;
+        let rows = ItemRepo::new(Arc::clone(&db)).add_all(&episodes).expect("rows");
+        let id_of = |n: f64| rows.iter().find(|e| e.number == n).expect("row").id;
 
         assert_eq!(adjacent(&db, id_of(1.0), Step::Next).unwrap(), Some(id_of(2.0)));
         assert_eq!(adjacent(&db, id_of(2.0), Step::Previous).unwrap(), Some(id_of(1.0)));

@@ -125,8 +125,8 @@ mod tests {
             row(2, "b", 3.0, 0, 0),
             row(3, "c", 2.0, 0, 0),
         ];
-        assert_eq!(ids(&rows, 0x100), vec![2, 3, 1]);
-        assert_eq!(ids(&rows, 0x101), vec![1, 3, 2]);
+        assert_eq!(ids(&rows, 0x200), vec![2, 3, 1]);
+        assert_eq!(ids(&rows, 0x201), vec![1, 3, 2]);
     }
 
     #[test]
@@ -136,14 +136,14 @@ mod tests {
             row(2, "x", -1.0, 0, 0),
             row(3, "c", 2.0, 0, 0),
         ];
-        assert_eq!(ids(&rows, 0x101), vec![2, 1, 3], "-1.0 first ascending");
-        assert_eq!(ids(&rows, 0x100), vec![3, 1, 2], "-1.0 last descending");
+        assert_eq!(ids(&rows, 0x201), vec![2, 1, 3], "-1.0 first ascending");
+        assert_eq!(ids(&rows, 0x200), vec![3, 1, 2], "-1.0 last descending");
     }
 
     #[test]
     fn nan_numbers_do_not_panic_and_sort_last_ascending() {
         let rows = [row(1, "a", f64::NAN, 0, 0), row(2, "b", 1.0, 0, 0)];
-        assert_eq!(ids(&rows, 0x101), vec![2, 1]);
+        assert_eq!(ids(&rows, 0x201), vec![2, 1]);
     }
 
     #[test]
@@ -153,7 +153,7 @@ mod tests {
             row(2, "b", 2.0, 0, 30),
             row(3, "c", 3.0, 0, 20),
         ];
-        assert_eq!(ids(&rows, 0x200), vec![2, 3, 1]);
+        assert_eq!(ids(&rows, 0x400), vec![2, 3, 1]);
         assert_eq!(ids(&rows, 0x201), vec![1, 3, 2]);
     }
 
@@ -166,8 +166,8 @@ mod tests {
             row(2, "Apple", 2.0, 0, 0),
             row(3, "cherry", 3.0, 0, 0),
         ];
-        assert_eq!(ids(&rows, 0x300), vec![3, 1, 2]);
-        assert_eq!(ids(&rows, 0x301), vec![2, 1, 3]);
+        assert_eq!(ids(&rows, 0x600), vec![3, 1, 2]);
+        assert_eq!(ids(&rows, 0x601), vec![2, 1, 3]);
     }
 
     #[test]
@@ -186,7 +186,7 @@ mod tests {
             row(2, "same", 5.0, 0, 0),
             row(3, "same", 5.0, 0, 0),
         ];
-        assert_eq!(ids(&rows, 0x100), vec![1, 2, 3]);
-        assert_eq!(ids(&rows, 0x101), vec![1, 2, 3]);
+        assert_eq!(ids(&rows, 0x200), vec![1, 2, 3]);
+        assert_eq!(ids(&rows, 0x201), vec![1, 2, 3]);
     }
 }

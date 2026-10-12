@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use gtk::glib;
 use kuro_core::sources::SourceGate;
-use kuro_data::chapter::ChapterRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
 use kuro_local::LOCAL_SOURCE_ID;
@@ -79,13 +79,13 @@ pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
 /// passes ids). `(manga, 0)` when the chapter is unknown, so the reader reports it. `None` when no local entry has that
 /// title.
 pub fn find_local_ids(db: &Arc<Db>, title: &str, chapter: &str, preferred: Option<i64>) -> Option<(i64, i64)> {
-    let manga = MangaRepo::new(Arc::clone(db));
+    let manga = EntryRepo::new(Arc::clone(db));
     let manga_id = preferred
         .and_then(|id| manga.by_id(id).ok())
         .filter(|m| m.source == LOCAL_SOURCE_ID && m.title == title)
         .map(|m| m.id)
         .or_else(|| super::open::local_id_with_title(db, Kind::Manga, title).ok().flatten())?;
-    let chapters = ChapterRepo::new(Arc::clone(db)).by_manga_id(manga_id, false).ok()?;
+    let chapters = ItemRepo::new(Arc::clone(db)).by_entry_id(manga_id, false).ok()?;
     let by_id = chapter.parse::<i64>().ok().and_then(|id| chapters.iter().find(|c| c.id == id));
     let chapter_id = chapters.iter().find(|c| c.name == chapter).or(by_id).map_or(0, |c| c.id);
     Some((manga_id, chapter_id))
