@@ -48,7 +48,7 @@ impl Show {
         match (self, kind) {
             (Show::Downloaded, _) => tr(MsgKey::label_downloaded),
             (Show::Unseen, Kind::Manga) => tr(MsgKey::action_filter_unread),
-            (Show::Unseen, Kind::Anime) => "Unwatched".to_owned(),
+            (Show::Unseen, Kind::Anime) => tr(MsgKey::action_filter_unwatched),
             (Show::Completed, _) => tr(MsgKey::completed),
             (Show::Tracked, _) => tr(MsgKey::action_filter_tracked),
         }

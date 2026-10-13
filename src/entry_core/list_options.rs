@@ -90,7 +90,7 @@ fn default_group() -> Group {
 /// toggle (anime); everything else is one description over the one flag layout.
 pub fn item_spec(kind: Kind) -> Spec {
     let anime = kind.is_anime();
-    let unseen = if anime { "Unwatched".to_owned() } else { tr(MsgKey::action_filter_unread) };
+    let unseen = if anime { tr(MsgKey::action_filter_unwatched) } else { tr(MsgKey::action_filter_unread) };
     let number = if anime { tr(MsgKey::show_episode_number) } else { tr(MsgKey::show_chapter_number) };
     let mut show_only = vec![
         check(DOWNLOADED, tr(MsgKey::label_downloaded), c::SHOW_DOWNLOADED, c::DOWNLOADED_MASK),
@@ -159,7 +159,7 @@ pub fn season_spec() -> Spec {
                 filter: true,
                 entries: vec![
                     check(DOWNLOADED, tr(MsgKey::label_downloaded), sf::SHOW_DOWNLOADED, sf::DOWNLOADED_MASK),
-                    check("unseen", "Unwatched".to_owned(), sf::SHOW_UNSEEN, sf::UNSEEN_MASK),
+                    check("unseen", tr(MsgKey::action_filter_unwatched), sf::SHOW_UNSEEN, sf::UNSEEN_MASK),
                     check("started", tr(MsgKey::action_filter_started), sf::SHOW_STARTED, sf::STARTED_MASK),
                     check("completed", tr(MsgKey::completed), sf::SHOW_COMPLETED, sf::COMPLETED_MASK),
                     check("bookmarked", tr(MsgKey::action_filter_bookmarked), sf::SHOW_BOOKMARKED, sf::BOOKMARKED_MASK),

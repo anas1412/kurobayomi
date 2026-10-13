@@ -4291,3 +4291,6 @@ right_to_left_viewer = Paged, right to left
 
 # source: kurobayomi
 vertical_viewer = Paged, vertical
+
+# source: kurobayomi
+action_filter_unwatched = Unwatched
