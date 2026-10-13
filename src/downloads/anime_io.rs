@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 /// The live anime source of an id, the same set Browse and the player use. `None` when it is not installed.
 pub(crate) fn live_source(id: i64) -> Option<Arc<dyn kuro_source::anime::AnimeSource>> {
-    crate::entry_core::details::route::live_anime_sources().into_iter().find(|s| s.id() == id)
+    crate::screens::anime_sources().into_iter().find(|s| s.id() == id)
 }
 
 /// The episode as the source sees it. The queue keeps the fields the source reads from the list row.

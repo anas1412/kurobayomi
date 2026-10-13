@@ -92,13 +92,6 @@ pub fn target(entry_id: i64) {
     TARGET.with(|t| t.set(Some(entry_id)));
 }
 
-/// The anime sources this build runs: the builtin ones (none) and the recipe sources (`docs/source-recipes.md`).
-pub(crate) fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSource>> {
-    let mut sources = kuro_source::anime::registry::builtin_anime_sources();
-    sources.extend(crate::recipe_sources::anime_sources());
-    sources
-}
-
 /// Pushes the details page of one anime.
 pub fn open(entry_id: i64) {
     open_kind(Kind::Anime, entry_id);
@@ -138,7 +131,7 @@ fn page_for(kind: Kind, entry_id: i64) -> GBox {
     // the live sources of this build; an id it does not know reports that the source is not installed
     let backend: Arc<dyn EntryBackend> = match kind {
         Kind::Anime => Arc::new(
-            RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(EntryDownloads::new()),
+            RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(crate::screens::anime_sources())), handle.clone()).with_downloads(EntryDownloads::new()),
         ),
         Kind::Manga => Arc::new(crate::entry_core::backend::SourceBackend::live(Arc::clone(&db), &prefs)),
     };
@@ -1496,7 +1489,7 @@ impl View {
             return;
         }
         // an episode of an online source resolves its video and plays in the internal player
-        if crate::player_view::open_source_episode(&live_anime_sources(), episode_id) {
+        if crate::player_view::open_source_episode(&crate::screens::anime_sources(), episode_id) {
             return;
         }
         crate::screens::open_media(Kind::Anime, title, name);
