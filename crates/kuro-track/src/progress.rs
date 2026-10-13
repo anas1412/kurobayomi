@@ -16,7 +16,6 @@ use crate::error::TrackError;
 use crate::error::redact;
 use crate::events::TrackEvent;
 use crate::model::{AnimeTrack, MangaTrack, TrackerId};
-use crate::policy::auto_update_allowed;
 use crate::queue::QueueItem;
 use crate::queue::retry::{ItemOutcome, RetryRunner};
 use crate::remote::{with_server_anime, with_server_manga};
@@ -72,11 +71,8 @@ async fn track_episode_with(
     episode: f64,
     already_locked: bool,
 ) -> Vec<(TrackerId, TrackOutcome)> {
-    // T-29a-057: with the switch off nothing is sent, and nothing is queued either. Incognito reading never reaches
-    // here; the reader or player checks it with the same gate.
-    if !auto_update_allowed(&ctx.prefs, false) {
-        return Vec::new();
-    }
+    // The "update progress after reading" switch and incognito are the caller's gate (`auto_update_allowed`): the reader and
+    // the player check it, a mark as read does not (Aniyomi checks `autoUpdateTrackOnMarkRead` there instead).
     let runs = ctx
         .trackers
         .logged_in()
@@ -164,10 +160,6 @@ async fn track_chapter_with(
     chapter: f64,
     already_locked: bool,
 ) -> Vec<(TrackerId, TrackOutcome)> {
-    // T-29a-057: see `track_episode_with`.
-    if !auto_update_allowed(&ctx.prefs, false) {
-        return Vec::new();
-    }
     let runs = ctx
         .trackers
         .logged_in()
@@ -600,44 +592,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t_29a_057_with_the_switch_off_reading_and_watching_send_no_update() {
+    async fn t_29a_057_the_core_sends_whatever_the_reader_switch_says_because_the_caller_gates_it() {
         let h = Harness::new();
         h.login(TrackerId::KITSU);
-        h.login(TrackerId::MANGAUPDATES);
-        h.ctx
-            .anime_tracks
-            .upsert(&anime_binding(5, TrackerId::KITSU, 1.0))
-            .await
-            .unwrap();
-        h.ctx
-            .manga_tracks
-            .upsert(&manga_binding(9, TrackerId::MANGAUPDATES, 1.0))
-            .await
-            .unwrap();
+        h.ctx.anime_tracks.upsert(&anime_binding(5, TrackerId::KITSU, 1.0)).await.unwrap();
         h.ctx.prefs.auto_update_track.set(false).unwrap();
 
-        assert!(track_episode(&h.ctx, 5, 2.0).await.is_empty());
-        assert!(track_chapter(&h.ctx, 9, 2.0).await.is_empty());
-        assert!(
-            spawn_track_episode(h.ctx.clone(), 5, 2.0)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            spawn_track_chapter(h.ctx.clone(), 9, 2.0)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            !logs(&h).iter().any(|l| l.starts_with("update")),
-            "no PUT is sent"
-        );
-        assert!(h.ctx.queue.list(Kind::Anime).unwrap().is_empty());
-        assert!(h.ctx.queue.list(Kind::Manga).unwrap().is_empty());
-
-        h.ctx.prefs.auto_update_track.set(true).unwrap();
+        // a mark as read with "Always" reaches the tracker although the reader's switch is off
         let out = track_episode(&h.ctx, 5, 2.0).await;
         assert_eq!(out, vec![(TrackerId::KITSU, TrackOutcome::Updated)]);
         assert!(logs(&h).iter().any(|l| l.starts_with("update")));
