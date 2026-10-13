@@ -26,11 +26,6 @@ pub fn plan_done(done: bool, items: &[Item], remove_after_read: bool) -> Option<
     Some(ReadPlan { changed, delete_downloads })
 }
 
-/// Bookmark writes: only the rows whose bookmark differs from `bookmark`. Returns `(id, bookmark)` pairs.
-pub fn plan_bookmark(bookmark: bool, items: &[Item]) -> Vec<(i64, bool)> {
-    items.iter().filter(|i| i.bookmark != bookmark).map(|i| (i.id, bookmark)).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use kuro_platform::kind::Kind;
@@ -69,14 +64,5 @@ mod tests {
         let rows = [row(1, true, 0), row(2, false, 0)];
         let plan = plan_done(true, &rows, true).expect("row 2 changes");
         assert_eq!(plan.delete_downloads, vec![2]);
-    }
-
-    #[test]
-    fn bookmark_writes_only_differing_rows() {
-        let mut a = row(1, false, 0);
-        a.bookmark = true;
-        let rows = [a, row(2, false, 0)];
-        assert_eq!(plan_bookmark(true, &rows), vec![(2, true)]);
-        assert_eq!(plan_bookmark(false, &rows), vec![(1, false)]);
     }
 }

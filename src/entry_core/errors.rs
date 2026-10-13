@@ -73,14 +73,6 @@ impl DetailError {
         }
     }
 
-    /// The message for a failed chapter fetch. An empty list shows "No chapters found", not "No results found".
-    pub fn chapter_fetch_message(&self) -> String {
-        match self {
-            Self::NoChapters => tr(MsgKey::no_chapters_error),
-            other => other.user_message(),
-        }
-    }
-
     /// HTTP 103 (Early Hints) is not an error. The details fetch ignores it silently (E-FETCH-1).
     pub fn is_ignored(&self) -> bool {
         matches!(self, Self::Http(103))
@@ -126,19 +118,6 @@ mod tests {
         assert_eq!(error.user_message(), "Comix is not answering. Try again in a moment.");
         assert_eq!(error.refresh_message().as_deref(), Some("Comix is not answering. Try again in a moment."));
         assert!(!error.is_ignored());
-    }
-
-    #[test]
-    fn no_chapters_differs_between_list_and_fetch() {
-        assert_eq!(DetailError::NoChapters.user_message(), "No results found");
-        assert_eq!(
-            DetailError::NoChapters.chapter_fetch_message(),
-            "No chapters found"
-        );
-        assert_eq!(
-            DetailError::Http(500).chapter_fetch_message(),
-            DetailError::Http(500).user_message()
-        );
     }
 
     #[test]

@@ -68,6 +68,7 @@ use crate::entry_core::info_block::InfoBlock;
 use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::list_model::RowAction;
 use crate::entry_core::flags::scanlator_filter_active;
+use crate::entry_core::selection::Command;
 use crate::entry_core::list_options::{self, Spec};
 use crate::entry_core::scanlator_sheet;
 use crate::entry_core::list_view::{self, Callbacks, ItemList, Press};
@@ -594,7 +595,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     page
 }
 
-/// Escape clears the selection first and then goes back; Ctrl+A and Ctrl+I select all and invert while selecting.
+/// Escape clears the selection first and then goes back; Space flips the focused row; Ctrl+A and Ctrl+I select all and invert.
 fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
     let keys = gtk::EventControllerKey::new();
     let weak = weak.clone();
@@ -614,11 +615,19 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
                 view.refresh();
                 glib::Propagation::Stop
             }
-            gtk::gdk::Key::a | gtk::gdk::Key::A if ctrl && selecting => {
+            // Space flips the focused row (Shift extends a range), as the long press and the tap do
+            gtk::gdk::Key::space if view.list.focused_id().is_some() => {
+                let id = view.list.focused_id().unwrap_or_default();
+                let command = if state.contains(gtk::gdk::ModifierType::SHIFT_MASK) { Command::LongPress } else { Command::Tap };
+                view.edit_selection(|m, view, _| m.selection.toggle_row(view, id, command));
+                view.list.focus_row(id);
+                glib::Propagation::Stop
+            }
+            gtk::gdk::Key::a | gtk::gdk::Key::A if ctrl => {
                 view.edit_selection(|m, _, full| m.selection.set_all(full, true));
                 glib::Propagation::Stop
             }
-            gtk::gdk::Key::i | gtk::gdk::Key::I if ctrl && selecting => {
+            gtk::gdk::Key::i | gtk::gdk::Key::I if ctrl => {
                 view.edit_selection(|m, _, full| m.selection.invert(full));
                 glib::Propagation::Stop
             }

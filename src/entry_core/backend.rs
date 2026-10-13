@@ -1,7 +1,7 @@
-//! What the page needs from outside its own database: the source name, the two fetches, the download states and
-//! the download removal. The fetches persist their result (as `updateManga.awaitUpdateFromSource` does), so the
-//! page sees the new rows through the store subscriptions. Nothing here imports GTK. `SourceBackend` is the one the app
-//! uses; `StubBackend` answers for a source that is not installed.
+//! What the entry page needs from a manga source outside its own database: the source name, the two fetches, the
+//! download states and the download removal (`EntryBackend` for manga). The fetches persist their result (as
+//! `updateManga.awaitUpdateFromSource` does), so the page sees the new rows through the store subscriptions. Nothing here
+//! imports GTK. A source the lookup does not know reads as not installed.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -30,48 +30,10 @@ use crate::entry_core::downloaded::download_states;
 use crate::entry_core::errors::DetailError;
 use crate::updates::download_host::{self, DownloadBackend};
 
-pub type Fetch = Pin<Box<dyn Future<Output = Result<(), DetailError>> + Send>>;
+type Fetch = Pin<Box<dyn Future<Output = Result<(), DetailError>> + Send>>;
 
 /// What a chapter fetch hands back: the chapters the sync added, which a manual refresh queues for download (T-REF-4).
 pub type FetchItems = Pin<Box<dyn Future<Output = Result<Vec<Item>, DetailError>> + Send>>;
-
-pub trait Backend: Send + Sync + 'static {
-    /// The source line of the header. `stub` is true when the extension is not installed.
-    fn source_info(&self, source_id: i64) -> SourceInfo;
-    /// Fetches the details from the source and stores them.
-    fn fetch_details(&self, manga_id: i64) -> Fetch;
-    /// Fetches the chapter list from the source and stores it. Returns the chapters the sync added.
-    fn fetch_chapters(&self, manga_id: i64) -> FetchItems;
-    /// The download state of each chapter of the manga that has one.
-    fn downloads(&self, _manga_id: i64) -> HashMap<i64, DownloadState> {
-        HashMap::new()
-    }
-    /// Removes the downloads of these chapters (after a mark-read with "remove after read").
-    fn delete_downloads(&self, _manga_id: i64, _chapter_ids: &[i64]) {}
-    /// Queues these chapters for download. With `start_now` the one chapter goes to the front and the queue starts.
-    /// `false` when the downloads layer is not there, or refused: nothing was queued.
-    fn enqueue_downloads(&self, _manga_id: i64, _chapter_ids: &[i64], _start_now: bool) -> bool {
-        false
-    }
-    /// Takes one chapter out of the download queue.
-    fn cancel_download(&self, _chapter_id: i64) {}
-    /// Binds the enhanced trackers of the source to a manga that just joined the library (`bindEnhancedTrackers`).
-    fn bind_enhanced(&self, _manga_id: i64) {}
-    /// Whether a tracker is logged in: the tracking button opens the tracking sheet then, the tracking settings
-    /// otherwise (E-25). The default is no; the app's backends read the published tracker session.
-    fn has_logged_in_tracker(&self) -> bool {
-        false
-    }
-    /// Whether the source is an HTTP source: only then does the page offer WebView and Share.
-    fn is_http_source(&self, _source_id: i64) -> bool {
-        false
-    }
-    /// Deletes the cover files of a manga that just left the library (`removeCovers`), after the write succeeded.
-    /// `true` when a file was removed.
-    fn remove_cover(&self, _manga_id: i64) -> bool {
-        false
-    }
-}
 
 const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
 
@@ -87,43 +49,6 @@ pub fn stub_source_info(stubs: &StubSourceRepo, kind: Kind, source_id: i64) -> S
     }
     let stub = stubs.get(source_id).ok().flatten().unwrap_or_else(|| StubSource::fallback(source_id));
     SourceInfo { name: stub.display_name(), stub: true }
-}
-
-/// The backend of an app with no source registry yet: every source reads as not installed, the local source reads
-/// as installed and has nothing to fetch.
-pub struct StubBackend {
-    stubs: StubSourceRepo,
-}
-
-impl StubBackend {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self {
-            stubs: StubSourceRepo::new(db, Kind::Manga),
-        }
-    }
-}
-
-impl Backend for StubBackend {
-    fn has_logged_in_tracker(&self) -> bool {
-        crate::entry_core::tracking::session::has_logged_in()
-    }
-    fn source_info(&self, source_id: i64) -> SourceInfo {
-        stub_source_info(&self.stubs, Kind::Manga, source_id)
-    }
-
-    fn fetch_details(&self, manga_id: i64) -> Fetch {
-        self.fetch(manga_id)
-    }
-
-    fn fetch_chapters(&self, _manga_id: i64) -> FetchItems {
-        Box::pin(async { Err(DetailError::SourceNotInstalled) })
-    }
-}
-
-impl StubBackend {
-    fn fetch(&self, _manga_id: i64) -> Fetch {
-        Box::pin(async { Err(DetailError::SourceNotInstalled) })
-    }
 }
 
 /// Finds the live manga source of an id; `None` when it is not installed.
@@ -165,11 +90,11 @@ fn prepare_hook<'a>(source: &'a dyn MangaSource, listed: &'a SManga) -> impl Fn(
 
 /// The backend over the live manga sources (`awaitUpdateFromSource` and `syncChaptersWithSource`): the details are
 /// written with the shared refresh rules (`UpdateEntry::update_from_source`), the chapter list through the domain's item
-/// sync, both on the row the Browse listing inserted with its source id. A source the lookup does not know reads as [`StubBackend`].
+/// sync, both on the row the Browse listing inserted with its source id. A source the lookup does not know reads as not installed.
 /// Source calls run under `limited` (the panic guard and the 30 second limit), so a panicking or silent source is an error
 /// on the page, not a crash or an endless refresh.
 pub struct SourceBackend {
-    stub: StubBackend,
+    stubs: StubSourceRepo,
     db: Arc<Db>,
     lookup: MangaLookup,
     chapters: SyncItems,
@@ -181,7 +106,7 @@ pub struct SourceBackend {
 impl SourceBackend {
     pub fn new(db: Arc<Db>, lookup: MangaLookup, mark_duplicate_read: bool) -> Self {
         let chapters = SyncItems::new(Arc::clone(&db), Arc::new(EntrySyncLocks::default()), Arc::new(NoRenames));
-        Self { stub: StubBackend::new(Arc::clone(&db)), db, lookup, chapters, mark_duplicate_read, downloads: None }
+        Self { stubs: StubSourceRepo::new(Arc::clone(&db), Kind::Manga), db, lookup, chapters, mark_duplicate_read, downloads: None }
     }
 
     /// Gives the backend the download service of the app.
@@ -209,19 +134,11 @@ async fn target(db: Arc<Db>, lookup: MangaLookup, manga_id: i64) -> Result<(Entr
     Ok((manga, source))
 }
 
-impl Backend for SourceBackend {
-    fn has_logged_in_tracker(&self) -> bool {
-        self.stub.has_logged_in_tracker()
-    }
-
-    fn bind_enhanced(&self, manga_id: i64) {
-        crate::updates::track_binding::bind_entry(&self.db, Kind::Manga, manga_id);
-    }
-
+impl SourceBackend {
     fn source_info(&self, source_id: i64) -> SourceInfo {
         match (self.lookup)(source_id) {
             Some(source) => SourceInfo { name: kuro_source::display_name(source.name(), source.lang()), stub: false },
-            None => self.stub.source_info(source_id),
+            None => stub_source_info(&self.stubs, Kind::Manga, source_id),
         }
     }
 
@@ -239,7 +156,7 @@ impl Backend for SourceBackend {
         })
     }
 
-    fn fetch_chapters(&self, manga_id: i64) -> FetchItems {
+    pub fn fetch_chapters(&self, manga_id: i64) -> FetchItems {
         let (db, lookup, sync, mark_duplicate_done) = (Arc::clone(&self.db), Arc::clone(&self.lookup), self.chapters.clone(), self.mark_duplicate_read);
         Box::pin(async move {
             let (manga, source) = target(db, lookup, manga_id).await?;
@@ -264,12 +181,6 @@ impl Backend for SourceBackend {
         download_states(host.as_ref(), Kind::Manga, &manga, &chapters)
     }
 
-    /// Removes the downloads of these chapters: they leave the queue, then the folders and the index entries go.
-    fn delete_downloads(&self, manga_id: i64, chapter_ids: &[i64]) {
-        let Some(host) = &self.downloads else { return };
-        host.delete(Kind::Manga, manga_id, chapter_ids);
-    }
-
     /// Queues the chapters and starts the queue: all of them, or with `start_now` the first one at the front. `false`
     /// when there is no download service or none of the chapters could be queued.
     fn enqueue_downloads(&self, manga_id: i64, chapter_ids: &[i64], start_now: bool) -> bool {
@@ -285,24 +196,17 @@ impl Backend for SourceBackend {
         }
         queued
     }
-
-    /// Takes one chapter out of the queue. Its downloaded files, if any, are not touched.
-    fn cancel_download(&self, chapter_id: i64) {
-        let Some(host) = &self.downloads else { return };
-        host.cancel(Kind::Manga, chapter_id);
-    }
 }
 
-/// The same source as the details page of either kind sees it (`details`): the generic page asks for what `plan`
-/// names, and gets the chapters the sync added. The manga page's own `Backend` and this trait share the methods below.
+/// The entry page of either kind asks for what `plan` names and gets the chapters the sync added.
 impl EntryBackend for SourceBackend {
     fn source_info(&self, source_id: i64) -> SourceInfo {
-        Backend::source_info(self, source_id)
+        SourceBackend::source_info(self, source_id)
     }
 
     fn fetch(&self, entry_id: i64, plan: RefreshPlan, _trigger: Trigger) -> EntryFetch {
-        let details = plan.info.then(|| Backend::fetch_details(self, entry_id));
-        let chapters = plan.episodes.then(|| Backend::fetch_chapters(self, entry_id));
+        let details = plan.info.then(|| self.fetch_details(entry_id));
+        let chapters = plan.episodes.then(|| self.fetch_chapters(entry_id));
         Box::pin(async move {
             let (details, chapters) = futures::join!(async { Some(details?.await) }, async { Some(chapters?.await) });
             // a details failure that the page ignores (HTTP 103) does not stop the chapters
@@ -317,15 +221,15 @@ impl EntryBackend for SourceBackend {
 
     fn enqueue_new_items(&self, entry_id: i64, items: &[Item]) {
         let ids: Vec<i64> = items.iter().map(|item| item.id).collect();
-        Backend::enqueue_downloads(self, entry_id, &ids, false);
+        self.enqueue_downloads(entry_id, &ids, false);
     }
 
     fn bind_enhanced(&self, entry_id: i64) {
-        Backend::bind_enhanced(self, entry_id);
+        crate::updates::track_binding::bind_entry(&self.db, Kind::Manga, entry_id);
     }
 
-    fn remove_cover(&self, entry_id: i64) -> bool {
-        Backend::remove_cover(self, entry_id)
+    fn remove_cover(&self, _entry_id: i64) -> bool {
+        false
     }
 
     fn downloaded_count(&self, entry_id: i64) -> usize {
@@ -335,7 +239,7 @@ impl EntryBackend for SourceBackend {
     fn delete_downloads(&self, entry_id: i64) {
         let Ok(items) = ItemRepo::new(Arc::clone(&self.db)).by_entry_id(entry_id, false) else { return };
         let ids: Vec<i64> = items.iter().map(|item| item.id).collect();
-        Backend::delete_downloads(self, entry_id, &ids);
+        self.delete_items(entry_id, &ids);
     }
 
     fn has_download_handler(&self) -> bool {
@@ -343,23 +247,24 @@ impl EntryBackend for SourceBackend {
     }
 
     fn downloaded_items(&self, entry_id: i64) -> std::collections::HashSet<i64> {
-        Backend::downloads(self, entry_id).into_iter().filter(|(_, state)| *state == DownloadState::Downloaded).map(|(id, _)| id).collect()
+        self.downloads(entry_id).into_iter().filter(|(_, state)| *state == DownloadState::Downloaded).map(|(id, _)| id).collect()
     }
 
     fn enqueue_items(&self, entry_id: i64, item_ids: &[i64], start_now: bool) -> bool {
-        Backend::enqueue_downloads(self, entry_id, item_ids, start_now)
+        self.enqueue_downloads(entry_id, item_ids, start_now)
     }
 
     fn delete_items(&self, entry_id: i64, item_ids: &[i64]) {
-        Backend::delete_downloads(self, entry_id, item_ids);
+        let Some(host) = &self.downloads else { return };
+        host.delete(Kind::Manga, entry_id, item_ids);
     }
 
     fn has_logged_in_tracker(&self) -> bool {
-        Backend::has_logged_in_tracker(self)
+        crate::entry_core::tracking::session::has_logged_in()
     }
 
-    fn is_http_source(&self, source_id: i64) -> bool {
-        Backend::is_http_source(self, source_id)
+    fn is_configurable_source(&self, source_id: i64) -> bool {
+        (self.lookup)(source_id).is_some_and(|source| source.is_configurable())
     }
 
     fn source_language(&self, source_id: i64) -> String {
@@ -416,7 +321,7 @@ mod tests {
         // details: the page's backend fills the row and its chapters
         let source: Arc<dyn MangaSource> = fake.clone();
         let backend = SourceBackend::new(Arc::clone(&db), Arc::new(move |sid| (sid == 41).then(|| Arc::clone(&source))), false);
-        assert_eq!(Backend::source_info(&backend, 41), SourceInfo { name: "Fake Central (EN)".into(), stub: false });
+        assert_eq!(backend.source_info(41), SourceInfo { name: "Fake Central (EN)".into(), stub: false });
         rt.block_on(backend.fetch_details(id)).expect("details");
         rt.block_on(backend.fetch_chapters(id)).expect("chapters");
         let manga = EntryRepo::new(Arc::clone(&db)).by_id(id).unwrap();
@@ -443,7 +348,7 @@ mod tests {
         assert_eq!(ItemRepo::new(Arc::clone(&db)).by_entry_id(id, false).unwrap().len(), 2, "a failed refresh keeps the chapters");
         let other = EntryRepo::new(Arc::clone(&db)).insert(&Entry { source: 99, url: "/x".into(), title: "X".into(), ..Entry::create(Kind::Manga) }).unwrap();
         assert_eq!(rt.block_on(backend.fetch_details(other)), Err(DetailError::SourceNotInstalled));
-        assert!(Backend::source_info(&backend, 99).stub);
+        assert!(backend.source_info(99).stub);
     }
 
     #[test]
@@ -451,7 +356,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = db_of(&dir.path().join("test.db"));
         StubSourceRepo::new(Arc::clone(&db), Kind::Manga).upsert(7, "en", "Reader").unwrap();
-        let backend = StubBackend::new(db);
+        let backend = SourceBackend::new(db, Arc::new(|_| None), false);
         assert_eq!(
             backend.source_info(7),
             SourceInfo {
@@ -466,7 +371,7 @@ mod tests {
     #[test]
     fn the_local_source_is_not_a_stub_and_fetches_report_not_installed() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = StubBackend::new(db_of(&dir.path().join("test.db")));
+        let backend = SourceBackend::new(db_of(&dir.path().join("test.db")), Arc::new(|_| None), false);
         let local = backend.source_info(LOCAL_SOURCE_ID);
         assert!(!local.stub);
         assert!(!local.name.is_empty());
@@ -496,15 +401,13 @@ mod tests {
 
         assert!(backend.enqueue_downloads(id, &ids, false));
         assert!(backend.enqueue_downloads(id, &ids, true));
-        backend.cancel_download(ids[0]);
-        Backend::delete_downloads(&backend, id, &ids[..1]);
+        EntryBackend::delete_items(&backend, id, &ids[..1]);
         assert_eq!(
             fake.calls(),
             [
                 Call::Enqueue { entry_id: id, unit_ids: ids.clone() },
                 Call::StartQueue,
                 Call::StartNow(ids[0]),
-                Call::Cancel(ids[0]),
                 Call::Delete { entry_id: id, unit_ids: vec![ids[0]] },
             ]
         );

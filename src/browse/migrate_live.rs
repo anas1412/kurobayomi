@@ -28,7 +28,7 @@ use crate::entry_core::details::entry_state::RefreshPlan;
 use crate::entry_core::refresh_rules::Trigger;
 use crate::entry_core::details::remote::{LiveSources, RemoteAnimeBackend};
 use crate::entry_core::details::runner::EntryBackend;
-use crate::entry_core::backend::{Backend, SourceBackend};
+use crate::entry_core::backend::SourceBackend;
 
 pub struct LiveSteps {
     kind: Kind,

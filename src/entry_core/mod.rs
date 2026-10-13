@@ -1,4 +1,4 @@
-//! Manga entry details (plan area 38). The model, the chapter engine, the store runner and the page controller have no
+//! The entry page of both kinds (the manga half was plan area 38, the anime half area 39), one page in `details`. The model, the chapter engine, the store runner and the page controller have no
 //! GTK in them: `backend`, `chapter`, `detail`, `dialog`, `errors`, `flags`, `header`, `list_model`, `live`,
 //! `numfmt`, `page`, `readstate`, `runner`, `scanlator_sheet` (its rules), `selection`, `store`, `text` and `view`, plus
 //! `downloaded` (the downloaded lookup of the chapters) and `handoff` (what a page parks for the screen it opens). The thin

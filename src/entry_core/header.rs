@@ -126,11 +126,6 @@ impl HeaderModel {
     }
 }
 
-/// True when a window of this width gets the large (two-pane) layout. The height does not decide any more.
-pub fn is_large(window_width: i32, _window_height: i32) -> bool {
-    crate::entry_core::constants::two_pane(window_width)
-}
-
 /// The cover size (width, height; 2:3) for a layout. `column_width` is the width of the column that holds it.
 pub fn cover_size(large: bool, column_width: i32) -> (i32, i32) {
     let width = if large {
@@ -202,9 +197,6 @@ mod tests {
         assert_eq!(cover_size(false, 400), (100, 150));
         assert_eq!(cover_size(false, 80), (80, 120));
         assert_eq!(cover_size(true, 400), (260, 390));
-        assert!(!is_large(899, 900));
-        assert!(is_large(900, 900));
-        assert!(is_large(1200, 719), "two panes follow the width, not the height");
     }
 }
 

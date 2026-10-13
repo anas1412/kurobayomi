@@ -179,24 +179,6 @@ pub fn diff(old: &[RowItem], new: &[RowItem]) -> Diff {
     if changed.is_empty() { Diff::Same } else { Diff::Rows(changed) }
 }
 
-/// The row that keeps keyboard focus after the list changed from `before` to `after` (both chapter ids in view
-/// order). The focused row stays focused while it is visible. When a filter hides it, focus goes to the next
-/// visible row, then the previous one, and never to a row that is not in the list.
-pub fn focus_after(before: &[i64], after: &[i64], focused: i64) -> Option<i64> {
-    if after.contains(&focused) {
-        return Some(focused);
-    }
-    let Some(at) = before.iter().position(|&id| id == focused) else {
-        return after.first().copied();
-    };
-    before[at + 1..]
-        .iter()
-        .find(|id| after.contains(id))
-        .or_else(|| before[..at].iter().rev().find(|id| after.contains(id)))
-        .copied()
-        .or_else(|| after.first().copied())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,14 +241,5 @@ mod tests {
         assert_eq!(changed_span(&[]), None);
         assert_eq!(changed_span(&[4]), Some((4, 1)));
         assert_eq!(changed_span(&[2, 3, 9]), Some((2, 8)));
-    }
-
-    #[test]
-    fn focus_stays_on_the_toggled_row_and_never_lands_on_a_hidden_one() {
-        assert_eq!(focus_after(&[1, 2, 3], &[1, 2, 3], 2), Some(2));
-        assert_eq!(focus_after(&[1, 2, 3], &[1, 3], 2), Some(3), "the next visible row");
-        assert_eq!(focus_after(&[1, 2, 3], &[1], 2), Some(1), "then the previous one");
-        assert_eq!(focus_after(&[1, 2, 3], &[], 2), None, "an empty list has no focus");
-        assert_eq!(focus_after(&[1, 2], &[5], 9), Some(5), "an unknown row falls to the first");
     }
 }
