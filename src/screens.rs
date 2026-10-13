@@ -40,7 +40,7 @@ pub fn build(id: &str) -> GBox {
                 return page;
             }
         }
-        "anime_entry_details" => return crate::entry_core::anime::route::build(),
+        "anime_entry_details" => return crate::entry_core::details::route::build(),
         "manga_entry_details" => return crate::entry_core::route::build(),
         "browse_source" | "migrate_source_search" => {
             if let Some(page) = crate::browse::browse_screen::page(id) {
@@ -88,7 +88,7 @@ fn is_local_manga(id: i64) -> bool {
 /// the id for the reader to tell two local folders with one name apart; any other manga is a plain entry page.
 pub fn open_entry(kind: Kind, id: i64) {
     match kind {
-        Kind::Anime => crate::entry_core::anime::route::open(id),
+        Kind::Anime => crate::entry_core::details::route::open(id),
         Kind::Manga if is_local_manga(id) => crate::local_flow::open::entry(id),
         Kind::Manga => crate::entry_core::route::open(id),
     }
@@ -118,7 +118,7 @@ pub fn open_unit(kind: Kind, entry_id: i64, unit_id: i64) {
 }
 
 /// Opens a unit by its entry's title and its own name, which finds only a local entry's file. Kept for
-/// `entry_core::anime::route::open_player`, whose fallback should call [`open_unit`] with the episode id instead.
+/// `entry_core::details::route::open_player`, whose fallback should call [`open_unit`] with the episode id instead.
 // ponytail: delete when entry_core opens its fallback by id.
 pub fn open_media(kind: Kind, title: &str, unit: &str) {
     if kind.is_anime() {

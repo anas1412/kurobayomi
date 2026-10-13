@@ -1,4 +1,4 @@
-//! The anime details route: a thin GTK page over `AnimeEntryModel` (state) and `AnimeRunner` (the store). It shows a
+//! The anime details route: a thin GTK page over `EntryModel` (state) and `EntryRunner` (the store). It shows a
 //! loading state until the first read arrives, the page when the model is `Success`, and a "not found" state with a
 //! Back button when the row is missing.
 //!
@@ -32,7 +32,7 @@ use crate::entry_core::constants::{FALLBACK_WIDTH, LEFT_PANE_WIDTH};
 use super::actions::{OpenPlan, continue_plan, tap_plan};
 use super::airing::{Airing, format_airing, visible as airing_visible};
 use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
-use super::download_backend::AnimeDownloads;
+use super::download_backend::EntryDownloads;
 use super::dispatch::{bottom_cmds, menu_cmds};
 use super::details_error::{DetailsError, required};
 use crate::entry_core::download_menu::{self, DownloadAmount, menu_visible};
@@ -40,7 +40,7 @@ use super::intro_dialog;
 use super::torrent_server;
 use crate::entry_core::overflow_menu::{self, Entry as OverflowEntry, Item as OverflowItem};
 use super::viewer;
-use super::dialog_state::{AnimeDialog, DialogSlot};
+use super::dialog_state::{EntryDialog, DialogSlot};
 use crate::duplicate_dialog::{self, DuplicateChoice};
 use super::season_grid::{Layout, SeasonGrid};
 use super::season_pipeline::process_seasons;
@@ -49,11 +49,11 @@ use super::set_default::{self, Scope};
 use crate::entry_core::selection::RowClick;
 use super::info::header_model;
 use super::layout::{bottom_bar_width, two_pane};
-use super::model::{AnimeEntryModel, AnimeLoadContext};
+use super::model::{EntryModel, EntryLoadContext};
 use super::refresh::refresh_snack;
 use super::remote::{LiveSources, RemoteAnimeBackend};
-use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeRunner};
-use super::store::AnimeStore;
+use super::runner::{self, EntryBackend, EntryCmd, EntryEvent, EntryRunner};
+use super::store::EntryStore;
 use super::related_view;
 use crate::data;
 use crate::entry_core::dialog::CategoryDialog;
@@ -116,18 +116,18 @@ fn page_for(anime_id: i64) -> GBox {
     let db = app.db.clone();
     let prefs = app.base.store().clone();
     let show_airing = crate::misc::diet_defaults::ENTRY_SHOW_AIRING_TIME;
-    let ctx = AnimeLoadContext {
+    let ctx = EntryLoadContext {
         from_source: false,
         downloaded_only: app.base.downloaded_only.get(),
         ..Default::default()
     };
     let handle = tokio::runtime::Handle::current();
     // the live sources of this build; an id it does not know reports that the source is not installed
-    let downloads = AnimeDownloads::new();
-    let backend: Arc<dyn AnimeBackend> =
+    let downloads = EntryDownloads::new();
+    let backend: Arc<dyn EntryBackend> =
         Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
-    let runner = Rc::new(runner::spawn(&handle, AnimeStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
-    runner.send(AnimeCmd::Load { anime_id });
+    let runner = Rc::new(runner::spawn(&handle, EntryStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
+    runner.send(EntryCmd::Load { anime_id });
     assemble(runner, show_airing, Env { prefs, backend, db })
 }
 
@@ -135,17 +135,17 @@ fn page_for(anime_id: i64) -> GBox {
 /// player and torrent choices that happen on the GTK thread) and the database.
 struct Env {
     prefs: PrefStore,
-    backend: Arc<dyn AnimeBackend>,
+    backend: Arc<dyn EntryBackend>,
     db: Arc<Db>,
 }
 
 /// Everything the widgets and handlers share. Handlers hold `Weak<View>`; the event pump holds the only strong
 /// reference, so the page frees itself when the pump ends.
 struct View {
-    model: RefCell<Option<AnimeEntryModel>>,
+    model: RefCell<Option<EntryModel>>,
     /// The first read arrived (`Loaded`), with or without a row.
     loaded: Cell<bool>,
-    runner: Rc<AnimeRunner>,
+    runner: Rc<EntryRunner>,
     env: Env,
     show_airing: bool,
     clock: std::time::Instant,
@@ -222,7 +222,7 @@ fn torrent_enabled(prefs: &PrefStore) -> bool {
     prefs.pref::<bool>("pref_torrserver_enable", false).get()
 }
 
-fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
+fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let stack = page_shell::state_stack();
 
     // the list head: the item header row, the refresh spinner and the empty line
@@ -573,7 +573,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         }
     });
     // a page that leaves the stack stops its runner: subscriptions are dropped, a fetch is cancelled, writes finish
-    page.connect_destroy(move |_| runner.send(AnimeCmd::Shutdown));
+    page.connect_destroy(move |_| runner.send(EntryCmd::Shutdown));
     page
 }
 
@@ -643,9 +643,9 @@ impl View {
         true
     }
 
-    fn on_event(self: &Rc<Self>, event: AnimeEvent) {
+    fn on_event(self: &Rc<Self>, event: EntryEvent) {
         match event {
-            AnimeEvent::Loaded(loaded) => {
+            EntryEvent::Loaded(loaded) => {
                 self.loaded.set(true);
                 if let Some(m) = &loaded {
                     let large = self.two_pane.get().unwrap_or(false);
@@ -653,19 +653,19 @@ impl View {
                 }
                 *self.model.borrow_mut() = loaded.map(|b| *b);
             }
-            AnimeEvent::Snapshot { anime, episodes } => {
+            EntryEvent::Snapshot { anime, episodes } => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
                     m.apply_snapshot(*anime, episodes);
                 }
             }
-            AnimeEvent::RefreshEnded(result) => {
+            EntryEvent::RefreshEnded(result) => {
                 // a failed refresh says why in a notification (behaviour 19)
                 if let Some(message) = result.as_ref().err().and_then(refresh_snack) {
                     // Retry runs the refresh again; an uninstalled source has nothing to retry
                     let anime_id = self.model.borrow().as_ref().map(|m| m.anime.id);
                     match anime_id.filter(|_| !matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled))) {
                         Some(anime_id) => {
-                            self.show_notice(Notice::of(&crate::entry_core::message::with_retry(message), Some(AnimeCmd::Refresh { anime_id })));
+                            self.show_notice(Notice::of(&crate::entry_core::message::with_retry(message), Some(EntryCmd::Refresh { anime_id })));
                         }
                         None => self.present(message, None),
                     }
@@ -674,31 +674,31 @@ impl View {
                     m.finish_refresh(result);
                 }
             }
-            AnimeEvent::Downloads(on_disk) => {
+            EntryEvent::Downloads(on_disk) => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
                     m.downloaded = on_disk;
                 }
             }
-            AnimeEvent::Categories { all, linked } => self.show_category_dialog(&all, &linked),
-            AnimeEvent::AddCategories { all, linked } => self.show_add_category_dialog(&all, &linked),
-            AnimeEvent::Added => {}
-            AnimeEvent::Removed(outcome) => {
+            EntryEvent::Categories { all, linked } => self.show_category_dialog(&all, &linked),
+            EntryEvent::AddCategories { all, linked } => self.show_add_category_dialog(&all, &linked),
+            EntryEvent::Added => {}
+            EntryEvent::Removed(outcome) => {
                 // downloads exist: ask whether they go too. Dismissing the prompt keeps them.
                 let anime_id = self.model.borrow().as_ref().map(|m| m.anime.id);
                 if let (true, Some(anime_id)) = (outcome.ask_delete_downloads, anime_id) {
-                    self.present(UserMessage::DeleteDownloadsForAnime, Some(AnimeCmd::DeleteDownloads { anime_id }));
+                    self.present(UserMessage::DeleteDownloadsForAnime, Some(EntryCmd::DeleteDownloads { anime_id }));
                 }
             }
-            AnimeEvent::Failed(message) => self.present(UserMessage::Plain(message), None),
-            AnimeEvent::Related(groups) => *self.related.borrow_mut() = groups,
-            AnimeEvent::SeasonFacts(extras) => {
+            EntryEvent::Failed(message) => self.present(UserMessage::Plain(message), None),
+            EntryEvent::Related(groups) => *self.related.borrow_mut() = groups,
+            EntryEvent::SeasonFacts(extras) => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
                     m.set_season_extras(extras);
                 }
             }
-            AnimeEvent::DefaultsApplied { scope, updated } => self.present(set_default::applied_message(scope, updated), None),
-            AnimeEvent::Duplicate { existing } => self.show_duplicate(&existing),
-            AnimeEvent::Tracking(count) => {
+            EntryEvent::DefaultsApplied { scope, updated } => self.present(set_default::applied_message(scope, updated), None),
+            EntryEvent::Duplicate { existing } => self.show_duplicate(&existing),
+            EntryEvent::Tracking(count) => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
                     m.tracking_count = count;
                 }
@@ -798,7 +798,7 @@ impl View {
 
     /// The bottom action bar: the rows `bottom_actions` gives for the selected episodes, shown only while something
     /// is selected, as wide as the window narrow and half of it wide.
-    fn render_bottom(self: &Rc<Self>, m: &AnimeEntryModel) {
+    fn render_bottom(self: &Rc<Self>, m: &EntryModel) {
         let selected: Vec<Selected> = m
             .episodes
             .iter()
@@ -879,8 +879,8 @@ impl View {
     }
 
     /// A mark seen goes to the trackers too, with the numbers of the episodes it changed.
-    fn track_marked(&self, cmd: &AnimeCmd) {
-        let AnimeCmd::SetSeen { ids, seen: true } = cmd else { return };
+    fn track_marked(&self, cmd: &EntryCmd) {
+        let EntryCmd::SetSeen { ids, seen: true } = cmd else { return };
         let model = self.model.borrow();
         let Some(m) = model.as_ref() else { return };
         let numbers: Vec<f64> = m.episodes.iter().filter(|e| ids.contains(&e.id)).map(|e| e.number).collect();
@@ -894,12 +894,12 @@ impl View {
     }
 
     /// Shows a message on the app's notification layer, replacing the one on screen. `action` is what its button runs.
-    fn present(&self, message: UserMessage, action: Option<AnimeCmd>) {
+    fn present(&self, message: UserMessage, action: Option<EntryCmd>) {
         self.show_notice(Notice::of(&present(message), action));
     }
 
     /// Shows `notice`; its button sends its command to this page's runner while the page is alive (E-UI-1).
-    fn show_notice(&self, notice: Notice<AnimeCmd>) {
+    fn show_notice(&self, notice: Notice<EntryCmd>) {
         let runner = Rc::downgrade(&self.runner);
         notice.show(move |cmd| {
             if let Some(runner) = runner.upgrade() {
@@ -916,13 +916,13 @@ impl View {
             m.flow.begin_refresh();
             m.anime.id
         };
-        self.runner.send(AnimeCmd::Refresh { anime_id });
+        self.runner.send(EntryCmd::Refresh { anime_id });
         self.render();
     }
 
     /// Puts `dialog` in the slot: the one on screen closes first, so the last request wins. Returns the name of the
     /// request, for `adopt`.
-    fn claim_slot(&self, dialog: AnimeDialog) -> u64 {
+    fn claim_slot(&self, dialog: EntryDialog) -> u64 {
         let id = self.dialog_gen.get() + 1;
         self.dialog_gen.set(id);
         self.dialogs.borrow_mut().open(dialog);
@@ -980,9 +980,9 @@ impl View {
             return;
         }
         let runner = self.runner.clone();
-        let id = self.claim_slot(AnimeDialog::SetAnimeFetchInterval { anime_id });
+        let id = self.claim_slot(EntryDialog::SetAnimeFetchInterval { anime_id });
         let window = fetch_interval_dialog::open(interval, expected, move |wheel| {
-            runner.send(AnimeCmd::SetFetchInterval { anime_id, wheel });
+            runner.send(EntryCmd::SetFetchInterval { anime_id, wheel });
         });
         self.adopt(id, &window, true);
     }
@@ -992,7 +992,7 @@ impl View {
         // a favorite leaves the library; an add checks for a same-named library entry first (T-39a-047)
         let target = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id);
         if let Some(anime_id) = target {
-            self.runner.send(AnimeCmd::ToggleLibrary { anime_id, check_duplicates: true });
+            self.runner.send(EntryCmd::ToggleLibrary { anime_id, check_duplicates: true });
         }
     }
 
@@ -1001,13 +1001,13 @@ impl View {
     fn show_duplicate(self: &Rc<Self>, existing: &[kuro_data::entry::Entry]) {
         let (Some(duplicate), Some(anime_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.anime.id)) else { return };
         let runner = Rc::clone(&self.runner);
-        let id = self.claim_slot(AnimeDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
+        let id = self.claim_slot(EntryDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
         let window = duplicate_dialog::open(
             Kind::Anime,
             move |choice| match choice {
                 DuplicateChoice::Show => open(duplicate.id),
                 DuplicateChoice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
-                DuplicateChoice::AddAnyway => runner.send(AnimeCmd::ToggleLibrary { anime_id, check_duplicates: false }),
+                DuplicateChoice::AddAnyway => runner.send(EntryCmd::ToggleLibrary { anime_id, check_duplicates: false }),
             },
             || {},
         );
@@ -1023,7 +1023,7 @@ impl View {
             let runner = Rc::downgrade(&self.runner);
             let changed = move || {
                 if let Some(runner) = runner.upgrade() {
-                    runner.send(AnimeCmd::ReadTracking { anime_id: id, source_id });
+                    runner.send(EntryCmd::ReadTracking { anime_id: id, source_id });
                 }
             };
             crate::entry_core::tracking::page::open_sheet(crate::entry_core::tracking::page::Entry { kind: Kind::Anime, id, title }, changed);
@@ -1032,7 +1032,7 @@ impl View {
 
     /// The tracking button.
     fn tracking_pressed(&self) {
-        self.claim_slot(AnimeDialog::TrackSheet);
+        self.claim_slot(EntryDialog::TrackSheet);
         self.open_tracking();
     }
 
@@ -1048,7 +1048,7 @@ impl View {
     fn open_categories(&self) {
         let anime_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id);
         if let Some(anime_id) = anime_id {
-            self.runner.send(AnimeCmd::LoadCategories { anime_id });
+            self.runner.send(EntryCmd::LoadCategories { anime_id });
         }
     }
 
@@ -1057,12 +1057,12 @@ impl View {
     fn show_category_dialog(self: &Rc<Self>, all: &[(i64, String)], linked: &[i64]) {
         let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
         let runner = Rc::clone(&self.runner);
-        let id = self.claim_slot(AnimeDialog::ChangeCategory { anime_id });
+        let id = self.claim_slot(EntryDialog::ChangeCategory { anime_id });
         let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
         let window = crate::category_picker::open(
             CategoryDialog::new(anime_id, false, all, linked),
             move |m| {
-                runner.send(AnimeCmd::SetCategories { anime_id, category_ids: m.checked_ids() });
+                runner.send(EntryCmd::SetCategories { anime_id, category_ids: m.checked_ids() });
                 if let Some(view) = ok.upgrade() {
                     view.confirm_category(id);
                 }
@@ -1091,13 +1091,13 @@ impl View {
         let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
         let runner = Rc::clone(&self.runner);
         // the choose branch sets the pending flag: a dismiss may open the track sheet after it
-        let id = self.claim_slot(AnimeDialog::ChangeCategory { anime_id });
+        let id = self.claim_slot(EntryDialog::ChangeCategory { anime_id });
         self.dialogs.borrow_mut().open_change_category_from_add(anime_id);
         let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
         let window = crate::category_picker::open(
             CategoryDialog::new(anime_id, true, all, linked),
             move |m| {
-                runner.send(AnimeCmd::AddWithCategories { anime_id, category_ids: m.checked_ids() });
+                runner.send(EntryCmd::AddWithCategories { anime_id, category_ids: m.checked_ids() });
                 if let Some(view) = ok.upgrade() {
                     view.confirm_category(id);
                 }
@@ -1120,7 +1120,7 @@ impl View {
 
     /// The season grid of a `Seasons` entry. Its minimum column count is the entry's size setting (`Layout::columns_for`); it
     /// is redrawn only when the cells, the columns or the width changed.
-    fn show_seasons(&self, m: &AnimeEntryModel, seasons_entry: bool) {
+    fn show_seasons(&self, m: &EntryModel, seasons_entry: bool) {
         if !seasons_entry {
             self.seasons.widget.set_visible(false);
             *self.seasons_shown.borrow_mut() = None;
@@ -1200,9 +1200,9 @@ impl View {
         };
         let default = DEFAULT_INTRO_LENGTH;
         let runner = self.runner.clone();
-        let id = self.claim_slot(AnimeDialog::ChangeAnimeSkipIntro);
+        let id = self.claim_slot(EntryDialog::ChangeAnimeSkipIntro);
         let window = intro_dialog::open(viewer::dialog_start(stored, disabled, default), move |length| {
-            runner.send(AnimeCmd::SetSkipIntroLength { anime_id, length });
+            runner.send(EntryCmd::SetSkipIntroLength { anime_id, length });
         });
         self.adopt(id, &window, true);
     }
@@ -1261,12 +1261,12 @@ impl View {
             (m.anime.id, m.download_targets(amount))
         };
         if !ids.is_empty() {
-            self.runner.send(AnimeCmd::Download { anime_id, ids, start_now: false });
+            self.runner.send(EntryCmd::Download { anime_id, ids, start_now: false });
         }
     }
 
     /// Draws the info block: the header in the layout and column of the page, then the description with its genre chips.
-    fn render_info(self: &Rc<Self>, m: &AnimeEntryModel) {
+    fn render_info(self: &Rc<Self>, m: &EntryModel) {
         let two = self.two_pane.get().unwrap_or(false);
         let model = header_model(&m.anime, &m.source);
         let column = if two { LEFT_PANE_WIDTH } else { self.width.get() };
@@ -1343,7 +1343,7 @@ impl View {
 
     /// The rows of the list. The download button shows only when the app can queue this entry's episodes: not for a
     /// local or stub source, and not without a download handler (`isLocalOrStub`, T-39b-059).
-    fn list_rows(&self, m: &AnimeEntryModel) -> Vec<crate::entry_core::list_model::RowItem> {
+    fn list_rows(&self, m: &EntryModel) -> Vec<crate::entry_core::list_model::RowItem> {
         let mut rows = m.lines();
         let can_download = !m.is_local() && !self.env.backend.source_info(m.anime.source).stub && self.env.backend.has_download_handler();
         if !can_download {
@@ -1370,12 +1370,12 @@ impl View {
     fn download_pressed(&self, id: i64, request: Request) {
         let Some(anime_id) = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id) else { return };
         match request {
-            Request::Start => self.runner.send(AnimeCmd::Download { anime_id, ids: vec![id], start_now: false }),
+            Request::Start => self.runner.send(EntryCmd::Download { anime_id, ids: vec![id], start_now: false }),
             Request::Cancel => {
                 crate::downloads::live::cancel(Kind::Anime, id);
                 self.live_changed(id, DownloadState::NotDownloaded, 0);
             }
-            Request::Delete => self.runner.send(AnimeCmd::DeleteEpisodeDownloads { anime_id, ids: vec![id] }),
+            Request::Delete => self.runner.send(EntryCmd::DeleteEpisodeDownloads { anime_id, ids: vec![id] }),
         }
     }
 
@@ -1443,7 +1443,7 @@ impl View {
     }
 
     /// Hands the episode to the external player the plan names, or to the internal one.
-    fn open_player(backend: &Arc<dyn AnimeBackend>, plan: OpenPlan, anime_id: i64, episode_id: i64, title: &str, name: &str) {
+    fn open_player(backend: &Arc<dyn EntryBackend>, plan: OpenPlan, anime_id: i64, episode_id: i64, title: &str, name: &str) {
         if plan.external && backend.play_external(anime_id, episode_id) {
             return;
         }
@@ -1461,7 +1461,7 @@ impl View {
 
     /// The continue button of a season tile: plays that season's next unseen episode, as the FAB does for an entry.
     fn continue_season(&self, season_id: i64) {
-        let store = AnimeStore::new(Arc::clone(&self.env.db));
+        let store = EntryStore::new(Arc::clone(&self.env.db));
         let played = (|| -> Result<(), DetailsError> {
             let season = required(store.anime(season_id)?, || DetailsError::AnimeNotFound(season_id))?;
             let episodes = store.episodes(season_id)?;
@@ -1496,7 +1496,7 @@ impl View {
 
     /// The FAB: opens the first unseen episode, with the setting as it is and no inversion (17.2).
     fn open_next(self: &Rc<Self>) {
-        let next = self.model.borrow().as_ref().and_then(AnimeEntryModel::next_unseen);
+        let next = self.model.borrow().as_ref().and_then(EntryModel::next_unseen);
         if let Some(id) = next {
             let plan = continue_plan(always_external(&self.env.prefs), torrent_enabled(&self.env.prefs), self.is_torrent_source());
             self.open_episode(id, plan);
@@ -1505,7 +1505,7 @@ impl View {
 
     /// Edits the selection, then redraws. The closure gets the processed ids (the view, for toggles) and every
     /// episode id (for select all and invert, which act on the full list).
-    fn edit_selection(self: &Rc<Self>, edit: impl FnOnce(&mut AnimeEntryModel, &[i64], &[i64])) {
+    fn edit_selection(self: &Rc<Self>, edit: impl FnOnce(&mut EntryModel, &[i64], &[i64])) {
         {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch()) else { return };
@@ -1555,14 +1555,14 @@ impl View {
                 m.note_flag_write(flag, mask);
             }
         }
-        self.runner.send(if seasons { AnimeCmd::SetSeasonFlagBits { anime_id, flag, mask } } else { AnimeCmd::SetFlagBits { anime_id, flag, mask } });
+        self.runner.send(if seasons { EntryCmd::SetSeasonFlagBits { anime_id, flag, mask } } else { EntryCmd::SetFlagBits { anime_id, flag, mask } });
         self.render();
     }
 
     /// "Use as default for all titles": stores the flag word of the list on screen as the default of its scope, and the
     /// runner applies that default to every favorite. Only that scope is written: an episode save never touches the
     /// season flags of the library, and the reverse. The message waits for the run, to say how many entries took the
-    /// settings (E-DEF-3, `AnimeEvent::DefaultsApplied`).
+    /// settings (E-DEF-3, `EntryEvent::DefaultsApplied`).
     fn use_as_default(self: &Rc<Self>) {
         let Some((seasons, word)) = self.model.borrow().as_ref().map(|m| {
             let seasons = m.anime.fetch_type() == FetchType::Seasons;
@@ -1577,7 +1577,7 @@ impl View {
             set_item_settings_default(&self.env.prefs, Kind::Anime, word);
             Scope::Episode
         };
-        self.runner.send(AnimeCmd::ApplyDefaultsToLibrary { scope });
+        self.runner.send(EntryCmd::ApplyDefaultsToLibrary { scope });
     }
 }
 
@@ -1586,16 +1586,16 @@ mod tests {
     use super::*;
 
     struct Stub;
-    impl runner::AnimeBackend for Stub {
+    impl runner::EntryBackend for Stub {
         fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
             crate::entry_core::detail::SourceInfo { name: "Stub".into(), stub: true }
         }
-        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::AnimeFetch {
+        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::EntryFetch {
             Box::pin(async { Ok(Vec::new()) })
         }
     }
 
-    fn env_of(store: &AnimeStore) -> Env {
+    fn env_of(store: &EntryStore) -> Env {
         Env { prefs: PrefStore::in_memory(), backend: Arc::new(Stub), db: store.db() }
     }
 
@@ -1603,11 +1603,11 @@ mod tests {
 
     /// A backend whose every fetch fails with `error`; it counts the fetches.
     struct Failing(crate::entry_core::errors::DetailError, std::sync::atomic::AtomicUsize);
-    impl runner::AnimeBackend for Failing {
+    impl runner::EntryBackend for Failing {
         fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
             crate::entry_core::detail::SourceInfo { name: "Src".into(), stub: false }
         }
-        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::AnimeFetch {
+        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::EntryFetch {
             self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let error = self.0.clone();
             Box::pin(async move { Err(error) })
@@ -1627,18 +1627,18 @@ mod tests {
             let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 3, 1);
             for (error, retry) in [(DetailError::Http(503), true), (DetailError::SourceNotInstalled, false)] {
                 let backend = Arc::new(Failing(error.clone(), Default::default()));
-                let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), AnimeLoadContext::default()));
+                let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), EntryLoadContext::default()));
                 let host = gtk::Overlay::new();
                 crate::toast::attach(&host);
                 let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
-                runner.send(AnimeCmd::Load { anime_id: id });
+                runner.send(EntryCmd::Load { anime_id: id });
                 let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
                 assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
                 assert!(
                     !descendants(page.upcast_ref()).iter().any(|w| w.has_css_class("app-notification")),
                     "the page has no notification bar of its own"
                 );
-                runner.send(AnimeCmd::Refresh { anime_id: id });
+                runner.send(EntryCmd::Refresh { anime_id: id });
                 let snack = descendants(host.upcast_ref())
                     .into_iter()
                     .filter_map(|w| w.downcast::<gtk::Revealer>().ok())
@@ -1653,7 +1653,7 @@ mod tests {
                     action.emit_clicked();
                     assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "Retry sends the refresh to the runner");
                 }
-                runner.send(AnimeCmd::Shutdown);
+                runner.send(EntryCmd::Shutdown);
             }
         });
     }
@@ -1670,15 +1670,15 @@ mod tests {
             let rt = kuro_core::runtime::build().expect("runtime");
             let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 0, 0);
             let backend = Arc::new(Failing(DetailError::NoEpisodes, Default::default()));
-            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), AnimeLoadContext::default()));
+            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), EntryLoadContext::default()));
             let host = gtk::Overlay::new();
             crate::toast::attach(&host);
             let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
-            runner.send(AnimeCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { anime_id: id });
             let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
             assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
             let before = backend.1.load(Ordering::SeqCst);
-            runner.send(AnimeCmd::Refresh { anime_id: id });
+            runner.send(EntryCmd::Refresh { anime_id: id });
             assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "the refresh ran and found nothing");
             let until = std::time::Instant::now() + Duration::from_millis(300);
             while std::time::Instant::now() < until {
@@ -1701,7 +1701,7 @@ mod tests {
             let before = backend.1.load(Ordering::SeqCst);
             retry.emit_clicked();
             assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "Retry refreshes again");
-            runner.send(AnimeCmd::Shutdown);
+            runner.send(EntryCmd::Shutdown);
             window.set_child(None::<&gtk::Widget>);
             window.close();
         });
@@ -1719,9 +1719,9 @@ mod tests {
             let category = kuro_testkit::insert_category(&store.db(), Kind::Anime, "Watching");
             let prefs = PrefStore::in_memory();
             kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(category as i32).expect("default category");
-            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), prefs, Arc::new(Stub), AnimeLoadContext::default()));
+            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), prefs, Arc::new(Stub), EntryLoadContext::default()));
             let page = assemble(Rc::clone(&runner), true, env_of(&store));
-            runner.send(AnimeCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { anime_id: id });
             let label = |text: &str| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == text);
             assert!(pump(&ctx, || label("Add to library").is_some()), "the page shows Add to library");
             let button = label("Add to library").and_then(|l| l.ancestor(Button::static_type())).and_downcast::<Button>().expect("the library button");
@@ -1729,7 +1729,7 @@ mod tests {
             assert!(pump(&ctx, || store.anime(id).unwrap().is_some_and(|a| a.favorite)), "the click writes favorite=1");
             assert_eq!(store.category_ids(id).unwrap(), vec![category], "the default category is linked");
             assert!(pump(&ctx, || label("In library").is_some()), "the button turns to In library");
-            runner.send(AnimeCmd::Shutdown);
+            runner.send(EntryCmd::Shutdown);
         });
     }
 
@@ -1745,9 +1745,9 @@ mod tests {
             let rt = kuro_core::runtime::build().expect("runtime");
             let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 3, 1);
             let spawn = |anime_id| {
-                let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), AnimeLoadContext::default()));
+                let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), EntryLoadContext::default()));
                 let page = assemble(Rc::clone(&runner), true, env_of(&store));
-                runner.send(AnimeCmd::Load { anime_id });
+                runner.send(EntryCmd::Load { anime_id });
                 (page, runner)
             };
             let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
@@ -1813,11 +1813,11 @@ mod tests {
 
             // 3000 episodes: the list view builds only the rows on screen, so the page opens without a stall
             let (_big_dir, big_store, big_id) = super::super::store::fixture::with_episodes(true, true, 3000, 10);
-            let big_runner = Rc::new(runner::spawn(rt.handle(), big_store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), AnimeLoadContext::default()));
+            let big_runner = Rc::new(runner::spawn(rt.handle(), big_store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), EntryLoadContext::default()));
             let big = assemble(Rc::clone(&big_runner), true, env_of(&big_store));
             let big_window = gtk::Window::builder().default_width(1000).default_height(700).child(&big).build();
             big_window.present();
-            big_runner.send(AnimeCmd::Load { anime_id: big_id });
+            big_runner.send(EntryCmd::Load { anime_id: big_id });
             let started = std::time::Instant::now();
             let big_list = descendants(big.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::ListView>().ok()).expect("the list view");
             assert!(pump(&ctx, || big_list.model().is_some_and(|m| m.n_items() == 3001)), "3000 rows and the list head");

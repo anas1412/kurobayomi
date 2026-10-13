@@ -85,7 +85,7 @@ impl Texts {
 /// (`shouldExpandFAB`).
 pub fn fab_expanded_at(value: f64, previous: f64, page_size: f64, upper: f64) -> bool {
     let first_visible = usize::from(value > 0.0);
-    crate::entry_core::anime::layout::fab_expanded(first_visible, 0, value < previous, value + page_size < upper - 1.0)
+    crate::entry_core::details::layout::fab_expanded(first_visible, 0, value < previous, value + page_size < upper - 1.0)
 }
 
 /// What a key does on the stores page (T-19a-067, p1-ui-parity section 7).

@@ -24,10 +24,10 @@ use super::directory::SourceDirectory;
 use super::migrate_engine::{CustomImage, Entry, MigrateSteps, MigrateTx, StepFuture, TxWork};
 use super::migrate_merge::{item_updates, merge_item_state};
 use kuro_platform::kind::Kind;
-use crate::entry_core::anime::entry_state::RefreshPlan;
+use crate::entry_core::details::entry_state::RefreshPlan;
 use crate::entry_core::refresh_rules::Trigger;
-use crate::entry_core::anime::remote::{LiveSources, RemoteAnimeBackend};
-use crate::entry_core::anime::runner::AnimeBackend;
+use crate::entry_core::details::remote::{LiveSources, RemoteAnimeBackend};
+use crate::entry_core::details::runner::EntryBackend;
 use crate::entry_core::backend::{Backend, SourceBackend};
 
 pub struct LiveSteps {

@@ -27,7 +27,7 @@ use crate::entry_core::tracking::facts::Summary;
 
 /// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
 #[derive(Clone)]
-pub struct AnimeStore {
+pub struct EntryStore {
     entries: EntryRepo,
     items: ItemRepo,
     categories: CategoryRepo,
@@ -35,7 +35,7 @@ pub struct AnimeStore {
     db: Arc<Db>,
 }
 
-impl AnimeStore {
+impl EntryStore {
     pub fn new(db: Arc<Db>) -> Self {
         Self {
             entries: EntryRepo::new(Arc::clone(&db)),
@@ -193,7 +193,7 @@ pub(crate) mod fixture {
 
     use super::*;
 
-    impl AnimeStore {
+    impl EntryStore {
         pub fn set_fetch_type_for_test(&self, id: i64, fetch_type: FetchType) {
             let update = kuro_data::entry::EntryUpdate { fetch_type: Some(fetch_type), ..kuro_data::entry::EntryUpdate::new(id) };
             self.entries.update(&update).expect("update");
@@ -202,7 +202,7 @@ pub(crate) mod fixture {
 
     /// A migrated temp anime database with one entry (`favorite`, `initialized`) and `episodes` episodes, the first
     /// `seen` of them seen. Keep the `TempDir` alive.
-    pub fn with_episodes(favorite: bool, initialized: bool, episodes: usize, seen: usize) -> (tempfile::TempDir, AnimeStore, i64) {
+    pub fn with_episodes(favorite: bool, initialized: bool, episodes: usize, seen: usize) -> (tempfile::TempDir, EntryStore, i64) {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("test.db");
         let writer = kuro_db::schema_unified::open_file(&path).expect("anime schema");
@@ -230,7 +230,7 @@ pub(crate) mod fixture {
             })
             .collect();
         ItemRepo::new(Arc::clone(&db)).add_all(&list).expect("insert episodes");
-        (dir, AnimeStore::new(db), id)
+        (dir, EntryStore::new(db), id)
     }
 }
 

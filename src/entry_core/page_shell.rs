@@ -8,7 +8,7 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
 use kuro_i18n::{MsgKey, tr};
 
-use crate::entry_core::anime::layout::fab_expanded;
+use crate::entry_core::details::layout::fab_expanded;
 use crate::entry_core::toolbar::{background_opaque, title_opaque};
 use crate::ui;
 

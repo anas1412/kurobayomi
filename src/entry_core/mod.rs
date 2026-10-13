@@ -87,7 +87,7 @@ pub mod list_row;
 pub mod shortcuts;
 
 /// Anime entry details (plan areas 39a and 39b): pure rules for the anime screen.
-pub mod anime;
+pub mod details;
 
 /// Tracking on the entry screens (plan areas 38b and 39b): the pure rules of the track sheet, the pickers, the detached
 /// writes, the search screen, the auto-track prompt and tracker removal.

@@ -4,7 +4,7 @@
 
 /// Every dialog the anime page can show, with the ids it needs. The widgets read the entry for the rest.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AnimeDialog {
+pub enum EntryDialog {
     ChangeCategory { anime_id: i64 },
     DeleteEpisodes(Vec<i64>),
     DuplicateAnime { anime_id: i64, duplicate_id: i64 },
@@ -18,25 +18,25 @@ pub enum AnimeDialog {
 /// The one open dialog, and the one-shot "track sheet after the category dialog" flag.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DialogSlot {
-    current: Option<AnimeDialog>,
+    current: Option<EntryDialog>,
     from_change_category: bool,
 }
 
 impl DialogSlot {
     /// Opens a dialog. It replaces the one on screen (the last request wins).
-    pub fn open(&mut self, dialog: AnimeDialog) {
+    pub fn open(&mut self, dialog: EntryDialog) {
         self.current = Some(dialog);
     }
 
     #[cfg(test)]
-    pub fn current(&self) -> Option<&AnimeDialog> {
+    pub fn current(&self) -> Option<&EntryDialog> {
         self.current.as_ref()
     }
 
     /// The choose-category branch of an add: the category dialog opens and the track sheet may follow its dismiss.
     pub fn open_change_category_from_add(&mut self, anime_id: i64) {
         self.from_change_category = true;
-        self.open(AnimeDialog::ChangeCategory { anime_id });
+        self.open(EntryDialog::ChangeCategory { anime_id });
     }
 
     /// Dismisses the dialog on screen. When the add flow set the flag and auto-open is on, the flag is cleared and the
@@ -45,7 +45,7 @@ impl DialogSlot {
         self.current = None;
         if auto_open_track && self.from_change_category {
             self.from_change_category = false;
-            self.open(AnimeDialog::TrackSheet);
+            self.open(EntryDialog::TrackSheet);
             return true;
         }
         false
@@ -64,9 +64,9 @@ mod tests {
     #[test]
     fn the_last_request_wins_and_dismiss_clears_the_slot() {
         let mut slot = DialogSlot::default();
-        slot.open(AnimeDialog::TrackSheet);
-        slot.open(AnimeDialog::ChangeAnimeSkipIntro);
-        assert_eq!(slot.current(), Some(&AnimeDialog::ChangeAnimeSkipIntro));
+        slot.open(EntryDialog::TrackSheet);
+        slot.open(EntryDialog::ChangeAnimeSkipIntro);
+        assert_eq!(slot.current(), Some(&EntryDialog::ChangeAnimeSkipIntro));
         assert!(!slot.dismiss(false));
         assert_eq!(slot.current(), None);
     }
@@ -78,7 +78,7 @@ mod tests {
         assert!(!slot.dismiss(false), "auto-open is off");
         slot.open_change_category_from_add(3);
         assert!(slot.dismiss(true), "the add flow and auto-open are both on");
-        assert_eq!(slot.current(), Some(&AnimeDialog::TrackSheet));
+        assert_eq!(slot.current(), Some(&EntryDialog::TrackSheet));
         slot.dismiss(true);
         assert!(!slot.dismiss(true), "the flag is one-shot");
     }
@@ -89,7 +89,7 @@ mod tests {
         slot.open_change_category_from_add(3);
         slot.confirm_category();
         assert_eq!(slot.current(), None);
-        slot.open(AnimeDialog::TrackSheet);
+        slot.open(EntryDialog::TrackSheet);
         assert!(slot.dismiss(true), "the flag is not cleared by the confirm");
     }
 }

@@ -12,29 +12,29 @@ use kuro_prefs::store::PrefStore;
 
 use super::bottom::BottomAction;
 use super::dispatch::bottom_cmds;
-use super::model::{AnimeEntryModel, AnimeLoadContext};
-use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeFetch};
+use super::model::{EntryModel, EntryLoadContext};
+use super::runner::{self, EntryBackend, EntryCmd, EntryEvent, EntryFetch};
 use super::store::fixture::with_episodes;
 use crate::entry_core::detail::SourceInfo;
 
 struct Backend;
 
-impl AnimeBackend for Backend {
+impl EntryBackend for Backend {
     fn source_info(&self, _: i64) -> SourceInfo {
         SourceInfo { name: "Fake".into(), stub: false }
     }
 
-    fn fetch(&self, _: i64, _: super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> AnimeFetch {
+    fn fetch(&self, _: i64, _: super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> EntryFetch {
         Box::pin(async { Ok(Vec::new()) })
     }
 }
 
 /// Applies events to `model` until `done` holds for it. A stuck page fails the test after five seconds.
-async fn settle(rx: &Receiver<AnimeEvent>, model: &mut AnimeEntryModel, done: impl Fn(&AnimeEntryModel) -> bool) {
+async fn settle(rx: &Receiver<EntryEvent>, model: &mut EntryModel, done: impl Fn(&EntryModel) -> bool) {
     while !done(model) {
         match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("an event in time").expect("open") {
-            AnimeEvent::Snapshot { anime, episodes } => model.apply_snapshot(*anime, episodes),
-            AnimeEvent::Downloads(on_disk) => model.downloaded = on_disk,
+            EntryEvent::Snapshot { anime, episodes } => model.apply_snapshot(*anime, episodes),
+            EntryEvent::Downloads(on_disk) => model.downloaded = on_disk,
             _ => {}
         }
     }
@@ -45,18 +45,18 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
     let (_dir, store, id) = with_episodes(false, true, 3, 0);
     rt.block_on(async {
-        let runner = runner::spawn(rt.handle(), store, PrefStore::in_memory(), Arc::new(Backend), AnimeLoadContext::default());
-        runner.send(AnimeCmd::Load { anime_id: id });
+        let runner = runner::spawn(rt.handle(), store, PrefStore::in_memory(), Arc::new(Backend), EntryLoadContext::default());
+        runner.send(EntryCmd::Load { anime_id: id });
         let rx = runner.events();
-        let AnimeEvent::Loaded(Some(model)) = rx.recv().await.unwrap() else { panic!("the model first") };
+        let EntryEvent::Loaded(Some(model)) = rx.recv().await.unwrap() else { panic!("the model first") };
         let mut model = *model;
         assert_eq!(model.rows().len(), 3, "no filter: every episode shows");
         assert!(!model.anime.favorite);
 
         // the filter sheet: Unseen. The entry is not in the library, so the store holds the flags it was given.
         model.note_flag_write(ep::SHOW_UNDONE, ep::UNDONE_MASK);
-        runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNDONE, mask: ep::UNDONE_MASK });
-        runner.send(AnimeCmd::SetSeen { ids: vec![model.episodes[0].id], seen: true });
+        runner.send(EntryCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNDONE, mask: ep::UNDONE_MASK });
+        runner.send(EntryCmd::SetSeen { ids: vec![model.episodes[0].id], seen: true });
         settle(&rx, &mut model, |m| m.episodes.iter().filter(|e| e.done).count() == 1).await;
         assert_eq!(model.rows().len(), 2, "the filter hides the seen episode");
         assert_eq!(model.item_header().count, "2 episodes");
@@ -66,7 +66,7 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         let view = model.processed_ids();
         model.selection.toggle_row(&view, unseen_ids[0], crate::entry_core::selection::Command::LongPress);
         let dispatch = bottom_cmds(&model, BottomAction::MarkViewed.effect(), false);
-        assert_eq!(dispatch.cmds, vec![AnimeCmd::SetSeen { ids: vec![unseen_ids[0]], seen: true }]);
+        assert_eq!(dispatch.cmds, vec![EntryCmd::SetSeen { ids: vec![unseen_ids[0]], seen: true }]);
         model.selection.clear();
         for cmd in dispatch.cmds {
             runner.send(cmd);
@@ -76,7 +76,7 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         assert!(model.fab().visible, "an unseen episode is left");
 
         // the library button
-        runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
+        runner.send(EntryCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
         settle(&rx, &mut model, |m| m.anime.favorite).await;
         assert!(model.anime.favorite, "added to the library");
         assert_eq!(model.episodes.iter().filter(|e| e.done).count(), 2, "the seen marks stay");

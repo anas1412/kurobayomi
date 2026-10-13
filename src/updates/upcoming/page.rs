@@ -316,7 +316,7 @@ fn heading(text: &str, count: u32) -> GBox {
 /// Pushes the entry screen of the entry by its id.
 fn open_entry(kind: Kind, id: i64) {
     match kind {
-        Kind::Anime => crate::entry_core::anime::route::open(id),
+        Kind::Anime => crate::entry_core::details::route::open(id),
         Kind::Manga => crate::entry_core::route::open(id),
     }
 }

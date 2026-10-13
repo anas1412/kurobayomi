@@ -41,14 +41,14 @@ use crate::entry_core::selection::Selection;
 use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
 use crate::entry_core::refresh_rules::open_refresh_due;
-use super::store::AnimeStore;
+use super::store::EntryStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::list_model::RowItem;
 
 /// What the load reads besides the rows: values read once at open (behaviour 2.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct AnimeLoadContext {
+pub struct EntryLoadContext {
     pub from_source: bool,
     pub downloaded_only: bool,
     /// When an open-time refresh last found this entry with no episodes (`refresh_rules::last_empty_open_fetch`).
@@ -58,7 +58,7 @@ pub struct AnimeLoadContext {
 }
 
 #[derive(Clone, Debug)]
-pub struct AnimeEntryModel {
+pub struct EntryModel {
     pub flow: EntryFlow,
     pub anime: Entry,
     pub source: SourceInfo,
@@ -87,13 +87,13 @@ pub struct AnimeEntryModel {
     pub season_extras: HashMap<i64, SeasonExtra>,
 }
 
-impl AnimeEntryModel {
+impl EntryModel {
     /// The load sequence. `source_of` resolves the source line (a stub when the extension is missing).
     pub fn load(
-        store: &AnimeStore,
+        store: &EntryStore,
         prefs: &PrefStore,
         anime_id: i64,
-        ctx: AnimeLoadContext,
+        ctx: EntryLoadContext,
         source_of: impl FnOnce(i64) -> SourceInfo,
     ) -> DataResult<Option<Self>> {
         let Some(mut anime) = store.anime(anime_id)? else {
@@ -344,9 +344,9 @@ mod tests {
     use super::super::store::fixture::with_episodes;
     use super::*;
 
-    fn load(store: &AnimeStore, id: i64) -> AnimeEntryModel {
+    fn load(store: &EntryStore, id: i64) -> EntryModel {
         let source = |_| SourceInfo { name: "Fake".into(), stub: false };
-        AnimeEntryModel::load(store, &PrefStore::in_memory(), id, AnimeLoadContext::default(), source)
+        EntryModel::load(store, &PrefStore::in_memory(), id, EntryLoadContext::default(), source)
             .unwrap()
             .expect("the entry exists")
     }
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn a_missing_entry_loads_as_none() {
         let (_dir, store, _) = with_episodes(true, true, 0, 0);
-        let none = AnimeEntryModel::load(&store, &PrefStore::in_memory(), 4242, AnimeLoadContext::default(), |_| SourceInfo::default());
+        let none = EntryModel::load(&store, &PrefStore::in_memory(), 4242, EntryLoadContext::default(), |_| SourceInfo::default());
         assert!(none.unwrap().is_none());
     }
 
@@ -378,8 +378,8 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
         let source = |_| SourceInfo { name: "Fake".into(), stub: false };
         let load_at = |last: Option<i64>, now: i64| {
-            let ctx = AnimeLoadContext { last_empty_open_fetch_ms: last, now_ms: now, ..Default::default() };
-            AnimeEntryModel::load(&store, &PrefStore::in_memory(), id, ctx, source).unwrap().unwrap()
+            let ctx = EntryLoadContext { last_empty_open_fetch_ms: last, now_ms: now, ..Default::default() };
+            EntryModel::load(&store, &PrefStore::in_memory(), id, ctx, source).unwrap().unwrap()
         };
         assert!(load_at(None, 0).plan.episodes, "never fetched: fetch");
         assert!(!load_at(Some(1_000), 1_001).plan.episodes, "a second open within ten minutes waits");
@@ -580,7 +580,7 @@ mod tests {
         use crate::entry_core::download_menu::DownloadAmount;
         let (_dir, store, id) = with_episodes(true, true, 4, 1);
         let mut model = load(&store, id);
-        let by_number = |model: &AnimeEntryModel, n: f64| model.episodes.iter().find(|e| e.number == n).unwrap().id;
+        let by_number = |model: &EntryModel, n: f64| model.episodes.iter().find(|e| e.number == n).unwrap().id;
         model.downloaded.insert(by_number(&model, 3.0));
         // the default list is descending; episode 1 is seen and episode 3 is on disk
         assert_eq!(model.download_targets(DownloadAmount::AllUnread), vec![by_number(&model, 2.0), by_number(&model, 4.0)], "everything queues in watching order");
@@ -614,7 +614,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 2, 0);
         let mut model = load(&store, id);
         let ep = model.episodes[0].id;
-        let row = |model: &AnimeEntryModel| model.rows().into_iter().find(|r| r.id == ep).unwrap();
+        let row = |model: &EntryModel| model.rows().into_iter().find(|r| r.id == ep).unwrap();
         assert_eq!((row(&model).download, row(&model).progress), (DownloadState::NotDownloaded, 0));
         assert!(row(&model).indicator && row(&model).indicator_enabled);
         model.apply_live(ep, DownloadState::Downloading, 40);

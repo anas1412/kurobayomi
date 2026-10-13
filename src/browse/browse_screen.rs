@@ -201,7 +201,7 @@ pub fn visible_page() -> String {
 pub fn open_entry(kind: Kind, id: i64) {
     match kind {
         Kind::Manga => crate::entry_core::route::open(id),
-        Kind::Anime => crate::entry_core::anime::route::open(id),
+        Kind::Anime => crate::entry_core::details::route::open(id),
     }
 }
 

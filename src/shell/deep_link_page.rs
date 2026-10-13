@@ -225,7 +225,7 @@ pub fn open_search(kind: Kind, query: &str) {
 fn run(nav: &Nav) {
     match nav {
         Nav::GlobalSearch { kind, query } => open_search(*kind, query),
-        Nav::Entry { kind: Kind::Anime, id } | Nav::Child { kind: Kind::Anime, entry_id: id, .. } => crate::entry_core::anime::route::open(*id),
+        Nav::Entry { kind: Kind::Anime, id } | Nav::Child { kind: Kind::Anime, entry_id: id, .. } => crate::entry_core::details::route::open(*id),
         Nav::Entry { kind: Kind::Manga, id } => crate::entry_core::route::open(*id),
         Nav::Child { kind: Kind::Manga, entry_id, child_id } => crate::ui::push(&crate::reader::launch::open_chapter(*entry_id, *child_id)),
     }

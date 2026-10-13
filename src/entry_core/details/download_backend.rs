@@ -16,12 +16,12 @@ use crate::updates::download_host::{self, DownloadBackend};
 
 /// The anime downloads of the page, over the one download service (`updates::download_host`), the same path the manga
 /// page takes.
-pub struct AnimeDownloads {
+pub struct EntryDownloads {
     host: Arc<dyn DownloadBackend>,
     can_enqueue: bool,
 }
 
-impl AnimeDownloads {
+impl EntryDownloads {
     /// Over the app's download service. Call it on the GTK thread: the service is found through the shell.
     pub fn new() -> Self {
         let service = crate::shell::host::Shell::get().is_some_and(|shell| shell.download_service().is_some());
@@ -94,7 +94,7 @@ mod tests {
 
         let fake = Arc::new(Fake::installed());
         fake.disk.lock().unwrap().push(2);
-        let downloads = AnimeDownloads::over(fake.clone(), true);
+        let downloads = EntryDownloads::over(fake.clone(), true);
         assert!(downloads.can_enqueue());
         assert_eq!(downloads.downloaded(&anime(), &episodes(3), &info()), HashSet::from([2]));
 
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn without_the_service_nothing_is_queued() {
-        let downloads = AnimeDownloads::over(Arc::new(crate::updates::download_host::fake::Fake::default()), false);
+        let downloads = EntryDownloads::over(Arc::new(crate::updates::download_host::fake::Fake::default()), false);
         assert!(!downloads.can_enqueue());
         assert!(!downloads.enqueue(&anime(), &episodes(1), &info(), false));
     }

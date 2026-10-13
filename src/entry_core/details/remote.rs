@@ -29,11 +29,11 @@ use kuro_source::anime::{AnimeSource, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonU
 use tokio::runtime::Handle;
 
 use super::entry_state::RefreshPlan;
-use super::download_backend::AnimeDownloads;
+use super::download_backend::EntryDownloads;
 use crate::entry_core::refresh_rules::Trigger;
-use super::runner::{AnimeBackend, AnimeFetch, StubAnimeBackend};
+use super::runner::{EntryBackend, EntryFetch, StubEntryBackend};
 use super::season_fetch::fetch_episodes_of;
-use super::store::AnimeStore;
+use super::store::EntryStore;
 use crate::browse::errors::limited;
 use crate::entry_core::backend::NoCoverFiles;
 use crate::entry_core::detail::SourceInfo;
@@ -164,12 +164,12 @@ impl ListSync for EpisodeListSync {
 
 /// The backend of the anime page over a source lookup.
 pub struct RemoteAnimeBackend {
-    stubs: StubAnimeBackend,
+    stubs: StubEntryBackend,
     lookup: Arc<dyn AnimeSourceLookup>,
     store: Arc<DbRemoteStore>,
     update: Arc<UpdateFromRemote>,
-    episodes: AnimeStore,
-    downloads: Option<AnimeDownloads>,
+    episodes: EntryStore,
+    downloads: Option<EntryDownloads>,
 }
 
 impl RemoteAnimeBackend {
@@ -180,11 +180,11 @@ impl RemoteAnimeBackend {
         let list_sync = EpisodeListSync { sync, seasons: SyncSeasons::new(Arc::clone(&db)), handle, mark_duplicate_done };
         let store = Arc::new(DbRemoteStore::new(Arc::clone(&db)));
         let update = Arc::new(UpdateFromRemote::new(store.clone(), Arc::new(list_sync), Arc::new(NoCoverFiles)));
-        Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None }
+        Self { stubs: StubEntryBackend::new(Arc::clone(&db)), lookup, store, update, episodes: EntryStore::new(db), downloads: None }
     }
 
     /// Gives the backend the downloads of the page: the downloads folder and the app's queue.
-    pub fn with_downloads(mut self, downloads: AnimeDownloads) -> Self {
+    pub fn with_downloads(mut self, downloads: EntryDownloads) -> Self {
         self.downloads = Some(downloads);
         self
     }
@@ -198,7 +198,7 @@ impl RemoteAnimeBackend {
     }
 }
 
-impl AnimeBackend for RemoteAnimeBackend {
+impl EntryBackend for RemoteAnimeBackend {
     fn has_logged_in_tracker(&self) -> bool {
         crate::entry_core::tracking::session::has_logged_in()
     }
@@ -210,7 +210,7 @@ impl AnimeBackend for RemoteAnimeBackend {
         self.lookup.info(source_id).unwrap_or_else(|| self.stubs.source_info(source_id))
     }
 
-    fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> AnimeFetch {
+    fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> EntryFetch {
         let (store, update, lookup) = (Arc::clone(&self.store), Arc::clone(&self.update), Arc::clone(&self.lookup));
         let season_episodes = crate::misc::diet_defaults::LIBRARY_UPDATE_SEASON;
         Box::pin(async move {
@@ -268,7 +268,7 @@ impl AnimeBackend for RemoteAnimeBackend {
     }
 
     fn has_download_handler(&self) -> bool {
-        self.downloads.as_ref().is_some_and(AnimeDownloads::can_enqueue)
+        self.downloads.as_ref().is_some_and(EntryDownloads::can_enqueue)
     }
 
     fn downloaded_episodes(&self, anime_id: i64) -> HashSet<i64> {
@@ -413,7 +413,7 @@ mod tests {
     }
 
     /// Refreshes a parent that lists seasons from `source`: the temp dir to keep alive, the ids of the stored seasons and the store.
-    fn season_refresh(rt: &tokio::runtime::Runtime, source: &Arc<FakeSource>) -> (tempfile::TempDir, Vec<i64>, AnimeStore) {
+    fn season_refresh(rt: &tokio::runtime::Runtime, source: &Arc<FakeSource>) -> (tempfile::TempDir, Vec<i64>, EntryStore) {
         let (dir, store, id) = with_episodes(true, true, 0, 0);
         store.set_fetch_type_for_test(id, FetchType::Seasons);
         let prefs = PrefStore::in_memory();

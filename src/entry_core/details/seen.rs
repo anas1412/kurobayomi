@@ -1,6 +1,6 @@
 //! Mark seen and unseen (T-39b-013) and mark previous episodes as seen (T-39b-014). Upstream:
 //! `domain/.../items/episode/interactor/SetSeenStatus.kt` and `AnimeScreenModel.kt:855-866`. The plan is the shared one
-//! of both pages (`readstate::plan_done`); `AnimeStore::set_seen` writes it.
+//! of both pages (`readstate::plan_done`); `EntryStore::set_seen` writes it.
 
 use std::collections::HashSet;
 

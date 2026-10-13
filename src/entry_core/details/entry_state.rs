@@ -1,5 +1,5 @@
 //! First-open refresh decision and load state of the anime entry (T-39b-001). Upstream: `AnimeScreenModel.kt` (init and
-//! `needRefresh*`), behaviour 2.3. The load sequence itself is `model::AnimeEntryModel::load`; this module holds the
+//! `needRefresh*`), behaviour 2.3. The load sequence itself is `model::EntryModel::load`; this module holds the
 //! decisions and the state flags that the sequence sets.
 
 /// The load state of the page. Dispatches are ignored while `Loading`.
