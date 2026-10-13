@@ -2,13 +2,19 @@
 //! links: the first one whose `uri_type` recognises it looks the manga up, and the entry opens. Only when none does, or
 //! the lookup finds nothing, the text is searched in the catalogues like any query.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use kuro_source::model::SManga;
+#[cfg(test)]
 use kuro_source::{DeepLinkOutcome, ResolvableSource, resolve_deep_link};
 
+#[cfg(test)]
 use super::listing::{LinkFuture, ListItem};
+#[cfg(test)]
 use super::pending::SearchIntent;
+#[cfg(test)]
 use kuro_platform::kind::Kind;
 
 /// Whether `text` is a link a source could own: an `http` or `https` URL with a host.
@@ -16,6 +22,7 @@ pub fn is_link(text: &str) -> bool {
     reqwest::Url::parse(text.trim()).is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
 }
 
+#[cfg(test)]
 /// The global search a `kurobayomi://animesearch?query=<text>&filter=<package name>` link asks for (T-41b-037). A missing
 /// `query` is blank, which still opens the page; a missing `filter` is no extension filter. Any other link is `None`.
 pub fn anime_search_intent(uri: &str) -> Option<SearchIntent> {
@@ -27,11 +34,13 @@ pub fn anime_search_intent(uri: &str) -> Option<SearchIntent> {
     Some(SearchIntent { query: param("query").unwrap_or_default(), extension: param("filter"), kind: Kind::Anime })
 }
 
+#[cfg(test)]
 /// Opens global search for an `animesearch` link; `false` when `uri` is not one.
 pub fn open_anime_search_link(uri: &str) -> bool {
     anime_search_intent(uri).map(super::pending::open_search_intent).is_some()
 }
 
+#[cfg(test)]
 /// The lookup of `uri` over `sources`, in list order (`resolve_deep_link`). `to_item` turns the resolved manga into its
 /// library row, given the id of the source that resolved it; `None` from it, or no source recognising the link, is no
 /// result.

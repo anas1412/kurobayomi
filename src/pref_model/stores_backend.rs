@@ -21,6 +21,7 @@ pub struct Card {
     pub note: Option<String>,
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// How an add ended.
 pub enum AddOutcome {
     Added,

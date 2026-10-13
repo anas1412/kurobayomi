@@ -12,7 +12,9 @@ use kuro_domain::source::model::Source;
 use kuro_domain::source::pin::Pin;
 
 use super::listing::ListItem;
-use super::pages::{GlobalSearchSnapshot, SearchChips, SearchRow, SearchState, SourceFilter, visible_rows};
+use super::pages::{GlobalSearchSnapshot, SearchRow, SearchState, SourceFilter};
+#[cfg(test)]
+use super::pages::{SearchChips, visible_rows};
 use super::route::BrowseRoute;
 use kuro_platform::kind::Kind;
 
@@ -197,6 +199,7 @@ impl GlobalSearch {
         (self.rows.iter().filter(|row| !matches!(row.state, SearchState::Loading)).count(), self.rows.len())
     }
 
+    #[cfg(test)]
     /// The rows the chips leave (`visible_rows`), in result order.
     pub fn visible(&self) -> Vec<&SearchRow> {
         visible_rows(&self.rows, SearchChips { filter: self.filter, only_has_results: self.only_has_results })
@@ -206,6 +209,7 @@ impl GlobalSearch {
         &self.rows
     }
 
+    #[cfg(test)]
     pub fn filter(&self) -> SourceFilter {
         self.filter
     }

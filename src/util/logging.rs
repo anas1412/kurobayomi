@@ -3,11 +3,14 @@
 //! Two `tracing` targets carry what the shell does with a launch request and with a notice action. The verbose preference
 //! (`verbose_logging`) turns them up; with it off, only warnings and the action name are logged, never the payload.
 
+#[cfg(test)]
 /// Launch requests: argv, deep links, desktop actions.
 pub const LAUNCH_TARGET: &str = "kurobayomi::launch";
+#[cfg(test)]
 /// Notice actions sent through `app.notice`.
 pub const NOTICE_TARGET: &str = "kurobayomi::notice";
 
+#[cfg(test)]
 /// The filter directives for the two targets, to add to the subscriber's filter. They follow
 /// `kuro_core::logging::level_for`: everything with verbose on, warnings only with it off.
 pub fn directives(verbose: bool) -> String {
@@ -15,12 +18,14 @@ pub fn directives(verbose: bool) -> String {
     format!("{LAUNCH_TARGET}={level},{NOTICE_TARGET}={level}")
 }
 
+#[cfg(test)]
 /// What to log for an action: the name alone with verbose off; with verbose on the name and the payload, with secrets in
 /// URL query and fragment values replaced by `<redacted>` (an OAuth return carries a token).
 pub fn describe(verbose: bool, action: &str, payload: &str) -> String {
     if verbose && !payload.is_empty() { format!("{action}: {}", redact(payload)) } else { action.to_owned() }
 }
 
+#[cfg(test)]
 /// Replaces the value of every `key=value` pair after `?`, `&` or `#` whose key looks secret.
 fn redact(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -43,19 +48,10 @@ fn redact(text: &str) -> String {
     out
 }
 
+#[cfg(test)]
 fn is_secret(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     ["token", "code", "secret", "password", "state", "key"].iter().any(|word| key.contains(word))
-}
-
-/// Logs a launch request on the launch target.
-pub fn log_launch(verbose: bool, action: &str, payload: &str) {
-    tracing::debug!(target: "kurobayomi::launch", "{}", describe(verbose, action, payload));
-}
-
-/// Logs a notice action on the notice target.
-pub fn log_notice(verbose: bool, action: &str, payload: &str) {
-    tracing::debug!(target: "kurobayomi::notice", "{}", describe(verbose, action, payload));
 }
 
 #[cfg(test)]

@@ -68,9 +68,6 @@ impl FakeStore {
         Self { library, favorites: Mutex::new(favorites), ..Self::default() }
     }
 
-    pub fn unfavourite(&self, id: i64) {
-        self.favorites.lock().unwrap().remove(&id);
-    }
 }
 
 impl LibraryStore for FakeStore {

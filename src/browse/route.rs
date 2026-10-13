@@ -32,6 +32,7 @@ impl BrowsePage {
         }
     }
 
+    #[cfg(test)]
     /// The tab label.
     pub fn title(self) -> String {
         use kuro_i18n::MsgKey as K;
@@ -44,6 +45,7 @@ impl BrowsePage {
     }
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The browse routes. `kind` says which catalogue the page belongs to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BrowseRoute {
@@ -81,14 +83,17 @@ pub fn search_listing(query: &str) -> BrowseQuery {
     BrowseQuery::Search(query.to_owned())
 }
 
+#[cfg(test)]
 /// Search box debounce (B§5.1).
 pub const SEARCH_DEBOUNCE_MS: u64 = 250;
 
+#[cfg(test)]
 /// True once the search text has been still for the debounce period.
 pub fn search_due(last_edit_ms: u64, now_ms: u64) -> bool {
     now_ms.saturating_sub(last_edit_ms) >= SEARCH_DEBOUNCE_MS
 }
 
+#[cfg(test)]
 /// Milliseconds until the debounce is due (0 once it is), measured from the last edit.
 pub fn search_wait_ms(last_edit_ms: u64, now_ms: u64) -> u64 {
     SEARCH_DEBOUNCE_MS.saturating_sub(now_ms.saturating_sub(last_edit_ms))

@@ -1,6 +1,7 @@
 //! Android features this port does not carry, each with the reason and what replaces it (T-36a-064, T-36a-068). The
 //! drop decisions live here so the code and its tests name them; a feature listed here has no route or screen.
 
+#[cfg(test)]
 /// One dropped feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Drop {
@@ -10,6 +11,7 @@ pub struct Drop {
     pub replacement: &'static str,
 }
 
+#[cfg(test)]
 pub const DROPS: [Drop; 4] = [
     Drop {
         feature: "assist content (AssistContentScreen)",

@@ -28,6 +28,7 @@ pub fn install(sheet: impl Fn(QualityRequest) + 'static) {
     SHEET.with(|s| *s.borrow_mut() = Some(Rc::new(sheet)));
 }
 
+#[cfg(test)]
 /// Whether a sheet is registered.
 pub fn available() -> bool {
     SHEET.with(|s| s.borrow().is_some())

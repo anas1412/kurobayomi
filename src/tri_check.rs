@@ -44,8 +44,8 @@ fn show(button: &gtk::CheckButton, state: &State) {
     button.set_active(active);
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct TriCheck {
     button: gtk::CheckButton,
     model: Rc<Model>,
@@ -78,21 +78,9 @@ pub fn tri_check(initial: State, on_change: impl Fn(State) + 'static) -> TriChec
     TriCheck { button, model }
 }
 
-#[allow(dead_code)] // `state` and `set_state` are the widget's API; the filter sheets call them as they land
 impl TriCheck {
     pub fn widget(&self) -> &gtk::CheckButton {
         &self.button
-    }
-
-    #[cfg(test)]
-    pub fn state(&self) -> State {
-        self.model.state.borrow().clone()
-    }
-
-    #[cfg(test)]
-    /// Changes the state and the look without calling `on_change`.
-    pub fn set_state(&self, state: State) {
-        self.model.set_state(state, &|s| show(&self.button, s));
     }
 
     /// Cycles as a click does (used by the list row that holds the check).

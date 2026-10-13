@@ -2,14 +2,20 @@
 //! navigation steps in order, the notification to withdraw and whether the window may be shown. A request whose `ready`
 //! is false is not for the window (Kotlin `return false`).
 
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use kuro_platform::deep_link::DeepLink;
 
+#[cfg(test)]
 use crate::shell::argv::{self, LaunchRequest, RouteError};
+#[cfg(test)]
 use kuro_platform::kind::Kind;
+#[cfg(test)]
 use crate::shell::uri::{self, UriError, UriRoute};
 
+#[cfg(test)]
 /// The extras of a notification dismiss (`notificationId` and `groupId`, behaviour 4.1 step 1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Dismissal {
@@ -18,12 +24,14 @@ pub struct Dismissal {
     pub group_id: i32,
 }
 
+#[cfg(test)]
 /// The dismiss extras as an intent carries them. A missing id or a negative one (Kotlin `> -1`) dismisses nothing.
 pub fn dismissal(notification_id: Option<i32>, group_id: Option<i32>) -> Option<Dismissal> {
     let id = notification_id.filter(|id| *id >= 0)?;
     Some(Dismissal { id, group_id: group_id.unwrap_or(0) })
 }
 
+#[cfg(test)]
 /// One inbound request. `Launch` wraps the requests the argv, URI and GApplication code already parse.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Intent {
@@ -33,6 +41,7 @@ pub enum Intent {
     ExtSearch { kind: Kind, query: String, filter: Option<String> },
 }
 
+#[cfg(test)]
 /// A page a navigation step pushes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Screen {
@@ -42,6 +51,7 @@ pub enum Screen {
     ExtensionStores { url: String },
 }
 
+#[cfg(test)]
 /// One navigation step, applied in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NavAction {
@@ -51,6 +61,7 @@ pub enum NavAction {
     Push(Screen),
 }
 
+#[cfg(test)]
 /// What routing decided for one request.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Routed {
@@ -63,6 +74,7 @@ pub struct Routed {
     pub ready: bool,
 }
 
+#[cfg(test)]
 impl Routed {
     fn to(actions: Vec<NavAction>) -> Self {
         Self { actions, ready: true, ..Self::default() }
@@ -73,6 +85,7 @@ impl Routed {
     }
 }
 
+#[cfg(test)]
 /// The shortcut actions of the `.desktop` file (the 11 Kotlin `Constants` shortcuts, behaviour 4.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShortcutAction {
@@ -89,6 +102,7 @@ pub enum ShortcutAction {
     AnimeDownloads,
 }
 
+#[cfg(test)]
 impl ShortcutAction {
     pub fn from_desktop(name: &str) -> Option<Self> {
         Some(match name {
@@ -134,6 +148,7 @@ impl ShortcutAction {
     }
 }
 
+#[cfg(test)]
 /// Routes one request. Pure: the window applies the result.
 pub fn route_request(intent: &Intent) -> Routed {
     match intent {
@@ -143,6 +158,7 @@ pub fn route_request(intent: &Intent) -> Routed {
     }
 }
 
+#[cfg(test)]
 fn launch(request: &LaunchRequest) -> Routed {
     match request {
         LaunchRequest::Action { name, id } => shortcut(name, *id),
@@ -154,6 +170,7 @@ fn launch(request: &LaunchRequest) -> Routed {
     }
 }
 
+#[cfg(test)]
 fn shortcut(name: &str, id: Option<i64>) -> Routed {
     let Some(action) = ShortcutAction::from_desktop(name) else {
         return Routed::failed(RouteError::UnknownAction(name.into()), false);
@@ -166,6 +183,7 @@ fn shortcut(name: &str, id: Option<i64>) -> Routed {
     }
 }
 
+#[cfg(test)]
 /// The global search of `kind`, then (for a search request) the deep-link page of the same query on top. An empty query
 /// does nothing.
 fn global_search(kind: Kind, query: &str, filter: Option<String>, deep_link: bool) -> Vec<NavAction> {
@@ -179,6 +197,7 @@ fn global_search(kind: Kind, query: &str, filter: Option<String>, deep_link: boo
     out
 }
 
+#[cfg(test)]
 /// A backup file opens the restore page. Any other file is ignored.
 fn restore(path: &Path) -> Vec<NavAction> {
     if path.extension().is_some_and(|e| e == "tachibk") {
@@ -188,6 +207,7 @@ fn restore(path: &Path) -> Vec<NavAction> {
     }
 }
 
+#[cfg(test)]
 fn open_uri(link: &str) -> Routed {
     match uri::parse_uri(link) {
         Ok(UriRoute::MangaRepos { url } | UriRoute::AnimeStores { url }) => Routed::to(store(url)),
@@ -199,6 +219,7 @@ fn open_uri(link: &str) -> Routed {
     }
 }
 
+#[cfg(test)]
 fn store(url: String) -> Vec<NavAction> {
     vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { url })]
 }

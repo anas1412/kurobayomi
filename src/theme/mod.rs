@@ -23,7 +23,6 @@
 //! - `MinMaxNumberPicker` and `MaterialSpinnerView`: numeric settings use `gtk::SpinButton`.
 //! - Widget corner radii (`appwidget_*`): there is no home-screen widget on Linux.
 //! - `ActionButton.Overflow` and the unused AppCompat full-screen style: no reference in the app.
-#![allow(dead_code)]
 
 pub mod anim;
 pub mod app_theme;
@@ -63,11 +62,6 @@ thread_local! {
     /// The window's size class, updated by `attach_window`. `Compact` until the first layout.
     static WINDOW_CLASS: std::cell::Cell<size_class::WindowClass> =
         const { std::cell::Cell::new(size_class::WindowClass::Compact) };
-}
-
-/// The current window size class (T-49a-021). Read by the layouts that branch on it.
-pub fn window_class() -> size_class::WindowClass {
-    WINDOW_CLASS.with(std::cell::Cell::get)
 }
 
 /// Installs the theme before the first window: the icon bundle, the stored choice (read from the

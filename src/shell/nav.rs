@@ -2,11 +2,14 @@
 //!
 //! `Navigator` is pure.
 
+#[cfg(test)]
 use kuro_platform::kind::Kind;
 
 /// Duration of a forward or back slide, in milliseconds (T-36a-002).
 pub const TRANSITION_MS: u32 = 250;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
+#[cfg(test)]
 /// One page of the stack. Only `Home` is ever the root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
@@ -18,6 +21,7 @@ pub enum Route {
     RestoreBackup { uri: String },
 }
 
+#[cfg(test)]
 /// Direction of the last stack change. A pop slides back; everything else slides forward.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -25,6 +29,7 @@ pub enum Direction {
     Back,
 }
 
+#[cfg(test)]
 /// The stack of routes. The invariant `stack[0] == Route::Home` holds for its whole life.
 #[derive(Debug)]
 pub struct Navigator {
@@ -32,12 +37,14 @@ pub struct Navigator {
     last: Direction,
 }
 
+#[cfg(test)]
 impl Default for Navigator {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(test)]
 impl Navigator {
     pub fn new() -> Self {
         Self { stack: vec![Route::Home], last: Direction::Forward }

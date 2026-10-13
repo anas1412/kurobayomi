@@ -25,6 +25,7 @@ use crate::updates::storage_data;
 use crate::updates::storage_screen::StorageScreen;
 use crate::updates::updates_screen::UpdatesScreen;
 
+#[cfg(test)]
 /// The stack page names of the kind switcher; anime comes first.
 const ANIME: &str = "anime";
 const MANGA: &str = "manga";

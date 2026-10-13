@@ -70,7 +70,6 @@ pub struct CoverSize {
 
 pub const SMALL: CoverSize = CoverSize { width: 40, height: 56 };
 pub const MEDIUM: CoverSize = CoverSize { width: 53, height: 80 };
-pub const BOOK: CoverSize = CoverSize { width: 64, height: 96 };
 
 /// One `ArtRef` for the cover of an entry: the one place the struct is filled in by name.
 /// The cover reference of a stored entry, for a cover drawn outside the library and browse lists (seasons, related titles).

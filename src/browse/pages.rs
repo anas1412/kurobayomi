@@ -22,18 +22,24 @@ use super::filters::SourceFilters;
 use super::grid::list_height;
 use super::header::OverflowItem;
 use super::header_bar::{HeaderDeps, SourceHeader, build as build_header, stub_header};
+#[cfg(test)]
 use super::icons::resolve;
 use super::listing::ListItem;
 use super::nav::{BackAction, action_url, back_action};
 use super::listing_view::{ListingDeps, ListingView};
-use super::names::{localized_display_name, subtitle_display_name};
+use super::names::subtitle_display_name;
+#[cfg(test)]
+use super::names::localized_display_name;
 use super::primitives::{ToastSpec, stub_source_label};
 use super::route::search_listing;
 use crate::widgets::view_options::{Item as MenuItem, Pick, Section, ViewOptions};
+#[cfg(test)]
 use super::sources::LOCAL_SOURCE_ID;
 use super::sources_page::{SourcesNav, SourcesPage};
-use super::view::{CoverLoader, list_row, source_row};
+use super::view::{CoverLoader, list_row};
 use crate::widgets::context_menu::{self, Item};
+#[cfg(test)]
+use super::view::source_row;
 
 /// `sources`: the installed-sources tab of one kind.
 pub fn sources(nav: SourcesNav, ready: watch::Receiver<bool>) -> SourcesPage {
@@ -42,6 +48,7 @@ pub fn sources(nav: SourcesNav, ready: watch::Receiver<bool>) -> SourcesPage {
 
 // ---------- migrate_sources ----------
 
+#[cfg(test)]
 /// The migration source picker: the sorted sources with their favourite counts, and the sort the list is in.
 #[derive(Clone, Debug)]
 pub struct MigrateSourcesSnapshot {
@@ -55,6 +62,7 @@ pub struct MigrateSourcesSnapshot {
     pub error: Option<String>,
 }
 
+#[cfg(test)]
 pub struct MigrateSourcesNav {
     /// A row: the favourites of that source.
     pub open: Rc<dyn Fn(i64)>,
@@ -66,6 +74,7 @@ pub struct MigrateSourcesNav {
     pub retry: Rc<dyn Fn()>,
 }
 
+#[cfg(test)]
 pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     // the prompt and the help button head the list column, as a section heading would
@@ -108,6 +117,7 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
     root
 }
 
+#[cfg(test)]
 /// The badge of a migrate source row, in words: how many library entries come from it.
 pub fn migrate_count(count: impl std::fmt::Display) -> String {
     format!("{count} in library")
@@ -169,6 +179,7 @@ pub fn cover_menu(item: &ListItem, open: Rc<dyn Fn(&ListItem)>, flow: Option<Rc<
     items
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// One source's listing with its header, search and Popular, Latest and Filter chips.
 pub struct BrowseSourcePage {
     pub root: gtk::Box,
@@ -576,11 +587,13 @@ impl GlobalSearchPage {
         self.actions.clone()
     }
 
+    #[cfg(test)]
     /// The progress bar's fraction while it shows, `None` while it is hidden.
     pub fn progress(&self) -> Option<f64> {
         self.view.progress.is_visible().then(|| self.view.progress.fraction())
     }
 
+    #[cfg(test)]
     pub fn update(&self, snapshot: &GlobalSearchSnapshot) {
         draw(&self.entry, &self.view, snapshot);
     }
@@ -588,11 +601,6 @@ impl GlobalSearchPage {
     /// The hint of the empty search box. The anime page says "Search a source by title" (T-41a-027).
     pub fn set_hint(&self, hint: &str) {
         self.entry.set_placeholder_text(Some(hint));
-    }
-
-    /// The text in the search box, as typed: a source row opens its browse page with it (GS-EC-15).
-    pub fn typed(&self) -> String {
-        self.view.typed.borrow().clone()
     }
 
     /// `update` as a closure that holds the page's contents but not the page widget itself, so a model that owns it does not
@@ -984,6 +992,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[allow(dead_code)] // kept for the shape of the type; not built or read yet
     struct Rig {
         page: SourcePage,
         script: Arc<Script>,

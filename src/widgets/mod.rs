@@ -1,6 +1,5 @@
 //! Reusable GTK widgets (T-49a-022 to T-49a-055). Each file holds pure helpers with unit tests and
 //! thin GTK builders on top. CSS classes come from `theme::style` and `theme::css`.
-#![allow(dead_code)]
 
 pub mod download_button;
 pub mod page_header;

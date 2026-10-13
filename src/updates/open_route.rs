@@ -32,6 +32,7 @@ thread_local! {
     static EXTERNAL: RefCell<Option<Launcher>> = const { RefCell::new(None) };
 }
 
+#[cfg(test)]
 /// Registers the external player launcher: it gets the entry id and the unit id and says whether it launched.
 pub fn install_external(launcher: impl Fn(i64, i64) -> bool + 'static) {
     EXTERNAL.with(|l| *l.borrow_mut() = Some(Rc::new(launcher)));

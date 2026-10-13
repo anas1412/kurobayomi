@@ -3,7 +3,6 @@
 //! `bind` seeds a widget from `Pref::get()` and then follows the preference. A widget never changes on a UI
 //! write: the write goes through `write` (`Pref::set`) and the widget updates when the change comes back through
 //! the watch, the same path another window's write takes.
-#![allow(dead_code)] // wired by the settings and reader screens as they land
 
 use std::time::Duration;
 
@@ -40,6 +39,7 @@ where
     });
 }
 
+#[cfg(test)]
 /// A write from the UI. It does not touch any widget; bound widgets follow once the store echoes the change. A save
 /// failure keeps the value in memory and is logged.
 pub fn write<T: PrefType>(pref: &Pref<T>, value: T) {

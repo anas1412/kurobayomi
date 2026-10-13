@@ -55,10 +55,6 @@ fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, then: 
 }
 
 impl FavoriteFlow {
-    #[cfg(test)]
-    pub fn new(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks) -> Rc<Self> {
-        Self::new_for(store, anchor, hooks, Kind::Manga)
-    }
 
     /// `kind` is the kind of the page.
     pub fn new_for(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks, kind: Kind) -> Rc<Self> {

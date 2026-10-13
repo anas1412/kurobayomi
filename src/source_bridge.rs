@@ -10,7 +10,6 @@ use tokio_util::sync::CancellationToken;
 
 /// Runs `call` on the runtime and passes its value to `deliver` on the GTK main context.
 // No call site until the source screens land (T-01a-037 wiring).
-#[allow(dead_code)]
 pub fn call_on_main<T, Call, Deliver>(call: Call, deliver: Deliver)
 where
     T: Send + 'static,
@@ -22,7 +21,6 @@ where
 
 /// As [`call_on_main`], but the call is dropped when `cancel` fires, and then `deliver` never runs.
 // No call site until the source screens land (T-01a-037 wiring).
-#[allow(dead_code)]
 pub fn call_cancellable<T, Call, Deliver>(cancel: CancellationToken, call: Call, deliver: Deliver)
 where
     T: Send + 'static,
@@ -46,16 +44,17 @@ where
     });
 }
 
+#[cfg(test)]
 /// The request of the browse listing on screen. A new listing cancels the one before it (T-15a-050).
 // No call site until the source screens land (T-01a-037 wiring).
-#[allow(dead_code)]
 #[derive(Default)]
 pub struct ListingRequest {
     current: Option<CancellationToken>,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl ListingRequest {
+    #[cfg(test)]
     /// The token for a new listing request. The previous request, if any, is cancelled.
     pub fn next(&mut self) -> CancellationToken {
         if let Some(previous) = self.current.take() {

@@ -4,15 +4,20 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
+#[cfg(test)]
 use std::sync::Mutex;
 
 use kuro_domain::source::model::Source;
 use kuro_domain::source::pin::{Pin, Pins};
-use kuro_domain::source::toggles::{flip_disabled, set_disabled, toggle_pin};
+#[cfg(test)]
+use kuro_domain::source::toggles::{flip_disabled, toggle_pin};
+#[cfg(test)]
 use kuro_prefs::PrefError;
+#[cfg(test)]
 use kuro_prefs::pref::Pref;
 
 use super::names::{case_insensitive_cmp, localized_display_name, source_display_name};
+#[cfg(test)]
 use super::primitives::{ToastDuration, ToastSpec};
 
 /// The local source has id 0. It is never dropped by the language filter (`LocalMangaSource.ID`).
@@ -135,14 +140,17 @@ pub fn language_line(section: &Section, source: &Source) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 /// The row's pin button reads the `Pinned` bit: the last-used copy of a pinned source keeps it.
 pub fn is_pinned(source: &Source) -> bool {
     source.pin.contains(Pin::Pinned)
 }
 
+#[cfg(test)]
 /// The dimmed alpha of a secondary control (`SECONDARY_ALPHA` of presentation-core `Constants.kt`).
 pub const SECONDARY_ALPHA: f64 = 0.78;
 
+#[cfg(test)]
 /// The pin button: filled at full strength when pinned, outline dimmed to `SECONDARY_ALPHA` otherwise (U§3.2).
 pub fn pin_button_style(pinned: bool) -> (bool, f64) {
     if pinned { (true, 1.0) } else { (false, SECONDARY_ALPHA) }
@@ -153,11 +161,13 @@ pub fn shows_latest(source: &Source) -> bool {
     source.supports_latest
 }
 
+#[cfg(test)]
 /// The disable toggle is not offered for the local source.
 pub fn can_disable(id: i64) -> bool {
     id != LOCAL_SOURCE_ID
 }
 
+#[cfg(test)]
 /// Rows of the source options dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionsAction {
@@ -166,6 +176,7 @@ pub enum OptionsAction {
     Disable,
 }
 
+#[cfg(test)]
 /// The options dialog of a source: pin or unpin by `Pin.Pinned`, and disable when the source may be disabled (B§2.5).
 pub fn options_actions(source: &Source) -> Vec<OptionsAction> {
     let mut actions = vec![if source.pin.contains(Pin::Pinned) { OptionsAction::Unpin } else { OptionsAction::Pin }];
@@ -175,6 +186,7 @@ pub fn options_actions(source: &Source) -> Vec<OptionsAction> {
     actions
 }
 
+#[cfg(test)]
 /// The label of a row of the options popover.
 pub fn options_label(action: OptionsAction) -> String {
     use kuro_i18n::{MsgKey, tr};
@@ -185,11 +197,13 @@ pub fn options_label(action: OptionsAction) -> String {
     })
 }
 
+#[cfg(test)]
 /// The title of the options popover: the source's `visualName` (`name (LANG)`).
 pub fn options_title(source: &Source) -> String {
     source.visual_name()
 }
 
+#[cfg(test)]
 /// What choosing a row does: flip the source's pin, or its disabled flag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionsEffect {
@@ -197,6 +211,7 @@ pub enum OptionsEffect {
     ToggleDisabled,
 }
 
+#[cfg(test)]
 pub fn options_effect(action: OptionsAction) -> OptionsEffect {
     match action {
         OptionsAction::Pin | OptionsAction::Unpin => OptionsEffect::TogglePin,
@@ -204,6 +219,7 @@ pub fn options_effect(action: OptionsAction) -> OptionsEffect {
     }
 }
 
+#[cfg(test)]
 /// The two stored sets the toggles write, and the lock that orders them (E-SL-09).
 pub struct SourceToggles {
     lock: Mutex<()>,
@@ -211,6 +227,7 @@ pub struct SourceToggles {
     disabled: Pref<BTreeSet<String>>,
 }
 
+#[cfg(test)]
 impl SourceToggles {
     pub fn new(pinned: Pref<BTreeSet<String>>, disabled: Pref<BTreeSet<String>>) -> Self {
         Self { lock: Mutex::new(()), pinned, disabled }
@@ -224,15 +241,6 @@ impl SourceToggles {
         toggle_disabled_serialized(&self.lock, &self.disabled, id)
     }
 
-    /// Hides every id in `ids`, or shows them, in one write under the same lock (`set_disabled`, bulk enable and disable).
-    pub fn set_disabled_many(&self, ids: &[i64], disable: bool) -> Result<bool, PrefError> {
-        let _guard = self.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut set = self.disabled.get();
-        let applied = set_disabled(&mut set, ids, disable);
-        self.disabled.set(set)?;
-        Ok(applied)
-    }
-
     /// Runs the effect of an options row for source `id`.
     pub fn apply(&self, effect: OptionsEffect, id: i64) -> Result<bool, PrefError> {
         match effect {
@@ -242,6 +250,7 @@ impl SourceToggles {
     }
 }
 
+#[cfg(test)]
 /// Toggles one source's pin under a lock, so two quick toggles of different sources both persist (E-SL-09).
 pub fn toggle_pin_serialized(lock: &Mutex<()>, pinned: &Pref<BTreeSet<String>>, id: i64) -> Result<bool, PrefError> {
     let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -251,6 +260,7 @@ pub fn toggle_pin_serialized(lock: &Mutex<()>, pinned: &Pref<BTreeSet<String>>, 
     Ok(now_pinned)
 }
 
+#[cfg(test)]
 /// Toggles one source's disabled flag under the same lock (`ToggleMangaSource`).
 pub fn toggle_disabled_serialized(
     lock: &Mutex<()>,
@@ -264,6 +274,7 @@ pub fn toggle_disabled_serialized(
     Ok(now_disabled)
 }
 
+#[cfg(test)]
 /// The toast of a failed source-list subscription. The last list stays on screen (E-SL-10).
 pub fn list_failure_toast() -> ToastSpec {
     ToastSpec {

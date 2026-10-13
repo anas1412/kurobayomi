@@ -180,11 +180,6 @@ impl Pager {
         self.done = false;
     }
 
-    #[cfg(test)]
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
     pub fn is_done(&self) -> bool {
         self.done
     }

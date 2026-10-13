@@ -13,7 +13,9 @@ use kuro_i18n::{MsgKey, tr};
 use tokio::sync::watch;
 
 use super::glue::{follow_ready, keep_alive};
-use super::icons::{IconCache, SourceIcon};
+use super::icons::IconCache;
+#[cfg(test)]
+use super::icons::SourceIcon;
 use super::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, language_line, section_title, shows_latest, source_list};
 use super::view::{list_row, source_row_with};
 use crate::widgets::context_menu::Item;
@@ -114,11 +116,13 @@ impl SourcesPage {
         self.inner.render();
     }
 
+    #[cfg(test)]
     /// The vertical scroll offset of the list.
     pub fn scroll_position(&self) -> f64 {
         self.inner.scroller.vadjustment().value()
     }
 
+    #[cfg(test)]
     pub fn set_scroll_position(&self, value: f64) {
         self.inner.scroller.vadjustment().set_value(value);
     }
@@ -250,6 +254,7 @@ pub(super) fn sources_empty() -> gtk::Box {
     super::look::empty_state("system-search-symbolic", &tr(MsgKey::source_empty_screen), Some(&repos)).0
 }
 
+#[cfg(test)]
 /// The `SourceIcon` a row resolves to, for callers that need to know without building the page.
 pub fn icon_of(source: &Source, has_custom_icon: bool) -> SourceIcon {
     super::icons::resolve(source.is_stub, has_custom_icon, source.id == LOCAL_SOURCE_ID)

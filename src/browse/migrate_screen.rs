@@ -47,6 +47,7 @@ pub fn page_title(source: &Source) -> String {
     if source.name.trim().is_empty() { source.id.to_string() } else { source.name.clone() }
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// What the screen needs of the app.
 pub struct MigrateEnv {
     pub source: Source,

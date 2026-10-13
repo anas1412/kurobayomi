@@ -56,11 +56,6 @@ impl Rgba {
         Rgba { r: mix(self.r, dst.r), g: mix(self.g, dst.g), b: mix(self.b, dst.b), a: (out_a * 255.0).round() as u8 }
     }
 
-    /// CSS `rgba(...)` text with the given alpha (0..1) rather than the stored one.
-    pub fn to_css_with_alpha(self, alpha: f32) -> String {
-        format!("rgba({}, {}, {}, {})", self.r, self.g, self.b, trim_unit(alpha))
-    }
-
     /// CSS `rgba(...)` text with alpha as a 0..1 number, for `@define-color`.
     pub fn to_css(self) -> String {
         format!(
@@ -240,6 +235,7 @@ impl Tokens {
             .collect()
     }
 
+    #[cfg(test)]
     /// The active-filter tint (Compose `ColorScheme.active`): amber in dark, darker amber in light.
     pub fn active(&self) -> Rgba {
         Self::active_for(self.dark)
@@ -257,35 +253,16 @@ impl Tokens {
 
 // --- Spacing, alpha, duration and radius (T-49a-051) ---
 
-pub const PAD_EXTRA_LARGE: f32 = 32.0;
-pub const PAD_MEDIUM: f32 = 16.0;
-pub const PAD_MEDIUM_SMALL: f32 = 12.0;
-pub const PAD_SMALL: f32 = 8.0;
-pub const PAD_EXTRA_SMALL: f32 = 4.0;
-pub const DISABLED_ALPHA: f32 = 0.38;
 pub const RIPPLE_ALPHA: f32 = 0.10;
-pub const SHEET_MAX_WIDTH_LANDSCAPE: f32 = 600.0;
-pub const SHEET_MAX_WIDTH_PORTRAIT: f32 = 460.0;
 pub const SHEET_ANIM_MS: u32 = 350;
-pub const SHEET_POSITIONAL_THRESHOLD: f32 = 56.0;
-pub const SHEET_VELOCITY_THRESHOLD: f32 = 125.0;
 pub const SCROLLBAR_FADE_MS: u32 = 250;
-pub const REPEAT_MAX_MS: u64 = 750;
-pub const REPEAT_MIN_MS: u64 = 5;
-pub const REPEAT_DECAY: f64 = 0.25;
-pub const DIALOG_MIN_WIDTH: f32 = 280.0;
-pub const DIALOG_MAX_WIDTH: f32 = 560.0;
-pub const DIALOG_PAD: f32 = 24.0;
-pub const PROGRESS_ROTATION_MS: u32 = 2000;
-pub const SETTINGS_PAD_H: f32 = 24.0;
-pub const SETTINGS_PAD_V: f32 = 10.0;
-pub const RADIUS_SMALL: f32 = 8.0;
-pub const RADIUS_EXTRA_LARGE: f32 = 28.0;
 
 /// Window-size class breakpoints, dp (`WindowSize.kt`): medium from 600, expanded from 840.
 pub const MEDIUM_WIDTH_WINDOW_SIZE: f32 = 600.0;
 pub const EXPANDED_WIDTH_WINDOW_SIZE: f32 = 840.0;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
+#[cfg(test)]
 /// One text style: the CSS class it is emitted under, `font-size` in em, an optional weight
 /// (omitted means normal) and an optional `line-height` in px.
 pub struct TypeStyle {
@@ -295,6 +272,7 @@ pub struct TypeStyle {
     pub line_height_px: Option<f32>,
 }
 
+#[cfg(test)]
 /// The Material 3 styles the app uses (`p1-rust-design.md` section 5).
 pub const TYPOGRAPHY: [TypeStyle; 6] = [
     TypeStyle { class: "kuro-body-medium", size_em: 0.875, weight: None, line_height_px: Some(20.0) },

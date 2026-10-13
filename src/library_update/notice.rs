@@ -20,8 +20,11 @@ pub const MANGA_DOWNLOAD_ACTION_LIMIT: usize = 15;
 /// Anime items at most this many: the "Download" action is offered.
 pub const ANIME_DOWNLOAD_ACTION_LIMIT: usize = 10;
 
+#[cfg(test)]
 pub const PROGRESS_CHANNEL: &str = "progress";
+#[cfg(test)]
 pub const ERROR_CHANNEL: &str = "error";
+#[cfg(test)]
 pub const WARNING_CHANNEL: &str = "warning";
 
 /// The "N update(s) failed" notification text and its tap line.
@@ -47,6 +50,7 @@ pub fn entry_id(kind: Kind, entry_id: i64) -> u32 {
     fnv1a(&bytes)
 }
 
+#[cfg(test)]
 /// The id of a pass notification (`channel` is one of the `*_CHANNEL` names) of one kind.
 pub fn pass_id(channel: &str, kind: Kind) -> u32 {
     fnv1a(format!("{channel}:{}", kind_tag(kind)).as_bytes())

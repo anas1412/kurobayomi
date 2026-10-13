@@ -9,9 +9,12 @@
 //! (`desktop_action_manga_library`, `desktop_action_anime_library`, owned by the i18n crate) and falls back to the existing
 //! `label_manga_library` and `label_anime_library` texts of each locale until those keys exist.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::path::Path;
 
+#[cfg(test)]
 /// One launcher action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActionLabel {
@@ -25,6 +28,7 @@ pub struct ActionLabel {
     pub english: &'static str,
 }
 
+#[cfg(test)]
 /// The five actions, in the order of the desktop entry.
 pub const LABELS: [ActionLabel; 5] = [
     ActionLabel { id: "show-library", key: "desktop_action_manga_library", fallback_key: "label_manga_library", english: "Manga library" },
@@ -34,9 +38,11 @@ pub const LABELS: [ActionLabel; 5] = [
     ActionLabel { id: "show-browse", key: "browse", fallback_key: "browse", english: "Browse" },
 ];
 
+#[cfg(test)]
 /// Looks a string key up in a locale. `None` when the locale has no such key.
 pub type Lookup<'a> = &'a dyn Fn(&str, &str) -> Option<String>;
 
+#[cfg(test)]
 /// A locale tag as a desktop-entry locale: `de` stays, `pt-BR` becomes `pt_BR`. A tag with a script or a numeric region
 /// (`es-419`) has no entry form and gives `None`.
 pub fn desktop_locale(tag: &str) -> Option<String> {
@@ -51,6 +57,7 @@ pub fn desktop_locale(tag: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 /// The translated names, by action id then locale. A locale whose text equals the English one, or is empty, adds nothing.
 pub fn translated_names(lookup: Lookup, tags: &[&str]) -> BTreeMap<&'static str, BTreeMap<String, String>> {
     let mut out: BTreeMap<&'static str, BTreeMap<String, String>> = BTreeMap::new();
@@ -69,6 +76,7 @@ pub fn translated_names(lookup: Lookup, tags: &[&str]) -> BTreeMap<&'static str,
     out
 }
 
+#[cfg(test)]
 /// The desktop entry with a `Name[locale]=` line after the `Name=` line of every action group.
 pub fn render_entry(base: &str, lookup: Lookup, tags: &[&str]) -> String {
     let names = translated_names(lookup, tags);
@@ -92,6 +100,7 @@ pub fn render_entry(base: &str, lookup: Lookup, tags: &[&str]) -> String {
     out
 }
 
+#[cfg(test)]
 /// Reads `key = value` lines of one locale's Fluent files (`kurobayomi.ftl`, `kurobayomi-extra.ftl`) under `dir/<tag>/`.
 /// Only single-line messages are read, which is what the five labels are.
 pub fn ftl_lookup(dir: &Path) -> impl Fn(&str, &str) -> Option<String> {

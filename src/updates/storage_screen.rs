@@ -198,12 +198,6 @@ impl StorageScreen {
         self.rebuild();
     }
 
-    #[cfg(test)]
-    /// The page state of the current input (T-42a-054): "Scanning downloads…" while the cache initializes.
-    pub fn state(&self) -> PageState {
-        storage::page_state(self.input.borrow().initializing)
-    }
-
     fn rebuild(self: &Rc<Self>) {
         let input = self.input.borrow();
         let snapshot = storage::build_snapshot(input.rows.clone(), self.selection.get(), &input.visible);

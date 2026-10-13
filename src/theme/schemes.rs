@@ -5,6 +5,7 @@
 
 use super::tokens::Rgba;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// One scheme, light and dark tables indexed by `Role as usize`.
 pub struct SchemeDef {
     pub name: &'static str,

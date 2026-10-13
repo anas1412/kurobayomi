@@ -31,6 +31,7 @@ impl TwoLineTitle {
         self.subtitle.set_label(text.unwrap_or(""));
     }
 
+    #[cfg(test)]
     pub fn subtitle(&self) -> String {
         self.subtitle.label().to_string()
     }

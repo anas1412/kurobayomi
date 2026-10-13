@@ -61,10 +61,6 @@ impl LiveRegistry {
         self.get(Kind::Manga, source_id).or_else(|| self.get(Kind::Anime, source_id))
     }
 
-    /// The name of the source with this id under either kind, when the app holds it. The folder renames read it.
-    pub fn name_of_known(&self, source_id: i64) -> Option<String> {
-        self.find(source_id).map(|source| source.name())
-    }
 }
 
 impl LiveSource {

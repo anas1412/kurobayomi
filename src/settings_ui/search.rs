@@ -1,35 +1,16 @@
 //! The contract every settings screen of this module meets (task T-47a-006), and the settings search (tasks T-47a-004
 //! and T-47a-008): the index of every row of the main and player screens, the matcher, and the results page.
-#![allow(dead_code)]
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
+#[cfg(test)]
 use kuro_prefs::prefs::Prefs;
 
 use crate::pref_model::highlight;
 use crate::pref_model::model::{Preference, PreferenceItem};
-use crate::pref_model::page::Built as PageBuilt;
 use crate::screens::{built, Built};
 use crate::settings_ui::route;
-
-pub trait SearchableSettings {
-    /// The screen title (English text of its title key).
-    fn title(&self) -> &'static str;
-
-    /// The preference tree. Evaluated on every open and every search, so rules see the current values.
-    fn preferences(&self, prefs: &Prefs) -> Vec<Preference>;
-
-    /// An optional app bar action as `(label, icon)`. Only the tracking and data screens have one.
-    fn app_bar_action(&self) -> Option<(&'static str, &'static str)> {
-        None
-    }
-}
-
-/// Renders a screen's tree through the shared page renderer (needs the GTK main thread).
-pub fn render(screen: &dyn SearchableSettings, prefs: &Prefs) -> PageBuilt {
-    crate::pref_model::page::body(&screen.preferences(prefs))
-}
 
 /// The main index, in index order (Android `settingScreens`). About is not indexed.
 pub const MAIN_SCREENS: [&str; 6] = [

@@ -20,6 +20,7 @@ pub fn read_settings(store: &PrefStore) -> ThemeSettings {
     ThemeSettings { mode }
 }
 
+#[cfg(test)]
 /// Writes the mode choice.
 pub fn write_mode(store: &PrefStore, mode: ThemeMode) {
     store.set_raw(KEY_THEME_MODE, PrefValue::Str(mode.name().to_string()));

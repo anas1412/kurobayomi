@@ -1,8 +1,8 @@
 //! The settings main menu (task T-47a-003) and the two-pane background rule.
 //! Titles, subtitles and icons follow the Linux spec (`spec/settings.json`, `main`); About shows the build.
 // Not reachable from `route.rs` yet: the main list in `pref_model/shell.rs` still reads `spec/settings.json`.
-#![allow(dead_code)]
 
+#[cfg(test)]
 /// One row of the main menu. `target` is the screen id the row opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuRow {
@@ -17,6 +17,7 @@ pub fn about_subtitle(app: &str, release: bool, version: &str, commit: &str) -> 
     if release { format!("{app} Stable {version}") } else { format!("Debug {commit}") }
 }
 
+#[cfg(test)]
 /// The eight rows in their order. `about` is the About subtitle (see [`about_subtitle`]).
 pub fn rows(about: &str) -> Vec<MenuRow> {
     let row = |title, subtitle: &str, icon, target| MenuRow { title, subtitle: subtitle.to_owned(), icon, target };

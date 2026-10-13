@@ -23,7 +23,6 @@
 //!   (`crate::data::app()`) and the source directory of the kind (`directory::current`). The entry points are `page` and
 //!   `production_env` of `browse_screen`, `migrate_screen`, `search_screen` and `source_prefs_screen`, and the `mount`
 //!   shell. Passing them in needs `screens::build` (not in this lane) to hand them down.
-#![allow(dead_code)] // wired as the source registry and the extension manager arrive
 
 pub mod banner;
 pub mod browse_screen;

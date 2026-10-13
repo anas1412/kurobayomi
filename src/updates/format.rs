@@ -18,6 +18,7 @@ pub enum RelativeDate {
 }
 
 impl RelativeDate {
+    #[cfg(test)]
     /// English text of the result (`relative_time_today`, `relative_time`, `upcoming_relative_time`).
     pub fn text(&self) -> String {
         match self {
@@ -47,6 +48,7 @@ pub fn relative_date(date: NaiveDate, today: NaiveDate, relative: bool, absolute
     }
 }
 
+#[cfg(test)]
 /// `Duration.toDurationString` (behaviour 5.4): the four `if` rules, joined with a space; blank gives `none`.
 pub fn duration_string(ms: i64, none: &str) -> String {
     let total_seconds = ms / 1000;

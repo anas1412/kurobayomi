@@ -26,12 +26,16 @@ pub fn label_backup() -> String {
     tr(MsgKey::label_backup)
 }
 
+#[cfg(test)]
 /// Kurobayomi-only words (T-47ba-074). Not in the Kotlin tree, so they are plain English constants until the string
 /// table (area 51) takes them.
 pub const NOT_INCLUDED: &str = "Not included";
+#[cfg(test)]
 pub const INCLUDED: &str = "Included";
+#[cfg(test)]
 pub const EXCLUDED: &str = "Excluded";
 pub const LOG_OUT_OF_TRACKER: &str = "Log out of this tracker?";
+#[cfg(test)]
 pub const COULD_NOT_SAVE: &str = "Could not save this setting";
 
 #[cfg(test)]

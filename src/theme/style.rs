@@ -11,8 +11,6 @@ pub const BASE_CSS: &str = include_str!("style.css");
 pub mod class {
     pub const SURFACE: &str = "kb-surface";
     pub const SELECTED: &str = "kb-selected";
-    pub const SECONDARY_ITEM: &str = "kb-secondary-item";
-    pub const HEADER: &str = "kb-header";
     pub const ACTIVE: &str = "kb-active";
     pub const PILL: &str = "kb-pill";
     pub const PLAYER_RIPPLE: &str = "kb-player-ripple";

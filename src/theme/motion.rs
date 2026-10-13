@@ -4,23 +4,22 @@
 //! CSS transitions are left to GTK, which reads the same switch. The durations that are set from
 //! Rust, and the ring, go through this module.
 
-/// Whether GTK animations are on. With no settings object (no display), they are on.
-pub fn enabled() -> bool {
-    gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations())
-}
-
 /// `ms` while animations are on, and 0 (instant) when they are off.
+#[cfg(test)]
 pub const fn duration_ms(ms: u32, enabled: bool) -> u32 {
     if enabled { ms } else { 0 }
 }
 
 /// The progress ring spins only while animations are on.
+#[cfg(test)]
 pub const fn ring_spins(enabled: bool) -> bool {
     enabled
 }
 
+#[cfg(test)]
 /// Browse icon rotation, 0 to 180 degrees (T-49ba-022, `anim_browse_enter`).
 pub const BROWSE_ROTATE_MS: u32 = 300;
+#[cfg(test)]
 /// History icon rotation, 360 to 0 degrees (T-49ba-022, `anim_history_enter`).
 pub const HISTORY_ROTATE_MS: u32 = 500;
 

@@ -1,6 +1,7 @@
 //! Settings router (T-47b-001) and back navigation (T-47b-003). Pure: which page a destination opens, and what one
 //! back action does. Escape, Alt+Left and the mouse back button all call [`Shell::back`].
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// Destinations other areas open by id (`SettingsScreen.kt`). Unknown ids open the default page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Destination {
@@ -77,6 +78,7 @@ impl Shell {
         }];
     }
 
+    #[cfg(test)]
     /// Pushes an inner page on top of the current one.
     pub fn push(&mut self, page: Page) {
         self.pages.push(page);

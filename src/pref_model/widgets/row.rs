@@ -10,6 +10,7 @@ use super::{
     TITLE_MAX_LINES, TRAILING_WIDGET_BUFFER,
 };
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// Handles to the parts of a built row. The caller updates labels and attaches the trailing widget.
 #[derive(Clone)]
 pub struct PrefRow {

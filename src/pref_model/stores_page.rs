@@ -24,6 +24,7 @@ thread_local! {
     static RELOAD: RefCell<Vec<Rc<dyn Fn()>>> = const { RefCell::new(Vec::new()) };
 }
 
+#[cfg(test)]
 /// Registers a listener for "the list of available extensions must be loaded again". The extension browser registers
 /// here; the add, remove and refresh flows call [`reload_extensions`] when they finish.
 pub fn on_extensions_reload(listener: impl Fn() + 'static) {

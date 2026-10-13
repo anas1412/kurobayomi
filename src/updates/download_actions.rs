@@ -4,6 +4,7 @@
 
 use crate::updates::download_state::DownloadState;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The actions of a download indicator or of the bulk bar (`ChapterDownloadAction` / `EpisodeDownloadAction`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DownloadAction {

@@ -1,21 +1,25 @@
 //! Search toolbar logic (Kotlin `SearchToolbar`, T-36a-039): when a query is submitted, when reset shows, and when the
 //! entry takes focus on open.
 
+#[cfg(test)]
 /// The query to submit on Enter, or `None` for a blank query (blank never searches).
 pub fn submit(query: &str) -> Option<&str> {
     if query.trim().is_empty() { None } else { Some(query) }
 }
 
+#[cfg(test)]
 /// The reset control shows only for a non-empty query.
 pub fn reset_visible(query: &str) -> bool {
     !query.is_empty()
 }
 
+#[cfg(test)]
 /// The keyboard opens with the entry only when the query was empty at open time.
 pub fn focus_on_open(query_at_open: &str) -> bool {
     query_at_open.is_empty()
 }
 
+#[cfg(test)]
 /// The search action in the bar: hidden when search is disabled, the search icon when closed, reset when there is text,
 /// and nothing while open but empty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +30,7 @@ pub enum SearchAction {
     Nothing,
 }
 
+#[cfg(test)]
 /// `query` is `None` when search is closed (behaviour 5.6).
 pub fn search_action(query: Option<&str>, enabled: bool) -> SearchAction {
     match (enabled, query) {

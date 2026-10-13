@@ -14,6 +14,7 @@ struct Inner {
 }
 
 impl EnabledFlag {
+    #[cfg(test)]
     pub fn new(value: bool) -> Self {
         Self(Rc::new(Inner { value: Cell::new(value), subscribers: RefCell::new(Vec::new()) }))
     }
@@ -22,6 +23,7 @@ impl EnabledFlag {
         self.0.value.get()
     }
 
+    #[cfg(test)]
     /// Sets the flag and tells the subscribers, only when the value changed.
     pub fn set(&self, value: bool) {
         if self.0.value.replace(value) == value {

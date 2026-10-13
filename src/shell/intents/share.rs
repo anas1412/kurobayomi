@@ -8,15 +8,16 @@
 //!
 //! Loss recorded: no third-party share targets on desktop.
 
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
-use gtk::gio;
-use gtk::prelude::*;
-use kuro_i18n::{MsgKey, tr};
 
+#[cfg(test)]
 use crate::shell::argv;
+#[cfg(test)]
 use crate::shell::uri::percent_decode;
 
+#[cfg(test)]
 /// What a share or save does for one item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Plan {
@@ -29,11 +30,13 @@ pub enum Plan {
     Nothing,
 }
 
+#[cfg(test)]
 /// The plan for a file that is already on disk: reveal it. A relative path does nothing.
 pub fn show_in_folder(path: &Path) -> Plan {
     if path.is_absolute() { Plan::ShowInFolder(path.to_path_buf()) } else { Plan::Nothing }
 }
 
+#[cfg(test)]
 /// The plan for an item: a web address is copied; a `file://` link or an absolute path is saved under its own name.
 /// Anything else (blank text, a relative path) does nothing.
 pub fn plan(item: &str) -> Plan {
@@ -55,43 +58,6 @@ pub fn plan(item: &str) -> Plan {
     match name {
         Some(name) => Plan::SaveFile { source: path, name },
         None => Plan::Nothing,
-    }
-}
-
-/// Runs a plan on the GTK thread. `parent` anchors the save dialog, and `downloads` is the folder it starts in.
-pub fn run(plan: Plan, parent: &gtk::Window, downloads: &Path) {
-    match plan {
-        Plan::CopyLink(link) => {
-            gtk::prelude::WidgetExt::display(parent).clipboard().set_text(&link);
-            crate::toast::notify(tr(MsgKey::copied_to_clipboard_plain));
-        }
-        Plan::SaveFile { source, name } => {
-            let dialog = gtk::FileDialog::new();
-            dialog.set_title(tr(MsgKey::action_save).as_str());
-            dialog.set_initial_name(Some(&name));
-            dialog.set_initial_folder(Some(&gio::File::for_path(downloads)));
-            dialog.save(Some(parent), None::<&gio::Cancellable>, move |result| {
-                // a cancelled dialog reports an error too, and it does nothing
-                let Ok(file) = result else { return };
-                let Some(dest) = file.path() else { return };
-                if let Err(e) = std::fs::copy(&source, &dest) {
-                    tracing::warn!("the shared file was not saved: {e}");
-                    crate::toast::notify(tr(MsgKey::clipboard_copy_error));
-                }
-            });
-        }
-        Plan::ShowInFolder(path) => {
-            gtk::FileLauncher::new(Some(&gio::File::for_path(&path))).open_containing_folder(
-                Some(parent),
-                None::<&gio::Cancellable>,
-                move |result| {
-                    if let Err(e) = result {
-                        tracing::warn!("{} was not shown in the file manager: {e}", path.display());
-                    }
-                },
-            );
-        }
-        Plan::Nothing => {}
     }
 }
 

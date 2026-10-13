@@ -74,6 +74,7 @@ impl MetadataLocks {
         Some(MetadataGuard { locks: Arc::clone(this), name, cancel })
     }
 
+    #[cfg(test)]
     pub fn is_running(&self, kind: Kind) -> bool {
         self.lock().contains_key(lock_name(kind))
     }
@@ -196,6 +197,7 @@ pub trait MetadataProgress: Send + Sync {
     fn done(&self, kind: Kind);
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MetadataStatus {
     /// A pass of this kind is already running; nothing started.
@@ -249,10 +251,12 @@ where
         Self { deps: Arc::new(deps), locks: Arc::new(MetadataLocks::default()) }
     }
 
+    #[cfg(test)]
     pub fn locks(&self) -> &Arc<MetadataLocks> {
         &self.locks
     }
 
+    #[cfg(test)]
     /// Runs a pass of `kind` on the caller's task. Refused when a pass of that kind is running.
     pub async fn run(&self, kind: Kind, now_ms: i64) -> MetadataOutcome {
         match MetadataLocks::acquire(&self.locks, kind) {
@@ -276,6 +280,7 @@ where
         self.locks.stop(kind)
     }
 
+    #[cfg(test)]
     pub fn is_running(&self, kind: Kind) -> bool {
         self.locks.is_running(kind)
     }

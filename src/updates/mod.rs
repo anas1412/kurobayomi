@@ -10,7 +10,6 @@
 //! - `TAB_ANIME`/`TAB_MANGA`, the anime `onInvertSelection` and the search query state: no port. Invert stays in `selection`.
 //! - Refresh: the Refresh button and F5 (`mount`). The back gesture: Escape. `animateItem`: dropped.
 //!   `FastScrollLazyColumn`: the GTK scrollbar.
-#![allow(dead_code)] // wired by the screens lane; the helpers are tested here before the screens call them
 
 #[cfg(test)]
 pub mod area42_tests;

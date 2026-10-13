@@ -3,6 +3,7 @@
 
 use gtk::gdk::{Key, ModifierType};
 use gtk::prelude::*;
+#[cfg(test)]
 use kuro_i18n::{MsgKey, tr};
 
 /// The shortcuts of the browse pages.
@@ -54,6 +55,7 @@ pub fn escape_step(search_open: bool) -> EscapeStep {
     if search_open { EscapeStep::CloseSearch } else { EscapeStep::Leave }
 }
 
+#[cfg(test)]
 /// The lines of the help overlay for the browse pages: the keys, and what they do (U§9). Every shortcut above is
 /// here, so the list cannot fall behind the table.
 pub fn help_entries() -> Vec<(String, String)> {

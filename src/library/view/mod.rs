@@ -333,12 +333,6 @@ impl LibraryView {
         self.inner.borrow().store.n_items() as usize
     }
 
-    #[cfg(test)]
-    /// Whether entries are selected (selection mode).
-    pub fn selection_active(&self) -> bool {
-        !self.inner.borrow().selection.is_empty()
-    }
-
     fn wire(&self, replies: &async_channel::Receiver<Reply>) {
         let weak = Rc::downgrade(&self.inner);
 

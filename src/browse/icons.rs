@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 /// Icons are 40 px high and square (`height(40) aspectRatio(1)`).
 pub const ICON_HEIGHT_PX: i32 = 40;
 
+#[cfg(test)]
 /// The icon of the details page header is 112 px square (T-40a-021, T-40a-027).
 pub const DETAILS_ICON_PX: i32 = 112;
 
@@ -173,6 +174,7 @@ impl IconCache {
         self.by_id.remove(&id);
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.by_id.len()
     }

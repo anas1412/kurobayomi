@@ -4,13 +4,16 @@
 //! applies after a restart. No AppCompat locale service and no per-app locale permission is ported. A locale that lacks a
 //! string falls back through its chain to English, so every key resolves for any chosen locale (TC-53-23).
 
+#[cfg(test)]
 use kuro_i18n::LocaleInfo;
 
+#[cfg(test)]
 /// The catalogue chain for a saved choice and the system language list: the chosen locale first, English last.
 pub fn chain(saved: &str, system: &[String]) -> Vec<&'static str> {
     kuro_i18n::locale::resolve(saved, system, &kuro_i18n::offered_locales())
 }
 
+#[cfg(test)]
 /// Whether the saved choice differs from the language the running app was started with, so the restart note applies.
 pub fn needs_restart(saved: &str, system: &[String], running: LocaleInfo) -> bool {
     chain(saved, system).first().copied() != Some(running.tag)

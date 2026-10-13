@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 
 use kuro_prefs::library::{DEVICE_CHARGING, DEVICE_NETWORK_NOT_METERED, DEVICE_ONLY_ON_WIFI};
 
+#[cfg(test)]
 /// NetworkManager's `PrimaryConnectionType` of a Wi-Fi link.
 pub const WIFI_CONNECTION_TYPE: &str = "802-11-wireless";
 
@@ -22,12 +23,14 @@ pub struct DeviceFacts {
     pub on_ac: Option<bool>,
 }
 
+#[cfg(test)]
 /// NetworkManager's `NMMetered` as a metered flag: unknown (0), yes (1) and guess-yes (3) are metered; no (2) and
 /// guess-no (4) are not (SC-05).
 pub fn nm_metered_is_metered(value: u32) -> bool {
     matches!(value, 0 | 1 | 3)
 }
 
+#[cfg(test)]
 /// The Wi-Fi flag of a NetworkManager `PrimaryConnectionType` text.
 pub fn is_wifi_connection(primary_connection_type: &str) -> bool {
     primary_connection_type == WIFI_CONNECTION_TYPE

@@ -6,9 +6,11 @@
 //! The table lists the decision and the user loss, so a later lane does not bring one back by accident. The tests scan
 //! the code lines of `src/` for the Android names; comments may still name them.
 
+#[cfg(test)]
 /// The note the security page shows beside the kept `secure_screen_v2` setting (T-52a-062, T-36a-035).
 pub const SECURE_SCREEN_NOTE: &str = "Screenshot blocking is not available on Linux";
 
+#[cfg(test)]
 /// `(task, dropped, loss)`.
 pub const DROPPED: &[(&str, &str, &str)] = &[
     ("T-36a-019", "system bar and edge-to-edge styling: GTK draws the title bar", "none on desktop"),

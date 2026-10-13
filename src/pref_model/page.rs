@@ -14,6 +14,7 @@ use super::widgets::{group, GROUP_SPACER, PAGE_MAX_WIDTH};
 /// Slide-in time of a row that becomes enabled.
 const REVEAL_MS: u32 = 150;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// A built page. `targets` maps each highlightable row title to its row (first registration wins).
 pub struct Built {
     pub widget: gtk::Widget,

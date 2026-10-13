@@ -60,6 +60,7 @@ impl Section {
         Section { title: Some(title.into()), filter: true, items }
     }
 
+    #[cfg(test)]
     pub fn untitled(items: Vec<Item>) -> Self {
         Section { title: None, filter: false, items }
     }
@@ -280,10 +281,12 @@ impl ViewOptions {
         }
     }
 
+    #[cfg(test)]
     pub fn toggle(&self, name: &str) -> bool {
         self.action(name).is_some_and(|a| bool_state(&a))
     }
 
+    #[cfg(test)]
     pub fn radio(&self, name: &str) -> Option<String> {
         self.action(name).and_then(|a| a.state()).and_then(|v| v.get::<String>())
     }
@@ -293,15 +296,18 @@ impl ViewOptions {
         self.button.popup();
     }
 
+    #[cfg(test)]
     pub fn button(&self) -> &gtk::MenuButton {
         &self.button
     }
 
+    #[cfg(test)]
     /// The action group, so a test can activate an item the way the menu does.
     pub fn group(&self) -> &gio::SimpleActionGroup {
         &self.group
     }
 
+    #[cfg(test)]
     pub fn dot_visible(&self) -> bool {
         self.inner.dot.is_visible()
     }

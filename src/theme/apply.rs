@@ -188,12 +188,6 @@ pub fn sync_gtk_preference(mode: ThemeMode) {
     settings.set_gtk_application_prefer_dark_theme(gtk_prefer_dark(mode, dark::startup_prefer_dark()));
 }
 
-/// Stores the settings, then applies them with the last known system value.
-/// The system dark flag as last read; light until the portal answers.
-pub fn system_is_dark() -> bool {
-    SYSTEM_DARK.with(Cell::get).unwrap_or(false)
-}
-
 pub fn set_settings(display: &gdk::Display, settings: ThemeSettings) -> bool {
     CURRENT.with(|c| *c.borrow_mut() = Some((display.clone(), settings)));
     apply_current()

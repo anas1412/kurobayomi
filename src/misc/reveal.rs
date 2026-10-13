@@ -2,26 +2,33 @@
 //! instead of Android's share chooser. The reveal itself is checked against the allowed folders when the action runs
 //! (`router::reveal_path_ok`), so these builders only name the file.
 
-#![allow(dead_code)] // the save-image action and the backup notifier call these from their own lanes
 
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+#[cfg(test)]
+use std::path::Path;
+use std::sync::Mutex;
 
+#[cfg(test)]
 use kuro_backup::notify::{Action, Notice, Urgency};
-use kuro_platform::notifier::Notifier;
 
+#[cfg(test)]
 use crate::misc::ids;
+#[cfg(test)]
 use crate::misc::notify::{Post, Target};
+#[cfg(test)]
 use crate::misc::router::AppAction;
 
+#[cfg(test)]
 /// The "Open folder" label of the reveal buttons (`notify.action.open_folder`).
 pub const OPEN_FOLDER: &str = "Open folder";
 
+#[cfg(test)]
 /// The target that reveals `path` in the file manager.
 pub fn reveal_target(path: &Path) -> Target {
     Target::Action(AppAction::RevealFile { path: path.to_path_buf() })
 }
 
+#[cfg(test)]
 /// The save-image notice (id `save-image`, T-35a-086): the tap and "Open folder" reveal the saved image.
 pub fn save_image_post(saved: &Path) -> Post {
     let target = reveal_target(saved);
@@ -36,6 +43,7 @@ pub fn save_image_post(saved: &Path) -> Post {
     }
 }
 
+#[cfg(test)]
 /// A `kuro-backup` notice as a desktop post. `ShowInFolder` becomes the tap and the "Open folder" button (T-35a-024);
 /// the error-log action opens the log; the settings and cancel actions are left to their own screens.
 pub fn backup_post(notice: &Notice) -> Post {
@@ -63,8 +71,10 @@ pub fn backup_post(notice: &Notice) -> Post {
 /// user chose. They join the folders a reveal may name (`notify::GtkHost::reveal_roots`), so the file the notice names can
 /// be shown while a path from anywhere else is still refused.
 static ANNOUNCED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+#[cfg(test)]
 const MAX_ANNOUNCED: usize = 16;
 
+#[cfg(test)]
 /// Lets a reveal name files in the folder of `file`, which the app has just written.
 pub fn allow_folder_of(file: &Path) {
     let Some(folder) = file.parent() else { return };
@@ -81,26 +91,8 @@ pub fn announced_folders() -> Vec<PathBuf> {
     ANNOUNCED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// Posts the save-image notice after the reader saved a page (T-35a-023). `false` when no notifier is attached, so the
-/// caller can show its toast instead.
-pub fn post_save_image(saved: &Path) -> bool {
-    allow_folder_of(saved);
-    crate::misc::notify::post(save_image_post(saved))
-}
 
-/// The backup notifier of the app (T-35a-024): "Backup created" becomes the desktop notice with "Open folder", and every
-/// other notice goes to the notifier underneath. The `Notifier` calls carry the notice text only, so the path is the first
-/// line of the body, which is how `kuro_backup::notify::manual_created` writes it.
-pub struct RevealNotifier {
-    inner: Arc<dyn Notifier>,
-}
-
-impl RevealNotifier {
-    pub fn new(inner: Arc<dyn Notifier>) -> Self {
-        Self { inner }
-    }
-}
-
+#[cfg(test)]
 /// The post for a "Backup created" call, or `None` for any other notice.
 fn created_post(id: &str, title: &str, body: Option<&str>) -> Option<Post> {
     let path = Path::new(body?.lines().next()?);
@@ -113,27 +105,6 @@ fn created_post(id: &str, title: &str, body: Option<&str>) -> Option<Post> {
     Some(backup_post(&notice))
 }
 
-impl Notifier for RevealNotifier {
-    fn show(&self, id: &str, title: &str, body: Option<&str>) {
-        if let Some(post) = created_post(id, title, body) {
-            if let Some(Target::Action(AppAction::RevealFile { path })) = &post.tap {
-                allow_folder_of(path);
-            }
-            if crate::misc::notify::post(post) {
-                return;
-            }
-        }
-        self.inner.show(id, title, body);
-    }
-
-    fn show_notice(&self, notice: &kuro_platform::notifier::Notice) {
-        self.inner.show_notice(notice);
-    }
-
-    fn withdraw(&self, id: &str) {
-        self.inner.withdraw(id);
-    }
-}
 
 #[cfg(test)]
 mod tests {

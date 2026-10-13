@@ -3,12 +3,20 @@
 //!
 //! `effects` is pure and lists the steps in order. `open_tab` applies them to the tab selection and the navigator.
 
+#[cfg(test)]
 use kuro_prefs::ui::Tab;
 
+#[cfg(test)]
 use kuro_platform::kind::Kind;
-use super::nav::{Navigator, Route};
+#[cfg(test)]
 use super::tabs::HomeTabs;
+#[cfg(test)]
+use super::nav::Navigator;
+#[cfg(test)]
+use super::nav::Route;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
+#[cfg(test)]
 /// A tab event with its payload (Kotlin `HomeScreen.Tab`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenTab {
@@ -24,6 +32,7 @@ pub enum OpenTab {
     Downloads,
 }
 
+#[cfg(test)]
 /// One step of an open.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
@@ -35,6 +44,7 @@ pub enum Effect {
     BrowseExtensions { kind: Kind },
 }
 
+#[cfg(test)]
 /// The steps for an open, in the order HomeScreen runs them: the tab first, then the page it names.
 pub fn effects(open: OpenTab) -> Vec<Effect> {
     match open {
@@ -66,6 +76,7 @@ pub fn effects(open: OpenTab) -> Vec<Effect> {
     }
 }
 
+#[cfg(test)]
 /// Applies an open: selects the tab, pushes the page, and hands the extensions request to `show_extensions`.
 pub fn open_tab(open: OpenTab, home: &mut HomeTabs, nav: &mut Navigator, mut show_extensions: impl FnMut(Kind)) {
     for effect in effects(open) {

@@ -210,6 +210,7 @@ impl PassLocks {
     }
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// Held while a pass runs. Dropping it frees the kind.
 pub struct PassGuard {
     locks: Arc<PassLocks>,
@@ -219,9 +220,6 @@ pub struct PassGuard {
 }
 
 impl PassGuard {
-    pub fn trigger(&self) -> Trigger {
-        self.trigger
-    }
 
     pub fn cancel_token(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancel)

@@ -10,6 +10,7 @@ use kuro_platform::kind::Kind;
 use gtk::prelude::*;
 
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// What a resolved link points to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Found {
@@ -19,6 +20,7 @@ pub enum Found {
     Child { entry_id: i64, child_id: i64 },
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The page state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
@@ -134,6 +136,7 @@ fn slot(kind: Kind) -> usize {
     }
 }
 
+#[cfg(test)]
 /// Installs the resolver of one catalogue (anime T-53a-048, manga T-53a-050). Without one, [`open`] goes straight to the
 /// global search with the address as text.
 pub fn install_resolver(kind: Kind, resolver: Resolver) {

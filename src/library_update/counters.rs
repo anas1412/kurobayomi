@@ -33,6 +33,7 @@ impl<H> PrefsHost<H> {
         }
     }
 
+    #[cfg(test)]
     pub fn inner(&self) -> &H {
         &self.inner
     }

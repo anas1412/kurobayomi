@@ -2,17 +2,23 @@
 //! page channel of the tab shell, the debounced search entry, the registry-ready follower, and the consumer that
 //! applies a page's events on the main thread. Everything here is thin; the rules sit in `route` and `tasks`.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+#[cfg(test)]
+use std::cell::Cell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 use kuro_platform::kind::Kind;
 
+#[cfg(test)]
 use async_channel::{Receiver, Sender, TrySendError, bounded};
 use gtk::glib;
 use gtk::prelude::*;
 use tokio::sync::watch;
 
-use super::route::{BrowsePage, SEARCH_DEBOUNCE_MS, search_due, search_wait_ms};
+#[cfg(test)]
+use super::route::BrowsePage;
 use super::tasks::PageTasks;
 
 /// Follows preferences while a page is open (T-40b-015): twice a second, on the GTK main loop, each `check` is asked whether its
@@ -37,6 +43,7 @@ pub fn open_categories(kind: Kind) {
     crate::ui::push(&page);
 }
 
+#[cfg(test)]
 /// The tab-switch channel: capacity one, drop-oldest (E-40 R-40-08). A new request replaces one nobody has read.
 #[derive(Clone)]
 pub struct PageChannel {
@@ -44,6 +51,7 @@ pub struct PageChannel {
     rx: Receiver<BrowsePage>,
 }
 
+#[cfg(test)]
 impl PageChannel {
     pub fn new() -> Self {
         let (tx, rx) = bounded(1);
@@ -69,58 +77,11 @@ impl PageChannel {
     }
 }
 
+#[cfg(test)]
 impl Default for PageChannel {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Runs `on_page` on the main loop for each page request. Stops when the channel closes or `on_page` returns false.
-pub fn follow_pages(channel: &PageChannel, on_page: impl Fn(BrowsePage) -> bool + 'static) {
-    let rx = channel.receiver();
-    glib::spawn_future_local(async move {
-        while let Ok(page) = rx.recv().await {
-            if !on_page(page) {
-                break;
-            }
-        }
-    });
-}
-
-/// Calls `on_text` with the entry's text once it has been still for the debounce period (B§5.1, 250 ms).
-pub fn debounce_search(entry: &gtk::SearchEntry, on_text: impl Fn(String) + 'static) {
-    struct State {
-        origin: Instant,
-        last_edit_ms: Cell<u64>,
-        armed: Cell<bool>,
-    }
-    fn arm(state: &Rc<State>, entry: &gtk::SearchEntry, on_text: &Rc<dyn Fn(String)>, wait_ms: u64) {
-        state.armed.set(true);
-        let (state, entry, on_text) = (Rc::clone(state), entry.clone(), Rc::clone(on_text));
-        glib::timeout_add_local_once(Duration::from_millis(wait_ms), move || {
-            let now = state.origin.elapsed().as_millis() as u64;
-            let last = state.last_edit_ms.get();
-            if search_due(last, now) {
-                state.armed.set(false);
-                on_text(entry.text().to_string());
-            } else {
-                arm(&state, &entry, &on_text, search_wait_ms(last, now));
-            }
-        });
-    }
-    let state = Rc::new(State { origin: Instant::now(), last_edit_ms: Cell::new(0), armed: Cell::new(false) });
-    let on_text: Rc<dyn Fn(String)> = Rc::new(on_text);
-    // the entry's own delay would add to ours
-    entry.set_search_delay(0);
-    entry.connect_changed({
-        let state = Rc::clone(&state);
-        move |entry| {
-            state.last_edit_ms.set(state.origin.elapsed().as_millis() as u64);
-            if !state.armed.get() {
-                arm(&state, entry, &on_text, SEARCH_DEBOUNCE_MS);
-            }
-        }
-    });
 }
 
 /// Calls `apply` with the registry's readiness now and every time it changes, on the main loop, so an open page

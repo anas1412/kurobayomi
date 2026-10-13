@@ -39,6 +39,7 @@ struct Inner {
     deps: ShellDeps,
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The tab shell. `root` is the whole page, header included; `end` stays empty because the header is in `root`.
 pub struct BrowseShell {
     pub root: gtk::Box,
@@ -91,6 +92,7 @@ impl BrowseShell {
         Self { root, end: Vec::new(), inner }
     }
 
+    #[cfg(test)]
     /// The tab that is showing.
     pub fn visible(&self) -> BrowsePage {
         self.inner.visible()

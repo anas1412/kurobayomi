@@ -23,7 +23,6 @@
 //!   (`t2::filter`, T2-FILTER-06).
 //! - T-37a-058: an entry with only logged-out tracks sorts as -1.0 (E-14). A NaN mean counts as unscored
 //!   (`kuro_domain::library::order::tracker_mean`).
-#![allow(dead_code)] // some pure helpers are tested but not called yet
 
 /// How long a Library toast stays on the shared toast layer (U-1.8).
 pub const TOAST_TIME: std::time::Duration = std::time::Duration::from_secs(4);

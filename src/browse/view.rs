@@ -108,6 +108,7 @@ pub fn repo_picture(path: &Path) -> gtk::Image {
     image
 }
 
+#[cfg(test)]
 /// A source row: a 40 px icon, the name on one line with ellipsis, the language when shown, "Not installed" in the
 /// error colour for a stub, and an action slot.
 pub fn source_row(

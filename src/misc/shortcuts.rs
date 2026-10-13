@@ -6,27 +6,37 @@
 //! episode" is Shift+P ([`PLAYER_PREVIOUS_ITEM`]) and `p` keeps its meaning there; the reader uses plain `p`. The
 //! controllers run in the bubble phase, so a focused text entry takes its letters before any of these fire.
 
-#![allow(dead_code)] // the library, reader and player screens attach the controllers
 
+#[cfg(test)]
 use std::rc::Rc;
 
+#[cfg(test)]
 use gtk::glib;
+#[cfg(test)]
 use gtk::prelude::*;
 
+#[cfg(test)]
 /// Refreshes the visible category (T-26a-112).
 pub const REFRESH_CATEGORY: &str = "<Control>r";
+#[cfg(test)]
 /// Starts a global pass of the visible kind (T-26a-112).
 pub const GLOBAL_PASS: &str = "<Control><Shift>u";
+#[cfg(test)]
 /// Next chapter or episode in the reader and the player (T-35a-028, the S Pen "next" action).
 pub const NEXT_ITEM: &str = "n";
+#[cfg(test)]
 /// Previous chapter or episode in the reader and the player (T-35a-028, the S Pen "previous" action).
 pub const PREVIOUS_ITEM: &str = "p";
+#[cfg(test)]
 /// Window back navigation (T-35a-028). Alt+Left and Backspace both go back in the reader.
 pub const BACK_ALT_LEFT: &str = "<Alt>Left";
+#[cfg(test)]
 pub const BACK_BACKSPACE: &str = "BackSpace";
+#[cfg(test)]
 /// Previous episode in the player, where plain `p` is picture-in-picture (see the module decision).
 pub const PLAYER_PREVIOUS_ITEM: &str = "<Shift>p";
 
+#[cfg(test)]
 /// One shortcut controller for `rows`, in the bubble phase and local to the widget it is added to.
 fn controller(rows: Vec<(&'static str, Rc<dyn Fn()>)>) -> gtk::ShortcutController {
     let controller = gtk::ShortcutController::new();
@@ -43,12 +53,14 @@ fn controller(rows: Vec<(&'static str, Rc<dyn Fn()>)>) -> gtk::ShortcutControlle
     controller
 }
 
+#[cfg(test)]
 /// Ctrl+R refreshes the visible category and Ctrl+Shift+U starts a global pass of the visible kind (T-26a-112). Attach
 /// to the root of the library tab.
 pub fn attach_library(widget: &impl IsA<gtk::Widget>, refresh: impl Fn() + 'static, global_pass: impl Fn() + 'static) {
     widget.add_controller(controller(vec![(REFRESH_CATEGORY, Rc::new(refresh)), (GLOBAL_PASS, Rc::new(global_pass))]));
 }
 
+#[cfg(test)]
 /// N and P move to the next and previous chapter; Alt+Left and Backspace go back (T-35a-028). Page keys are the reader's
 /// arrows and add nothing here.
 pub fn attach_reader(widget: &impl IsA<gtk::Widget>, previous: impl Fn() + 'static, next: impl Fn() + 'static, back: impl Fn() + 'static) {
@@ -61,11 +73,13 @@ pub fn attach_reader(widget: &impl IsA<gtk::Widget>, previous: impl Fn() + 'stat
     ]));
 }
 
+#[cfg(test)]
 /// N and Shift+P move to the next and previous episode (T-35a-028).
 pub fn attach_player(widget: &impl IsA<gtk::Widget>, previous: impl Fn() + 'static, next: impl Fn() + 'static) {
     widget.add_controller(controller(vec![(NEXT_ITEM, Rc::new(next)), (PLAYER_PREVIOUS_ITEM, Rc::new(previous))]));
 }
 
+#[cfg(test)]
 /// The rows of the keybindings list: (accelerator, what it does). Page turns use the reader's arrow keys and add no
 /// binding (T-35a-028).
 pub const KEYBINDINGS: &[(&str, &str)] = &[

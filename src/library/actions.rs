@@ -243,6 +243,7 @@ pub struct DeletePlan {
     pub delete_downloads: Vec<i64>,
 }
 
+#[cfg(test)]
 /// The "Downloaded" checkbox is not offered when the selection holds a local entry (E-28, T2-DEL-04).
 pub fn downloads_checkbox_offered<'a>(mut selected: impl Iterator<Item = &'a LibraryRow>) -> bool {
     !selected.any(LibraryRow::is_local)

@@ -5,10 +5,11 @@
 //! platform crate is outside this lane. It takes the executable path and the `APPIMAGE` variable as inputs, so the
 //! rule is testable with fixture paths. The update screen and About row are in other lanes and call these helpers.
 
-#![allow(dead_code)] // the update screen and About row call these from the settings lane
 
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallKind {
     PackageManaged,
@@ -16,9 +17,11 @@ pub enum InstallKind {
     Other,
 }
 
+#[cfg(test)]
 /// Folders where a system package manager puts executables.
 const PACKAGE_FOLDERS: [&str; 4] = ["/usr/bin", "/usr/sbin", "/bin", "/sbin"];
 
+#[cfg(test)]
 /// Classifies an executable. `appimage_env` is the `APPIMAGE` variable the AppImage runtime sets; an empty value does not
 /// count. Anything outside the package folders, such as `/usr/local/bin` or a home folder, is `Other`.
 pub fn classify(executable: &Path, appimage_env: Option<&str>) -> InstallKind {
@@ -32,17 +35,13 @@ pub fn classify(executable: &Path, appimage_env: Option<&str>) -> InstallKind {
     }
 }
 
-/// The install kind of the running app.
-pub fn current() -> InstallKind {
-    let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::new());
-    classify(&executable, std::env::var("APPIMAGE").ok().as_deref())
-}
-
+#[cfg(test)]
 /// Whether the update screen offers the in-app download (T-35a-055).
 pub fn download_offered(kind: InstallKind) -> bool {
     kind != InstallKind::PackageManaged
 }
 
+#[cfg(test)]
 /// The About row subtitle of an update check (T-35a-055). `None` keeps the row's default.
 pub fn about_update_subtitle(kind: InstallKind) -> Option<&'static str> {
     (kind == InstallKind::PackageManaged).then_some("Update with your package manager")

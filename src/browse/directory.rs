@@ -79,6 +79,7 @@ impl Catalogues {
         Self { runnable, listed: Vec::new(), store }
     }
 
+    #[cfg(test)]
     /// Adds the rows of sources that are listed but cannot run here. They come first, as the extension host lists them.
     pub fn with_listed(mut self, listed: Vec<DirectorySource>) -> Self {
         self.listed = listed;

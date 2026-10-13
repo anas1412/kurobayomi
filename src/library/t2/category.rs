@@ -2,8 +2,6 @@
 
 use kuro_domain::category::bulk::{Choice, Initial, initial_states};
 use kuro_domain::category::model::Category;
-use kuro_domain::category::service::CategoryService;
-use kuro_domain::error::DomainError;
 
 use crate::library::actions::next_membership;
 use crate::library::category_dialog::CategoryDialog;
@@ -43,15 +41,4 @@ fn t2_cat_04_common_and_mixed_categories() {
     let dialog = CategoryDialog::new(vec![10, 11], &[cat(1, "A"), cat(2, "B")], &[vec![1, 2], vec![2]]);
     assert_eq!(dialog.rows()[0].1, Choice::Untouched);
     assert_eq!(dialog.rows()[1].1, Choice::Checked);
-}
-
-/// T2-CAT-08, a compile check: creating, renaming and deleting a category all fail with the one `DomainError`.
-fn t2_cat_08_every_category_write_has_one_error_type(svc: &CategoryService) {
-    fn same_error<A, B, C, E>(
-        _: impl std::future::Future<Output = Result<A, E>>,
-        _: impl std::future::Future<Output = Result<B, E>>,
-        _: impl std::future::Future<Output = Result<C, E>>,
-    ) {
-    }
-    same_error::<_, _, _, DomainError>(svc.create("x"), svc.rename(1, "y"), svc.delete(1));
 }

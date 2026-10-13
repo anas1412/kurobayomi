@@ -20,6 +20,7 @@ use gtk::prelude::*;
 use super::argv::LaunchRequest;
 use kuro_platform::kind::Kind;
 
+#[cfg(test)]
 pub const DESKTOP_ID: &str = "io.github.anas1412.Kurobayomi.desktop";
 pub const BUS_NAME: &str = "io.github.anas1412.Kurobayomi.SearchProvider";
 pub const OBJECT_PATH: &str = "/io/github/anas1412/Kurobayomi/SearchProvider";
@@ -29,6 +30,7 @@ pub const ICON: &str = "io.github.anas1412.Kurobayomi";
 /// Most results one search returns.
 pub const MAX_RESULTS: usize = 20;
 
+#[cfg(test)]
 /// The contents of the provider's `.ini` file.
 pub fn ini() -> String {
     format!("[Shell Search Provider]\nDesktopId={DESKTOP_ID}\nBusName={BUS_NAME}\nObjectPath={OBJECT_PATH}\nVersion=2\n")

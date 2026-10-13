@@ -2,20 +2,36 @@
 //! the counts the library holds, each source taken from the directory or, when it is not installed, a stub (`getOrStub`);
 //! the local source is left out by the sort, and an empty library shows `information_empty_library` (E-MS-01, E-MS-02).
 
+#[cfg(test)]
 use std::cmp::Ordering;
+#[cfg(test)]
 use std::rc::Rc;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use gtk::prelude::*;
+#[cfg(test)]
 use kuro_domain::app::source::LOCAL_SOURCE_ID;
+#[cfg(test)]
 use kuro_domain::items::sorter::collate;
+#[cfg(test)]
 use kuro_domain::source::model::Source;
+#[cfg(test)]
 use kuro_prefs::source::{MigrationDirection, MigrationSortingMode, SourcePrefs};
 
+#[cfg(test)]
 use super::directory::{SourceDirectory, source_or_stub};
-use super::pages::{MigrateSourcesNav, MigrateSourcesSnapshot, migrate_sources};
+#[cfg(test)]
 use kuro_platform::kind::Kind;
+#[cfg(test)]
+use super::pages::MigrateSourcesNav;
+#[cfg(test)]
+use super::pages::MigrateSourcesSnapshot;
+#[cfg(test)]
+use super::pages::migrate_sources;
 
+#[cfg(test)]
 /// The order of the migration list (T-41b-039, E-MS-03, E-MS-04): the local source is left out; a stub comes first when
 /// ascending and last when descending; then the name (lowercase, collated) or the favourite count. Ties go by source id
 /// ascending in both directions, so the order does not depend on the query's row order (a deliberate deviation from
@@ -40,6 +56,7 @@ pub fn sort_migrate_rows(rows: Vec<(Source, i64)>, mode: MigrationSortingMode, d
     kept
 }
 
+#[cfg(test)]
 /// The display order of the migration list: every library source with its count, in `mode` and `direction`. A source the
 /// directory does not know is a stub and, with no name, shows its id.
 pub fn migrate_list(counts: Vec<(i64, i64)>, directory: Option<&dyn SourceDirectory>, mode: MigrationSortingMode, direction: MigrationDirection) -> Vec<(Source, i64)> {
@@ -53,6 +70,7 @@ pub fn migrate_list(counts: Vec<(i64, i64)>, directory: Option<&dyn SourceDirect
     sorted
 }
 
+#[cfg(test)]
 /// The empty state of the picker: upstream's "Your library is empty" for manga, and for anime the plan's own text, since
 /// that one is a text bug there (T-41a-036).
 pub fn empty_text(kind: Kind) -> String {
@@ -62,6 +80,8 @@ pub fn empty_text(kind: Kind) -> String {
     }
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
+#[cfg(test)]
 pub struct MigrateDeps {
     /// Which catalogue the tab lists: it words the empty state.
     pub kind: Kind,
@@ -80,6 +100,7 @@ pub struct MigrateDeps {
     pub open_url: Rc<dyn Fn(&str)>,
 }
 
+#[cfg(test)]
 /// The tab. It reads the counts each time it is shown and after a change of the sort.
 pub fn migrate_tab(deps: MigrateDeps) -> gtk::Box {
     let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -90,6 +111,7 @@ pub fn migrate_tab(deps: MigrateDeps) -> gtk::Box {
     holder
 }
 
+#[cfg(test)]
 /// Reads the counts and replaces the tab's content with the list in the stored sort.
 fn draw(deps: Rc<MigrateDeps>, holder: gtk::glib::WeakRef<gtk::Box>) {
     let counts = Rc::clone(&deps.counts);
@@ -174,19 +196,6 @@ pub(crate) mod tests {
         let mut out = Vec::new();
         walk(root, &mut out);
         out
-    }
-
-    fn pump(mut done: impl FnMut() -> bool) -> bool {
-        let context = gtk::glib::MainContext::default();
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_secs(3) {
-            while context.iteration(false) {}
-            if done() {
-                return true;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        done()
     }
 
     fn deps(counts: Vec<(i64, i64)>, prefs: Rc<SourcePrefs>, opened: Rc<RefCell<Vec<i64>>>) -> MigrateDeps {

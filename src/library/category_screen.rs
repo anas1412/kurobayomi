@@ -1,8 +1,10 @@
 //! The pure rules of the category management screen (T2-CATSCR-01 to T2-CATSCR-03): the name dialog, the dialog that
 //! survives a refresh, and which categories the list shows. The widgets are in `src/live.rs`.
 
+#[cfg(test)]
 use kuro_domain::category::model::Category;
 
+#[cfg(test)]
 /// The Add or Rename dialog's state for a typed name, from `CategoryDialogs.kt`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameCheck {
@@ -12,6 +14,7 @@ pub struct NameCheck {
     pub helper: Helper,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Helper {
     /// "*required"
@@ -20,6 +23,7 @@ pub enum Helper {
     Exists,
 }
 
+#[cfg(test)]
 impl Helper {
     pub fn text(self) -> String {
         use kuro_i18n::{MsgKey, tr};
@@ -34,6 +38,7 @@ impl Helper {
     }
 }
 
+#[cfg(test)]
 /// Checks `name` against the names `taken` by other categories. The match is exact: the name is not trimmed and
 /// "Action" and "action" differ, as in Aniyomi (E-40).
 pub fn check_name(name: &str, taken: &[&str]) -> NameCheck {
@@ -41,6 +46,7 @@ pub fn check_name(name: &str, taken: &[&str]) -> NameCheck {
     NameCheck { confirm_enabled: !name.is_empty() && !exists, helper: if exists { Helper::Exists } else { Helper::Required } }
 }
 
+#[cfg(test)]
 /// An open dialog of the screen: the category it works on, or none for Add.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Dialog {
@@ -49,6 +55,7 @@ pub enum Dialog {
     Delete { id: i64 },
 }
 
+#[cfg(test)]
 /// The dialog after the list refreshed (E-29). Aniyomi closes it on every emission and loses the typed text; here it
 /// stays while its target category still exists.
 pub fn after_refresh(dialog: Option<Dialog>, categories: &[Category]) -> Option<Dialog> {
@@ -58,6 +65,7 @@ pub fn after_refresh(dialog: Option<Dialog>, categories: &[Category]) -> Option<
     })
 }
 
+#[cfg(test)]
 /// The categories the management list shows, in order. The system category is never listed; hidden ones always are
 /// (dimmed by the UI). The "hide hidden categories" setting applies to the Storage filter only
 /// (`kuro_domain::category::storage_view::storage_items`).

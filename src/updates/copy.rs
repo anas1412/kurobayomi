@@ -6,13 +6,6 @@
 
 use kuro_i18n::{MsgKey, tr};
 
-pub fn none() -> String {
-    tr(MsgKey::none)
-}
-pub fn not_available() -> String {
-    tr(MsgKey::not_applicable)
-}
-
 pub fn storage_all() -> String {
     tr(MsgKey::label_all)
 }

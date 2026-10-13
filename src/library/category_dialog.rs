@@ -39,6 +39,7 @@ impl CategoryDialog {
         &self.rows
     }
 
+    #[cfg(test)]
     /// True when the library has no category besides Default: the dialog shows "edit categories" instead.
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()

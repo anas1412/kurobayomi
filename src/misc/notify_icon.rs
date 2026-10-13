@@ -6,15 +6,18 @@
 //! covers (`feed::cover`). The plan names gdk-pixbuf, but this build's cairo has no PNG writer, so a cairo route would
 //! need a new feature flag. The result is the same PNG.
 
-#![allow(dead_code)] // the library notices call this once the cover cache is wired
 
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use image::{Rgba, imageops::FilterType};
 
+#[cfg(test)]
 /// Side of the notification icon in pixels (T-26a-127).
 pub const ICON_SIZE: u32 = 192;
 
+#[cfg(test)]
 /// Writes `cover` as a circle-cropped PNG named `name` inside `cache_dir` and returns its path. `None` when the cover
 /// cannot be read or the PNG cannot be written.
 pub fn circle_icon(cover: &Path, cache_dir: &Path, name: &str) -> Option<PathBuf> {

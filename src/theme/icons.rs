@@ -5,7 +5,9 @@
 //! Standard names come from the user's icon theme. The `kb-*` names are symbolic SVGs exported by
 //! `gen/export_icons.py` into `icons/` and bundled as a GResource.
 
+#[cfg(test)]
 use gtk::prelude::*;
+#[cfg(test)]
 use kuro_i18n::{MsgKey, tr};
 
 /// The application id, also the icon name of the full-colour app icon.
@@ -14,6 +16,7 @@ pub const APP_ID: &str = "io.github.anas1412.Kurobayomi";
 /// The bundled icon theme root: `scalable/actions/`, `scalable/apps/` and `symbolic/apps/` below it.
 pub const ICON_RESOURCE_PATH: &str = "/io/github/anas1412/Kurobayomi/icons";
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// One icon the app shows. `name()` is the icon-theme name looked up at run time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
@@ -69,6 +72,7 @@ pub enum Icon {
 }
 
 impl Icon {
+    #[cfg(test)]
     /// Every variant, in declaration order.
     pub const ALL: [Icon; 48] = [
         Icon::Close,
@@ -177,6 +181,7 @@ impl Icon {
 
     /// The file this icon is bundled as, relative to the icon theme root, or `None` for a standard
     /// name that the user's icon theme provides.
+    #[cfg(test)]
     pub const fn bundled_path(self) -> Option<&'static str> {
         Some(match self {
             Icon::Logo => "scalable/apps/io.github.anas1412.Kurobayomi.svg",
@@ -226,21 +231,25 @@ pub fn register(display: &gtk::gdk::Display) {
     gtk::IconTheme::for_display(display).add_resource_path(ICON_RESOURCE_PATH);
 }
 
+#[cfg(test)]
 /// The anime library tab icon: outline when not selected, filled when selected (T-49ba-015).
 pub fn anime_library_icon(selected: bool) -> Icon {
     if selected { Icon::AnimeLibraryFilled } else { Icon::AnimeLibraryOutline }
 }
 
+#[cfg(test)]
 /// The entry info header caret: up when expanded, down when collapsed (T-49ba-019).
 pub fn caret_icon(expanded: bool) -> Icon {
     if expanded { Icon::CaretUp } else { Icon::CaretDown }
 }
 
+#[cfg(test)]
 /// The caret tooltip: the collapse label when expanded, the expand label otherwise.
 pub fn caret_tooltip(expanded: bool) -> String {
     tr(if expanded { MsgKey::manga_info_collapse } else { MsgKey::manga_info_expand })
 }
 
+#[cfg(test)]
 /// The reading-mode icon for a `ReadingMode` constant name, as in `ReadingMode.kt`. An unknown
 /// name is `DEFAULT`, as `ReadingMode.fromPreference` does (T-49ba-025).
 pub fn reading_mode_icon(mode: &str) -> Icon {
@@ -254,42 +263,30 @@ pub fn reading_mode_icon(mode: &str) -> Icon {
     }
 }
 
+#[cfg(test)]
 /// The download indicator icon: shown for a downloaded row, nothing otherwise (T-49ba-026).
 pub fn download_indicator_icon(downloaded: bool) -> Option<Icon> {
     downloaded.then_some(Icon::DownloadCircle)
 }
 
-/// The download indicator widget. It is not clickable and carries the "Downloaded" tooltip.
-pub fn download_indicator(downloaded: bool) -> Option<gtk::Image> {
-    let icon = download_indicator_icon(downloaded)?;
-    let image = gtk::Image::from_icon_name(icon.name());
-    image.set_tooltip_text(Some(&tr(MsgKey::label_downloaded)));
-    image.set_can_target(false);
-    Some(image)
-}
-
-/// The reader mode image. LTR and RTL icons are never mirrored, so the widget is set to LTR (I3).
-pub fn reading_mode_image(mode: &str) -> gtk::Image {
-    let icon = reading_mode_icon(mode);
-    let image = gtk::Image::from_icon_name(icon.name());
-    image.set_direction(gtk::TextDirection::Ltr);
-    image
-}
-
+#[cfg(test)]
 /// The crop-borders toggle icon: on when crop borders is on (T-49ba-011, `BottomReaderBar.kt:59`).
 pub fn crop_icon(crop_borders: bool) -> Icon {
     if crop_borders { Icon::CropOn } else { Icon::CropOff }
 }
 
+#[cfg(test)]
 /// The crop-borders toggle tooltip. The reader's label catalogue has no key for it yet, so it is
 /// the English text.
 pub const CROP_TOOLTIP: &str = "Crop borders";
 
+#[cfg(test)]
 /// The centre player button: pause while playing, play while paused (T-49ba-024).
 pub fn play_pause_icon(playing: bool) -> Icon {
     if playing { Icon::Pause } else { Icon::Play }
 }
 
+#[cfg(test)]
 /// The icon name of each desktop shortcut, by action name (T-49ba-038). The names are the standard
 /// icon names, or the bundled `kb-*` names where Android had a Kurobayomi drawable.
 pub const SHORTCUT_ICONS: [(&str, &str); 5] = [
@@ -300,23 +297,20 @@ pub const SHORTCUT_ICONS: [(&str, &str); 5] = [
     ("browse", "system-search-symbolic"),
 ];
 
+#[cfg(test)]
 /// The icon name of a desktop shortcut action, or `None` for an unknown action.
 pub fn shortcut_icon_name(action: &str) -> Option<&'static str> {
     SHORTCUT_ICONS.iter().find(|(name, _)| *name == action).map(|(_, icon)| *icon)
 }
 
+#[cfg(test)]
 /// The icon of a notification (T-49ba-013). Standard names come from the user's icon theme; the
 /// logo uses the application id, and no notification sets an accent colour.
 pub fn notification_icon(icon: Icon) -> gtk::gio::Icon {
     gtk::gio::ThemedIcon::new(icon.name()).upcast()
 }
 
-/// Exposes the selected state of a toggle widget to assistive technology.
-pub fn set_toggle_state(widget: &impl IsA<gtk::Accessible>, selected: bool) {
-    let tristate = if selected { gtk::AccessibleTristate::True } else { gtk::AccessibleTristate::False };
-    widget.update_state(&[gtk::accessible::State::Checked(tristate)]);
-}
-
+#[cfg(test)]
 /// The brand and extension marks (T-49b-024). They are SVG files in the bundle under `brand/`, with
 /// `fill="currentColor"` so the CSS colour tints them. Only their links use them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -326,6 +320,7 @@ pub enum Brand {
     Magnet,
 }
 
+#[cfg(test)]
 impl Brand {
     /// The file name inside the bundle's `brand/` directory.
     pub const fn file_name(self) -> &'static str {
@@ -341,10 +336,6 @@ impl Brand {
         format!("{ICON_RESOURCE_PATH}/brand/{}", self.file_name())
     }
 
-    /// The mark as an image, read from the bundle.
-    pub fn image(self) -> gtk::Image {
-        gtk::Image::from_resource(&self.resource_path())
-    }
 }
 
 #[cfg(test)]

@@ -62,6 +62,7 @@ pub fn content_plan(input: &ContentInput) -> ContentPlan {
     ContentPlan::Items { mode: input.display, toast: error.map(error_toast) }
 }
 
+#[cfg(test)]
 /// Whether the error state offers this action in the given plan (used by the view for accessible names).
 pub fn offers(plan: &ContentPlan, action: EmptyAction) -> bool {
     matches!(plan, ContentPlan::Error { actions, .. } if actions.contains(&action))

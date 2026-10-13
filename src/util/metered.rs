@@ -4,6 +4,7 @@
 //! can read it. NetworkManager's values: 0 unknown, 1 yes, 2 no, 3 guess yes, 4 guess no; 1 and 3 mean metered.
 //! An unknown state changes no behaviour: a job that waits for an unmetered connection waits only on a known metered one.
 
+#[cfg(test)]
 /// What is known about the connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Metered {
@@ -12,10 +13,12 @@ pub enum Metered {
     Unknown,
 }
 
+#[cfg(test)]
 /// The policy text for the settings help of the "only on unmetered networks" rows.
 pub const POLICY_HELP: &str = "A connection that the desktop or NetworkManager marks as metered pauses these jobs. \
 When the connection state is not known, nothing changes.";
 
+#[cfg(test)]
 /// NetworkManager's `Metered` property as a state.
 pub fn from_network_manager(value: u32) -> Metered {
     match value {
@@ -25,6 +28,7 @@ pub fn from_network_manager(value: u32) -> Metered {
     }
 }
 
+#[cfg(test)]
 /// Joins the two readings. A metered reading from either source wins. `gio` is `None` when no network monitor answers,
 /// `network_manager` is `None` when NetworkManager is absent or the property is unknown.
 pub fn combine(gio: Option<bool>, network_manager: Option<u32>) -> Metered {
@@ -36,21 +40,16 @@ pub fn combine(gio: Option<bool>, network_manager: Option<u32>) -> Metered {
     }
 }
 
+#[cfg(test)]
 /// `is_metered` of the network state: true only for a known metered connection.
 pub fn is_metered(gio: Option<bool>, network_manager: Option<u32>) -> bool {
     combine(gio, network_manager) == Metered::Yes
 }
 
+#[cfg(test)]
 /// Whether a job set to run only on an unmetered connection must wait now.
 pub fn must_wait(only_unmetered: bool, state: Metered) -> bool {
     only_unmetered && state == Metered::Yes
-}
-
-/// The GIO reading, or `None` when there is no default network monitor.
-pub fn gio_reading() -> Option<bool> {
-    use gtk::gio::prelude::NetworkMonitorExt;
-    let monitor = gtk::gio::NetworkMonitor::default();
-    Some(monitor.is_network_metered())
 }
 
 #[cfg(test)]

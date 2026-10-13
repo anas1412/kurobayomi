@@ -10,6 +10,7 @@ use kuro_platform::kind::Kind;
 pub const APP_UPDATE_PROGRESS: &str = "app-update.progress";
 pub const APP_UPDATE_INSTALL: &str = "app-update.install";
 pub const APP_UPDATE_ERROR: &str = "app-update.error";
+#[cfg(test)]
 pub const SAVE_IMAGE: &str = "save-image";
 pub const LIBRARY_PROGRESS: &str = "library.progress";
 pub const LIBRARY_ERROR: &str = "library.error";

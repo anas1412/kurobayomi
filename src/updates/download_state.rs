@@ -57,15 +57,18 @@ impl DiskCache {
         self.checks.clear();
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.checks.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.checks.is_empty()
     }
 }
 
+#[cfg(test)]
 /// One row of the feed as the download state sees it: the unit it belongs to and what it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnitDownload {
@@ -88,6 +91,7 @@ pub fn apply_to(download: &mut RowDownload, change: Change) {
     }
 }
 
+#[cfg(test)]
 /// Applies `change` to the row with `unit_id` only. Returns whether a row was found; unknown ids are ignored.
 pub fn apply(rows: &mut [UnitDownload], unit_id: i64, change: Change) -> bool {
     match rows.iter_mut().find(|r| r.unit_id == unit_id) {

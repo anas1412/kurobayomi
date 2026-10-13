@@ -121,6 +121,7 @@ fn error_state(text: &str) -> gtk::Widget {
     label.upcast()
 }
 
+#[cfg(test)]
 /// The search page for `start`. The runner lives as long as the page; popping it aborts the fetches.
 pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Widget {
     search_page(env, start, migrating).0

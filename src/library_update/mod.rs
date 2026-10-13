@@ -3,7 +3,6 @@
 //!
 //! Pure logic only; no GTK. Notifications, downloads and the item sync are ports (`Host`, `ItemSync`) that the GUI
 //! and the download lanes implement. Tests run with `cargo test -p kurobayomi library_update`.
-#![allow(dead_code)] // the pass is wired by the screens lane; some helpers are tested but not called yet
 
 pub mod constraints;
 pub mod counters;

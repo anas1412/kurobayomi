@@ -4,22 +4,28 @@
 
 use std::sync::Mutex;
 
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
+#[cfg(test)]
+use async_channel::Receiver;
 use kuro_platform::kind::Kind;
 
 use crate::library_update::pass::PassEvent;
 
+#[cfg(test)]
 pub type EventSender = Sender<PassEvent>;
 
+#[cfg(test)]
 pub fn channel() -> (EventSender, Receiver<PassEvent>) {
     async_channel::unbounded()
 }
 
+#[cfg(test)]
 /// Sends one event. Returns `false` when the receiver is gone (the window closed); the pass carries on regardless.
 pub fn send(tx: &EventSender, event: PassEvent) -> bool {
     tx.try_send(event).is_ok()
 }
 
+#[cfg(test)]
 /// Hands each event to `apply`, in order, until every sender is dropped. Returns how many were applied.
 pub async fn pump(rx: Receiver<PassEvent>, mut apply: impl FnMut(PassEvent)) -> usize {
     let mut applied = 0;
@@ -28,11 +34,6 @@ pub async fn pump(rx: Receiver<PassEvent>, mut apply: impl FnMut(PassEvent)) -> 
         applied += 1;
     }
     applied
-}
-
-/// Starts the consumer on the GTK main context. Call from the main thread; `apply` may touch widgets.
-pub fn attach_to_main_loop(rx: Receiver<PassEvent>, apply: impl FnMut(PassEvent) + 'static) {
-    gtk::glib::spawn_future_local(pump(rx, apply));
 }
 
 /// A live event, tagged with the kind of the pass that sent it (the two kinds run side by side).
@@ -49,6 +50,7 @@ impl Feed {
         Self { subscribers: Mutex::new(Vec::new()) }
     }
 
+    #[cfg(test)]
     pub fn subscribe(&self) -> Receiver<LiveEvent> {
         let (tx, rx) = async_channel::unbounded();
         self.subscribers.lock().unwrap_or_else(|e| e.into_inner()).push(tx);
@@ -64,16 +66,12 @@ impl Feed {
 /// The feed of the app's passes: `PassRunner` publishes to it as a pass runs.
 static LIVE: Feed = Feed::new();
 
-/// Subscribes to the live events of every pass.
-pub fn subscribe() -> Receiver<LiveEvent> {
-    LIVE.subscribe()
-}
-
 /// Called by the pass at its start, after each entry and at its end (T-26a-111).
 pub fn publish(kind: Kind, event: PassEvent) {
     LIVE.publish(kind, event);
 }
 
+#[cfg(test)]
 fn show_fraction(bar: &gtk::ProgressBar, fraction: Option<f64>) {
     use gtk::prelude::*;
     match fraction {
@@ -85,12 +83,7 @@ fn show_fraction(bar: &gtk::ProgressBar, fraction: Option<f64>) {
     }
 }
 
-/// The determinate bar for the library header of `kind`: hidden while idle, filled while a pass of that kind runs
-/// (T-26a-111). The library header appends it once; it follows the live events on the main context.
-pub fn header_bar(kind: Kind) -> gtk::ProgressBar {
-    header_bar_from(subscribe(), kind)
-}
-
+#[cfg(test)]
 fn header_bar_from(rx: Receiver<LiveEvent>, kind: Kind) -> gtk::ProgressBar {
     use gtk::prelude::*;
     let bar = gtk::ProgressBar::new();
@@ -110,6 +103,7 @@ fn header_bar_from(rx: Receiver<LiveEvent>, kind: Kind) -> gtk::ProgressBar {
     bar
 }
 
+#[cfg(test)]
 /// The library header's progress bar (T-26a-111), folded from the pass events. The bar is determinate while a pass runs
 /// and hidden when the pass is idle.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -119,6 +113,7 @@ pub struct HeaderProgress {
     total: usize,
 }
 
+#[cfg(test)]
 impl HeaderProgress {
     pub fn apply(&mut self, event: &PassEvent) {
         match event {

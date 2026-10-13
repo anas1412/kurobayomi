@@ -5,9 +5,9 @@
 //!
 //! Decisions: ids are a counter, not UUIDs (the workspace has no uuid crate). The registry records state only; the owner
 //! spawns the job future on the runtime and reports its start and outcome here.
-#![allow(dead_code)] // the job owners are not in this lane yet; the worker info page reads the registry
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The states a job moves through. `Blocked` is kept for the dump format; nothing here sets it yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobState {
@@ -46,6 +46,7 @@ pub enum JobOutcome {
     Failure,
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// `Keep` returns the active job of the same name; `Replace` cancels it and enqueues the new one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UniquePolicy {
@@ -142,6 +143,7 @@ impl JobRegistry {
         }
     }
 
+    #[cfg(test)]
     /// Whether a running job carries `tag` (the busy checks of the backup screens).
     pub fn is_running(&self, tag: &str) -> bool {
         self.lock().jobs.iter().any(|job| job.state == JobState::Running && job.tags.iter().any(|t| t == tag))

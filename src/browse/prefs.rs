@@ -10,6 +10,7 @@ use kuro_prefs::store::PrefStore;
 
 use kuro_platform::kind::Kind;
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The typed browse preferences of one kind. Each field reads and writes one stored key.
 pub struct BrowsePrefs {
     /// `[sources]`: the upstream source keys (languages, pins, disabled sources and the migrate sorting).

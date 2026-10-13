@@ -4,12 +4,6 @@
 //! player, the settings pages and the lock window) live in other lanes.
 
 // the player, the downloads and the lock window call these from their own lanes
-#[allow(dead_code)]
-#[allow(dead_code)]
 pub mod dropped;
-#[allow(dead_code)]
-pub mod keep_awake;
-#[allow(dead_code)]
 pub mod logging;
-#[allow(dead_code)]
 pub mod metered;

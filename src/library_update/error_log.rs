@@ -17,6 +17,7 @@ use kuro_platform::paths::Paths;
 
 use crate::library_update::pass::Failure;
 
+#[cfg(test)]
 /// The file name inside the cache directory.
 pub const FILE_NAME: &str = "update_errors.txt";
 

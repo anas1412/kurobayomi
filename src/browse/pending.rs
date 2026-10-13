@@ -27,6 +27,7 @@ pub fn park(route: BrowseRoute) {
     ROUTE.with(|slot| *slot.borrow_mut() = Some(route));
 }
 
+#[cfg(test)]
 /// The parked route, handed out once.
 pub fn take() -> Option<BrowseRoute> {
     ROUTE.with(|slot| slot.borrow_mut().take())
@@ -40,6 +41,7 @@ pub fn take_for(screen: &str) -> Option<BrowseRoute> {
     })
 }
 
+#[cfg(test)]
 pub fn park_intent(intent: SearchIntent) {
     INTENT.with(|slot| *slot.borrow_mut() = Some(intent));
 }
@@ -56,6 +58,7 @@ pub fn open(route: BrowseRoute) {
     crate::ui::open(screen);
 }
 
+#[cfg(test)]
 /// The SEARCH intent: opens global search with the extension filter (T-40b-065). A blank query still opens the page.
 pub fn open_search_intent(intent: SearchIntent) {
     park_intent(intent);

@@ -36,6 +36,7 @@ impl DialogSlot {
         Self::default()
     }
 
+    #[cfg(test)]
     /// Shows `spec` over `anchor`'s window and replaces any dialog this slot still has open. `on_answer` runs once for
     /// the dialog: `Some(index)` for a button, `None` when it was closed without one (also when a newer dialog
     /// replaced it), and then the dialog is gone.

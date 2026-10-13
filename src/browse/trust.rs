@@ -1,8 +1,10 @@
 //! The untrusted-extension dialog and what its answers do (T-41a-012). Pure: the page runs the effects. Trusting or
 //! uninstalling an entry that already vanished does nothing (T28, race R13).
 
+#[cfg(test)]
 use kuro_i18n::{MsgKey, tr};
 
+#[cfg(test)]
 /// The dialog text: title "Untrusted extension", the risk body, and the buttons Trust and Uninstall.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrustDialog {
@@ -12,6 +14,7 @@ pub struct TrustDialog {
     pub uninstall: String,
 }
 
+#[cfg(test)]
 pub fn trust_dialog() -> TrustDialog {
     TrustDialog {
         title: tr(MsgKey::untrusted_extension),
@@ -21,6 +24,7 @@ pub fn trust_dialog() -> TrustDialog {
     }
 }
 
+#[cfg(test)]
 /// How the dialog was answered. Dismissing it without a button press is `Dismiss`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrustAnswer {
@@ -29,6 +33,7 @@ pub enum TrustAnswer {
     Dismiss,
 }
 
+#[cfg(test)]
 /// What the page does after an answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrustEffect {
@@ -37,6 +42,7 @@ pub enum TrustEffect {
     Nothing,
 }
 
+#[cfg(test)]
 /// `still_untrusted` is whether the entry is still an untrusted extension when the answer arrives.
 pub fn answer(answer: TrustAnswer, still_untrusted: bool) -> TrustEffect {
     match (answer, still_untrusted) {

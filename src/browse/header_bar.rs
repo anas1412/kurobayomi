@@ -25,6 +25,7 @@ pub struct HeaderDeps {
     pub on_overflow: Rc<dyn Fn(OverflowItem)>,
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 pub struct SourceHeader {
     pub bar: gtk::HeaderBar,
     pub search: gtk::ToggleButton,

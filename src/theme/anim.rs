@@ -4,6 +4,7 @@
 //! Rotations are CSS transitions defined in `style.css`, so no per-frame code runs. The durations
 //! are in `motion`, and every duration goes through `motion::duration_ms` when it is set from Rust.
 
+#[cfg(test)]
 /// The two rotations of the tab-enter icons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rotation {
@@ -13,6 +14,7 @@ pub enum Rotation {
     FullBackSlow,
 }
 
+#[cfg(test)]
 impl Rotation {
     /// The target class for the icon's state. The transition runs from the current angle to this one.
     pub const fn class(self, selected: bool) -> &'static str {

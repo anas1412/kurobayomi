@@ -4,19 +4,19 @@
 //! The rules are pure. The page engine (WebKitGTK, T-36a-052) reports `can_go_back`, `can_go_forward`, the page title and
 //! the load state; this module turns them into what the header shows.
 
-use std::cell::Cell;
-use std::rc::Rc;
-use std::time::Duration;
 
-use gtk::prelude::*;
+#[cfg(test)]
 use kuro_i18n::{MsgKey, tr};
+#[cfg(test)]
 use kuro_platform::kind::Kind;
 
+#[cfg(test)]
 /// The title: the page title when the page has one, otherwise the title the screen was opened with.
 pub fn title(page_title: Option<&str>, initial_title: &str) -> String {
     page_title.unwrap_or(initial_title).to_string()
 }
 
+#[cfg(test)]
 /// What the screen is opened with (Kotlin extras `url_key`, `source_key`, `title_key`, `anime_key`, T-53a-071).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
@@ -27,13 +27,16 @@ pub struct OpenRequest {
     pub kind: Kind,
 }
 
+#[cfg(test)]
 impl OpenRequest {
+    #[cfg(test)]
     /// The title the header starts with: the `title_key` value, or none.
     pub fn initial_title(&self) -> &str {
         self.title_key.as_deref().unwrap_or("")
     }
 }
 
+#[cfg(test)]
 /// What the Back action does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackStep {
@@ -43,22 +46,26 @@ pub enum BackStep {
     Close,
 }
 
+#[cfg(test)]
 /// Back goes back in history while the page can, and closes the screen otherwise.
 pub fn back_step(can_go_back: bool) -> BackStep {
     if can_go_back { BackStep::History } else { BackStep::Close }
 }
 
+#[cfg(test)]
 /// The label of the Back action.
 pub fn back_label() -> String {
     tr(MsgKey::action_webview_back)
 }
 
+#[cfg(test)]
 /// Opening the screen pushes; closing it pops (T-53a-051).
 pub fn transition(opening: bool) -> super::transitions::Spec {
     let direction = if opening { super::transitions::Direction::Push } else { super::transitions::Direction::Pop };
     super::transitions::spec(direction, super::transitions::animations_enabled())
 }
 
+#[cfg(test)]
 /// The overflow actions, in the order the menu lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overflow {
@@ -68,10 +75,13 @@ pub enum Overflow {
     ClearCookies,
 }
 
+#[cfg(test)]
 /// Overflow menu order (`WebViewScreenContent`).
 pub const OVERFLOW: [Overflow; 4] = [Overflow::Refresh, Overflow::Share, Overflow::OpenInBrowser, Overflow::ClearCookies];
 
+#[cfg(test)]
 impl Overflow {
+    #[cfg(test)]
     pub fn label(self) -> String {
         tr(match self {
             Self::Refresh => MsgKey::action_webview_refresh,
@@ -82,6 +92,7 @@ impl Overflow {
     }
 }
 
+#[cfg(test)]
 /// The page engine's load state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LoadState {
@@ -92,6 +103,7 @@ pub enum LoadState {
     Loading(Option<f64>),
 }
 
+#[cfg(test)]
 /// What the progress bar shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Progress {
@@ -100,6 +112,7 @@ pub enum Progress {
     Fraction(f64),
 }
 
+#[cfg(test)]
 /// Indeterminate while initialising, determinate while loading (a missing progress counts as complete), hidden when idle.
 pub fn progress(state: LoadState) -> Progress {
     match state {
@@ -109,116 +122,6 @@ pub fn progress(state: LoadState) -> Progress {
     }
 }
 
-/// The header of the WebView screen. Built once; the screen updates it as the engine reports changes.
-pub struct Header {
-    pub widget: gtk::HeaderBar,
-    title: gtk::Label,
-    subtitle: gtk::Label,
-    back: gtk::Button,
-    forward: gtk::Button,
-    progress: gtk::ProgressBar,
-    indeterminate: Rc<Cell<bool>>,
-}
-
-/// Builds the header. `close`, `back`, `forward` and `overflow` run on the GTK thread when the matching control is used.
-pub fn header(
-    close: impl Fn() + 'static,
-    back: impl Fn() + 'static,
-    forward: impl Fn() + 'static,
-    overflow: impl Fn(Overflow) + 'static,
-) -> Header {
-    let title = gtk::Label::builder().ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["title"]).build();
-    let subtitle = gtk::Label::builder().ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["subtitle"]).build();
-    let titles = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    titles.append(&title);
-    titles.append(&subtitle);
-
-    let widget = crate::ui::header_bar();
-    widget.set_decoration_layout(Some(&crate::ui::decoration(false)));
-    widget.set_title_widget(Some(&titles));
-    let close_button = gtk::Button::from_icon_name("window-close-symbolic");
-    close_button.connect_clicked(move |_| close());
-    widget.pack_start(&close_button);
-
-    let back_button = crate::ui::icon_button("go-previous-symbolic", &back_label());
-    back_button.set_sensitive(false);
-    back_button.connect_clicked(move |_| back());
-    let forward_button = crate::ui::icon_button("go-next-symbolic", &tr(MsgKey::action_webview_forward));
-    forward_button.set_sensitive(false);
-    forward_button.connect_clicked(move |_| forward());
-    widget.pack_end(&overflow_menu(overflow));
-    widget.pack_end(&forward_button);
-    widget.pack_end(&back_button);
-    crate::ui::no_sticky_focus(&widget);
-
-    let progress = gtk::ProgressBar::new();
-    progress.set_visible(false);
-    let indeterminate = Rc::new(Cell::new(false));
-    // the indeterminate bar is pulsed on a timer; the timer ends with the bar
-    let weak = progress.downgrade();
-    let pulsing = indeterminate.clone();
-    gtk::glib::timeout_add_local(Duration::from_millis(100), move || match weak.upgrade() {
-        Some(bar) => {
-            if pulsing.get() {
-                bar.pulse();
-            }
-            gtk::glib::ControlFlow::Continue
-        }
-        None => gtk::glib::ControlFlow::Break,
-    });
-
-    Header { widget, title, subtitle, back: back_button, forward: forward_button, progress, indeterminate }
-}
-
-fn overflow_menu(overflow: impl Fn(Overflow) + 'static) -> gtk::MenuButton {
-    let labels: Vec<String> = OVERFLOW.iter().map(|item| item.label()).collect();
-    let overflow = Rc::new(overflow);
-    let button = crate::ui::menu_button("view-more-symbolic", &labels, move |label| {
-        if let Some(item) = OVERFLOW.iter().find(|item| item.label() == label) {
-            overflow(*item);
-        }
-    });
-    button.set_tooltip_text(None);
-    button
-}
-
-impl Header {
-    /// Shows the page title (or `initial_title`) and the current URL as the subtitle.
-    pub fn set_page(&self, page_title: Option<&str>, initial_title: &str, url: &str) {
-        self.title.set_text(&title(page_title, initial_title));
-        self.subtitle.set_text(url);
-    }
-
-    /// Back and Forward are sensitive only when the engine can go that way.
-    pub fn set_navigation(&self, can_go_back: bool, can_go_forward: bool) {
-        self.back.set_sensitive(can_go_back);
-        self.forward.set_sensitive(can_go_forward);
-    }
-
-    /// Applies the load state to the progress bar.
-    pub fn set_load(&self, state: LoadState) {
-        match progress(state) {
-            Progress::Hidden => {
-                self.indeterminate.set(false);
-                self.progress.set_visible(false);
-            }
-            Progress::Indeterminate => {
-                self.indeterminate.set(true);
-                self.progress.set_visible(true);
-            }
-            Progress::Fraction(fraction) => {
-                self.indeterminate.set(false);
-                self.progress.set_visible(true);
-                self.progress.set_fraction(fraction);
-            }
-        }
-    }
-
-    /// The progress bar, for the screen to place under the content.
-    pub fn progress_bar(&self) -> &gtk::ProgressBar {
-        &self.progress
-    }
-}
 
 #[cfg(test)]
 mod tests {

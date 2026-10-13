@@ -8,6 +8,7 @@ pub const GLOBAL_SEARCH_EMPTY_HINT: &str = "Search a source by title";
 /// `loading_sources`: the line under the spinner of a Sources tab while the repository sources load.
 pub const LOADING_SOURCES: &str = "Loading sources…";
 
+#[cfg(test)]
 /// `migrate_sources_empty`: the empty picker of the anime migration, which upstream words as "Your library is empty"
 /// (a text bug; T-41a-036, ui-parity S9).
 pub const MIGRATE_SOURCES_EMPTY: &str = "No source has favorites to migrate";
@@ -26,6 +27,7 @@ pub const OPEN: &str = "Open";
 /// `action_open_website`: a source row's right-click item that opens the source's site in the browser.
 pub const OPEN_WEBSITE: &str = "Open website";
 
+#[cfg(test)]
 /// The migrate tab's help action (T-41b-040, help URLs of `p2-data-and-config.md` section 5).
 pub const SOURCE_MIGRATION_HELP_URL: &str = "https://aniyomi.org/help/guides/source-migration/";
 

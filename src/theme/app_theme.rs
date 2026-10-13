@@ -3,7 +3,6 @@
 //!
 //! The choice is stored as the mode name in `pref_theme_mode_key` (`SYSTEM`, `LIGHT`, `DARK`).
 
-use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::ui::ThemeMode;
 
 /// One theme choice, in picker order.
@@ -15,6 +14,7 @@ pub enum AppTheme {
 }
 
 impl AppTheme {
+    #[cfg(test)]
     /// The picker order.
     pub const PICKER: [AppTheme; 3] = [AppTheme::System, AppTheme::Light, AppTheme::Dark];
 
@@ -36,14 +36,6 @@ impl AppTheme {
         }
     }
 
-    /// The picker title, from the translation catalogue.
-    pub fn title(self) -> String {
-        tr(match self {
-            AppTheme::System => MsgKey::theme_system,
-            AppTheme::Light => MsgKey::theme_light,
-            AppTheme::Dark => MsgKey::theme_dark,
-        })
-    }
 }
 
 #[cfg(test)]

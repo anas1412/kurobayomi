@@ -62,19 +62,9 @@ impl ItemCommon {
         self
     }
 
-    pub fn with_icon(mut self, icon: &'static str) -> Self {
-        self.icon = Some(icon);
-        self
-    }
-
     /// Marks the row as one that opens another page.
     pub fn with_link(mut self) -> Self {
         self.link = true;
-        self
-    }
-
-    pub fn disabled(mut self) -> Self {
-        self.enabled = false;
         self
     }
 
@@ -95,6 +85,7 @@ impl ItemCommon {
 /// An item key and its visible label.
 pub type Entry = (String, String);
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// Veto-gated value. A `None` on the `Veto` side means the caller owns the value.
 pub enum PreferenceItem {
     Text { common: ItemCommon, on_click: Option<Rc<dyn Fn()>> },
@@ -114,60 +105,8 @@ pub enum PreferenceItem {
     Custom { title: String, build: Rc<dyn Fn() -> gtk::Widget> },
 }
 
-/// The 13 variants, without payloads. Used by tests and by the exhaustive render match.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Text,
-    Switch,
-    Slider,
-    List,
-    BasicList,
-    MultiSelect,
-    EditText,
-    MultiLineEdit,
-    MpvConf,
-    EditTextInfo,
-    Tracker,
-    Info,
-    Custom,
-}
-
-impl Kind {
-    pub const ALL: [Kind; 13] = [
-        Kind::Text,
-        Kind::Switch,
-        Kind::Slider,
-        Kind::List,
-        Kind::BasicList,
-        Kind::MultiSelect,
-        Kind::EditText,
-        Kind::MultiLineEdit,
-        Kind::MpvConf,
-        Kind::EditTextInfo,
-        Kind::Tracker,
-        Kind::Info,
-        Kind::Custom,
-    ];
-}
 
 impl PreferenceItem {
-    pub fn kind(&self) -> Kind {
-        match self {
-            Self::Text { .. } => Kind::Text,
-            Self::Switch { .. } => Kind::Switch,
-            Self::Slider { .. } => Kind::Slider,
-            Self::List { .. } => Kind::List,
-            Self::BasicList { .. } => Kind::BasicList,
-            Self::MultiSelect { .. } => Kind::MultiSelect,
-            Self::EditText { .. } => Kind::EditText,
-            Self::MultiLineEdit { .. } => Kind::MultiLineEdit,
-            Self::MpvConf { .. } => Kind::MpvConf,
-            Self::EditTextInfo { .. } => Kind::EditTextInfo,
-            Self::Tracker { .. } => Kind::Tracker,
-            Self::Info { .. } => Kind::Info,
-            Self::Custom { .. } => Kind::Custom,
-        }
-    }
 
     /// The title used for highlight lookup. Trackers use their name, Info rows use their text.
     pub fn title(&self) -> &str {

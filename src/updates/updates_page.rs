@@ -89,30 +89,11 @@ pub fn limit_footer(rows: usize) -> Option<&'static str> {
     (rows == kuro_domain::UPDATES_LIMIT as usize).then_some(copy::SHOWING_LATEST_500)
 }
 
-#[cfg(test)]
-use crate::updates::selection::Selectable;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Clone, Debug, PartialEq)]
-    struct Row {
-        id: i64,
-        selected: bool,
-    }
-
-    impl Selectable for Row {
-        fn id(&self) -> i64 {
-            self.id
-        }
-        fn selected(&self) -> bool {
-            self.selected
-        }
-        fn set_selected(&mut self, selected: bool) {
-            self.selected = selected;
-        }
-    }
 
     #[test]
     fn progress_only_when_unread_and_positive() {

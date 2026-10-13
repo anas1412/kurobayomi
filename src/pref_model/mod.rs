@@ -3,7 +3,6 @@
 //!
 //! `settings::body` builds these screens through [`pages::body`]; Escape, Alt+Left and the mouse back button reach
 //! the settings shell through [`shell::go_back`].
-#![allow(dead_code)]
 
 pub mod backup_pages;
 pub mod bind;

@@ -8,6 +8,7 @@
 
 use std::collections::VecDeque;
 
+#[cfg(test)]
 /// What the library page shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LibraryState {
@@ -41,11 +42,13 @@ impl<T> Bootstrap<T> {
         self.migrated = true;
     }
 
+    #[cfg(test)]
     /// The first window may be presented.
     pub fn may_present(&self) -> bool {
         self.migrated
     }
 
+    #[cfg(test)]
     /// The library page shows the loading state until the migrator finishes.
     pub fn library_state(&self) -> LibraryState {
         if self.migrated { LibraryState::Ready } else { LibraryState::Loading }

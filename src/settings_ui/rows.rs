@@ -1,17 +1,15 @@
 //! Row builders shared by the settings pages. Each one binds a row to a typed preference; a value the list does not
 //! offer shows the preference default (the stored value is kept).
 // Not reachable from `route.rs` yet: text rows are used by pages that are not routed yet.
-#![allow(dead_code)]
 use std::collections::BTreeSet;
 use std::fmt::Debug;
-use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use kuro_prefs::pref::Pref;
 use kuro_prefs::values::PrefType;
 
 use crate::pref_model::bind::{self, Veto};
-use crate::pref_model::model::{slider_steps, ItemCommon, Preference, PreferenceGroup, PreferenceItem};
+use crate::pref_model::model::{ItemCommon, Preference, PreferenceGroup, PreferenceItem};
 
 pub fn group(title: &str, items: Vec<PreferenceItem>) -> Preference {
     Preference::Group(PreferenceGroup::new(title, items))
@@ -21,6 +19,7 @@ pub fn item(item: PreferenceItem) -> Preference {
     Preference::Item(item)
 }
 
+#[cfg(test)]
 /// Drops the rows that are not enabled (Android hides them instead of greying them out).
 pub fn visible(items: Vec<PreferenceItem>) -> Vec<PreferenceItem> {
     items.into_iter().filter(PreferenceItem::enabled).collect()
@@ -37,6 +36,7 @@ pub fn text(title: &str, subtitle: Option<&str>, enabled: bool) -> PreferenceIte
     PreferenceItem::Text { common: common(title, subtitle, enabled), on_click: None }
 }
 
+#[allow(dead_code)] // kept for the shape of the type; not built or read yet
 /// The live parts of a row built by [`tap_item`], handed to its tap handler.
 #[derive(Clone)]
 pub struct TapRow {
@@ -112,6 +112,7 @@ pub fn info(text: &str) -> PreferenceItem {
     PreferenceItem::Info { text: text.to_owned(), enabled: true }
 }
 
+#[cfg(test)]
 /// A single-line text field. The dialog OK needs a changed, non-blank (unless `can_be_blank`) and valid text; a text
 /// that fails `validate` is refused with its message, and a blank one that is not allowed is not applied.
 pub fn edit_text(
@@ -149,14 +150,11 @@ pub fn switch(title: &str, pref: &Pref<bool>, enabled: bool) -> PreferenceItem {
     switch_with(title, None, pref, enabled, bind::accept())
 }
 
-pub fn switch_sub(title: &str, subtitle: &str, pref: &Pref<bool>, enabled: bool) -> PreferenceItem {
-    switch_with(title, Some(subtitle), pref, enabled, bind::accept())
-}
-
 pub fn switch_with(title: &str, subtitle: Option<&str>, pref: &Pref<bool>, enabled: bool, veto: Veto<bool>) -> PreferenceItem {
     PreferenceItem::Switch { common: common(title, subtitle, enabled), pref: pref.clone(), veto }
 }
 
+#[cfg(test)]
 /// A switch that, when turned on, turns `partner` off first (Aniyomi split and rotate are exclusive).
 pub fn exclusive_switch(title: &str, pref: &Pref<bool>, partner: &Pref<bool>, enabled: bool) -> PreferenceItem {
     let partner = partner.clone();
@@ -194,19 +192,6 @@ pub fn ranged_choice(title: &str, pref: &Pref<i32>, label: impl Fn(i32) -> Strin
 
 /// The subtitle of a row whose change applies at the next launch (task T-47a-010).
 pub const REQUIRES_RESTART: &str = "Requires app restart to take effect";
-
-/// A list of text values stored as the text itself (`app_date_format`). A stored text the list does not offer shows
-/// the preference default, as the other lists do.
-pub fn text_choice(title: &str, pref: &Pref<String>, options: &[(String, String)], enabled: bool) -> PreferenceItem {
-    let stored = pref.get();
-    let current = if options.iter().any(|(value, _)| *value == stored) { stored } else { pref.default_value() };
-    let pref = pref.clone();
-    let on_change = bind::veto(move |value: String| {
-        let result = pref.set(value).map(|()| true).map_err(|err| err.to_string());
-        async move { result }
-    });
-    PreferenceItem::BasicList { common: common(title, Some("%s"), enabled), value: current, entries: options.to_vec(), on_change }
-}
 
 /// A list of a Rust enum stored by its constant name (`pref_enum!` types).
 pub fn enum_choice<T>(title: &str, pref: &Pref<T>, options: &[(T, &str)], enabled: bool) -> PreferenceItem
@@ -250,31 +235,6 @@ pub fn multi_choice_with(common: ItemCommon, pref: &Pref<BTreeSet<String>>, opti
         async move { result }
     });
     PreferenceItem::MultiSelect { common, pref: pref.clone(), entries, veto }
-}
-
-/// An integer slider. `subtitle` is shown as the value text.
-pub fn slider(title: &str, pref: &Pref<i32>, range: RangeInclusive<i32>, subtitle: Option<&str>, enabled: bool) -> PreferenceItem {
-    scaled_slider(title, pref, range, 1, subtitle, enabled)
-}
-
-/// A slider over `pref / scale` whose moves store `value * scale`: the E-Ink flash duration is stored in milliseconds
-/// and offered in 100 ms steps (`scale` 100).
-pub fn scaled_slider(
-    title: &str,
-    pref: &Pref<i32>,
-    range: RangeInclusive<i32>,
-    scale: i32,
-    subtitle: Option<&str>,
-    enabled: bool,
-) -> PreferenceItem {
-    let steps = slider_steps(*range.start(), *range.end());
-    let stored = pref.get() / scale;
-    let pref = pref.clone();
-    let on_change = bind::veto(move |value: i32| {
-        let result = pref.set(value * scale).map_err(|err| err.to_string());
-        async move { result.map(|()| true) }
-    });
-    PreferenceItem::Slider { common: common(title, subtitle, enabled), value: stored, range, steps, on_change }
 }
 
 #[cfg(test)]

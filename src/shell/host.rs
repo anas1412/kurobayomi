@@ -20,7 +20,6 @@ use super::tabs::HomeTabs;
 use crate::ui::{DialogButton, Role};
 
 pub struct Shell {
-    #[allow(dead_code)] // read through `runtime()` by the background tasks that start from the shell
     runtime: tokio::runtime::Handle,
     boot: RefCell<Bootstrap<LaunchRequest>>,
     home: RefCell<Option<Rc<RefCell<HomeTabs>>>>,
@@ -63,7 +62,6 @@ impl Shell {
     }
 
     /// The runtime every background task of the app runs on.
-    #[allow(dead_code)]
     pub fn runtime(&self) -> &tokio::runtime::Handle {
         &self.runtime
     }
@@ -85,8 +83,8 @@ impl Shell {
         self.boot.borrow_mut().migration_done();
     }
 
+    #[cfg(test)]
     /// What the library page shows now.
-    #[allow(dead_code)]
     pub fn library_state(&self) -> super::bootstrap::LibraryState {
         self.boot.borrow().library_state()
     }
