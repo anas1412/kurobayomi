@@ -15,6 +15,7 @@ pub mod queue;
 pub mod queue_model;
 pub mod restore;
 pub mod runner;
+pub mod service;
 pub mod state;
 pub mod store;
 pub mod unit;
