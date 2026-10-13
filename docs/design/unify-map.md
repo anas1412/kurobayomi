@@ -176,6 +176,13 @@ Behaviour differences that look like bugs. "Decide" = no right answer from code;
 | Snapshots coalesced only on manga | runner.rs:50 |
 
 ### Lists, browse, library update (step 7)
+
+Status 2026-10-13: done in substance. Step 4 already made the favourite store, the migration and the mark-done path one
+each; step 7 added the cached-cover deletion for Browse, History and the entry page (`library::mount::clear_cached`),
+the tracker send from Library and Updates mark-as-read (`progress::marked_items`), one global-search hint for both
+kinds and a translatable "Unwatched". The remaining `Kind` arms in these areas are data tables (wording, help URLs,
+lock names, layouts), not duplicated logic, and stay. Pin and hide of sources are cut by design. `browse::migrate_list`
+is only built by tests (dead; the "never used" cleanup removes it). The drift table below is the pre-step-4 survey.
 | Drift | Where |
 |---|---|
 | Manga add from Browse/History never applies default chapter flags | src/browse/repo_store.rs:47-108 vs 214 |

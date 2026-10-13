@@ -196,9 +196,7 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
         edit_categories: Rc::new(move || super::glue::open_categories(kind)),
     };
     *flow_slot.borrow_mut() = Some(FavoriteFlow::new_for(Arc::clone(&env.store), page.widget(), hooks, kind));
-    if env.kind == Kind::Anime {
-        page.set_hint(super::texts::GLOBAL_SEARCH_EMPTY_HINT);
-    }
+    page.set_hint(super::texts::GLOBAL_SEARCH_EMPTY_HINT);
     let hooks = RunnerHooks { changed: Rc::new(page.updater()), open_entry: Rc::clone(&env.replace_with_entry) };
     let loaders: Loaders = {
         let directory = Arc::clone(&directory);
