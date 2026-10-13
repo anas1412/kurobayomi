@@ -572,7 +572,13 @@ pub fn menu_button(icon: &str, entries: &[String], on: impl Fn(&str) + Clone + '
             .iter()
             .map(|e| {
                 let (on, e, pop) = (on.clone(), e.clone(), pop.clone());
-                crate::entry_core::page_shell::plain_row(&e.clone(), &pop.clone(), move |_| on(&e))
+                let b = Button::builder().label(e.as_str()).css_classes(["flat"]).build();
+                b.child().and_downcast::<Label>().map(|l| l.set_xalign(0.0));
+                b.connect_clicked(move |_| {
+                    pop.popdown();
+                    on(&e);
+                });
+                b
             })
             .collect()
     });
