@@ -39,7 +39,7 @@ use kuro_player::seekbar_model::{drags_enabled, duration_label, fraction, positi
 use kuro_player::session::prepare_mpv_dir;
 use kuro_player::shortcuts::{Action, action_for};
 
-use neighbours::{Step, adjacent};
+use neighbours::{Step, neighbour};
 use playback::{Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
 use store::Tracker;
 
@@ -646,8 +646,7 @@ fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
     if resolving || !crate::data::is_installed() {
         return;
     }
-    let db = crate::data::app().db.clone();
-    match adjacent(&db, current, step) {
+    match neighbour(current, step) {
         Ok(Some(next)) => play_episode(shared, next),
         Ok(None) => {
             if announce_end {

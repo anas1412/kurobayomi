@@ -2,7 +2,7 @@
 //! press (`autohide`, 2.5 seconds in fullscreen, where the pointer hides with it). The header hides only in fullscreen.
 //! A click on the video toggles pause and a double click toggles fullscreen. The buttons follow the playing episode and file: previous and next are enabled only with a neighbour,
 //! the quality button shows only for an online episode, and the speed and chapter buttons show what plays now.
-//! Main thread only; the shared logic is in the parent module (`toggle_pause`, `toggle_fullscreen`, `adjacent`).
+//! Main thread only; the shared logic is in the parent module (`toggle_pause`, `toggle_fullscreen`, `neighbour`).
 
 mod autohide;
 
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use gtk::glib;
 use gtk::prelude::*;
 
-use super::neighbours::{Step, adjacent};
+use super::neighbours::{Step, neighbour};
 use super::sheets;
 use super::{Shared, toggle_fullscreen, toggle_pause};
 
@@ -54,8 +54,7 @@ impl Live {
         let episode = shared.borrow().episode_id;
         self.episode.set(episode);
         let (has_previous, has_next) = if crate::data::is_installed() {
-            let db = &crate::data::app().db;
-            let has = |step| adjacent(db, episode, step).ok().flatten().is_some();
+            let has = |step| neighbour(episode, step).ok().flatten().is_some();
             (has(Step::Previous), has(Step::Next))
         } else {
             (false, false)
