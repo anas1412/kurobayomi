@@ -124,6 +124,14 @@ pub fn home_url(kind: Kind, source_id: i64) -> Option<String> {
     current(kind).sources().into_iter().find(|entry| entry.source.id == source_id).and_then(|entry| entry.home_url)
 }
 
+/// The sources whose name or language changed since the last load, as (kind, old key, new key), for the download folders.
+static RENAMED: Mutex<Vec<(Kind, kuro_downloads::unit::SourceKey, kuro_downloads::unit::SourceKey)>> = Mutex::new(Vec::new());
+
+/// Takes the renames the last loads noticed, so the download folders follow them.
+pub fn take_renames() -> Vec<(Kind, kuro_downloads::unit::SourceKey, kuro_downloads::unit::SourceKey)> {
+    std::mem::take(&mut *RENAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
+}
+
 /// Records every loaded source (id, language, name) in the stub table, as Aniyomi's sources table does, so a backup made while
 /// the sources are not loaded (`--run-backup`) and the restore screen can still name them.
 fn remember_stubs(kind: Kind, catalogues: &Catalogues) {
@@ -132,6 +140,12 @@ fn remember_stubs(kind: Kind, catalogues: &Catalogues) {
     }
     let stubs = kuro_data::source::StubSourceRepo::new(crate::data::app().db.clone(), kind);
     for entry in catalogues.sources() {
+        // a source that changed its name or language has its download folder renamed after this load (`take_renames`)
+        if let Some(old) = stubs.get(entry.source.id).ok().flatten().filter(|old| !old.is_invalid() && (old.name != entry.source.name || old.lang != entry.source.lang)) {
+            let key = |name: &str, lang: &str, availability| kuro_downloads::unit::SourceKey { id: entry.source.id, name: name.to_owned(), lang: lang.to_owned(), unmetered: false, availability };
+            let renamed = (kind, key(&old.name, &old.lang, kuro_downloads::unit::Availability::Stub), key(&entry.source.name, &entry.source.lang, kuro_downloads::unit::Availability::Live));
+            RENAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(renamed);
+        }
         if let Err(error) = stubs.upsert(entry.source.id, &entry.source.lang, &entry.source.name) {
             tracing::warn!(source = entry.source.id, %error, "a source could not be recorded for the backup");
         }

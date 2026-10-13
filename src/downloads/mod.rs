@@ -118,6 +118,12 @@ fn follow_sources(downloads: &Downloads) {
     crate::recipe_sources::follow_loads(move || {
         let (index, downloads, first_load) = (index.clone(), queue.clone(), first_load.clone());
         async move {
+            // a source that changed its name takes its download folder with it, before the folders are read again
+            for (kind, old, new) in crate::browse::directory::take_renames() {
+                if let Err(error) = downloads.rename_source(kind, &old, &new).await {
+                    tracing::warn!(source = old.id, %error, "the download folder of a renamed source was not renamed");
+                }
+            }
             for kind in Kind::ALL {
                 index.rescan(kind, crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(kind)).await;
             }
