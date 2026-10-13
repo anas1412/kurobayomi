@@ -210,7 +210,7 @@ title-page mark-as-read):
 |---|---|
 | TrackChanged{entry_id} has no kind; anime 7 and manga 7 collide | kuro-track/src/events.rs:12, ctx.rs:146,160 (fixed by step 3 ids) |
 | AniList completion_status uses the anime id for manga; check per tracker (MAL ranges differ) | tracker/anilist/tracker_impl.rs:51, remote.rs:12,20, mal/status.rs |
-| Unlink order differs (manga local first, anime remote first) | src/entry_core/tracking/remove.rs |
+| Unlink order differs (stale: the order is the tracker's, one for both kinds; dead `steps` removed) | src/entry_core/tracking/remove.rs |
 
 ### Player / reader (step 9)
 | Drift | Where |
