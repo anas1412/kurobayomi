@@ -2,6 +2,7 @@
 //! camelCase, as in `wire.rs`, and each `kuro-source` anime model has a wire twin and a conversion.
 
 use kuro_source::anime::{AnimesPage, Headers, Hoster, SAnime, SEpisode, Track, Video};
+use kuro_source::model::UpdateStrategy;
 use serde::{Deserialize, Serialize};
 
 fn unknown_episode_number() -> f32 {
@@ -24,6 +25,12 @@ pub struct WireAnime {
     /// `AnimeStatus` as its number (0 unknown, 1 ongoing, 2 completed, ...).
     #[serde(default)]
     pub status: i32,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub update_strategy: UpdateStrategy,
+    #[serde(default)]
+    pub initialized: bool,
 }
 
 /// The answer of `popular`, `latest` and `search` in an anime package.
@@ -108,7 +115,10 @@ impl From<&SAnime> for WireAnime {
             thumbnail_url: anime.thumbnail_url.clone(),
             author: anime.author.clone(),
             genre: anime.genre.clone(),
-            status: 0,
+            status: anime.status.to_i32(),
+            artist: anime.artist.clone(),
+            update_strategy: anime.update_strategy,
+            initialized: anime.initialized,
         }
     }
 }
@@ -123,6 +133,9 @@ impl From<WireAnime> for SAnime {
             author: wire.author.filter(|a| !a.trim().is_empty()),
             genre: wire.genre.filter(|g| !g.trim().is_empty()),
             status: kuro_source::anime::model::AnimeStatus::from_i32(wire.status),
+            artist: wire.artist.filter(|a| !a.trim().is_empty()),
+            update_strategy: wire.update_strategy,
+            initialized: wire.initialized,
             ..SAnime::default()
         }
     }
