@@ -375,17 +375,20 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     overlay.add_overlay(&fab);
     overlay.set_vexpand(true);
 
-    // the action bar: cancel, the count, select all and invert
-    let cancel = icon_button("window-close-symbolic", &tr(MsgKey::action_cancel));
-    let bar_count = Label::builder().xalign(0.0).hexpand(true).build();
-    let select_all = icon_button("edit-select-all-symbolic", &tr(MsgKey::action_select_all));
-    let invert = icon_button("object-flip-horizontal-symbolic", &tr(MsgKey::action_select_inverse));
-    let bar_row = GBox::new(O::Horizontal, 6);
-    bar_row.add_css_class("toolbar");
-    for w in [cancel.upcast_ref::<gtk::Widget>(), bar_count.upcast_ref(), select_all.upcast_ref(), invert.upcast_ref()] {
-        bar_row.append(w);
-    }
-    let bar = gtk::Revealer::builder().child(&bar_row).transition_type(gtk::RevealerTransitionType::SlideUp).build();
+    // the selection header, the one of Library and Updates: Cancel, the count, Select all. The view does not exist yet, so the
+    // buttons reach it through `late`, set once it is built. Ctrl+I still inverts the selection.
+    let late: Rc<RefCell<Weak<View>>> = Rc::default();
+    let bar_count = Label::new(None);
+    let selecting = |edit: fn(&mut EntryModel, &[i64], &[i64])| {
+        let late = Rc::clone(&late);
+        move || {
+            if let Some(view) = late.borrow().upgrade() {
+                view.edit_selection(edit);
+            }
+        }
+    };
+    let bar_row = crate::ui::selection_header(&bar_count, selecting(|m, _, _| m.selection.clear()), selecting(|m, _, full| m.selection.set_all(full, true)));
+    let bar = gtk::Revealer::builder().child(&bar_row).transition_type(gtk::RevealerTransitionType::SlideDown).build();
 
     // the bottom action bar of the selection (behaviour 1.4): its rows follow the selected episodes, it is hidden
     // when nothing is selected, and it is as wide as the window narrow and half of it wide
@@ -395,8 +398,8 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let bottom = gtk::Revealer::builder().child(&bottom_row).transition_type(gtk::RevealerTransitionType::SlideUp).build();
 
     let ready = GBox::new(O::Vertical, 0);
-    ready.append(&overlay);
     ready.append(&bar);
+    ready.append(&overlay);
     ready.append(&bottom);
     stack.add_named(&ready, Some("ready"));
 
@@ -518,9 +521,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
             }
         }
     });
-    cancel.connect_clicked(on_view(|v| v.edit_selection(|m, _, _| m.selection.clear())));
-    select_all.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.set_all(full, true))));
-    invert.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.invert(full))));
+    *late.borrow_mut() = weak.clone();
     fab.connect_clicked(on_view(View::open_next));
     back.connect_clicked(on_view(|v| {
         if !v.back_pressed() {
