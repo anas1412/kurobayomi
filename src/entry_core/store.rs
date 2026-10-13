@@ -23,6 +23,7 @@ use crate::entry_core::entry_ops;
 use crate::entry_core::library_flow::LibraryRepos;
 use crate::entry_core::flags::ChapterFlags;
 use crate::entry_core::readstate::{ReadPlan, plan_bookmark, plan_done};
+use crate::entry_core::refresh_rules::{self, Trigger};
 use crate::entry_core::tracking::facts::Summary;
 
 /// `LocalSource.ID`: rows of the local source are always downloaded.
@@ -192,6 +193,11 @@ impl DbStore {
             self.items.update_all(&updates)?;
         }
         Ok(updates.len())
+    }
+
+    /// The new chapters a refresh queues (`refresh_rules::new_item_targets`).
+    pub fn new_item_targets(&self, prefs: &PrefStore, id: i64, trigger: Trigger, new_items: &[Item]) -> DataResult<Vec<Item>> {
+        refresh_rules::new_item_targets(&self.entries, &self.categories, &self.items, prefs, Kind::Manga, id, trigger, new_items)
     }
 
     /// The repositories of the library button (`library_flow`).

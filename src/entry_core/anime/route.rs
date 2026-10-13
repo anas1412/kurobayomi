@@ -1608,7 +1608,7 @@ mod tests {
         fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
             crate::entry_core::detail::SourceInfo { name: "Stub".into(), stub: true }
         }
-        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: super::super::refresh::Trigger) -> runner::AnimeFetch {
+        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::AnimeFetch {
             Box::pin(async { Ok(Vec::new()) })
         }
     }
@@ -1625,7 +1625,7 @@ mod tests {
         fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
             crate::entry_core::detail::SourceInfo { name: "Src".into(), stub: false }
         }
-        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: super::super::refresh::Trigger) -> runner::AnimeFetch {
+        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::AnimeFetch {
             self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let error = self.0.clone();
             Box::pin(async move { Err(error) })

@@ -5,18 +5,20 @@
 //! blocking pool and never look at the token, so a pop does not cancel them (`launchNonCancellable`). Nothing here imports GTK.
 //! Upstream: `MangaScreenModel.kt:173-256` (init), `:362-420` (fetchAllFromSource), `CoroutinesExtensions.kt`.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
+use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore;
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::entry_core::backend::Backend;
+use crate::entry_core::refresh_rules::{RefreshGate, Trigger, last_empty_open_fetch, open_refresh_due, record_empty_open_fetch};
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::detail::{
     LatestWins, LoadContext, LoadState, MangaRow, StoreCmd, StoreEvent, finish_load,
@@ -43,7 +45,7 @@ pub fn spawn(handle: &Handle, store: DbStore, prefs: PrefStore, backend: Arc<dyn
         events: event_tx,
         cancel,
         subscriptions: Mutex::new(Vec::new()),
-        refreshing: Mutex::new(HashSet::new()),
+        gate: RefreshGate::default(),
     });
     handle.spawn(run(shared, cmd_rx));
     runner
@@ -77,7 +79,7 @@ struct Shared {
     /// The page's scope: cancelled when the page is disposed. Only refreshes watch it.
     cancel: CancellationToken,
     subscriptions: Mutex<Vec<AbortHandle>>,
-    refreshing: Mutex<HashSet<i64>>,
+    gate: RefreshGate,
 }
 
 async fn run(shared: Arc<Shared>, cmds: Receiver<StoreCmd>) {
@@ -97,15 +99,6 @@ async fn run(shared: Arc<Shared>, cmds: Receiver<StoreCmd>) {
         }
     }
     shared.drop_subscriptions();
-}
-
-/// Removes the manga from the refreshing set on every exit path, a panic included.
-struct RefreshGuard<'a>(&'a Shared, i64);
-
-impl Drop for RefreshGuard<'_> {
-    fn drop(&mut self) {
-        self.0.refreshing.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.1);
-    }
 }
 
 impl Shared {
@@ -170,7 +163,13 @@ impl Shared {
             page.http_source = http_source;
         }
         let ready = matches!(loaded.state, LoadState::Ready(_));
-        let fetch = loaded.needs_info || loaded.needs_chapters;
+        // an entry with no chapters is fetched again on open only after the 10-minute guard (fix 23.24)
+        let now = chrono::Utc::now().timestamp_millis();
+        let chapters_due = loaded.needs_chapters && open_refresh_due(true, last_empty_open_fetch(Kind::Manga, manga_id), now);
+        let fetch = loaded.needs_info || chapters_due;
+        if ready && chapters_due {
+            record_empty_open_fetch(Kind::Manga, manga_id, now);
+        }
         self.emit(StoreEvent::Loaded(Box::new(loaded)));
         if ready {
             self.subscribe(manga_id);
@@ -223,12 +222,11 @@ impl Shared {
     }
 
     /// `fetchAllFromSource`: details and chapters run at once. One refresh per manga: a second call while one runs
-    /// does nothing. A chapter failure re-reads the manga from the store.
-    async fn fetch_all(self: Arc<Self>, manga_id: i64, _manual: bool) {
-        if !self.refreshing.lock().unwrap_or_else(PoisonError::into_inner).insert(manga_id) {
-            return;
-        }
-        let _guard = RefreshGuard(&self, manga_id);
+    /// does nothing. A chapter failure re-reads the manga from the store. A manual refresh queues the new chapters when
+    /// the preferences allow it (`refresh_rules`, T-REF-4).
+    async fn fetch_all(self: Arc<Self>, manga_id: i64, manual: bool) {
+        let trigger = if manual { Trigger::Manual } else { Trigger::Open };
+        let Some(_running) = self.gate.begin(manga_id) else { return };
         self.emit(StoreEvent::Refreshing(true));
         let fetched = tokio::select! {
             () = self.cancel.cancelled() => None,
@@ -244,19 +242,44 @@ impl Shared {
         {
             self.emit(StoreEvent::Failed(e));
         }
-        if let Err(e) = chapters {
-            self.emit(StoreEvent::ChapterFetchFailed(e));
-            let reread = self
-                .blocking(move |store, backend| store.read_page(manga_id, &backend.downloads(manga_id)))
-                .await;
-            if let Ok((Some(manga), chapters)) = reread {
-                self.emit(StoreEvent::Snapshot {
-                    manga: Box::new(manga),
-                    chapters,
-                });
+        match chapters {
+            Ok(new_chapters) => self.auto_download(manga_id, trigger, new_chapters).await,
+            Err(e) => {
+                self.emit(StoreEvent::ChapterFetchFailed(e));
+                let reread = self
+                    .blocking(move |store, backend| store.read_page(manga_id, &backend.downloads(manga_id)))
+                    .await;
+                if let Ok((Some(manga), chapters)) = reread {
+                    self.emit(StoreEvent::Snapshot {
+                        manga: Box::new(manga),
+                        chapters,
+                    });
+                }
             }
         }
         self.emit(StoreEvent::Refreshing(false));
+    }
+
+    /// Queues the new chapters of a manual refresh when the preferences and the entry's categories allow it (T-REF-4).
+    /// The open-time refresh never queues any (E-REF-5).
+    async fn auto_download(&self, manga_id: i64, trigger: Trigger, new_chapters: Vec<Item>) {
+        if new_chapters.is_empty() {
+            return;
+        }
+        let prefs = self.prefs.clone();
+        let queued = self
+            .blocking(move |store, backend| {
+                let targets = store.new_item_targets(&prefs, manga_id, trigger, &new_chapters)?;
+                if !targets.is_empty() {
+                    let ids: Vec<i64> = targets.iter().map(|chapter| chapter.id).collect();
+                    backend.enqueue_downloads(manga_id, &ids, false);
+                }
+                kuro_data::DataResult::Ok(())
+            })
+            .await;
+        if let Err(e) = queued {
+            self.fail("SQLiteException", e);
+        }
     }
 
     /// One write command. Runs in its own task.
@@ -406,7 +429,7 @@ mod tests {
     use kuro_db::flags::item as c;
 
     use super::*;
-    use crate::entry_core::backend::Fetch;
+    use crate::entry_core::backend::{Fetch, FetchItems};
     use crate::entry_core::detail::SourceInfo;
     use crate::entry_core::store::fixture::store;
 
@@ -424,10 +447,17 @@ mod tests {
         queued: Mutex<Vec<(Vec<i64>, bool)>>,
         cancelled: Mutex<Vec<i64>>,
         stored_downloads: std::collections::HashMap<i64, kuro_downloads::DownloadState>,
+        /// The chapters the fake sync reports as added.
+        new_chapters: Vec<Item>,
     }
 
     impl Fake {
         fn ok() -> Arc<Self> {
+            Self::adding(Vec::new())
+        }
+
+        /// A backend whose chapter sync reports these chapters as added.
+        fn adding(new_chapters: Vec<Item>) -> Arc<Self> {
             Arc::new(Self {
                 details: AtomicUsize::new(0),
                 chapters: AtomicUsize::new(0),
@@ -440,6 +470,7 @@ mod tests {
                 queued: Mutex::default(),
                 cancelled: Mutex::default(),
                 stored_downloads: Default::default(),
+                new_chapters,
             })
         }
     }
@@ -484,13 +515,13 @@ mod tests {
             true
         }
 
-        fn fetch_chapters(&self, _: i64) -> Fetch {
+        fn fetch_chapters(&self, _: i64) -> FetchItems {
             self.chapters.fetch_add(1, Ordering::SeqCst);
-            let (hold, error, finished) = (self.hold_ms, self.chapter_error.clone(), Arc::clone(&self.finished));
+            let (hold, error, finished, added) = (self.hold_ms, self.chapter_error.clone(), Arc::clone(&self.finished), self.new_chapters.clone());
             Box::pin(async move {
                 tokio::time::sleep(Duration::from_millis(hold)).await;
                 finished.fetch_add(1, Ordering::SeqCst);
-                error.map_or(Ok(()), Err)
+                error.map_or(Ok(added), Err)
             })
         }
     }
@@ -741,6 +772,37 @@ mod tests {
             };
             assert!(membership.is_empty());
             assert!(store.manga(id).unwrap().unwrap().favorite);
+        });
+    }
+
+    #[test]
+    fn a_manual_refresh_queues_the_new_chapters_of_a_library_manga_only_when_download_new_is_on() {
+        use kuro_domain::download::prefs::DownloadPrefs;
+        let rt = rt();
+        let (_dir, store, id) = store(true, 2);
+        let rows = store.chapter_list(id, &Default::default()).unwrap();
+        let added: Vec<Item> = rows.iter().map(|r| Item { id: r.id, ..Item::create(Kind::Manga) }).collect();
+        let prefs = PrefStore::in_memory();
+        rt.block_on(async {
+            let off = Fake::adding(added.clone());
+            let runner = spawn(rt.handle(), store.clone(), prefs.clone(), off.clone(), ctx());
+            let rx = runner.events();
+            runner.send(StoreCmd::FetchAll { manga_id: id, manual: true });
+            until(&rx, |e| matches!(e, StoreEvent::Refreshing(false))).await;
+            assert!(off.queued.lock().unwrap().is_empty(), "the preference is off");
+
+            DownloadPrefs::new(&prefs).download_new_chapters.set(true).unwrap();
+            let on = Fake::adding(added.clone());
+            let runner = spawn(rt.handle(), store.clone(), prefs.clone(), on.clone(), ctx());
+            let rx = runner.events();
+            runner.send(StoreCmd::FetchAll { manga_id: id, manual: false });
+            until(&rx, |e| matches!(e, StoreEvent::Refreshing(false))).await;
+            assert!(on.queued.lock().unwrap().is_empty(), "an open-time refresh never queues (E-REF-5)");
+            runner.send(StoreCmd::FetchAll { manga_id: id, manual: true });
+            until(&rx, |e| matches!(e, StoreEvent::Refreshing(false))).await;
+            let queued = on.queued.lock().unwrap().clone();
+            assert_eq!(queued.len(), 1);
+            assert_eq!((queued[0].0.len(), queued[0].1), (2, false), "both new chapters, queued but not started by this call");
         });
     }
 

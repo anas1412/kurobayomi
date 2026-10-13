@@ -64,6 +64,7 @@ pub mod page;
 /// menu rows, the scroll fade).
 pub mod page_shell;
 pub mod readstate;
+pub mod refresh_rules;
 pub mod route;
 pub mod runner;
 /// The runner handle and the entry-and-items live subscription both store runners use.

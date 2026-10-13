@@ -24,7 +24,7 @@ impl AnimeBackend for Backend {
         SourceInfo { name: "Fake".into(), stub: false }
     }
 
-    fn fetch(&self, _: i64, _: super::entry_state::RefreshPlan, _: super::refresh::Trigger) -> AnimeFetch {
+    fn fetch(&self, _: i64, _: super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> AnimeFetch {
         Box::pin(async { Ok(Vec::new()) })
     }
 }

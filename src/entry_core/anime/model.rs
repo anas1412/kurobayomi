@@ -40,7 +40,7 @@ use crate::entry_core::download_menu::{Candidate, DownloadAmount, targets};
 use crate::entry_core::selection::Selection;
 use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
-use super::refresh::open_refresh_due;
+use crate::entry_core::refresh_rules::open_refresh_due;
 use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
@@ -51,7 +51,7 @@ use crate::entry_core::list_model::RowItem;
 pub struct AnimeLoadContext {
     pub from_source: bool,
     pub downloaded_only: bool,
-    /// When an open-time refresh last found this entry with no episodes (`refresh::last_empty_open_fetch`).
+    /// When an open-time refresh last found this entry with no episodes (`refresh_rules::last_empty_open_fetch`).
     pub last_empty_open_fetch_ms: Option<i64>,
     /// The current time, for the 10-minute guard of an entry with no episodes.
     pub now_ms: i64,
@@ -340,7 +340,7 @@ mod tests {
     use kuro_platform::kind::Kind;
 
     use super::super::entry_state::LoadState;
-    use super::super::refresh::EMPTY_OPEN_REFRESH_GAP_MS;
+    use crate::entry_core::refresh_rules::EMPTY_OPEN_REFRESH_GAP_MS;
     use super::super::store::fixture::with_episodes;
     use super::*;
 

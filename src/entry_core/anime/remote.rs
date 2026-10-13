@@ -30,7 +30,7 @@ use tokio::runtime::Handle;
 
 use super::entry_state::RefreshPlan;
 use super::download_backend::AnimeDownloads;
-use super::refresh::Trigger;
+use crate::entry_core::refresh_rules::Trigger;
 use super::runner::{AnimeBackend, AnimeFetch, StubAnimeBackend};
 use super::season_fetch::fetch_episodes_of;
 use super::store::AnimeStore;

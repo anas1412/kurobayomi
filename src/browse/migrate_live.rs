@@ -25,7 +25,7 @@ use super::migrate_engine::{CustomImage, Entry, MigrateSteps, MigrateTx, StepFut
 use super::migrate_merge::{item_updates, merge_item_state};
 use kuro_platform::kind::Kind;
 use crate::entry_core::anime::entry_state::RefreshPlan;
-use crate::entry_core::anime::refresh::Trigger;
+use crate::entry_core::refresh_rules::Trigger;
 use crate::entry_core::anime::remote::{LiveSources, RemoteAnimeBackend};
 use crate::entry_core::anime::runner::AnimeBackend;
 use crate::entry_core::backend::{Backend, SourceBackend};
@@ -150,7 +150,7 @@ impl MigrateSteps for LiveSteps {
                 let task = backend.fetch_chapters(new.id);
                 Box::pin(async move {
                     match handle.spawn(task).await {
-                        Ok(Ok(())) => Ok(()),
+                        Ok(Ok(_)) => Ok(()),
                         Ok(Err(error)) => Err(error.user_message()),
                         Err(error) => Err(error.to_string()),
                     }

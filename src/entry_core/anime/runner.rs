@@ -17,8 +17,6 @@ use kuro_data::item::Item;
 use kuro_data::source::StubSourceRepo;
 use kuro_db::handle::Db;
 use kuro_db::codec::FetchType;
-use kuro_domain::download::filter::{CategoryDecision, should_download_new};
-use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_platform::kind::Kind;
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
@@ -30,7 +28,7 @@ use super::actions::Mark;
 use super::details_error::{DetailsError, join_failed};
 use super::entry_state::RefreshPlan;
 use super::model::{AnimeEntryModel, AnimeLoadContext};
-use super::refresh::{Begin, RefreshGate, Trigger, auto_download_targets, last_empty_open_fetch, record_empty_open_fetch};
+use crate::entry_core::refresh_rules::{RefreshGate, Trigger, last_empty_open_fetch, record_empty_open_fetch};
 use super::season_tile::SeasonExtra;
 use super::set_default::Scope;
 use super::store::AnimeStore;
@@ -226,7 +224,7 @@ struct Shared {
     events: Sender<AnimeEvent>,
     cancel: CancellationToken,
     subscriptions: Mutex<Vec<AbortHandle>>,
-    gate: Mutex<RefreshGate>,
+    gate: RefreshGate,
 }
 
 /// Starts the runner on `handle`.
@@ -246,7 +244,7 @@ pub fn spawn(
         events: event_tx,
         cancel,
         subscriptions: Mutex::new(Vec::new()),
-        gate: Mutex::default(),
+        gate: RefreshGate::default(),
     });
     handle.spawn(run(shared, cmd_rx));
     runner
@@ -306,7 +304,7 @@ impl Shared {
     /// The load sequence (`AnimeEntryModel::load`), then the live subscription, then the first-open refresh.
     async fn load(self: Arc<Self>, anime_id: i64) {
         let ctx = AnimeLoadContext {
-            last_empty_open_fetch_ms: last_empty_open_fetch(anime_id),
+            last_empty_open_fetch_ms: last_empty_open_fetch(Kind::Anime, anime_id),
             now_ms: now_ms(),
             ..self.ctx
         };
@@ -324,7 +322,7 @@ impl Shared {
             Ok(Some(model)) => {
                 let plan = model.plan;
                 if plan.episodes {
-                    record_empty_open_fetch(anime_id, ctx.now_ms);
+                    record_empty_open_fetch(Kind::Anime, anime_id, ctx.now_ms);
                 }
                 let seasons = model.anime.fetch_type() == FetchType::Seasons;
                 self.emit(AnimeEvent::Loaded(Some(Box::new(model))));
@@ -348,17 +346,12 @@ impl Shared {
     /// runs joins it and fetches nothing (E-CONC-1), and the running one reports the end. A cancelled refresh ends
     /// silently: nobody is left to read its event.
     async fn refresh(self: Arc<Self>, anime_id: i64, plan: RefreshPlan, trigger: Trigger) {
-        if self.gate.lock().unwrap_or_else(PoisonError::into_inner).begin(anime_id) == Begin::Joined {
-            return;
-        }
+        let Some(running) = self.gate.begin(anime_id) else { return };
         let fetched = tokio::select! {
-            () = self.cancel.cancelled() => {
-                self.gate.lock().unwrap_or_else(PoisonError::into_inner).end(anime_id);
-                return;
-            }
+            () = self.cancel.cancelled() => return,
             result = self.backend.fetch(anime_id, plan, trigger) => result,
         };
-        self.gate.lock().unwrap_or_else(PoisonError::into_inner).end(anime_id);
+        drop(running);
         let result = match fetched {
             Ok(new_episodes) => {
                 self.auto_download(anime_id, trigger, new_episodes).await;
@@ -405,23 +398,7 @@ impl Shared {
             return;
         }
         let prefs = self.prefs.clone();
-        let targets = self
-            .blocking(move |store| -> DataResult<Vec<Item>> {
-                let downloads = DownloadPrefs::new(&prefs);
-                let favorite = store.anime(anime_id)?.is_some_and(|a| a.favorite);
-                // the episode category lists are cut from the settings: every category is eligible
-                let rule = CategoryDecision { included: Default::default(), excluded: Default::default() };
-                let eligible = should_download_new(favorite, &store.category_ids(anime_id)?, &rule);
-                Ok(auto_download_targets(
-                    trigger,
-                    downloads.download_new_episodes.get(),
-                    eligible,
-                    crate::misc::diet_defaults::DOWNLOAD_NEW_UNREAD_ONLY,
-                    &new_episodes,
-                    &store.episodes(anime_id)?,
-                ))
-            })
-            .await;
+        let targets = self.blocking(move |store| store.new_item_targets(&prefs, anime_id, trigger, &new_episodes)).await;
         match targets {
             Ok(targets) if !targets.is_empty() => {
                 let backend = Arc::clone(&self.backend);

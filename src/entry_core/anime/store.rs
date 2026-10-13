@@ -22,6 +22,7 @@ use kuro_prefs::store::PrefStore;
 use super::actions::Mark;
 use crate::entry_core::entry_ops;
 use crate::entry_core::library_flow::LibraryRepos;
+use crate::entry_core::refresh_rules::{self, Trigger};
 use crate::entry_core::tracking::facts::Summary;
 
 /// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
@@ -74,6 +75,11 @@ impl AnimeStore {
     /// The repositories of the library button (`library_flow`).
     pub fn library(&self, prefs: &PrefStore) -> LibraryRepos {
         LibraryRepos::new(self.entries.clone(), self.categories.clone(), prefs.clone())
+    }
+
+    /// The new episodes a refresh queues (`refresh_rules::new_item_targets`).
+    pub fn new_item_targets(&self, prefs: &PrefStore, id: i64, trigger: Trigger, new_items: &[Item]) -> DataResult<Vec<Item>> {
+        refresh_rules::new_item_targets(&self.entries, &self.categories, &self.items, prefs, Kind::Anime, id, trigger, new_items)
     }
 
     /// Replaces the category links of the entry in one transaction.

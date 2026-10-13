@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use kuro_data::entry::{Entry, EntryRepo};
-use kuro_data::item::ItemRepo;
+use kuro_data::item::{Item, ItemRepo};
 use kuro_data::source::{StubSource, StubSourceRepo};
 use kuro_db::handle::Db;
 use kuro_domain::entries::source_convert::to_s_manga;
@@ -29,13 +29,16 @@ use crate::updates::download_host::{self, DownloadBackend};
 
 pub type Fetch = Pin<Box<dyn Future<Output = Result<(), DetailError>> + Send>>;
 
+/// What a chapter fetch hands back: the chapters the sync added, which a manual refresh queues for download (T-REF-4).
+pub type FetchItems = Pin<Box<dyn Future<Output = Result<Vec<Item>, DetailError>> + Send>>;
+
 pub trait Backend: Send + Sync + 'static {
     /// The source line of the header. `stub` is true when the extension is not installed.
     fn source_info(&self, source_id: i64) -> SourceInfo;
     /// Fetches the details from the source and stores them.
     fn fetch_details(&self, manga_id: i64) -> Fetch;
-    /// Fetches the chapter list from the source and stores it.
-    fn fetch_chapters(&self, manga_id: i64) -> Fetch;
+    /// Fetches the chapter list from the source and stores it. Returns the chapters the sync added.
+    fn fetch_chapters(&self, manga_id: i64) -> FetchItems;
     /// The download state of each chapter of the manga that has one.
     fn downloads(&self, _manga_id: i64) -> HashMap<i64, DownloadState> {
         HashMap::new()
@@ -109,8 +112,8 @@ impl Backend for StubBackend {
         self.fetch(manga_id)
     }
 
-    fn fetch_chapters(&self, manga_id: i64) -> Fetch {
-        self.fetch(manga_id)
+    fn fetch_chapters(&self, _manga_id: i64) -> FetchItems {
+        Box::pin(async { Err(DetailError::SourceNotInstalled) })
     }
 }
 
@@ -233,7 +236,7 @@ impl Backend for SourceBackend {
         })
     }
 
-    fn fetch_chapters(&self, manga_id: i64) -> Fetch {
+    fn fetch_chapters(&self, manga_id: i64) -> FetchItems {
         let (db, lookup, sync, mark_duplicate_done) = (Arc::clone(&self.db), Arc::clone(&self.lookup), self.chapters.clone(), self.mark_duplicate_read);
         Box::pin(async move {
             let (manga, source) = target(db, lookup, manga_id).await?;
@@ -242,7 +245,7 @@ impl Backend for SourceBackend {
             let options = SyncOptions { now_ms: chrono::Utc::now().timestamp_millis(), manual: true, window: (0, 0), mark_duplicate_done, is_local: false };
             let items: Vec<SourceItem> = raw.iter().map(source_item_from_chapter).collect();
             let prepare = prepare_hook(source.as_ref(), &listed);
-            sync.run(items, &manga, options, Some(&prepare)).await.map(drop).map_err(|error| match error {
+            sync.run(items, &manga, options, Some(&prepare)).await.map_err(|error| match error {
                 SyncItemsError::NoItems => DetailError::NoChapters,
                 SyncItemsError::Db(error) => db_error(error),
             })
@@ -356,7 +359,7 @@ mod tests {
 
         // a failing source and an unknown one are errors the page shows
         fake.fail.store(true, std::sync::atomic::Ordering::SeqCst);
-        for failed in [rt.block_on(backend.fetch_details(id)), rt.block_on(backend.fetch_chapters(id))] {
+        for failed in [rt.block_on(backend.fetch_details(id)), rt.block_on(backend.fetch_chapters(id)).map(drop)] {
             let text = failed.expect_err("the source is down").user_message();
             assert!(text.starts_with("Fake Central ") && text.contains("isn't working right now") && !text.contains("503"), "{text}");
         }
