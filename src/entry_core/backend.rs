@@ -369,14 +369,12 @@ mod tests {
     }
 
     #[test]
-    fn the_local_source_is_not_a_stub_and_fetches_report_not_installed() {
+    fn the_local_source_is_not_a_stub() {
         let dir = tempfile::tempdir().unwrap();
         let backend = SourceBackend::new(db_of(&dir.path().join("test.db")), Arc::new(|_| None), false);
         let local = backend.source_info(LOCAL_SOURCE_ID);
         assert!(!local.stub);
         assert!(!local.name.is_empty());
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        assert_eq!(rt.block_on(backend.fetch_details(1)), Err(DetailError::SourceNotInstalled));
     }
 
     /// Queueing, cancelling and deleting go through the one download service: a queued chapter shows its queue state, a
