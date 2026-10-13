@@ -15,7 +15,7 @@ use crate::ui;
 /// page adds its `ready` child.
 pub fn state_stack() -> gtk::Stack {
     let stack = gtk::Stack::new();
-    let spinner = gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).build();
+    let spinner = ui::loading(ui::LoadSize::Page);
     let loading = GBox::new(O::Vertical, 12);
     loading.set_halign(Align::Center);
     loading.set_valign(Align::Center);

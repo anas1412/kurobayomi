@@ -230,7 +230,10 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
 
     // the list head: the item header row, the refresh spinner and the empty line
     let page_shell::ItemHeaderRow { row: header_row, count, missing } = page_shell::item_header_row();
-    let spinner = gtk::Spinner::builder().halign(Align::Center).build();
+    // the refresh spinner of the list head: inline size, spinning only while a refresh runs
+    let spinner = ui::loading(ui::LoadSize::Inline);
+    spinner.set_spinning(false);
+    spinner.set_halign(Align::Center);
     let weak_view: Rc<RefCell<Weak<View>>> = Rc::default();
     // nothing listed: the list says so, with Retry (a refresh that finds nothing raises no notification)
     let (empty, empty_label) = list_view::empty_list(&tr(crate::entry_core::wording::none_found(kind)), {

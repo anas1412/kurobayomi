@@ -23,7 +23,8 @@ pub fn title(ep: &Item, display_number: bool) -> String {
 fn progress(ep: &Item) -> Option<String> {
     match ep.kind {
         Kind::Manga => (!ep.done && ep.progress > 0).then(|| trf(MsgKey::chapter_progress, &[("arg1", Arg::Int(ep.progress + 1))])),
-        Kind::Anime => watch_progress(ep.done, ep.progress, ep.total_seconds()),
+        // the row stores seconds; `watch_progress` counts milliseconds
+        Kind::Anime => watch_progress(ep.done, ep.progress * 1000, ep.total_seconds() * 1000),
     }
 }
 
@@ -47,6 +48,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_partly_watched_episode_shows_the_time_left_from_its_stored_seconds() {
+        let mut ep = Item::create(kuro_platform::kind::Kind::Anime);
+        ep.progress = 690;
+        ep.total_seconds = Some(1440);
+        assert_eq!(progress(&ep).as_deref(), Some("12:30 left"));
+        ep.progress = 0;
+        assert_eq!(progress(&ep), None, "never started");
+        let mut chapter = Item::create(kuro_platform::kind::Kind::Manga);
+        chapter.progress = 4;
+        assert_eq!(progress(&chapter).as_deref(), Some("Page: 5"), "a chapter shows its page, whatever its length");
+    }
+
+    #[test]
     fn title_follows_the_display_mode() {
         let mut ep = Item::create(kuro_platform::kind::Kind::Anime);
         ep.name = "The Start".into();
@@ -61,8 +75,8 @@ mod tests {
         ep.id = 4;
         ep.name = "Pilot".into();
         ep.scanlator = Some("grp".into());
-        ep.progress = 690_000;
-        ep.total_seconds = Some(1_440_000);
+        ep.progress = 690;
+        ep.total_seconds = Some(1_440);
         ep.summary = Some("plot".into());
         ep.bookmark = true;
         ep.fillermark = true;
