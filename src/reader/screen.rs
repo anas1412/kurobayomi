@@ -30,7 +30,7 @@ use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
 
 use super::chapters::ListOptions;
-use super::delete_queue::{Pending, QueueFile};
+use super::delete_queue::Pending;
 use super::chrome::{self, MenuHandlers, TopBar, TopBarActions, build_bare_top_bar, build_error_card, build_top_bar};
 use super::flags;
 use super::history_rules;
@@ -79,15 +79,19 @@ pub struct ReaderDeps {
     pub prefs_store: kuro_prefs::store::PrefStore,
 }
 
-/// Deletes the downloads of the chapters a closing reader hands it (T-43a-032). It is called once, on the GTK thread, and
-/// does its work elsewhere.
-pub type DeleteSink = Rc<dyn Fn(Vec<Pending>)>;
+/// Deletes the downloads of the chapters read (T-43a-032). `defer` gets each chapter the moment it is queued, and `flush`
+/// is called once, when the reader closes. Both run on the GTK thread and do their work elsewhere.
+#[derive(Clone)]
+pub struct DeleteSink {
+    pub defer: Rc<dyn Fn(Pending)>,
+    pub flush: Rc<dyn Fn()>,
+}
 
 /// What a reader opened by the app has beyond [`ReaderDeps`]: where it keeps its crash-restore record and its delete
 /// queue, how it deletes downloads, and the download index for its transition cards. The default has none of them, so
 /// a reader that does not need them (a local manga) is opened with [`open`] and writes nothing.
 pub struct ReaderExtras {
-    /// The platform data directory. Without it no restore record and no delete queue are kept.
+    /// The platform data directory. Without it no restore record is kept.
     pub data_dir: Option<PathBuf>,
     /// Deletes the downloads of the chapters queued by delete-after-read. Without it the rule is off.
     pub delete_sink: Option<DeleteSink>,
@@ -182,22 +186,15 @@ impl ReaderCore {
         restore::resolve(self.deps.manga_id, self.deps.chapter_id, saved, history_rules::now_ms(), enabled)
     }
 
-    /// Hands the chapters queued by delete-after-read to the sink, once, when the reader closes (T-43a-032). The queue is
-    /// kept in its file until the sink reports them dealt with, so chapters of a reader that never closed are deleted by
-    /// the next one that does.
+    /// Tells the sink to delete what delete-after-read queued, once, when the reader closes (T-43a-032). The chapters were
+    /// handed over as they were queued and wait in the service until now, so those of a reader that never closed are
+    /// deleted by the next flush.
     pub fn flush_deletes(&self) {
-        let (Some(sink), Some(dir)) = (&self.extras.delete_sink, self.extras.data_dir.as_deref()) else { return };
+        let Some(sink) = &self.extras.delete_sink else { return };
         if self.deletes_flushed.replace(true) {
             return;
         }
-        let pending = match self.session.borrow_mut().as_mut() {
-            Some(session) => session.pending_deletes(),
-            // the reader never loaded: what an earlier one left is still due
-            None => QueueFile::in_dir(dir).list(),
-        };
-        if !pending.is_empty() {
-            sink(pending);
-        }
+        (sink.flush)();
     }
 
     /// The reader's event feed for the viewers, once the initial load has made it. Taken once.
@@ -273,10 +270,10 @@ impl ReaderCore {
             tx,
         );
         session.set_mark_duplicates_read(diet::LIBRARY_MARK_DUPLICATE_CHAPTER_READ);
-        if let (Some(_), Some(dir)) = (&self.extras.delete_sink, self.extras.data_dir.as_deref()) {
+        if let Some(sink) = &self.extras.delete_sink {
             // the slot count is read once, when the reader opens
             let slots = DownloadPrefs::new(&self.deps.prefs_store).remove_after_read_slots.get();
-            session.set_delete_after_read(i64::from(slots), Some(QueueFile::in_dir(dir)));
+            session.set_delete_after_read(i64::from(slots), Rc::clone(&sink.defer));
         }
         if let Some(sink) = &self.extras.track_update {
             let (sink, prefs, incognito) = (Rc::clone(sink), TrackPrefs::new(self.deps.prefs_store.clone()), self.deps.incognito);
@@ -1654,10 +1651,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = PrefStore::in_memory();
         DownloadPrefs::new(&store).remove_after_read_slots.set(0).unwrap();
-        let handed: Rc<RefCell<Vec<Vec<Pending>>>> = Rc::default();
-        let sink: DeleteSink = {
-            let handed = Rc::clone(&handed);
-            Rc::new(move |pending| handed.borrow_mut().push(pending))
+        let handed: Rc<RefCell<Vec<Pending>>> = Rc::default();
+        let flushes = Rc::new(Cell::new(0));
+        let sink = DeleteSink {
+            defer: {
+                let handed = Rc::clone(&handed);
+                Rc::new(move |pending| handed.borrow_mut().push(pending))
+            },
+            flush: {
+                let flushes = Rc::clone(&flushes);
+                Rc::new(move || flushes.set(flushes.get() + 1))
+            },
         };
         let core = core_with(&f, f.chapter_ids[0], store.clone(), data_extras(dir.path(), Some(sink)), http_build("delete"));
         core.initial_load().unwrap();
@@ -1670,13 +1674,14 @@ mod tests {
         finish(&core);
         core.flush_deletes();
         core.flush_deletes();
-        assert_eq!(*handed.borrow(), vec![vec![Pending { manga_id: f.manga_id, chapter_id: f.chapter_ids[0] }]]);
+        assert_eq!(*handed.borrow(), vec![Pending { manga_id: f.manga_id, chapter_id: f.chapter_ids[0] }]);
+        assert_eq!(flushes.get(), 1, "closing flushes once");
 
         let quiet = core_with(&f, f.chapter_ids[0], store, data_extras(dir.path(), None), http_build("delete-off"));
         quiet.initial_load().unwrap();
         finish(&quiet);
         quiet.flush_deletes();
-        assert_eq!(handed.borrow().len(), 1, "without a sink nothing is handed over");
+        assert_eq!((handed.borrow().len(), flushes.get()), (1, 1), "without a sink nothing is handed over");
     }
 
     fn runtime() -> tokio::runtime::Runtime {

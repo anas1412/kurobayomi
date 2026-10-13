@@ -16,7 +16,7 @@ use kuro_platform::kind::Kind;
 use kuro_prefs::reader::{READING_MODE_MASK, ReadingMode};
 
 use super::chapters::{ListError, ListOptions, build_reader_list};
-use super::delete_queue::{self, DeleteQueue, Pending, QueueFile};
+use super::delete_queue::{self, DeleteQueue, Pending};
 use super::download_ahead;
 use super::flags;
 use super::history_rules::{self, now_ms};
@@ -140,11 +140,11 @@ struct AheadRule {
 }
 
 /// The delete-after-read state of a session: the slot count read when the reader opened, the chapters queued so far
-/// and the file that keeps them across a restart.
+/// and what hands a newly queued chapter to the download service, which keeps it across a restart.
 struct DeleteAfterRead {
     slots: i64,
     queue: DeleteQueue,
-    file: Option<QueueFile>,
+    defer: Rc<dyn Fn(Pending)>,
 }
 
 impl ReaderSession {
@@ -200,20 +200,9 @@ impl ReaderSession {
     }
 
     /// Turns on delete-after-read for the completions this session sees (T-43a-032). `slots` is the preference value:
-    /// a negative one turns it off. The queue is also written to `file`, so it survives a restart (E-DEL-4).
-    pub fn set_delete_after_read(&mut self, slots: i64, file: Option<QueueFile>) {
-        self.delete_after_read = (slots >= 0).then(|| DeleteAfterRead { slots, queue: DeleteQueue::default(), file });
-    }
-
-    /// The chapters to delete now that the reader is closing: those queued by this session and, when the queue is kept in
-    /// a file, those left by an earlier one. The file keeps them until the caller reports them dealt with.
-    pub fn pending_deletes(&mut self) -> Vec<Pending> {
-        let Some(rule) = self.delete_after_read.as_mut() else { return Vec::new() };
-        let queued = rule.queue.take();
-        match &rule.file {
-            Some(file) => file.list(),
-            None => queued,
-        }
+    /// a negative one turns it off. `defer` gets each chapter at once, so it survives a restart (E-DEL-4).
+    pub fn set_delete_after_read(&mut self, slots: i64, defer: Rc<dyn Fn(Pending)>) {
+        self.delete_after_read = (slots >= 0).then(|| DeleteAfterRead { slots, queue: DeleteQueue::default(), defer });
     }
 
     /// Turns on the duplicate rule for the completions this session sees (T-43a-031).
@@ -475,8 +464,8 @@ impl ReaderSession {
         }
     }
 
-    /// `deleteChapterIfNeeded`: queues the chapter `slots` before the completed one, when it has been read. The queue is
-    /// flushed when the reader closes, and it is written to its file at once so a crash does not lose it.
+    /// `deleteChapterIfNeeded`: queues the chapter `slots` before the completed one, when it has been read. It is handed to
+    /// the download service at once, which deletes it when the reader closes (and after a crash, at the next flush).
     fn queue_delete_after(&mut self, completed: usize) {
         let Some(rule) = self.delete_after_read.as_mut() else { return };
         let Some(target) = delete_queue::delete_target(&self.chapters, completed, rule.slots) else { return };
@@ -485,9 +474,8 @@ impl ReaderSession {
             return;
         }
         let entry = Pending { manga_id: self.manga_id, chapter_id: chapter.chapter.id };
-        rule.queue.push(entry);
-        if let Some(Err(error)) = rule.file.as_ref().map(|file| file.add(entry)) {
-            tracing::warn!(error = %error, "the delete queue could not be saved");
+        if rule.queue.push(entry) {
+            (rule.defer)(entry);
         }
     }
 
@@ -716,52 +704,42 @@ mod tests {
     }
 
     /// Four chapters, the first `read` of them already read; the session is on the last page of chapter 3.
-    fn delete_session(read: usize, slots: i64, incognito: bool) -> (ReaderSession, Vec<Rc<ReaderChapter>>) {
+    fn delete_session(read: usize, slots: i64, incognito: bool) -> (Rc<RefCell<Vec<Pending>>>, Vec<Rc<ReaderChapter>>) {
         let chapters: Vec<_> = (1..=4).map(|id| chapter(id, (id as usize) <= read)).collect();
         let (mut s, _rx) = session(Rc::new(Recorder::default()), chapters.clone(), 2, incognito);
-        s.set_delete_after_read(slots, None);
+        let handed: Rc<RefCell<Vec<Pending>>> = Rc::default();
+        let sink = Rc::clone(&handed);
+        s.set_delete_after_read(slots, Rc::new(move |entry| sink.borrow_mut().push(entry)));
         s.record_page(2, &page(&chapters[2], 2));
-        (s, chapters)
+        // the page is recorded twice: a chapter is handed over once
+        s.record_page(2, &page(&chapters[2], 2));
+        (handed, chapters)
     }
 
-    fn queued_ids(s: &mut ReaderSession) -> Vec<i64> {
-        s.pending_deletes().iter().map(|p| p.chapter_id).collect()
+    fn queued_ids(handed: &Rc<RefCell<Vec<Pending>>>) -> Vec<i64> {
+        handed.borrow().iter().map(|p| p.chapter_id).collect()
     }
 
     #[test]
     fn completing_a_chapter_queues_the_one_slots_before_it_and_only_when_that_one_is_read() {
-        let (mut one_back, _c) = delete_session(2, 1, false);
-        assert_eq!(queued_ids(&mut one_back), [2], "slot 1 targets the chapter before the completed one");
-        let (mut itself, _c) = delete_session(2, 0, false);
-        assert_eq!(queued_ids(&mut itself), [3], "slot 0 targets the completed chapter, which is read now");
-        let (mut unread_target, _c) = delete_session(0, 1, false);
-        assert!(queued_ids(&mut unread_target).is_empty(), "an unread chapter is never queued");
+        let (one_back, _c) = delete_session(2, 1, false);
+        assert_eq!(queued_ids(&one_back), [2], "slot 1 targets the chapter before the completed one");
+        let (itself, _c) = delete_session(2, 0, false);
+        assert_eq!(queued_ids(&itself), [3], "slot 0 targets the completed chapter, which is read now");
+        let (unread_target, _c) = delete_session(0, 1, false);
+        assert!(queued_ids(&unread_target).is_empty(), "an unread chapter is never queued");
     }
 
     #[test]
     fn a_negative_slot_count_an_early_position_and_incognito_queue_nothing() {
-        let (mut off, _c) = delete_session(4, -1, false);
-        assert!(queued_ids(&mut off).is_empty());
-        let (mut also_off, _c) = delete_session(4, -2, false);
-        assert!(queued_ids(&mut also_off).is_empty(), "-2 does not reach a chapter ahead");
-        let (mut too_far, _c) = delete_session(4, 5, false);
-        assert!(queued_ids(&mut too_far).is_empty());
-        let (mut private, _c) = delete_session(4, 1, true);
-        assert!(queued_ids(&mut private).is_empty(), "incognito writes nothing (E-INC-1)");
-    }
-
-    #[test]
-    fn the_queue_file_survives_the_session_and_the_next_reader_flushes_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let chapters: Vec<_> = (1..=3).map(|id| chapter(id, true)).collect();
-        let (mut first, _rx) = session(Rc::new(Recorder::default()), chapters.clone(), 2, false);
-        first.set_delete_after_read(1, Some(QueueFile::in_dir(dir.path())));
-        first.record_page(2, &page(&chapters[2], 2));
-        drop(first); // the reader never closed cleanly
-
-        let (mut next, _rx) = session(Rc::new(Recorder::default()), chapters, 0, false);
-        next.set_delete_after_read(1, Some(QueueFile::in_dir(dir.path())));
-        assert_eq!(next.pending_deletes(), vec![Pending { manga_id: 7, chapter_id: 2 }]);
+        let (off, _c) = delete_session(4, -1, false);
+        assert!(queued_ids(&off).is_empty());
+        let (also_off, _c) = delete_session(4, -2, false);
+        assert!(queued_ids(&also_off).is_empty(), "-2 does not reach a chapter ahead");
+        let (too_far, _c) = delete_session(4, 5, false);
+        assert!(queued_ids(&too_far).is_empty());
+        let (private, _c) = delete_session(4, 1, true);
+        assert!(queued_ids(&private).is_empty(), "incognito writes nothing (E-INC-1)");
     }
 
     #[test]

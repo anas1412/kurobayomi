@@ -20,15 +20,18 @@
 //! - The page viewers (area 44) are attached by the screen itself once the chapter has loaded (`screen::install_viewer`),
 //!   and swapped when the reading mode changes.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_core::sources::SourceGate;
+use crate::downloads::directory::AppDirectory;
 use kuro_data::entry::{Entry, EntryRepo};
 use kuro_data::item::{Item, ItemRepo};
+use kuro_downloads::next::service::Downloads;
+use kuro_downloads::next::unit::UnitRef;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
 use kuro_downloads::index::DownloadIndex;
@@ -38,9 +41,7 @@ use kuro_platform::toast::{Toaster, toast_channel};
 use kuro_prefs::reader::ReaderPrefs;
 use tokio::sync::watch;
 
-use super::delete_disk::{DiskDeleter, Settings as DeleteSettings};
-use super::delete_queue::QueueFile;
-use super::download_paths::unique_download;
+use super::delete_queue::Pending;
 use super::loader::{Loader, LoaderInputs, SourceKind, choose_loader};
 use super::model::{LoadError, ReaderChapter};
 use super::screen::{DeleteSink, ReaderDeps, ReaderExtras, open_with};
@@ -65,10 +66,10 @@ pub fn find_ids(db: &Arc<Db>, title: &str, chapter_name: &str) -> (i64, i64) {
     (manga.id, chapters.iter().find(|c| c.name == chapter_name).or(by_id).map_or(0, |c| c.id))
 }
 
-/// Builds the loader with the downloads folder and the manga's title, which locate a downloaded chapter, and the manga's
-/// online source, which a chapter that is not on disk is read from once its page list is cached.
-fn loader_for(chapter: &Rc<ReaderChapter>, downloads: Option<(&Path, &str)>, online: Option<&Arc<Prefetch>>) -> Result<Loader, LoadError> {
-    let download = downloads.and_then(|(root, title)| unique_download(root, title, &chapter.chapter.name, chapter.chapter.scanlator.as_deref()));
+/// Builds the loader with the lookup that finds a downloaded chapter on disk, and the manga's online source, which a
+/// chapter that is not on disk is read from once its page list is cached.
+fn loader_for(chapter: &Rc<ReaderChapter>, locate: Option<&dyn Fn(&Item) -> Option<PathBuf>>, online: Option<&Arc<Prefetch>>) -> Result<Loader, LoadError> {
+    let download = locate.and_then(|locate| locate(&chapter.chapter));
     let url = &chapter.chapter.url;
     let source = match online {
         // asking the source here would wait on the network with the window, so a list that is not cached yet fails fast
@@ -121,16 +122,35 @@ pub fn downloaded_items(index: Option<DownloadIndex>, manga: &Entry) -> Arc<dyn 
     }
 }
 
-/// What closing the reader does with the chapters delete-after-read queued: a worker deletes their downloads.
-fn delete_sink(db: Arc<Db>, index: DownloadIndex, data_dir: PathBuf) -> DeleteSink {
-    Rc::new(move |pending| {
-        // The settings diet cut the bookmark and category exclusions of delete-after-read: nothing is kept back.
-        let settings = DeleteSettings::default();
-        let deleter = DiskDeleter { db: Arc::clone(&db), index: index.clone(), queue: QueueFile::in_dir(&data_dir), settings };
-        std::thread::spawn(move || {
-            deleter.run(&pending);
-        });
-    })
+/// The downloaded chapter's place on disk, by the one download service: the entry and its source are looked up once.
+/// `None` for the lookup when the service or the entry's source name is not known.
+fn locate_with(downloads: Downloads, db: Arc<Db>, manga_id: i64) -> Option<impl Fn(&Item) -> Option<PathBuf>> {
+    let (entry, source) = AppDirectory::new(db).entry_context(Kind::Manga, manga_id)?;
+    Some(move |chapter: &Item| downloads.locate(&entry, &source, &UnitRef::from(chapter)))
+}
+
+/// What delete-after-read does: each chapter read is handed to the service at once (`defer_delete`, which keeps
+/// bookmarked ones and survives a restart), and closing the reader flushes the service's pending deletes on the runtime.
+fn delete_sink(downloads: Downloads, db: Arc<Db>, runtime: tokio::runtime::Handle) -> DeleteSink {
+    let directory = AppDirectory::new(Arc::clone(&db));
+    let service = downloads.clone();
+    DeleteSink {
+        defer: Rc::new(move |pending: Pending| {
+            let Some((entry, _)) = directory.entry_context(Kind::Manga, pending.manga_id) else { return };
+            let Ok(Some(chapter)) = ItemRepo::new(Arc::clone(&db)).by_id(pending.chapter_id) else { return };
+            if let Err(error) = service.defer_delete(&entry, &[UnitRef::from(&chapter)]) {
+                tracing::warn!(chapter_id = pending.chapter_id, error = %error, "a read chapter could not be queued for deletion");
+            }
+        }),
+        flush: Rc::new(move || {
+            let downloads = downloads.clone();
+            runtime.spawn(async move {
+                if let Err(error) = downloads.flush_pending_deletes().await {
+                    tracing::warn!(error = %error, "the read chapters could not be deleted");
+                }
+            });
+        }),
+    }
 }
 
 /// `reader::open(manga_id, chapter_id)`: the reader page for the manga's chapter, closing back to the page below. The
@@ -140,18 +160,20 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let store = app.base.store().clone();
     let db = app.db.clone();
     let data_dir = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.data_dir());
-    let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+    let shell = crate::shell::host::Shell::get();
+    let index = shell.as_ref().map(|shell| shell.downloads().clone());
+    let service = shell.as_ref().and_then(|shell| shell.download_service());
     let manga = EntryRepo::new(Arc::clone(&db)).by_id(manga_id).ok();
 
     let mut writer = WriterHandle::spawn(Arc::clone(&db));
     if let Some(dir) = &data_dir {
         writer = writer.with_restore_in(dir);
     }
-    let (lookup, manga_is_local, title) = match &manga {
-        Some(manga) => (downloaded_items(index.clone(), manga), is_local_source(manga.source), manga.title.clone()),
-        None => (Arc::new(|_: &Item| false) as Arc<dyn Fn(&Item) -> bool + Send + Sync>, false, String::new()),
+    let (lookup, manga_is_local) = match &manga {
+        Some(manga) => (downloaded_items(index.clone(), manga), is_local_source(manga.source)),
+        None => (Arc::new(|_: &Item| false) as Arc<dyn Fn(&Item) -> bool + Send + Sync>, false),
     };
-    let root = index.as_ref().map(|index| index.root().to_path_buf());
+    let locate = service.clone().and_then(|service| locate_with(service, Arc::clone(&db), manga_id));
     let online = manga.as_ref().filter(|_| !manga_is_local).and_then(|m| super::source_pages::online(m.source, manga_id));
     // the opened chapter's page list is fetched before the reader asks for it, unless the chapter is on disk; Retry on
     // the failure card fetches it again and waits
@@ -174,7 +196,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
         prefs: ReaderPrefs::new(store.clone()),
         store: Rc::new(writer),
         build: Rc::new(move |chapter| {
-            let loaded = loader_for(chapter, root.as_deref().map(|root| (root, title.as_str())), online.as_ref());
+            let loaded = loader_for(chapter, locate.as_ref().map(|locate| locate as &dyn Fn(&Item) -> Option<PathBuf>), online.as_ref());
             if let (Ok(Loader::Http(_)), Some(prefetch)) = (&loaded, &online) {
                 warm_neighbours(&neighbours_db, prefetch, &chapter.chapter, &*on_disk);
             }
@@ -186,8 +208,8 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
         prefs_store: store.clone(),
     };
     let extras = ReaderExtras {
-        delete_sink: match (&data_dir, &index) {
-            (Some(dir), Some(index)) => Some(delete_sink(db, index.clone(), dir.clone())),
+        delete_sink: match (&shell, service) {
+            (Some(shell), Some(service)) => Some(delete_sink(service, db, shell.runtime().clone())),
             _ => None,
         },
         data_dir,
@@ -257,15 +279,22 @@ mod tests {
         ReaderChapter::new(plain(name))
     }
 
+    /// A lookup over a folder that holds a downloaded "Chapter 1" and nothing else.
+    fn on_disk(root: &std::path::Path) -> impl Fn(&Item) -> Option<PathBuf> {
+        let folder = root.join("Chapter 1");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("001.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        let root = root.to_path_buf();
+        move |chapter| Some(root.join(&chapter.name)).filter(|path| path.exists())
+    }
+
     #[test]
     fn a_chapter_on_disk_opens_from_its_download_and_any_other_reports_source_not_found() {
         let root = tempfile::tempdir().unwrap();
-        let folder = root.path().join("Source (EN)/Manga Title/Chapter 1");
-        std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join("001.png"), b"\x89PNG\r\n\x1a\n").unwrap();
-        let loaded = loader_for(&named("Chapter 1"), Some((root.path(), "Manga Title")), None).ok().expect("the download opens");
+        let locate = on_disk(root.path());
+        let loaded = loader_for(&named("Chapter 1"), Some(&locate), None).ok().expect("the download opens");
         assert!(matches!(loaded, Loader::Download(_)));
-        assert_eq!(loader_for(&named("Chapter 2"), Some((root.path(), "Manga Title")), None).err().unwrap().message, "Source not found");
+        assert_eq!(loader_for(&named("Chapter 2"), Some(&locate), None).err().unwrap().message, "Source not found");
     }
 
     /// A source whose chapters have one page; it counts the page lists it was asked for.
@@ -289,13 +318,12 @@ mod tests {
     #[test]
     fn a_chapter_of_an_online_source_opens_through_its_cached_list_unless_it_is_on_disk() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("Source (EN)/Manga Title/Chapter 1")).unwrap();
-        std::fs::write(root.path().join("Source (EN)/Manga Title/Chapter 1/001.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        let locate = on_disk(root.path());
         let dir = tempfile::tempdir().unwrap();
         let cache = Arc::new(DiskCache::open(dir.path(), super::super::cache::CACHE_LIMIT_BYTES).unwrap());
         let source = Arc::new(NoPages(AtomicUsize::new(0)));
         let online = Prefetch::new(source.clone(), Arc::clone(&cache), 0);
-        let downloads = Some((root.path(), "Manga Title"));
+        let downloads = Some(&locate as &dyn Fn(&Item) -> Option<PathBuf>);
         assert!(matches!(loader_for(&named("Chapter 1"), downloads, Some(&online)), Ok(Loader::Download(_))), "the download wins");
         assert_eq!(source.0.load(Ordering::SeqCst), 0, "a download asks the source for nothing");
         assert_eq!(loader_for(&named("Chapter 2"), downloads, Some(&online)).err().unwrap().message, super::super::source_pages::STILL_LOADING);

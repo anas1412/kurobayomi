@@ -1,25 +1,18 @@
 //! The delete-after-read rule (T-43a-032). When a chapter is completed, the chapter `slots` positions before it in the
-//! reader list is queued for deletion. The queue is flushed when the reader closes, so a chapter is removed only
+//! reader list is queued for deletion. The service flushes its pending deletes when the reader closes, so a chapter is removed only
 //! after the reader is done with it. A negative slot count turns the feature off (E-DEL-1).
 //!
-//! The queue survives a restart (E-DEL-4): [`QueueFile`] keeps it in one file in the platform data directory, so
-//! chapters queued by a reader that never closed are deleted by the next reader that does. Each entry names its
-//! manga, because the next reader may be open on another one.
+//! The queue survives a restart (E-DEL-4): each completed chapter is handed at once to the download service
+//! (`Downloads::defer_delete`), which keeps it in its pending table. The in-memory queue below only keeps a chapter
+//! from being handed twice.
 
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Mutex;
-
-use serde::{Deserialize, Serialize};
 
 use super::model::ReaderChapter;
 use super::rules;
 
-/// The queue's file name in the data directory.
-pub const FILE_NAME: &str = "reader_delete_queue.json";
-
 /// A read chapter whose download waits for the reader to close.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pending {
     pub manga_id: i64,
     pub chapter_id: i64,
@@ -34,26 +27,24 @@ pub fn delete_target(chapters: &[Rc<ReaderChapter>], completed: usize, slots: i6
     rules::delete_index(completed, slots.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32)
 }
 
-/// The chapters waiting for the reader to close. Each one is queued once, in the order it was completed.
+/// The chapters already handed to the download service, so each is handed once.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DeleteQueue {
     entries: Vec<Pending>,
 }
 
 impl DeleteQueue {
-    /// Queues a chapter that has been read. One already queued stays where it is.
-    pub fn push(&mut self, entry: Pending) {
-        if !self.entries.contains(&entry) {
+    /// Remembers a chapter that has been read. `false` when it was already there.
+    pub fn push(&mut self, entry: Pending) -> bool {
+        let new = !self.entries.contains(&entry);
+        if new {
             self.entries.push(entry);
         }
+        new
     }
+}
 
-    /// Takes every queued chapter, leaving the queue empty. The caller deletes them when the reader closes.
-    pub fn take(&mut self) -> Vec<Pending> {
-        std::mem::take(&mut self.entries)
-    }
-
-    #[cfg(test)]
+#[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -152,38 +143,10 @@ mod tests {
     }
 
     #[test]
-    fn each_chapter_is_queued_once_and_taking_empties_the_queue() {
+    fn each_chapter_is_queued_once() {
         let mut queue = DeleteQueue::default();
-        queue.push(pending(4));
-        queue.push(pending(9));
-        queue.push(pending(4));
-        assert_eq!(queue.take(), vec![pending(4), pending(9)]);
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn the_file_keeps_the_queue_across_a_restart_and_removes_only_what_was_dealt_with() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = QueueFile::in_dir(&dir.path().join("data"));
-        assert!(file.list().is_empty());
-        file.add(pending(4)).unwrap();
-        file.add(pending(9)).unwrap();
-        file.add(pending(4)).unwrap();
-        // a new handle, as after a restart, sees the same queue
-        let after_restart = QueueFile::in_dir(&dir.path().join("data"));
-        assert_eq!(after_restart.list(), vec![pending(4), pending(9)]);
-        after_restart.remove(&[pending(4)]).unwrap();
-        after_restart.add(pending(12)).unwrap();
-        assert_eq!(file.list(), vec![pending(9), pending(12)]);
-    }
-
-    #[test]
-    fn an_unreadable_file_is_an_empty_queue() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = QueueFile::in_dir(dir.path());
-        std::fs::write(dir.path().join(FILE_NAME), b"[").unwrap();
-        assert!(file.list().is_empty());
-        file.add(pending(1)).unwrap();
-        assert_eq!(file.list(), vec![pending(1)]);
+        assert!(queue.push(pending(4)));
+        assert!(queue.push(pending(9)));
+        assert!(!queue.push(pending(4)));
     }
 }
