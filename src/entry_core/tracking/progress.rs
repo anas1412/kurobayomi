@@ -14,10 +14,11 @@ use super::actions;
 use super::auto_track::{self, Marking};
 
 /// Chapter or episode `item_number` of entry `entry_id` was finished. Nothing happens in incognito or with the
-/// "update progress after reading" switch off, and without the tracker services.
+/// "update progress after reading" switch off, and without the tracker services. When a tracker takes the update, "Trackers
+/// updated to chapter N" or "... episode N" shows, the same notice as after a mark as read (one flow for both kinds).
 pub fn item_finished(kind: Kind, entry_id: i64, item_number: f64, incognito: bool) {
     let Some(ctx) = crate::settings_ui::tracker_host::ctx() else { return };
-    send_if_allowed(&ctx.prefs, incognito, || { send(kind, entry_id, item_number); });
+    send_if_allowed(&ctx.prefs, incognito, || send_and_tell(kind, entry_id, item_number));
 }
 
 /// The one call into the tracker flow, for a finished item and for a mark-as-read alike.
