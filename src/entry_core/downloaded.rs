@@ -2,10 +2,16 @@
 //! reader's skip paths ask the same question of a chapter (`Fn(&Item) -> bool`), so `downloaded_lookup` has the shape of
 //! the reader's `is_downloaded` argument. A local manga counts every chapter as downloaded and is never looked up.
 
+use std::collections::HashMap;
+
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_downloads::index::DownloadIndex;
-use kuro_downloads::model::{ChapterRef, MangaRef};
+use kuro_downloads::model::{ChapterRef, DownloadState, MangaRef};
+use kuro_platform::kind::Kind;
+
+use crate::updates::download_host::DownloadBackend;
+use crate::updates::download_state::DiskKey;
 
 /// The lookup of one manga over the download index, with the local passthrough: it is true for every chapter of a local
 /// manga and otherwise asks the index for the chapter's name and scanlator.
@@ -13,7 +19,22 @@ pub fn downloaded_lookup(index: DownloadIndex, source_id: i64, manga_title: Stri
     move |chapter| local || index.is_chapter_downloaded(source_id, &manga_title, &chapter.name, chapter.scanlator.as_deref())
 }
 
-/// The downloads layer's view of a chapter.
+/// The download state of each unit of an entry that is queued or on disk, for either kind: a queued unit shows its queue
+/// state, a finished one in the index shows Downloaded.
+pub fn download_states(host: &dyn DownloadBackend, kind: Kind, entry: &Entry, units: &[Item]) -> HashMap<i64, DownloadState> {
+    units
+        .iter()
+        .filter_map(|unit| {
+            if let Some(queued) = host.queue_entry(kind, unit.id) {
+                return Some((unit.id, queued.status));
+            }
+            let key = DiskKey { source_id: entry.source, entry_title: entry.title.clone(), unit_name: unit.name.clone(), scanlator: unit.scanlator.clone() };
+            host.on_disk(kind, &key).then_some((unit.id, DownloadState::Downloaded))
+        })
+        .collect()
+}
+
+/// The downloads layer's view of a chapter. Still used by the old manga queue (removed with it).
 pub fn chapter_ref(chapter: &Item) -> ChapterRef {
     ChapterRef {
         id: chapter.id,

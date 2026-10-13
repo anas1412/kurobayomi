@@ -1,18 +1,21 @@
-//! The anime downloads of the page over `kuro-downloads` (T-39b-063, T-39b-013): which episodes are on disk, queueing
-//! episodes, and deleting them. Queueing and the delete rules go through the app's `AnimeQueue` when one is installed
-//! (`install_queue`); without one nothing can be queued and the page shows no Download menu, but a delete still removes
-//! the episode folders from the downloads folder. No GTK here. The calls block on the disk: run them on the blocking pool.
+//! The anime downloads of the page (T-39b-063, T-39b-013): which episodes are on disk, queueing episodes, and deleting
+//! them, all through the app's one download service. Without it nothing can be queued and the page shows no Download
+//! menu. `install_queue`, `entry_source`, `entry_ref` and `item_ref` stay for the old anime queue until it goes. No GTK here. The calls block on the disk: run them on the blocking pool.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_downloads::anime::layout::AnimeLayout;
-use kuro_downloads::anime::manager::{AnimeQueue, Command, QueueEntry};
+use kuro_downloads::anime::manager::AnimeQueue;
 use kuro_downloads::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
+use kuro_downloads::model::DownloadState;
+use kuro_platform::kind::Kind;
 
 use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::downloaded::download_states;
+use crate::updates::download_host::{self, DownloadBackend};
 
 static QUEUE: OnceLock<AnimeQueue> = OnceLock::new();
 
@@ -65,61 +68,60 @@ pub(crate) fn item_ref(e: &Item) -> EpisodeRef {
     }
 }
 
-/// The downloads folder and, when the app has one, the queue.
+/// The anime downloads of the page, over the one download service (`updates::download_host`), the same path the manga
+/// page takes.
 pub struct AnimeDownloads {
-    layout: AnimeLayout,
-    queue: Option<AnimeQueue>,
+    host: Arc<dyn DownloadBackend>,
+    can_enqueue: bool,
 }
 
 impl AnimeDownloads {
-    pub fn new(layout: AnimeLayout, queue: Option<AnimeQueue>) -> Self {
-        Self { layout, queue }
+    /// Over the app's download service. The folder and the old queue are not read any more; the parameters stay until the
+    /// route that passes them moves (phase C5). Call it on the GTK thread: the service is found through the shell.
+    pub fn new(_layout: AnimeLayout, _queue: Option<AnimeQueue>) -> Self {
+        let service = crate::shell::host::Shell::get().is_some_and(|shell| shell.download_service().is_some());
+        Self::over(download_host::current(), service)
     }
 
-    /// Whether episodes can be queued (`onDownloadEpisode != null`).
+    pub(crate) fn over(host: Arc<dyn DownloadBackend>, can_enqueue: bool) -> Self {
+        Self { host, can_enqueue }
+    }
+
+    /// Whether episodes can be queued: the download service runs.
     pub fn can_enqueue(&self) -> bool {
-        self.queue.is_some()
+        self.can_enqueue
     }
 
-    /// The ids of the episodes that have a finished folder in the downloads folder.
-    pub fn downloaded(&self, anime: &Entry, episodes: &[Item], info: &SourceInfo) -> HashSet<i64> {
-        let (source, anime) = (entry_source(anime, info), entry_ref(anime));
-        episodes.iter().filter(|e| self.layout.find_episode_dir(&source, &anime, &item_ref(e)).is_some()).map(|e| e.id).collect()
+    /// The ids of the episodes that are finished on disk.
+    pub fn downloaded(&self, anime: &Entry, episodes: &[Item], _info: &SourceInfo) -> HashSet<i64> {
+        let states = download_states(self.host.as_ref(), Kind::Anime, anime, episodes);
+        states.into_iter().filter(|(_, state)| *state == DownloadState::Downloaded).map(|(id, _)| id).collect()
     }
 
-    /// Queues the episodes and starts the run when the queue was empty. `false` when there is no queue. `start_now`
-    /// puts the one episode at the front and starts the run.
-    pub fn enqueue(&self, anime: &Entry, episodes: &[Item], info: &SourceInfo, start_now: bool) -> bool {
-        let Some(queue) = &self.queue else { return false };
-        let (source, anime) = (entry_source(anime, info), entry_ref(anime));
-        let sent = if start_now {
-            let Some(episode) = episodes.first().map(item_ref) else { return false };
-            let (reply, _answer) = tokio::sync::oneshot::channel();
-            queue.send(Command::StartNow { entry: QueueEntry { source, anime, episode, alt: false, video: None }, reply })
-        } else {
-            let episodes = episodes.iter().map(item_ref).collect();
-            let (reply, _answer) = tokio::sync::oneshot::channel();
-            queue.send(Command::Enqueue { source, anime, episodes, auto_start: true, alt: false, video: None, reply })
-        };
-        sent.is_ok()
-    }
-
-    /// Deletes the downloads of these episodes: through the queue, which applies the delete rules and keeps its index,
-    /// or straight from the folder when there is none. `categories` are the entry's, for the rules.
-    pub fn delete(&self, anime: &Entry, episodes: &[Item], categories: Vec<i64>, info: &SourceInfo) {
-        let (source, anime) = (entry_source(anime, info), entry_ref(anime));
-        let episodes: Vec<EpisodeRef> = episodes.iter().map(item_ref).collect();
-        if let Some(queue) = &self.queue {
-            let (reply, _answer) = tokio::sync::oneshot::channel();
-            let _ = queue.send(Command::DeleteEpisodes { source, anime, episodes, categories, reply });
-            return;
+    /// Queues the episodes and starts the queue. `false` when nothing was queued. `start_now` puts the one episode at
+    /// the front and starts the run.
+    pub fn enqueue(&self, anime: &Entry, episodes: &[Item], _info: &SourceInfo, start_now: bool) -> bool {
+        if !self.can_enqueue {
+            return false;
         }
-        let (_, finished) = self.layout.find_episode_dirs(&source, &anime, &episodes);
-        for path in finished.into_iter().chain(self.layout.find_episode_tmp_dirs(&source, &anime, &episodes)) {
-            if let Err(e) = std::fs::remove_dir_all(&path) {
-                tracing::warn!("could not delete the download {}: {e}", path.display());
-            }
+        if start_now {
+            let Some(first) = episodes.first() else { return false };
+            self.host.start_now(Kind::Anime, first.id);
+            return true;
         }
+        let ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
+        let queued = self.host.enqueue(Kind::Anime, anime.id, &ids, false);
+        if queued {
+            self.host.start_queue(Kind::Anime);
+        }
+        queued
+    }
+
+    /// Deletes the downloads of these episodes: they leave the queue and their folders go. The bookmark rule does not
+    /// keep any back (an explicit delete); the entry's categories no longer matter.
+    pub fn delete(&self, anime: &Entry, episodes: &[Item], _categories: Vec<i64>, _info: &SourceInfo) {
+        let ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
+        self.host.delete(Kind::Anime, anime.id, &ids);
     }
 }
 
@@ -141,17 +143,6 @@ mod tests {
         (1..=n).map(|id| Item { id, entry_id: 1, name: format!("Episode {id}"), url: format!("/e{id}"), ..Item::create(Kind::Anime) }).collect()
     }
 
-    /// A downloads folder with the finished folders of `names` for `Frieren`.
-    fn root_with(names: &[&str]) -> (tempfile::TempDir, AnimeLayout) {
-        let dir = tempfile::tempdir().unwrap();
-        let anime_dir = dir.path().join("Reader (EN)").join("Frieren");
-        for name in names {
-            std::fs::create_dir_all(anime_dir.join(name)).unwrap();
-        }
-        let layout = AnimeLayout::new(Some(dir.path().to_path_buf()));
-        (dir, layout)
-    }
-
     #[test]
     fn a_source_line_splits_into_name_and_language() {
         assert_eq!(split_source_name("Reader (EN)"), ("Reader".to_owned(), "en".to_owned()));
@@ -161,23 +152,33 @@ mod tests {
     }
 
     #[test]
-    fn only_the_episodes_with_a_folder_are_downloaded() {
-        let (_dir, layout) = root_with(&["Episode 2"]);
-        let downloads = AnimeDownloads::new(layout, None);
-        let found = downloads.downloaded(&anime(), &episodes(3), &info());
-        assert_eq!(found, HashSet::from([2]));
+    fn the_page_downloads_go_through_the_one_service() {
+        use crate::updates::download_host::fake::{Call, Fake};
+
+        let fake = Arc::new(Fake::installed());
+        fake.disk.lock().unwrap().push(2);
+        let downloads = AnimeDownloads::over(fake.clone(), true);
+        assert!(downloads.can_enqueue());
+        assert_eq!(downloads.downloaded(&anime(), &episodes(3), &info()), HashSet::from([2]));
+
+        assert!(downloads.enqueue(&anime(), &episodes(2), &info(), false));
+        assert!(downloads.enqueue(&anime(), &episodes(2)[1..], &info(), true));
+        downloads.delete(&anime(), &episodes(2)[1..], Vec::new(), &info());
+        assert_eq!(
+            fake.calls(),
+            [
+                Call::Enqueue { entry_id: 1, unit_ids: vec![1, 2], external: false },
+                Call::StartQueue,
+                Call::StartNow(2),
+                Call::Delete { entry_id: 1, unit_ids: vec![2] },
+            ]
+        );
     }
 
     #[test]
-    fn without_a_queue_nothing_is_queued_and_a_delete_removes_the_folders() {
-        let (dir, layout) = root_with(&["Episode 1", "Episode 2"]);
-        std::fs::create_dir_all(dir.path().join("Reader (EN)").join("Frieren").join("Episode 2_tmp")).unwrap();
-        let downloads = AnimeDownloads::new(layout, None);
+    fn without_the_service_nothing_is_queued() {
+        let downloads = AnimeDownloads::over(Arc::new(crate::updates::download_host::fake::Fake::default()), false);
         assert!(!downloads.can_enqueue());
         assert!(!downloads.enqueue(&anime(), &episodes(1), &info(), false));
-        downloads.delete(&anime(), &episodes(2)[1..], Vec::new(), &info());
-        let left = downloads.downloaded(&anime(), &episodes(2), &info());
-        assert_eq!(left, HashSet::from([1]), "episode 2 is gone and episode 1 stays");
-        assert!(!dir.path().join("Reader (EN)").join("Frieren").join("Episode 2_tmp").exists(), "a partial download goes too");
     }
 }
