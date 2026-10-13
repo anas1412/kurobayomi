@@ -180,7 +180,7 @@ impl RemoteAnimeBackend {
         let list_sync = EpisodeListSync { sync, seasons: SyncSeasons::new(Arc::clone(&db)), handle, mark_duplicate_done };
         let store = Arc::new(DbRemoteStore::new(Arc::clone(&db)));
         let update = Arc::new(UpdateFromRemote::new(store.clone(), Arc::new(list_sync), Arc::new(NoCoverFiles)));
-        Self { stubs: StubEntryBackend::new(Arc::clone(&db)), lookup, store, update, episodes: EntryStore::new(db), downloads: None }
+        Self { stubs: StubEntryBackend::new(Arc::clone(&db)), lookup, store, update, episodes: EntryStore::new(db, Kind::Anime), downloads: None }
     }
 
     /// Gives the backend the downloads of the page: the downloads folder and the app's queue.

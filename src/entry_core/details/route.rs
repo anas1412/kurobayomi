@@ -126,7 +126,7 @@ fn page_for(entry_id: i64) -> GBox {
     let downloads = EntryDownloads::new();
     let backend: Arc<dyn EntryBackend> =
         Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
-    let runner = Rc::new(runner::spawn(&handle, EntryStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
+    let runner = Rc::new(runner::spawn(&handle, EntryStore::new(Arc::clone(&db), Kind::Anime), prefs.clone(), Arc::clone(&backend), ctx));
     runner.send(EntryCmd::Load { entry_id });
     assemble(runner, show_airing, Env { prefs, backend, db })
 }
@@ -1461,7 +1461,7 @@ impl View {
 
     /// The continue button of a season tile: plays that season's next unseen episode, as the FAB does for an entry.
     fn continue_season(&self, season_id: i64) {
-        let store = EntryStore::new(Arc::clone(&self.env.db));
+        let store = EntryStore::new(Arc::clone(&self.env.db), Kind::Anime);
         let played = (|| -> Result<(), DetailsError> {
             let season = required(store.entry(season_id)?, || DetailsError::AnimeNotFound(season_id))?;
             let episodes = store.episodes(season_id)?;

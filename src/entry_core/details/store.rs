@@ -25,9 +25,10 @@ use crate::entry_core::library_flow::LibraryRepos;
 use crate::entry_core::refresh_rules::{self, Trigger};
 use crate::entry_core::tracking::facts::Summary;
 
-/// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
+/// Typed access to the tables of one details page, for an entry of one kind. Cheap to clone: it shares one `Db`.
 #[derive(Clone)]
 pub struct EntryStore {
+    kind: Kind,
     entries: EntryRepo,
     items: ItemRepo,
     categories: CategoryRepo,
@@ -36,14 +37,20 @@ pub struct EntryStore {
 }
 
 impl EntryStore {
-    pub fn new(db: Arc<Db>) -> Self {
+    pub fn new(db: Arc<Db>, kind: Kind) -> Self {
         Self {
+            kind,
             entries: EntryRepo::new(Arc::clone(&db)),
             items: ItemRepo::new(Arc::clone(&db)),
-            categories: CategoryRepo::new(Arc::clone(&db), Kind::Anime),
+            categories: CategoryRepo::new(Arc::clone(&db), kind),
             tracks: TrackRepo::new(Arc::clone(&db)),
             db,
         }
+    }
+
+    /// The kind of the entries of this page.
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 
     /// The database handle, for the pieces that work on it directly (the source refresh).
@@ -64,7 +71,7 @@ impl EntryStore {
 
     /// The tracking count and the logged-in flag of the entry, through the same filter as the sheet (T-TRK-12, D-10).
     pub fn track_summary(&self, entry_id: i64, source_id: i64) -> DataResult<Summary> {
-        entry_ops::track_summary(&self.tracks, Kind::Anime, entry_id, source_id)
+        entry_ops::track_summary(&self.tracks, self.kind, entry_id, source_id)
     }
 
     /// Every category (the default row `0` included, the dialog drops it) and the ids the entry is linked to.
@@ -79,7 +86,7 @@ impl EntryStore {
 
     /// The new episodes a refresh queues (`refresh_rules::new_item_targets`).
     pub fn new_item_targets(&self, prefs: &PrefStore, id: i64, trigger: Trigger, new_items: &[Item]) -> DataResult<Vec<Item>> {
-        refresh_rules::new_item_targets(&self.entries, &self.categories, &self.items, prefs, Kind::Anime, id, trigger, new_items)
+        refresh_rules::new_item_targets(&self.entries, &self.categories, &self.items, prefs, self.kind, id, trigger, new_items)
     }
 
     /// Replaces the category links of the entry in one transaction.
@@ -121,7 +128,7 @@ impl EntryStore {
     /// Returns how many entries changed.
     pub fn apply_episode_defaults_to_library(&self, prefs: &PrefStore) -> DataResult<usize> {
         let mut changed = 0;
-        for entry in self.entries.favorites(Kind::Anime)? {
+        for entry in self.entries.favorites(self.kind)? {
             if apply_item_defaults(&self.entries, prefs, &entry)? {
                 changed += 1;
             }
@@ -132,7 +139,7 @@ impl EntryStore {
     /// The same for a season list: the season default word goes to every favorite, the episode flags stay.
     pub fn apply_season_defaults_to_library(&self, prefs: &PrefStore) -> DataResult<usize> {
         let mut changed = 0;
-        for entry in self.entries.favorites(Kind::Anime)? {
+        for entry in self.entries.favorites(self.kind)? {
             if apply_season_defaults(&self.entries, prefs, &entry)? {
                 changed += 1;
             }
@@ -230,7 +237,7 @@ pub(crate) mod fixture {
             })
             .collect();
         ItemRepo::new(Arc::clone(&db)).add_all(&list).expect("insert episodes");
-        (dir, EntryStore::new(db), id)
+        (dir, EntryStore::new(db, Kind::Anime), id)
     }
 }
 

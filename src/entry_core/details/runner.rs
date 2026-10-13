@@ -304,7 +304,7 @@ impl Shared {
     /// The load sequence (`EntryModel::load`), then the live subscription, then the first-open refresh.
     async fn load(self: Arc<Self>, entry_id: i64) {
         let ctx = EntryLoadContext {
-            last_empty_open_fetch_ms: last_empty_open_fetch(Kind::Anime, entry_id),
+            last_empty_open_fetch_ms: last_empty_open_fetch(self.store.kind(), entry_id),
             now_ms: now_ms(),
             ..self.ctx
         };
@@ -322,7 +322,7 @@ impl Shared {
             Ok(Some(model)) => {
                 let plan = model.plan;
                 if plan.episodes {
-                    record_empty_open_fetch(Kind::Anime, entry_id, ctx.now_ms);
+                    record_empty_open_fetch(self.store.kind(), entry_id, ctx.now_ms);
                 }
                 let seasons = model.entry.fetch_type() == FetchType::Seasons;
                 self.emit(EntryEvent::Loaded(Some(Box::new(model))));
@@ -415,7 +415,7 @@ impl Shared {
     /// write does nothing else (E-LIB-9).
     async fn toggle_library(&self, entry_id: i64, check_duplicates: bool) {
         let prefs = self.prefs.clone();
-        let default_category = i64::from(LibraryPrefs::new(prefs.clone()).default_category(Kind::Anime).get());
+        let default_category = i64::from(LibraryPrefs::new(prefs.clone()).default_category(self.store.kind()).get());
         let (backend, now) = (Arc::clone(&self.backend), now_ms());
         let toggled = self
             .blocking(move |store| {
