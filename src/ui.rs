@@ -552,21 +552,30 @@ pub fn linked(labels: &[String], active: usize) -> GBox {
     b
 }
 
+/// The one popover menu of the app: flat rows in a column (spacing 2, margin 6). `rows` builds the rows once the popover
+/// exists, so each can close it (`entry_core::page_shell::plain_row`).
+pub fn popover_menu(rows: impl FnOnce(&gtk::Popover) -> Vec<Button>) -> gtk::Popover {
+    let popover = gtk::Popover::new();
+    let column = GBox::new(O::Vertical, 2);
+    margins(&column, 6);
+    for row in rows(&popover) {
+        column.append(&row);
+    }
+    popover.set_child(Some(&column));
+    popover
+}
+
 /// Popover menu of plain buttons; clicking one runs `on(label)`.
 pub fn menu_button(icon: &str, entries: &[String], on: impl Fn(&str) + Clone + 'static) -> gtk::MenuButton {
-    let pop = gtk::Popover::new();
-    let col = GBox::new(O::Vertical, 0);
-    for e in entries {
-        let b = Button::builder().label(e).css_classes(["flat"]).build();
-        b.child().and_downcast::<Label>().map(|l| l.set_xalign(0.0));
-        let (on, e, pop) = (on.clone(), e.clone(), pop.clone());
-        b.connect_clicked(move |_| {
-            pop.popdown();
-            on(&e);
-        });
-        col.append(&b);
-    }
-    pop.set_child(Some(&col));
+    let pop = popover_menu(|pop| {
+        entries
+            .iter()
+            .map(|e| {
+                let (on, e, pop) = (on.clone(), e.clone(), pop.clone());
+                crate::entry_core::page_shell::plain_row(&e.clone(), &pop.clone(), move |_| on(&e))
+            })
+            .collect()
+    });
     quiet_menu(gtk::MenuButton::builder().icon_name(icon).popover(&pop).tooltip_text("More").build())
 }
 

@@ -4,7 +4,6 @@
 //! The rule: from the displayed (filtered, sorted) list, keep the items that are unread and not queued or on disk;
 //! they queue in reading order, oldest first, and an entry takes the first N or all of them.
 
-use gtk::prelude::*;
 use kuro_downloads::DownloadState;
 use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_platform::kind::Kind;
@@ -70,15 +69,15 @@ pub fn targets(rows: &[Candidate], descending: bool, amount: DownloadAmount) -> 
 
 /// The Download menu as a popover of flat rows. `on_pick` runs with the chosen entry.
 pub fn popover(kind: Kind, on_pick: impl Fn(DownloadAmount) + Clone + 'static) -> gtk::Popover {
-    let popover = gtk::Popover::new();
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    crate::ui::margins(&column, 6);
-    for amount in amounts() {
-        let on_pick = on_pick.clone();
-        column.append(&plain_row(&label(kind, amount), &popover, move |_| on_pick(amount)));
-    }
-    popover.set_child(Some(&column));
-    popover
+    crate::ui::popover_menu(|popover| {
+        amounts()
+            .into_iter()
+            .map(|amount| {
+                let on_pick = on_pick.clone();
+                plain_row(&label(kind, amount), popover, move |_| on_pick(amount))
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]

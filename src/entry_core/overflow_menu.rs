@@ -75,17 +75,17 @@ pub fn label(item: Item) -> String {
 /// The menu as a popover of flat rows, built each time it opens so the items follow the entry. Refresh is greyed while
 /// one runs (one refresh at a time). `on_pick` runs with the chosen item.
 pub fn popover(entry: Entry, refreshing: bool, on_pick: impl Fn(Item) + Clone + 'static) -> gtk::Popover {
-    let popover = gtk::Popover::new();
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    crate::ui::margins(&column, 6);
-    for item in items(entry) {
-        let on_pick = on_pick.clone();
-        let row = plain_row(&label(item), &popover, move |_| on_pick(item));
-        row.set_sensitive(item != Item::Refresh || !refreshing);
-        column.append(&row);
-    }
-    popover.set_child(Some(&column));
-    popover
+    crate::ui::popover_menu(|popover| {
+        items(entry)
+            .into_iter()
+            .map(|item| {
+                let on_pick = on_pick.clone();
+                let row = plain_row(&label(item), popover, move |_| on_pick(item));
+                row.set_sensitive(item != Item::Refresh || !refreshing);
+                row
+            })
+            .collect()
+    })
 }
 
 /// Share: copies the entry's address to the clipboard and returns the notice to show ("Copied to clipboard: …"), or
