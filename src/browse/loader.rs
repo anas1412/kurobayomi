@@ -128,7 +128,12 @@ impl PageLoader for SourceLoader {
 async fn list_page(source: &Catalogue, store: Arc<dyn FavoriteStore>, query: BrowseQuery, filters: FilterList, page: u32) -> Result<ListedPage, String> {
     let page = i32::try_from(page).map_err(|error| error.to_string())?;
     let name = source.name().to_owned();
-    let (entries, has_next) = errors::plain(&name, source.list(query, &filters, page)).await?;
+    let searching = matches!(query, BrowseQuery::Search(_));
+    let (entries, has_next) = match errors::limited(source.list(query, &filters, page)).await {
+        // a source without search (a single webcomic, say) has no results for a search, as in Aniyomi; not a failure
+        Err(SourceError::Unsupported(_)) if searching => (Vec::new(), false),
+        result => result.map_err(|error| errors::plain_message(&name, &error))?,
+    };
     let source_id = source.id();
     tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
         let mut items = Vec::with_capacity(entries.len());
@@ -200,6 +205,17 @@ mod tests {
         let loader = SourceLoader::new(Catalogue::Manga(manga.clone()), Arc::new(FakeStore::default()));
         run(loader.load(BrowseQuery::Search("one".into()), FilterList::default(), 1)).expect("page");
         assert_eq!(*manga.calls.lock().expect("calls"), ["search 1 one 0"]);
+    }
+
+    #[test]
+    fn a_source_without_search_answers_a_search_with_no_results_and_still_fails_a_listing() {
+        let search = FakeAnime::new(3, vec![Err(SourceError::Unsupported("search"))]);
+        let loader = SourceLoader::new(Catalogue::Anime(search), Arc::new(FakeStore::default()));
+        let got = run(loader.load(BrowseQuery::Search("one".into()), FilterList::default(), 1)).expect("no results, not an error");
+        assert!(got.items.is_empty() && !got.has_next);
+        let latest = FakeAnime::new(3, vec![Err(SourceError::Unsupported("latest"))]);
+        let loader = SourceLoader::new(Catalogue::Anime(latest), Arc::new(FakeStore::default()));
+        assert!(run(loader.load(BrowseQuery::Latest, FilterList::default(), 1)).is_err(), "only a search reads as empty");
     }
 
     #[test]
