@@ -12,7 +12,7 @@ use crate::entry_core::flags::Write;
 use crate::entry_core::list_model::{RowItem, focus_after, row_items};
 use crate::entry_core::live::{DownloadEvent, ProgressThrottle, apply_event};
 use crate::entry_core::message::{Notice, SNACK_DURATION};
-use crate::entry_core::selection::{Command, Key, Mods, Pick, back_clears_selection, click_command, key_command};
+use crate::entry_core::selection::{Command, Key, Mods, RowClick, key_command};
 use crate::entry_core::view::view;
 
 /// What a row's context menu runs on that one chapter.
@@ -261,7 +261,7 @@ impl Page {
         let manga_id = self.manga_id;
         let remove_after_read = self.remove_after_read;
         let default_category = self.default_category;
-        let view_ids = if matches!(action, UiAction::MarkPrevious(_)) { self.view_ids() } else { Vec::new() };
+        let view_ids = if matches!(action, UiAction::MarkPrevious(_) | UiAction::Row { .. } | UiAction::Key { .. }) { self.view_ids() } else { Vec::new() };
         let mut out = Outcome::default();
         let Some(page) = self.ready_mut() else {
             return out;
@@ -336,9 +336,7 @@ impl Page {
             UiAction::Back => {
                 if page.dialog.current().is_some() {
                     page.dialog.dismiss();
-                } else if back_clears_selection(page.selection.len()) {
-                    page.selection.clear();
-                } else {
+                } else if !page.selection.back() {
                     out.pop = true;
                 }
             }
@@ -363,14 +361,12 @@ impl Page {
                 mods,
                 long_press_or_right,
             } => {
-                let command = click_command(mods, long_press_or_right);
-                if command == Command::Tap && !mods.ctrl && page.selection.is_empty() {
+                if let RowClick::Open(id) = page.selection.press(&view_ids, id, mods, long_press_or_right) {
                     out.open_chapter = Some(id);
                     return out;
                 }
                 self.focused = Some(id);
                 out.focus = Some(id);
-                self.toggle(id, command);
             }
             UiAction::Key { key, mods, focused } => {
                 let in_selection = !page.selection.is_empty();
@@ -381,9 +377,9 @@ impl Page {
                 match command {
                     Command::Tap | Command::LongPress => {
                         if let Some(id) = focused {
+                            page.selection.toggle_row(&view_ids, id, command);
                             self.focused = Some(id);
                             out.focus = Some(id);
-                            self.toggle(id, command);
                         }
                     }
                     Command::SelectAll => {
@@ -407,14 +403,6 @@ impl Page {
         out
     }
 
-    /// Toggles one row in the view. A tap flips it. A long press or Shift selects it and the range up to it.
-    fn toggle(&mut self, id: i64, command: Command) {
-        let ids = self.view_ids();
-        let Some(page) = self.ready_mut() else { return };
-        let selected = !page.selection.contains(id);
-        let pick = if command == Command::LongPress { Pick::LongPress } else { Pick::Tap };
-        page.selection.toggle(&ids, id, selected, pick);
-    }
 }
 
 /// One download action on `ids` (`runChapterDownloadActions`). START_NOW and CANCEL act on exactly one row and do

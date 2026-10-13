@@ -106,7 +106,7 @@ mod tests {
         let view = m.processed_ids();
         for n in numbers {
             let id = m.episodes.iter().find(|e| e.number == *n).unwrap().id;
-            m.selection.long_press(&view, id);
+            m.selection.toggle_row(&view, id, crate::entry_core::selection::Command::LongPress);
         }
     }
 

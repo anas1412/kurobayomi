@@ -36,7 +36,7 @@ use super::entry_state::{EntryFlow, RefreshPlan, refresh_on_open};
 use super::episode_row::row;
 use super::season_tile::SeasonExtra;
 use super::summary::SummaryExpansion;
-use super::selection::Selection;
+use crate::entry_core::selection::Selection;
 use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
 use super::refresh::open_refresh_due;
@@ -446,7 +446,7 @@ mod tests {
         assert_eq!(model.rows().len(), 1, "only the seen episode shows");
         assert!(model.fab().visible, "an unseen episode exists in the unfiltered list");
         let view = model.processed_ids();
-        model.selection.long_press(&view, view[0]);
+        model.selection.toggle_row(&view, view[0], crate::entry_core::selection::Command::LongPress);
         assert!(!model.fab().visible, "selecting hides it");
         assert!(!model.item_header().enabled);
     }
@@ -553,7 +553,7 @@ mod tests {
         let mut model = load(&store, id);
         let first = model.processed_ids()[0];
         let view = model.processed_ids();
-        model.selection.long_press(&view, first);
+        model.selection.toggle_row(&view, first, crate::entry_core::selection::Command::LongPress);
         assert_eq!(model.rows().iter().filter(|r| r.selected).count(), 1);
         let anime = model.anime.clone();
         model.apply_snapshot(anime, model.episodes[..2].to_vec());

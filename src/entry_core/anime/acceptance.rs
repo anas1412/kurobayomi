@@ -64,7 +64,7 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         // select the episode that is left and press "Mark as seen" on the bar
         let unseen_ids: Vec<i64> = model.episodes.iter().filter(|e| !e.done).map(|e| e.id).collect();
         let view = model.processed_ids();
-        model.selection.long_press(&view, unseen_ids[0]);
+        model.selection.toggle_row(&view, unseen_ids[0], crate::entry_core::selection::Command::LongPress);
         let dispatch = bottom_cmds(&model, BottomAction::MarkViewed.effect(), false);
         assert_eq!(dispatch.cmds, vec![AnimeCmd::SetSeen { ids: vec![unseen_ids[0]], seen: true }]);
         model.selection.clear();

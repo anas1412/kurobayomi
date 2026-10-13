@@ -17,7 +17,6 @@ pub mod torrent_server;
 pub mod entry_state;
 pub mod episode_row;
 pub mod format;
-pub mod selection;
 pub mod header;
 pub mod info;
 pub mod layout;

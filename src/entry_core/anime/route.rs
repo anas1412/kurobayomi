@@ -46,7 +46,7 @@ use super::season_grid::{Layout, SeasonGrid};
 use super::season_pipeline::process_seasons;
 use super::season_tile::{SeasonFacts, SeasonItem, continue_episode, season_facts};
 use super::set_default::{self, Scope};
-use super::selection::Click;
+use crate::entry_core::selection::RowClick;
 use super::info::header_model;
 use super::layout::{bottom_bar_width, two_pane};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
@@ -508,7 +508,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         }
     });
     cancel.connect_clicked(on_view(|v| v.edit_selection(|m, _, _| m.selection.clear())));
-    select_all.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.select_all(full))));
+    select_all.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.set_all(full, true))));
     invert.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.invert(full))));
     fab.connect_clicked(on_view(View::open_next));
     back.connect_clicked(on_view(|v| {
@@ -598,7 +598,7 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
                 glib::Propagation::Stop
             }
             gtk::gdk::Key::a | gtk::gdk::Key::A if ctrl && selecting => {
-                view.edit_selection(|m, _, full| m.selection.select_all(full));
+                view.edit_selection(|m, _, full| m.selection.set_all(full, true));
                 glib::Propagation::Stop
             }
             gtk::gdk::Key::i | gtk::gdk::Key::I if ctrl && selecting => {
@@ -1355,14 +1355,9 @@ impl View {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch()) else { return };
             let view = m.processed_ids();
-            if long {
-                m.selection.long_press(&view, id);
-                None
-            } else {
-                match m.selection.click_with(&view, id, mods.shift, mods.ctrl) {
-                    Click::Open(id) => Some(id),
-                    Click::Toggled { .. } => None,
-                }
+            match m.selection.press(&view, id, mods, long) {
+                RowClick::Open(id) => Some(id),
+                RowClick::Toggled => None,
             }
         };
         if let Some(id) = open {
