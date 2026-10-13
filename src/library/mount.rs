@@ -45,8 +45,6 @@ thread_local! {
     static LISTENER: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
     /// Searches injected before the view of their kind was built; each is applied when that view mounts.
     static PENDING_SEARCH: RefCell<Vec<(Kind, String)>> = const { RefCell::new(Vec::new()) };
-    /// What the selection Download action does with its entries (the app's download manager registers here).
-    static DELETE_DOWNLOADS_SINK: RefCell<Option<Rc<dyn Fn(Kind, Vec<i64>)>>> = const { RefCell::new(None) };
     /// What the refresh button does (the update runner in `crate::misc` registers here).
     static UPDATE_HOST: RefCell<Option<UpdateHost>> = const { RefCell::new(None) };
     static DOWNLOAD_SINK: RefCell<Option<Rc<dyn Fn(Kind, Vec<i64>, DownloadAmount)>>> = const { RefCell::new(None) };
@@ -66,11 +64,6 @@ pub struct UpdateHost {
 /// Registers the update runner behind the refresh button. Replaces an earlier one.
 pub fn on_update(host: UpdateHost) {
     UPDATE_HOST.with(|h| *h.borrow_mut() = Some(host));
-}
-
-/// Registers what "delete downloads" in the remove dialog does. Replaces an earlier one.
-pub fn on_delete_downloads(sink: impl Fn(Kind, Vec<i64>) + 'static) {
-    DELETE_DOWNLOADS_SINK.with(|s| *s.borrow_mut() = Some(Rc::new(sink)));
 }
 
 /// Registers what the Download action of a selection does. Replaces an earlier one.
@@ -244,11 +237,13 @@ fn nav(kind: Kind, db: Arc<Db>) -> Nav {
                     crate::toast::notify_for(&text, crate::library::TOAST_TIME);
                 }
                 if !plan.delete_downloads.is_empty() {
-                    let sink = DELETE_DOWNLOADS_SINK.with(|s| s.borrow().clone());
-                    match sink {
-                        Some(sink) => sink(kind, plan.delete_downloads),
-                        None => tracing::debug!(entries = ?plan.delete_downloads, "no download manager is registered for the library"),
-                    }
+                    // the one download service deletes each entry's folder and its queued units, for both kinds
+                    crate::updates::download_host::spawn_detached(move || {
+                        let backend = crate::updates::download_host::current();
+                        for id in plan.delete_downloads {
+                            backend.delete_entry(kind, id);
+                        }
+                    });
                 }
                 if let Some(view) = visible(Some(kind)) {
                     view.refresh();
@@ -290,16 +285,13 @@ fn open_secrets() -> Arc<dyn kuro_platform::secrets::SecretStore> {
     }
 }
 
-/// Whether a chapter is on disk, for the continue button's downloaded filter. A local manga has every chapter; the
-/// app keeps no anime download cache yet, so an episode is never downloaded.
-fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
+/// Whether a chapter or an episode is on disk, for the continue button's downloaded filter. A local entry has every unit.
+fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::next::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
     Rc::new(move |id| {
-        if kind == Kind::Anime {
-            return false;
-        }
         let Some(item) = ItemRepo::new(db.clone()).by_id(id).ok().flatten() else { return false };
         let Ok(entry) = EntryRepo::new(db.clone()).by_id(item.entry_id) else { return false };
-        crate::reader::launch::downloaded_items(index.clone(), &entry)(&item)
+        entry.source == 0
+            || index.as_ref().is_some_and(|i| i.is_downloaded(kind, entry.source, &entry.title, &item.name, item.scanlator.as_deref()))
     })
 }
 
@@ -315,8 +307,8 @@ fn deps(kind: Kind) -> Deps {
     ));
     let source_db = db.clone();
     let downloaded_only = app.base.downloaded_only.clone();
-    // the per-row download count comes from the download index; the tracker logins from the secret store
-    let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+    // the per-row download count comes from the one download index; the tracker logins from the secret store
+    let index = crate::shell::host::Shell::get().and_then(|shell| shell.download_service()).map(|service| service.index().clone());
     let item_downloaded = item_downloaded(kind, db.clone(), index.clone());
     let logins = Rc::new(Logins::new(kind, open_secrets, move || {
         glib::MainContext::default().invoke(move || {

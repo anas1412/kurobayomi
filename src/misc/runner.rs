@@ -24,9 +24,12 @@ use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_prefs::Prefs;
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
+use kuro_downloads::next::queue::Place;
+use kuro_downloads::next::service::Downloads;
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
+use crate::downloads::directory::AppDirectory;
 use crate::library_update::constraints::{self, DeviceFacts};
 use crate::library_update::counters::PrefsHost;
 use crate::library_update::download::DownloadPolicy;
@@ -48,18 +51,19 @@ use crate::updates::download_host;
 
 /// The notifications and downloads of a pass: a desktop notice for the summary, and desktop notices (`notify`) for each
 /// entry, for failures and for the large-queue warning, which fall back to a toast when no notifier is attached. New items go
-/// to the downloads backend (`download_host::current`) paused, and one start at the end of the pass. Progress and
-/// counters have no surface here: the counters are written by `PrefsHost`.
+/// to the one download service paused (fillermarked episodes skipped, D6), and one start at the end of the pass. Progress
+/// and counters have no surface here: the counters are written by `PrefsHost`.
 ///
 /// The host runs on the runtime's workers, where the app's thread-bound handles are out of reach, so it keeps the
-/// database handle and the external-downloader preference it needs.
+/// database handle and the download service (with the runtime that runs it) it needs.
 pub struct ToastHost {
     db: Arc<Db>,
+    downloads: Option<(Downloads, Handle)>,
 }
 
 impl ToastHost {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<Db>, downloads: Option<(Downloads, Handle)>) -> Self {
+        Self { db, downloads }
     }
 
     /// What the error log calls a source: `Name (LANG)` for a source the app holds, else the name its stub row keeps
@@ -113,8 +117,20 @@ impl Host for ToastHost {
         if ids.is_empty() {
             return;
         }
-        if !download_host::current().enqueue(kind, entry_id, &ids, diet::DOWNLOAD_USE_EXTERNAL) {
-            tracing::debug!(entry_id, items = ids.len(), "the downloads backend queued none of the new items");
+        let Some((downloads, runtime)) = &self.downloads else { return };
+        // paused, so the pass starts the queue once; this automatic path alone skips fillermarked episodes (D6)
+        let request = AppDirectory::new(Arc::clone(&self.db)).enqueue_request(kind, entry_id, &ids, Place::Back, false, true);
+        let Some(request) = request else { return };
+        // a pass runs on the runtime's workers: block in place there, else block on the handle
+        let queued = if Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| runtime.block_on(downloads.enqueue(request)))
+        } else {
+            runtime.block_on(downloads.enqueue(request))
+        };
+        match queued {
+            Ok(done) if done.added.is_empty() => tracing::debug!(entry_id, items = ids.len(), "the downloads queued none of the new items"),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, entry_id, "the new items were not queued"),
         }
     }
 
@@ -225,14 +241,10 @@ pub fn pass_settings(kind: Kind, category: Option<i64>, inputs: &Inputs) -> Pass
     }
 }
 
-/// The folder renames of the item sync: the downloads folders of the storage location, the shell's manga download
-/// cache, and the source names of the one registry (a source the registry does not know keeps its folders).
-fn folder_renames() -> Arc<FolderRenames> {
-    let storage = crate::settings_ui::storage::manager(crate::data::app().base.store())
-        .expect("main resolved the platform folders before the runner");
-    let (manga_root, anime_root) = (storage.downloads_path(Kind::Manga), storage.downloads_path(Kind::Anime));
-    let index = crate::shell::host::Shell::get().map(|s| s.downloads().clone());
-    Arc::new(FolderRenames::new(manga_root, anime_root, Arc::new(|id: i64| LiveRegistry.name_of_known(id)), index))
+/// The folder renames of the item sync: the one download service renames the folders and keeps its index, and the source
+/// names come from the one directory (a source it does not know keeps its folders).
+fn folder_renames(downloads: Option<Downloads>, db: Arc<Db>) -> Arc<FolderRenames> {
+    Arc::new(FolderRenames::new(downloads, AppDirectory::new(db)))
 }
 
 fn runner() -> Arc<Runner> {
@@ -242,7 +254,11 @@ fn runner() -> Arc<Runner> {
 
 /// The runner over the database handle and a preference store, for the app and for the headless pass.
 fn runner_over(db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
-    let renames = folder_renames();
+    // the shell and its service live on the GTK thread, so they are taken here (the headless pass has none)
+    let shell = crate::shell::host::Shell::get();
+    let downloads = shell.as_ref().and_then(|shell| shell.download_service());
+    let runtime = shell.as_ref().map(|shell| shell.runtime().clone());
+    let renames = folder_renames(downloads.clone(), db.clone());
     let sync = DbItemSync::new(
         db.clone(),
         Arc::new(EntrySyncLocks::default()),
@@ -251,7 +267,7 @@ fn runner_over(db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
     )
     .with_renames(renames);
     let prefs = Prefs::with_store(store.clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()));
-    let host = PrefsHost::new(ToastHost::new(db.clone()), &prefs);
+    let host = PrefsHost::new(ToastHost::new(db.clone(), downloads.zip(runtime)), &prefs);
     Arc::new(PassRunner::new(Deps {
         registry: LiveRegistry,
         store: SqliteLibraryStore::new(db),

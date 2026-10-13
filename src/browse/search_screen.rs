@@ -237,11 +237,11 @@ fn production_env(kind: Kind, migrate_from: Option<i64>) -> SearchEnv {
     }
 }
 
-/// The migration steps of `kind` over the app: its database, its source directory, the manga download index and the
+/// The migration steps of `kind` over the app: its database, its source directory, the one download service and the
 /// preferences.
 fn live_steps(kind: Kind) -> LiveSteps {
     let app = crate::data::app();
-    let downloads = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+    let downloads = crate::shell::host::Shell::get().and_then(|shell| shell.download_service());
     LiveSteps::new(kind, app.db.clone(), super::directory::current(kind), downloads, app.base.store().clone())
 }
 

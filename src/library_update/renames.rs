@@ -1,140 +1,50 @@
 //! Renames the download folder of a chapter or episode whose name changed during a sync (T-26a-086; the
 //! `renameChapter` and `renameEpisode` calls of `SyncChaptersWithSource` and `SyncEpisodesWithSource`).
 //!
-//! The planner of the sync offers every rewritten row for a rename. The rule that decides is here (S-17): the folder is
-//! renamed only when the old item is downloaded (its folder or `.cbz` exists) and its folder name differs from the one
-//! the new name gives. An item that is not downloaded is never touched, and no folder is created for it. A failed rename
-//! is logged and never fails the sync (EC-11).
+//! The planner of the sync offers every rewritten row for a rename. The one download service decides (S-17): the folder
+//! is renamed only when the old item is downloaded and its folder name differs from the one the new name gives, and the
+//! download index follows. An item that is not downloaded is never touched, and no folder is created for it. A failed
+//! rename is logged and never fails the sync (EC-11).
 //!
-//! The downloads folder is the one of the app and the source name comes from a lookup the caller passes (`Name (EN)`,
-//! the line the source pages show). A source the lookup does not know keeps its folders as they are.
-
-use std::io;
-use std::path::PathBuf;
-use std::sync::Arc;
+//! The source name comes from the app's source directory. A source it does not know, and the local source, keep their
+//! folders as they are.
 
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_domain::items::sync::ItemRenames;
-use kuro_platform::kind::Kind;
-use kuro_downloads::anime::layout::AnimeLayout;
-use kuro_downloads::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
-use kuro_downloads::index::DownloadIndex;
-use kuro_downloads::layout::{CBZ_EXTENSION, DownloadLayout, chapter_dir_name, valid_chapter_names};
+use kuro_downloads::next::runner::SourceDirectory as _;
+use kuro_downloads::next::service::Downloads;
+use kuro_downloads::next::unit::{Availability, EntryRef, UnitRef};
 
-use crate::entry_core::anime::download_backend::split_source_name;
+use crate::downloads::directory::AppDirectory;
 
-/// The name line of an installed source (`Name (EN)`), or `None` when the source is not known.
-pub type SourceNames = Arc<dyn Fn(i64) -> Option<String> + Send + Sync>;
-
-/// The folder names a chapter rename moved: bare names, without `.cbz`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Renamed {
-    pub old: String,
-    pub new: String,
-}
-
-/// The chapter rename of `renameChapter`. `Ok(None)` when nothing was renamed: the manga folder or the old item is
-/// missing, or the folder name did not change.
-pub fn rename_chapter_folder(
-    layout: &DownloadLayout,
-    source_name: &str,
-    manga_title: &str,
-    old: (&str, Option<&str>),
-    new: (&str, Option<&str>),
-) -> io::Result<Option<Renamed>> {
-    let Some(manga_dir) = layout.find_manga_dir(source_name, manga_title) else { return Ok(None) };
-    let Some(old_path) = valid_chapter_names(old.0, old.1).into_iter().map(|n| manga_dir.join(n)).find(|p| p.exists()) else {
-        return Ok(None);
-    };
-    let mut new_name = chapter_dir_name(new.0, new.1);
-    let is_cbz = old_path.is_file() && old_path.extension().is_some_and(|e| e == CBZ_EXTENSION);
-    if is_cbz {
-        new_name = format!("{new_name}.{CBZ_EXTENSION}");
-    }
-    let old_name = old_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    if old_name == new_name {
-        return Ok(None);
-    }
-    std::fs::rename(&old_path, manga_dir.join(&new_name))?;
-    let bare = |name: &str| name.strip_suffix(&format!(".{CBZ_EXTENSION}")).unwrap_or(name).to_owned();
-    Ok(Some(Renamed { old: bare(&old_name), new: bare(&new_name) }))
-}
-
-/// The anime episode as the downloads crate names it.
-fn episode_ref(i: &Item) -> EpisodeRef {
-    EpisodeRef {
-        id: i.id,
-        anime_id: i.entry_id,
-        url: i.url.clone(),
-        name: i.name.clone(),
-        scanlator: i.scanlator.clone(),
-        seen: i.done,
-        bookmark: i.bookmark,
-        fillermark: i.fillermark,
-        source_order: i.source_order,
-        upload_date: i.date_upload,
-        episode_number: i.number,
-    }
-}
-
-/// The folder renames behind the sync port, per kind.
+/// The folder renames behind the sync port, for both kinds.
 pub struct FolderRenames {
-    manga_root: PathBuf,
-    anime_root: PathBuf,
-    source_names: SourceNames,
-    index: Option<DownloadIndex>,
+    downloads: Option<Downloads>,
+    directory: AppDirectory,
 }
 
 impl FolderRenames {
-    /// `manga_root` and `anime_root` are the downloads folders of each kind. `index` is the manga download cache; a
-    /// rename moves the chapter in it so the page shows the chapter downloaded without a rescan.
-    pub fn new(manga_root: PathBuf, anime_root: PathBuf, source_names: SourceNames, index: Option<DownloadIndex>) -> Self {
-        Self { manga_root, anime_root, source_names, index }
-    }
-}
-
-impl FolderRenames {
-    fn rename_chapter(&self, manga: &Entry, stored: &Item, prepared: &Item) {
-        let Some(source_name) = (self.source_names)(manga.source) else { return };
-        let layout = DownloadLayout::new(&self.manga_root);
-        let old = (stored.name.as_str(), stored.scanlator.as_deref());
-        let new = (prepared.name.as_str(), prepared.scanlator.as_deref());
-        match rename_chapter_folder(&layout, &source_name, &manga.title, old, new) {
-            Ok(Some(renamed)) => {
-                if let Some(index) = &self.index {
-                    index.remove_chapter(manga.source, &manga.title, std::slice::from_ref(&renamed.old));
-                    index.add_chapter(manga.source, &DownloadLayout::source_dir_name(&source_name), &manga.title, &renamed.new);
-                }
-            }
-            Ok(None) => {}
-            Err(error) => tracing::error!(%error, chapter = stored.id, "could not rename the downloaded chapter"),
-        }
-    }
-
-    fn rename_episode(&self, anime: &Entry, stored: &Item, prepared: &Item) {
-        let Some(shown) = (self.source_names)(anime.source) else { return };
-        let (name, lang) = split_source_name(&shown);
-        let source = AnimeSource { id: anime.source, name, lang, is_http: true, unmetered: false };
-        let show = AnimeRef { id: anime.id, source_id: anime.source, url: anime.url.clone(), title: anime.title.clone() };
-        let (old, new) = (episode_ref(stored), episode_ref(prepared));
-        let layout = AnimeLayout::new(Some(self.anime_root.clone()));
-        // The layout logs an error for an episode with no folder, and a rename creates the anime folder; only a
-        // downloaded episode gets that far (S-17).
-        if layout.find_episode_dir(&source, &show, &old).is_none() {
-            return;
-        }
-        if let Err(error) = layout.rename_episode(&source, &show, &old, &new) {
-            tracing::error!(%error, episode = stored.id, "could not rename the downloaded episode");
-        }
+    /// `downloads` is the one download service; without it (the headless pass) nothing is renamed.
+    pub fn new(downloads: Option<Downloads>, directory: AppDirectory) -> Self {
+        Self { downloads, directory }
     }
 }
 
 impl ItemRenames for FolderRenames {
     fn rename(&self, e: &Entry, stored: &Item, prepared: &Item) {
-        match e.kind {
-            Kind::Manga => self.rename_chapter(e, stored, prepared),
-            Kind::Anime => self.rename_episode(e, stored, prepared),
+        let Some(downloads) = &self.downloads else { return };
+        let Some(source) = self.directory.source_key(e.kind, e.source) else { return };
+        if source.availability == Availability::Local {
+            return;
+        }
+        let (entry, old, new) = (EntryRef::from(e), UnitRef::from(stored), UnitRef::from(prepared));
+        // The sync runs on a runtime worker, where the series lock cannot be waited for, so the rename runs on a thread of its own.
+        let renamed = std::thread::scope(|scope| scope.spawn(|| downloads.rename_unit_blocking(&entry, &source, &old, &new)).join());
+        match renamed {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::error!(%error, unit = stored.id, "could not rename the downloaded unit"),
+            Err(_) => tracing::error!(unit = stored.id, "the rename of the downloaded unit panicked"),
         }
     }
 }
@@ -142,93 +52,137 @@ impl ItemRenames for FolderRenames {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Arc;
+
+    use kuro_data::source::StubSourceRepo;
+    use kuro_db::handle::Db;
+    use kuro_db::schema_unified;
+    use kuro_downloads::next::gate::Connectivity;
+    use kuro_downloads::next::index::{DownloadIndex, IndexRoots};
+    use kuro_downloads::next::layout::Layout;
+    use kuro_downloads::next::naming::UnitName;
+    use kuro_downloads::next::pending::PendingStore;
+    use kuro_downloads::next::queue::{Layouts, Queue, QueueParams};
+    use kuro_downloads::next::store::QueueStore;
+    use kuro_platform::kind::Kind;
 
     use super::*;
 
-    fn tree() -> (tempfile::TempDir, DownloadLayout) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let layout = DownloadLayout::new(dir.path());
-        (dir, layout)
+    /// A service over a temporary folder and a database whose stub table names source 7 `Src (EN)`; the runtime that runs
+    /// its queue stays alive with it.
+    struct Fixture {
+        _runtime: tokio::runtime::Runtime,
+        _net: tokio::sync::watch::Sender<Connectivity>,
+        dir: tempfile::TempDir,
+        downloads: Downloads,
+        directory: AppDirectory,
+        layouts: Layouts,
     }
 
-    fn manga_dir(dir: &tempfile::TempDir) -> PathBuf {
-        let path = dir.path().join("Src (EN)").join("Title");
-        fs::create_dir_all(&path).expect("manga folder");
-        path
+    impl Fixture {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let path = schema_unified::db_path(dir.path());
+            let db = Arc::new(Db::new(&path, schema_unified::open_file(&path).expect("db file")).expect("db"));
+            for kind in Kind::ALL {
+                StubSourceRepo::new(Arc::clone(&db), kind).upsert(7, "en", "Src").expect("stub source");
+            }
+            let roots = IndexRoots { manga: dir.path().join("manga"), anime: dir.path().join("anime") };
+            let cache = dir.path().join("cache");
+            fs::create_dir_all(&cache).expect("cache folder");
+            let index = DownloadIndex::open(roots.clone(), &cache);
+            let layouts = || Layouts { manga: Layout::new(Kind::Manga, &roots.manga), anime: Layout::new(Kind::Anime, &roots.anime) };
+            let directory = AppDirectory::new(Arc::clone(&db));
+            let (net, connectivity) = tokio::sync::watch::channel(Connectivity { online: true, metered: false });
+            let runtime = tokio::runtime::Runtime::new().expect("runtime");
+            let downloads = runtime.block_on(async {
+                let queue = Queue::spawn(QueueParams {
+                    db: Arc::clone(&db),
+                    store: Arc::new(QueueStore::new(Arc::clone(&db))),
+                    runners: Vec::new(),
+                    directory: Arc::new(directory.clone()),
+                    layouts: layouts(),
+                    index: index.clone(),
+                    free_space: |_| None,
+                    max_active: Arc::new(|| 1),
+                    connectivity,
+                    only_over_wifi: false,
+                });
+                Downloads::new(queue, index, layouts(), Arc::new(PendingStore::new(Arc::clone(&db))), Arc::new(directory.clone()), db)
+            });
+            Self { _runtime: runtime, _net: net, dir, downloads, directory, layouts: layouts() }
+        }
+
+        fn renames(&self) -> FolderRenames {
+            FolderRenames::new(Some(self.downloads.clone()), self.directory.clone())
+        }
+
+        /// A finished unit of source 7 on disk and in the index.
+        fn download(&self, kind: Kind, title: &str, name: &str) {
+            let layout = match kind {
+                Kind::Manga => &self.layouts.manga,
+                Kind::Anime => &self.layouts.anime,
+            };
+            let source = Layout::source_dir_name("Src", "en");
+            let folder = layout.unit_dir_names(UnitName::new(name, None))[0].clone();
+            fs::create_dir_all(layout.entry_dir(&source, title).expect("entry folder").join(&folder)).expect("unit folder");
+            self.downloads.index().add_unit(kind, 7, &source, title, &folder);
+        }
+
+        fn found(&self, kind: Kind, title: &str, name: &str) -> bool {
+            let layout = match kind {
+                Kind::Manga => &self.layouts.manga,
+                Kind::Anime => &self.layouts.anime,
+            };
+            layout.find_unit(&Layout::source_dir_name("Src", "en"), title, UnitName::new(name, None)).is_some()
+        }
+    }
+
+    fn pair(kind: Kind, source: i64, old: &str, new: &str) -> (Entry, Item, Item) {
+        let entry = Entry { source, title: "Title".into(), ..Entry::create(kind) };
+        let stored = Item { name: old.into(), ..Item::create(kind) };
+        (entry, stored.clone(), Item { name: new.into(), ..stored })
     }
 
     #[test]
-    fn s_17_a_downloaded_chapter_whose_dir_name_changed_is_renamed() {
-        let (dir, layout) = tree();
-        let manga = manga_dir(&dir);
-        fs::create_dir(manga.join("Ch 1")).expect("chapter folder");
-        let done = rename_chapter_folder(&layout, "Src (EN)", "Title", ("Ch 1", None), ("Ch 1 fixed", None)).expect("rename");
-        assert_eq!(done, Some(Renamed { old: "Ch 1".into(), new: "Ch 1 fixed".into() }));
-        assert!(manga.join("Ch 1 fixed").is_dir() && !manga.join("Ch 1").exists());
+    fn s_17_a_downloaded_unit_is_renamed_on_disk_and_in_the_index_for_both_kinds() {
+        for kind in Kind::ALL {
+            let f = Fixture::new();
+            f.download(kind, "Title", "Ch 1");
+            let (entry, stored, prepared) = pair(kind, 7, "Ch 1", "Ch 1 fixed");
+            ItemRenames::rename(&f.renames(), &entry, &stored, &prepared);
+            assert!(f.found(kind, "Title", "Ch 1 fixed") && !f.found(kind, "Title", "Ch 1"), "{kind:?}");
+            assert!(f.downloads.index().is_downloaded(kind, 7, "Title", "Ch 1 fixed", None), "the index follows ({kind:?})");
+            assert!(!f.downloads.index().is_downloaded(kind, 7, "Title", "Ch 1", None), "{kind:?}");
+        }
     }
 
     #[test]
-    fn s_17_a_chapter_that_is_not_downloaded_is_left_alone_and_no_folder_is_made() {
-        let (dir, layout) = tree();
-        assert_eq!(rename_chapter_folder(&layout, "Src (EN)", "Title", ("Ch 1", None), ("Ch 2", None)).expect("rename"), None);
-        assert!(!dir.path().join("Src (EN)").exists(), "nothing is created for a missing manga folder");
-        let manga = manga_dir(&dir);
-        assert_eq!(rename_chapter_folder(&layout, "Src (EN)", "Title", ("Ch 1", None), ("Ch 2", None)).expect("rename"), None);
-        assert_eq!(fs::read_dir(&manga).expect("list").count(), 0, "no chapter folder is created either");
+    fn s_17_a_unit_that_is_not_downloaded_is_left_alone_and_no_folder_is_made() {
+        for kind in Kind::ALL {
+            let f = Fixture::new();
+            let (entry, stored, prepared) = pair(kind, 7, "Ch 1", "Ch 2");
+            ItemRenames::rename(&f.renames(), &entry, &stored, &prepared);
+            let root = f.dir.path().join(if kind == Kind::Manga { "manga" } else { "anime" });
+            assert!(!root.exists() || fs::read_dir(&root).expect("list").count() == 0, "nothing is created ({kind:?})");
+        }
     }
 
     #[test]
-    fn s_17_an_unchanged_dir_name_is_not_renamed() {
-        let (dir, layout) = tree();
-        let manga = manga_dir(&dir);
-        fs::create_dir(manga.join("Ch 1")).expect("chapter folder");
-        // the planner offers every rewritten row, most of them with the same name
-        assert_eq!(rename_chapter_folder(&layout, "Src (EN)", "Title", ("Ch 1", None), ("Ch 1", None)).expect("rename"), None);
-        assert!(manga.join("Ch 1").is_dir());
+    fn a_source_the_directory_does_not_know_keeps_its_folders() {
+        let f = Fixture::new();
+        f.download(Kind::Manga, "Title", "Ch 1");
+        let (entry, stored, prepared) = pair(Kind::Manga, 8, "Ch 1", "Ch 1 v2");
+        ItemRenames::rename(&f.renames(), &entry, &stored, &prepared);
+        assert!(f.found(Kind::Manga, "Title", "Ch 1") && !f.found(Kind::Manga, "Title", "Ch 1 v2"));
     }
 
     #[test]
-    fn a_cbz_keeps_its_extension_and_a_scanlator_is_part_of_the_name() {
-        let (dir, layout) = tree();
-        let manga = manga_dir(&dir);
-        fs::write(manga.join("Team_Ch 1.cbz"), b"zip").expect("archive");
-        let done = rename_chapter_folder(&layout, "Src (EN)", "Title", ("Ch 1", Some("Team")), ("Ch 1b", Some("Team"))).expect("rename");
-        assert_eq!(done, Some(Renamed { old: "Team_Ch 1".into(), new: "Team_Ch 1b".into() }), "names are bare");
-        assert!(manga.join("Team_Ch 1b.cbz").is_file());
-    }
-
-    fn names(known: &'static str) -> SourceNames {
-        Arc::new(move |id| (id == 7).then(|| known.to_owned()))
-    }
-
-    #[test]
-    fn the_chapter_port_renames_through_the_layout_and_ignores_unknown_sources() {
-        let (dir, _) = tree();
-        let manga_folder = manga_dir(&dir);
-        fs::create_dir(manga_folder.join("Ch 1")).expect("chapter folder");
-        let manga = Entry { source: 7, title: "Title".into(), ..Entry::create(Kind::Manga) };
-        let stored = Item { name: "Ch 1".into(), ..Item::create(Kind::Manga) };
-        let prepared = Item { name: "Ch 1 v2".into(), ..Item::create(Kind::Manga) };
-        let unknown = FolderRenames::new(dir.path().to_path_buf(), dir.path().to_path_buf(), names("Other (EN)"), None);
-        ItemRenames::rename(&unknown, &Entry { source: 8, ..manga.clone() }, &stored, &prepared);
-        assert!(manga_folder.join("Ch 1").is_dir(), "a source the lookup does not know is not touched");
-        let known = FolderRenames::new(dir.path().to_path_buf(), dir.path().to_path_buf(), names("Src (EN)"), None);
-        ItemRenames::rename(&known, &manga, &stored, &prepared);
-        assert!(manga_folder.join("Ch 1 v2").is_dir());
-    }
-
-    #[test]
-    fn s_17_the_episode_port_renames_only_a_downloaded_episode() {
-        let (dir, _) = tree();
-        let anime_dir = dir.path().join("Src (EN)").join("Show");
-        let anime = Entry { source: 7, title: "Show".into(), ..Entry::create(Kind::Anime) };
-        let stored = Item { name: "Ep 1".into(), ..Item::create(Kind::Anime) };
-        let prepared = Item { name: "Ep 1 fixed".into(), ..Item::create(Kind::Anime) };
-        let renames = FolderRenames::new(dir.path().join("elsewhere"), dir.path().to_path_buf(), names("Src (EN)"), None);
-        ItemRenames::rename(&renames, &anime, &stored, &prepared);
-        assert!(!anime_dir.exists(), "not downloaded: nothing is renamed or created");
-        fs::create_dir_all(anime_dir.join("Ep 1")).expect("episode folder");
-        ItemRenames::rename(&renames, &anime, &stored, &prepared);
-        assert!(anime_dir.join("Ep 1 fixed").is_dir() && !anime_dir.join("Ep 1").exists());
+    fn no_service_renames_nothing() {
+        let f = Fixture::new();
+        f.download(Kind::Anime, "Title", "Ep 1");
+        let (entry, stored, prepared) = pair(Kind::Anime, 7, "Ep 1", "Ep 1 fixed");
+        ItemRenames::rename(&FolderRenames::new(None, f.directory.clone()), &entry, &stored, &prepared);
+        assert!(f.found(Kind::Anime, "Title", "Ep 1"));
     }
 }

@@ -1,10 +1,10 @@
 //! The app side of the migration engine for both kinds (T-40a-016, T-40a-041, T-41a-034): the steps of `MigrateSteps` over
-//! the kind's database, its source directory, the manga download index and the custom image files. The new entry's
+//! the kind's database, its source directory, the one download service and the custom image files. The new entry's
 //! chapters or episodes are fetched and stored by the same backend its entry page refreshes with. The database steps
 //! share one transaction, so a failed step rolls all of them back; the file steps run after it commits.
 //!
-//! Downloads: this app publishes no anime download index, so an anime never offers Delete downloaded and has nothing to
-//! delete.
+//! Downloads: both kinds read the one download index for Delete downloaded and delete the old entry's folder and its
+//! queued units through the one download service.
 
 use std::sync::Arc;
 
@@ -12,14 +12,14 @@ use kuro_data::entry::EntryRepo;
 use kuro_data::item::Item;
 use kuro_db::tables::{EntryPatch, ItemPatch, TrackRow, categories, entries, items, tracks};
 use kuro_db::{Db, DbError, Transaction};
-use kuro_downloads::index::DownloadIndex;
-use kuro_downloads::layout::DownloadLayout;
+use kuro_downloads::next::service::Downloads;
 use kuro_images::cover_paths::{Family, custom_file};
 use kuro_platform::linux::LinuxPaths;
 use kuro_prefs::store::PrefStore;
 use kuro_source::anime::model::FetchType;
 use tokio::runtime::Handle;
 
+use crate::downloads::directory::AppDirectory;
 use super::directory::SourceDirectory;
 use super::migrate_engine::{CustomImage, Entry, MigrateSteps, MigrateTx, StepFuture, TxWork};
 use super::migrate_merge::{item_updates, merge_item_state};
@@ -34,14 +34,14 @@ pub struct LiveSteps {
     kind: Kind,
     db: Arc<Db>,
     directory: Arc<dyn SourceDirectory>,
-    /// The manga download index; `None` when the app runs none.
-    downloads: Option<DownloadIndex>,
+    /// The one download service; `None` when the app runs none.
+    downloads: Option<Downloads>,
     prefs: PrefStore,
 }
 
 impl LiveSteps {
     /// The fetch runs on the app runtime: the one entered on the calling thread, or the shell's.
-    pub fn new(kind: Kind, db: Arc<Db>, directory: Arc<dyn SourceDirectory>, downloads: Option<DownloadIndex>, prefs: PrefStore) -> Self {
+    pub fn new(kind: Kind, db: Arc<Db>, directory: Arc<dyn SourceDirectory>, downloads: Option<Downloads>, prefs: PrefStore) -> Self {
         Self { kind, db, directory, downloads, prefs }
     }
 
@@ -64,9 +64,9 @@ impl LiveSteps {
         EntryRepo::new(Arc::clone(&self.db)).by_id(id).map_or(FetchType::Episodes, |entry| FetchType::from(entry.fetch_type() as i64))
     }
 
-    /// Whether the old entry has downloaded chapters on disk (the dialog offers Delete downloaded only then).
+    /// Whether the old entry has downloaded chapters or episodes on disk (the dialog offers Delete downloaded only then).
     pub fn has_downloads(&self, entry: &Entry) -> bool {
-        self.kind == Kind::Manga && self.downloads.as_ref().is_some_and(|index| index.chapter_count_manga(entry.source, &entry.title) > 0)
+        self.downloads.as_ref().is_some_and(|downloads| downloads.index().unit_count_entry(self.kind, entry.source, &entry.title) > 0)
     }
 
     /// The image files of a custom image of this kind; a manga has no background.
@@ -186,24 +186,18 @@ impl MigrateSteps for LiveSteps {
         super::browse_screen::now_ms()
     }
 
-    /// Removes the old manga's folder. The source folder a manga lives in is not known without a source registry, so the
-    /// folder is deleted only when exactly one source folder holds one for this title; two are ambiguous and left alone.
+    /// Removes the old entry's downloads, queued units included, through the download service. An entry or a source the
+    /// app no longer knows has nothing to delete.
     fn delete_downloads(&self, old: &Entry) -> Result<(), String> {
-        let (Kind::Manga, Some(index)) = (self.kind, &self.downloads) else { return Ok(()) };
-        let manga_dir = DownloadLayout::manga_dir_name(&old.title);
-        let found: Vec<_> = std::fs::read_dir(index.root())
-            .map_err(text)?
-            .filter_map(Result::ok)
-            .map(|source| source.path().join(&manga_dir))
-            .filter(|path| path.is_dir())
-            .collect();
-        match found.as_slice() {
-            [] => {}
-            [only] => std::fs::remove_dir_all(only).map_err(text)?,
-            _ => return Err("more than one source folder holds downloads for this title".to_owned()),
-        }
-        index.remove_manga(old.source, &old.title);
-        Ok(())
+        let Some(downloads) = &self.downloads else { return Ok(()) };
+        let Some((entry, source)) = AppDirectory::new(Arc::clone(&self.db)).entry_context(self.kind, old.id) else { return Ok(()) };
+        let work = downloads.delete_entry(&entry, &source, true);
+        // the engine runs on the main context; inside a runtime the wait must not stall its worker
+        let done = match Handle::try_current() {
+            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(work)),
+            Err(_) => runtime().ok_or("no runtime to delete the downloads on")?.block_on(work),
+        };
+        done.map_err(text)
     }
 
     fn has_custom(&self, image: CustomImage, old: &Entry) -> bool {
@@ -401,5 +395,60 @@ mod tests {
         assert_eq!(steps.copy_custom(CustomImage::Background, &entry, &entry), Ok(()));
         assert_eq!(steps.fetch_type(1), FetchType::Episodes);
         assert!(!steps.has_downloads(&entry), "no download index, no downloads");
+    }
+
+    /// The old entry's downloads go through the one service for both kinds (anime downloads were left behind before).
+    #[test]
+    fn delete_downloads_removes_the_old_entrys_folder_and_index_rows_for_both_kinds() {
+        use kuro_data::source::StubSourceRepo;
+        use kuro_downloads::next::gate::Connectivity;
+        use kuro_downloads::next::index::{DownloadIndex, IndexRoots};
+        use kuro_downloads::next::layout::Layout;
+        use kuro_downloads::next::naming::UnitName;
+        use kuro_downloads::next::pending::PendingStore;
+        use kuro_downloads::next::queue::{Layouts, Queue, QueueParams};
+        use kuro_downloads::next::store::QueueStore;
+
+        let rt = runtime();
+        let _entered = rt.enter();
+        for kind in KINDS {
+            let (dir, db) = db();
+            StubSourceRepo::new(Arc::clone(&db), kind).upsert(1, "en", "S").expect("stub source");
+            let (old_id, _) = pair(&db, kind);
+            let roots = IndexRoots { manga: dir.path().join("manga"), anime: dir.path().join("anime") };
+            let cache = dir.path().join("cache");
+            std::fs::create_dir_all(&cache).expect("cache folder");
+            let index = DownloadIndex::open(roots.clone(), &cache);
+            let layouts = || Layouts { manga: Layout::new(Kind::Manga, &roots.manga), anime: Layout::new(Kind::Anime, &roots.anime) };
+            let app_directory = AppDirectory::new(Arc::clone(&db));
+            let (_net, connectivity) = tokio::sync::watch::channel(Connectivity { online: true, metered: false });
+            let downloads = rt.block_on(async {
+                let queue = Queue::spawn(QueueParams {
+                    db: Arc::clone(&db),
+                    store: Arc::new(QueueStore::new(Arc::clone(&db))),
+                    runners: Vec::new(),
+                    directory: Arc::new(app_directory.clone()),
+                    layouts: layouts(),
+                    index: index.clone(),
+                    free_space: |_| None,
+                    max_active: Arc::new(|| 1),
+                    connectivity,
+                    only_over_wifi: false,
+                });
+                Downloads::new(queue, index.clone(), layouts(), Arc::new(PendingStore::new(Arc::clone(&db))), Arc::new(app_directory), Arc::clone(&db))
+            });
+            let steps = LiveSteps::new(kind, Arc::clone(&db), directory(Vec::new()), Some(downloads), PrefStore::in_memory());
+            let old = steps.entry(old_id).expect("old");
+            let layout = layouts();
+            let layout = if kind == Kind::Manga { layout.manga } else { layout.anime };
+            let source = Layout::source_dir_name("S", "en");
+            let unit = layout.unit_dir_names(UnitName::new("Unit 1", None))[0].clone();
+            std::fs::create_dir_all(layout.entry_dir(&source, &old.title).expect("entry folder").join(&unit)).expect("unit folder");
+            index.add_unit(kind, 1, &source, &old.title, &unit);
+            assert!(steps.has_downloads(&old), "{kind:?}");
+            assert_eq!(steps.delete_downloads(&old), Ok(()), "{kind:?}");
+            assert!(layout.find_entry_dir(&source, &old.title).is_none(), "{kind:?}: the folder is gone");
+            assert!(!steps.has_downloads(&old), "{kind:?}: the index followed");
+        }
     }
 }
