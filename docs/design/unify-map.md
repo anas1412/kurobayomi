@@ -268,6 +268,12 @@ lang, name) in its sources table when the sources load. Fix in step 10: upsert e
 | tachiyomi:// add-repo has no handler | src/shell/uri.rs | 11 |
 
 ### Backup and local (steps 3, 10, 12)
+
+Status 2026-10-13: step 12 was done by step 4 (one `EntryIn`, `HistoryIn` with the duration, one merge; the unified tables
+have no `is_syncing`; no old table names outside kuro-backup). Step 11: the orphan-folder check now knows the repository
+sources; `tachiyomi://add-repo` is handled. Not done, waiting for a decision (feature removal): delete the anime `.kuroext`
+package system in kuro-extensions (store, install, manager, loader, trust; about 6,000 lines) now that repository sources
+cover anime, and the manifest.toml loader of kuro-source-wasm.
 | Drift | Where | Step |
 |---|---|---|
 | Anime restore never clears is_syncing; update_is_noop ignores it | kuro-backup/src/restore/anime.rs:87-118,209-244 vs manga.rs:75,127-160 | 12 (gone with one restore_entry) |
