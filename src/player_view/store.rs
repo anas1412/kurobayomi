@@ -59,7 +59,8 @@ pub struct Tracker {
     history: HistoryRepo,
     episode_id: i64,
     stored: Item,
-    incognito: bool,
+    /// Read at every save, so the switch takes effect in the middle of an episode.
+    incognito: std::rc::Rc<dyn Fn() -> bool>,
     throttle: WriteThrottle,
     /// When the watched time was last added to the history, while the episode plays. A pause, a stop or a switch of
     /// episode (a forced save) clears it, so the time spent paused is never counted.
@@ -69,8 +70,18 @@ pub struct Tracker {
 }
 
 impl Tracker {
+    #[cfg(test)]
     /// Reads the episode row. `None` when no row has `episode_id` or the read fails, and then nothing is saved.
     pub fn open(db: Arc<Db>, episode_id: i64, incognito: bool) -> Option<Self> {
+        Self::open_following(db, episode_id, std::rc::Rc::new(move || incognito))
+    }
+
+    /// [`open`](Self::open) for the app: the incognito switch is read at every save.
+    pub fn open_live(db: Arc<Db>, episode_id: i64) -> Option<Self> {
+        Self::open_following(db, episode_id, std::rc::Rc::new(|| crate::data::is_installed() && crate::data::app().base.incognito_mode.get()))
+    }
+
+    fn open_following(db: Arc<Db>, episode_id: i64, incognito: std::rc::Rc<dyn Fn() -> bool>) -> Option<Self> {
         let episodes = ItemRepo::new(Arc::clone(&db));
         let stored = match episodes.by_id(episode_id) {
             Ok(Some(row)) => row,
@@ -88,11 +99,11 @@ impl Tracker {
             history: HistoryRepo::new(db),
             episode_id,
             stored,
-            incognito,
+            incognito: std::rc::Rc::clone(&incognito),
             throttle: WriteThrottle::new(HISTORY_INTERVAL_MS),
             played_since: None,
             on_seen: Box::new(move |anime_id, number| {
-                crate::entry_core::tracking::progress::item_finished(Kind::Anime, anime_id, number, incognito);
+                crate::entry_core::tracking::progress::item_finished(Kind::Anime, anime_id, number, incognito());
             }),
         })
     }
@@ -122,7 +133,7 @@ impl Tracker {
         };
         let plan = progress::plan_save(
             SaveContext {
-                incognito_source: self.incognito,
+                incognito_source: (self.incognito)(),
                 has_trackers: false,
                 now_ms,
                 forced,

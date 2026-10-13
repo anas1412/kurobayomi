@@ -120,7 +120,7 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
     };
     let (tracker, start) = if crate::data::is_installed() {
         let app = crate::data::app();
-        let tracker = Tracker::open(app.db.clone(), episode_id, app.base.incognito_mode.get());
+        let tracker = Tracker::open_live(app.db.clone(), episode_id);
         let start = tracker.as_ref().map_or(start_ms.max(0), |t| t.start_ms(start_ms));
         (tracker, start)
     } else {
@@ -192,7 +192,7 @@ impl Player {
         self.tracker = crate::data::is_installed()
             .then(|| {
                 let app = crate::data::app();
-                Tracker::open(app.db.clone(), episode_id, app.base.incognito_mode.get())
+                Tracker::open_live(app.db.clone(), episode_id)
             })
             .flatten();
         let start = self.tracker.as_ref().map_or(0, |t| t.start_ms(0));
