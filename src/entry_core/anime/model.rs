@@ -36,6 +36,7 @@ use super::entry_state::{EntryFlow, RefreshPlan, refresh_on_open};
 use super::episode_row::row;
 use super::season_tile::SeasonExtra;
 use super::summary::SummaryExpansion;
+use crate::entry_core::download_menu::{Candidate, DownloadAmount, targets};
 use crate::entry_core::selection::Selection;
 use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
@@ -215,10 +216,12 @@ impl AnimeEntryModel {
         self.episodes.iter().filter(|e| self.selection.contains(e.id)).cloned().collect()
     }
 
-    /// The episodes a Download menu entry queues (`downloads::download_targets`).
-    pub fn download_targets(&self, menu: super::downloads::DownloadMenu) -> Vec<i64> {
+    /// The episodes a Download menu entry queues (`download_menu::targets`) from the displayed list.
+    pub fn download_targets(&self, amount: DownloadAmount) -> Vec<i64> {
         let descending = self.filters().is_some_and(|f| f.descending);
-        super::downloads::download_targets(&self.processed(), descending, &self.downloaded, menu)
+        let rows: Vec<Candidate> =
+            self.processed().iter().map(|e| Candidate { id: e.id, done: e.done, state: self.download_of(e.id).0 }).collect();
+        targets(&rows, descending, amount)
     }
 
     pub fn processed_ids(&self) -> Vec<i64> {
@@ -574,14 +577,14 @@ mod tests {
 
     #[test]
     fn the_download_menu_targets_follow_the_filtered_list_and_the_disk() {
-        use super::super::downloads::DownloadMenu;
+        use crate::entry_core::download_menu::DownloadAmount;
         let (_dir, store, id) = with_episodes(true, true, 4, 1);
         let mut model = load(&store, id);
         let by_number = |model: &AnimeEntryModel, n: f64| model.episodes.iter().find(|e| e.number == n).unwrap().id;
         model.downloaded.insert(by_number(&model, 3.0));
         // the default list is descending; episode 1 is seen and episode 3 is on disk
-        assert_eq!(model.download_targets(DownloadMenu::Unseen), vec![by_number(&model, 4.0), by_number(&model, 2.0)]);
-        assert_eq!(model.download_targets(DownloadMenu::Next(1)), vec![by_number(&model, 2.0)], "the oldest unseen first");
+        assert_eq!(model.download_targets(DownloadAmount::AllUnread), vec![by_number(&model, 2.0), by_number(&model, 4.0)], "everything queues in watching order");
+        assert_eq!(model.download_targets(DownloadAmount::Next(1)), vec![by_number(&model, 2.0)], "the oldest unseen first");
     }
 
     #[test]

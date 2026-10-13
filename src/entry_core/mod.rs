@@ -40,6 +40,7 @@ pub mod chapter;
 pub mod description_view;
 pub mod detail;
 pub mod dialog;
+pub mod download_menu;
 pub mod downloaded;
 pub mod entry_ops;
 pub mod errors;

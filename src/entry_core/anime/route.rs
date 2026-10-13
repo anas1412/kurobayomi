@@ -24,7 +24,7 @@ use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
-use kuro_i18n::{MsgKey, tr, tr_plural};
+use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::store::PrefStore;
 
 use crate::entry_core::constants::{FALLBACK_WIDTH, LEFT_PANE_WIDTH};
@@ -35,7 +35,7 @@ use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
 use super::download_backend::AnimeDownloads;
 use super::dispatch::{bottom_cmds, menu_cmds};
 use super::details_error::{DetailsError, required};
-use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
+use crate::entry_core::download_menu::{self, DownloadAmount, menu_visible};
 use super::intro_dialog;
 use super::torrent_server;
 use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem, LINK_COPIED, can_launch};
@@ -1261,31 +1261,21 @@ impl View {
         });
     }
 
-    /// The Download menu: the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
+    /// The Download menu (`download_menu`): the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
     fn download_popover(self: &Rc<Self>) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        let col = GBox::new(O::Vertical, 2);
-        ui::margins(&col, 6);
-        let mut entries: Vec<(String, DownloadMenu)> =
-            NEXT_COUNTS.iter().map(|&n| (tr_plural(MsgKey::download_amount_anime, n as i64, &[]), DownloadMenu::Next(n))).collect();
-        entries.push((tr(MsgKey::download_unseen), DownloadMenu::Unseen));
-        for (label, menu) in entries {
-            let weak = Rc::downgrade(self);
-            col.append(&plain_row(&label, &popover, move |_| {
-                if let Some(view) = weak.upgrade() {
-                    view.run_download(menu);
-                }
-            }));
-        }
-        popover.set_child(Some(&col));
-        popover
+        let weak = Rc::downgrade(self);
+        download_menu::popover(Kind::Anime, move |amount| {
+            if let Some(view) = weak.upgrade() {
+                view.run_download(amount);
+            }
+        })
     }
 
-    fn run_download(&self, menu: DownloadMenu) {
+    fn run_download(&self, amount: DownloadAmount) {
         let (anime_id, ids) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            (m.anime.id, m.download_targets(menu))
+            (m.anime.id, m.download_targets(amount))
         };
         if !ids.is_empty() {
             self.runner.send(AnimeCmd::Download { anime_id, ids, start_now: false });

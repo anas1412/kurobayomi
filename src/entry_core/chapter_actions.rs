@@ -7,6 +7,7 @@ use kuro_downloads::DownloadState;
 
 use crate::entry_core::chapter::{ChapterRow, sort_rows};
 use crate::entry_core::detail::EntryState;
+use crate::entry_core::download_menu::{Candidate, DownloadAmount, targets};
 use crate::entry_core::view::view;
 
 /// The action the download indicator of a row starts (`ChapterDownloadAction`). `Start` queues the rows; `StartNow` puts
@@ -87,35 +88,19 @@ pub fn fab_state(page: &EntryState) -> ResumeFab {
     resume_fab(processed.iter().any(|r| !r.read), page.chapters.iter().any(|r| r.read), page.selection.len())
 }
 
-/// The entries of the Download menu (`DownloadAction`, behaviour 6.9.5): the next 1, 5, 10 or 25 unread chapters, or
-/// every unread one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DownloadAction {
-    Next(usize),
-    Unread,
-}
-
-/// The chapters a Download menu entry queues (behaviour 6.9.6): unread and not downloaded, from the filtered list
-/// when the reader preference `skipFiltered` is on and from every chapter otherwise. "Next N" takes the oldest first:
-/// the stored sort, reversed when it is descending, then the first N. "Unread" keeps the list order.
-pub fn download_targets(page: &EntryState, action: DownloadAction) -> Vec<i64> {
+/// The chapters a Download menu entry queues (behaviour 6.9.6): unread and not queued or downloaded, from the filtered
+/// list when the reader preference `skipFiltered` is on and from every chapter otherwise, in the stored sort. The rule
+/// is `download_menu::targets`.
+pub fn download_targets(page: &EntryState, amount: DownloadAmount) -> Vec<i64> {
     let flags = page.manga.flags;
-    let pool: Vec<&ChapterRow> = if page.skip_filtered {
+    let mut pool: Vec<&ChapterRow> = if page.skip_filtered {
         view(&page.chapters, flags, page.downloaded_only, page.manga.local)
     } else {
         page.chapters.iter().collect()
     };
-    let mut unread: Vec<&ChapterRow> = pool.into_iter().filter(|r| !r.read && r.download == DownloadState::NotDownloaded).collect();
-    match action {
-        DownloadAction::Unread => unread.into_iter().map(|r| r.id).collect(),
-        DownloadAction::Next(n) => {
-            sort_rows(flags, &mut unread);
-            if flags.sort_descending() {
-                unread.reverse();
-            }
-            unread.into_iter().take(n).map(|r| r.id).collect()
-        }
-    }
+    sort_rows(flags, &mut pool);
+    let rows: Vec<Candidate> = pool.into_iter().map(|r| Candidate { id: r.id, done: r.read, state: r.download }).collect();
+    targets(&rows, flags.sort_descending(), amount)
 }
 
 #[cfg(test)]
@@ -191,23 +176,23 @@ mod tests {
     #[test]
     fn unread_download_targets_skip_read_downloaded_and_queued_rows() {
         let p = page(0x1 | 0x200, true, rows());
-        assert_eq!(download_targets(&p, DownloadAction::Unread), vec![4, 5, 6]);
-        assert_eq!(download_targets(&p, DownloadAction::Next(2)), vec![4, 5]);
+        assert_eq!(download_targets(&p, DownloadAmount::AllUnread), vec![4, 5, 6]);
+        assert_eq!(download_targets(&p, DownloadAmount::Next(2)), vec![4, 5]);
     }
 
     #[test]
-    fn next_n_takes_the_oldest_first_for_a_descending_sort_too() {
+    fn items_queue_oldest_first_for_a_descending_sort_too() {
         let p = page(0x200, true, rows()); // number descending
-        assert_eq!(download_targets(&p, DownloadAction::Next(2)), vec![4, 5], "oldest unread first (6.9.6)");
-        assert_eq!(download_targets(&p, DownloadAction::Unread), vec![6, 5, 4], "unread keeps the list order");
+        assert_eq!(download_targets(&p, DownloadAmount::Next(2)), vec![4, 5], "oldest unread first (6.9.6)");
+        assert_eq!(download_targets(&p, DownloadAmount::AllUnread), vec![4, 5, 6], "everything queues in reading order too");
     }
 
     #[test]
     fn skip_filtered_decides_between_the_view_and_every_chapter() {
         // the bookmarked filter shows only chapter 6
         let flags = 0x1 | 0x200 | kuro_db::flags::item::SHOW_BOOKMARKED;
-        assert_eq!(download_targets(&page(flags, true, rows()), DownloadAction::Unread), vec![6]);
-        assert_eq!(download_targets(&page(flags, false, rows()), DownloadAction::Unread), vec![4, 5, 6]);
+        assert_eq!(download_targets(&page(flags, true, rows()), DownloadAmount::AllUnread), vec![6]);
+        assert_eq!(download_targets(&page(flags, false, rows()), DownloadAmount::AllUnread), vec![4, 5, 6]);
     }
 
     #[test]

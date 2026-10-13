@@ -4,7 +4,7 @@
 
 use kuro_i18n::{MsgKey, tr};
 
-use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, acts_on, download_targets, indicator_action, previous_ids, state_after_cancel};
+use crate::entry_core::chapter_actions::{IndicatorAction, acts_on, download_targets, indicator_action, previous_ids, state_after_cancel};
 use crate::entry_core::detail::{EntryState, LoadState, StoreCmd, StoreEvent, apply_snapshot};
 use crate::entry_core::dialog::{CategoryConfirm, Dialog};
 use crate::entry_core::errors::DetailError;
@@ -12,6 +12,7 @@ use crate::entry_core::flags::Write;
 use crate::entry_core::list_model::{RowItem, focus_after, row_items};
 use crate::entry_core::live::{DownloadEvent, ProgressThrottle, apply_event};
 use crate::entry_core::message::{Notice, SNACK_DURATION};
+use crate::entry_core::download_menu::DownloadAmount;
 use crate::entry_core::selection::{Command, Key, Mods, RowClick, key_command};
 use crate::entry_core::view::view;
 
@@ -72,7 +73,7 @@ pub enum UiAction {
     /// Writes the library's default chapter flags to this manga.
     ResetFlags,
     /// An entry of the Download menu: the next chapters, or every unread one.
-    DownloadMenu(DownloadAction),
+    DownloadMenu(DownloadAmount),
     /// The scanlator sheet's OK: the exclusions become exactly this set.
     SetExcludedScanlators(std::collections::BTreeSet<String>),
     /// The delete confirmation's OK: the selection is cleared, then the downloads of these chapters are deleted.
@@ -812,12 +813,12 @@ mod tests {
     #[test]
     fn the_download_menu_queues_the_next_unread_chapters_and_nothing_when_there_are_none() {
         let mut page = ready(3);
-        let out = page.act(UiAction::DownloadMenu(DownloadAction::Next(2)));
+        let out = page.act(UiAction::DownloadMenu(DownloadAmount::Next(2)));
         assert_eq!(out.cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1, 2], start_now: false }]);
         for id in 1..=3 {
             page.apply_download(DownloadEvent::Status { chapter_id: id, state: DownloadState::Downloaded }, 0);
         }
-        assert!(page.act(UiAction::DownloadMenu(DownloadAction::Unread)).cmds.is_empty());
+        assert!(page.act(UiAction::DownloadMenu(DownloadAmount::AllUnread)).cmds.is_empty());
     }
 
     #[test]

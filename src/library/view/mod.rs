@@ -595,24 +595,13 @@ impl LibraryView {
                 connect(&button, action);
                 bar_box.pack_start(&button);
             }
-            // the Download menu: the next 1, 5, 10 or 25 items, or every unviewed one (T-37a-028)
-            // the look of `ui::menu_button`: flat entries, left aligned, no spacing
-            let menu = gtk::Box::new(O::Vertical, 0);
-            let popover = gtk::Popover::builder().child(&menu).build();
-            for (amount, label) in actions::download_menu(kind) {
-                let item = gtk::Button::builder().label(&label).css_classes(["flat"]).build();
-                if let Some(text) = item.child().and_downcast::<gtk::Label>() {
-                    text.set_xalign(0.0);
+            // the Download menu: the next 1, 5, 10 or 25 items, or every unread one (T-37a-028), shared with the entry pages
+            let weak_menu = weak.clone();
+            let popover = crate::entry_core::download_menu::popover(kind, move |amount| {
+                if let Some(inner) = weak_menu.upgrade() {
+                    selected_download(&inner, amount);
                 }
-                let (weak_item, popover_item) = (weak.clone(), popover.clone());
-                item.connect_clicked(move |_| {
-                    popover_item.popdown();
-                    if let Some(inner) = weak_item.upgrade() {
-                        selected_download(&inner, amount);
-                    }
-                });
-                menu.append(&item);
-            }
+            });
             download_button.set_popover(Some(&popover));
             bar_box.pack_start(&download_button);
             crate::ui::no_sticky_focus(&bar_box);
@@ -1200,7 +1189,7 @@ fn cover_menu(weak: &Weak<RefCell<Inner>>, row: &LibraryRow) -> Vec<Item> {
                     actions::CoverAction::MarkAllViewed => mark(&inner, &[id], true),
                     actions::CoverAction::DownloadUnviewed => {
                         let download = inner.borrow().nav.download.clone();
-                        download(vec![id], actions::DownloadAmount::Unviewed);
+                        download(vec![id], actions::DownloadAmount::AllUnread);
                     }
                     actions::CoverAction::ChangeCategories => open_categories(&inner, vec![id], false),
                     // the remove dialog is the confirmation

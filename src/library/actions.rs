@@ -177,37 +177,14 @@ pub fn download_visible<'a>(mut selected: impl Iterator<Item = &'a LibraryRow>) 
     !selected.any(LibraryRow::is_local)
 }
 
-/// How many items a bulk download covers (`DownloadAction`): the next N, or every unseen one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DownloadAmount {
-    Next(usize),
-    Unviewed,
-}
+pub use crate::entry_core::download_menu::DownloadAmount;
+use crate::entry_core::download_menu::pick;
 
 /// The item ids to queue for one entry. `unseen` is its next-items list in reading order. Items that are already
 /// queued or downloaded (`skip`) are dropped first and the amount is taken after, so "Next 5" picks the next five
 /// that are not on disk, which may lie further along the list (E-36, T2-BULK-01, T2-BULK-04).
 pub fn plan_download(unseen: &[i64], amount: DownloadAmount, skip: impl Fn(i64) -> bool) -> Vec<i64> {
-    let pending = unseen.iter().copied().filter(|id| !skip(*id));
-    match amount {
-        DownloadAmount::Next(n) => pending.take(n).collect(),
-        DownloadAmount::Unviewed => pending.collect(),
-    }
-}
-
-/// The Download menu of the selection bar for `kind`: next 1, 5, 10 or 25 items, then every unviewed one (T-37a-028).
-pub fn download_menu(kind: Kind) -> Vec<(DownloadAmount, String)> {
-    let (one, many, unviewed) = match kind {
-        Kind::Manga => ("chapter", "chapters", "Unread"),
-        Kind::Anime => ("episode", "episodes", "Unwatched"),
-    };
-    vec![
-        (DownloadAmount::Next(1), format!("Next {one}")),
-        (DownloadAmount::Next(5), format!("Next 5 {many}")),
-        (DownloadAmount::Next(10), format!("Next 10 {many}")),
-        (DownloadAmount::Next(25), format!("Next 25 {many}")),
-        (DownloadAmount::Unviewed, unviewed.to_owned()),
-    ]
+    pick(unseen.iter().copied().filter(|id| !skip(*id)), amount)
 }
 
 /// One entry of a cover's right-click menu.
@@ -635,10 +612,10 @@ mod tests {
         let other = Fake::installed();
         other.disk.lock().unwrap().push(3);
         other.queue(id_of(&ids, "u2"), DownloadState::Queue, 0);
-        assert_eq!(download_selection(&db, &other, Kind::Manga, &[id, 9_999], DownloadAmount::Unviewed), 1);
+        assert_eq!(download_selection(&db, &other, Kind::Manga, &[id, 9_999], DownloadAmount::AllUnread), 1);
         assert_eq!(other.calls()[0], Call::Enqueue { entry_id: id, unit_ids: vec![id_of(&ids, "u1")] });
         let none = Fake::installed();
-        assert_eq!(download_selection(&db, &none, Kind::Manga, &[9_999], DownloadAmount::Unviewed), 0);
+        assert_eq!(download_selection(&db, &none, Kind::Manga, &[9_999], DownloadAmount::AllUnread), 0);
         assert!(none.calls().is_empty(), "nothing to queue, nothing started");
     }
 

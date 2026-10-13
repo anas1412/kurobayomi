@@ -16,8 +16,8 @@ fn t2_bulk_01_next_n_skips_queued_and_downloaded_items_before_taking_n() {
 #[test]
 fn t2_bulk_04_unviewed_takes_every_unseen_item_that_is_not_downloaded_or_queued() {
     let unseen = [10, 11, 12, 13];
-    assert_eq!(plan_download(&unseen, DownloadAmount::Unviewed, |id| id == 11), vec![10, 12, 13]);
-    assert_eq!(plan_download(&unseen, DownloadAmount::Unviewed, |_| true), Vec::<i64>::new());
+    assert_eq!(plan_download(&unseen, DownloadAmount::AllUnread, |id| id == 11), vec![10, 12, 13]);
+    assert_eq!(plan_download(&unseen, DownloadAmount::AllUnread, |_| true), Vec::<i64>::new());
 }
 
 #[test]
@@ -40,25 +40,4 @@ fn t2_del_04_local_entries_never_lose_their_files_and_the_checkbox_is_not_offere
     let http = row(2, 0);
     assert!(!downloads_checkbox_offered([&local, &http].into_iter()));
     assert!(downloads_checkbox_offered([&http].into_iter()));
-}
-
-#[test]
-fn t2_bulk_menu_offers_1_5_10_25_and_all_unviewed_with_per_kind_labels() {
-    // T-37a-028: the menu labels are per kind; "all" is the unviewed amount.
-    use crate::library::actions::download_menu;
-    use kuro_platform::kind::Kind;
-    let labels = |kind| download_menu(kind).into_iter().map(|(_, label)| label).collect::<Vec<_>>();
-    assert_eq!(
-        labels(Kind::Manga),
-        ["Next chapter", "Next 5 chapters", "Next 10 chapters", "Next 25 chapters", "Unread"]
-    );
-    assert_eq!(
-        labels(Kind::Anime),
-        ["Next episode", "Next 5 episodes", "Next 10 episodes", "Next 25 episodes", "Unwatched"]
-    );
-    let amounts: Vec<DownloadAmount> = download_menu(Kind::Manga).into_iter().map(|(amount, _)| amount).collect();
-    assert_eq!(
-        amounts,
-        [DownloadAmount::Next(1), DownloadAmount::Next(5), DownloadAmount::Next(10), DownloadAmount::Next(25), DownloadAmount::Unviewed]
-    );
 }

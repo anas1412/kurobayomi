@@ -16,7 +16,7 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
 use kuro_domain::entries::defaults::item_default_word;
 use kuro_platform::kind::Kind;
-use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 
 use crate::data;
 use crate::entry_core::backend::SourceBackend;
@@ -25,7 +25,7 @@ use crate::entry_core::action_row::interval_click_opens_dialog;
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::bulk_bar::{BulkAction, bulk_actions};
 use crate::entry_core::chapter::ChapterRow;
-use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state};
+use crate::entry_core::chapter_actions::{IndicatorAction, fab_state};
 use crate::entry_core::info_block::InfoBlock;
 use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::tracking;
@@ -959,19 +959,14 @@ impl View {
         .present();
     }
 
-    /// The Download menu: the next 1, 5, 10 or 25 unread chapters, or every unread one.
+    /// The Download menu (`download_menu`): the next 1, 5, 10 or 25 unread chapters, or every unread one.
     fn download_popover(self: &Rc<Self>) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        let col = GBox::new(O::Vertical, 2);
-        ui::margins(&col, 6);
         let weak = Rc::downgrade(self);
-        for n in [1usize, 5, 10, 25] {
-            let label = tr_plural(MsgKey::download_amount, n as i64, &[]);
-            col.append(&plain_row(&label, &popover, on_view(&weak, move |v| v.act(UiAction::DownloadMenu(DownloadAction::Next(n))))));
-        }
-        col.append(&plain_row(&tr(MsgKey::download_unread), &popover, on_view(&weak, |v| v.act(UiAction::DownloadMenu(DownloadAction::Unread)))));
-        popover.set_child(Some(&col));
-        popover
+        crate::entry_core::download_menu::popover(Kind::Manga, move |amount| {
+            if let Some(view) = weak.upgrade() {
+                view.act(UiAction::DownloadMenu(amount));
+            }
+        })
     }
 
     /// The overflow menu: Refresh, Edit categories, Migrate, Share and Settings, as `toolbar::overflow_items` says.
