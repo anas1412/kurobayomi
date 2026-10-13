@@ -25,8 +25,8 @@ use super::unit::{Availability, EntryRef, QueuedUnit, SourceKey, UnitRef};
 pub struct Restored {
     /// In queue order. Hand them to `Lane::restored`.
     pub units: Vec<QueuedUnit>,
-    /// Staging folders of the units whose source has a name, for `Layout::sweep_staging`. The staging folder of a unit
-    /// whose source cannot be named has no known path, so the sweep removes it and a resume starts that unit over.
+    /// The staging folders of the restored units, for `Layout::sweep_staging`. `source_dir` names a unit's source folder
+    /// (for a source nobody can name, the index remembers it), so a waiting unit keeps its pages too.
     pub keep: Vec<PathBuf>,
 }
 
@@ -39,6 +39,7 @@ pub fn restore(
     directory: &dyn SourceDirectory,
     runner: &dyn UnitRunner,
     layout: &Layout,
+    source_dir: &dyn Fn(&QueuedUnit) -> String,
 ) -> Result<Restored, StoreError> {
     let rows = store.load(kind)?;
     let entries = EntryRepo::new(db.clone());
@@ -68,9 +69,7 @@ pub fn restore(
         };
         let mut unit = QueuedUnit::new(kind, EntryRef::from(&entry), UnitRef::from(&item), source);
         unit.waiting = waiting;
-        if unit.source.availability != Availability::Stub {
-            keep.extend(staging_paths(layout, runner, &unit));
-        }
+        keep.extend(staging_paths(layout, runner, &unit, &source_dir(&unit)));
         units.push(unit);
     }
     Ok(Restored { units, keep })
@@ -82,9 +81,8 @@ fn stub_source(id: i64) -> SourceKey {
 }
 
 /// The staging folders of `unit` that exist under its entry folder.
-fn staging_paths(layout: &Layout, runner: &dyn UnitRunner, unit: &QueuedUnit) -> Vec<PathBuf> {
-    let source_dir = Layout::source_dir_name(&unit.source.name, &unit.source.lang);
-    let Some(entry_dir) = layout.find_entry_dir(&source_dir, &unit.entry.title) else { return Vec::new() };
+fn staging_paths(layout: &Layout, runner: &dyn UnitRunner, unit: &QueuedUnit, source_dir: &str) -> Vec<PathBuf> {
+    let Some(entry_dir) = layout.find_entry_dir(source_dir, &unit.entry.title) else { return Vec::new() };
     runner.staging_names(&unit.unit).into_iter().map(|name| entry_dir.join(name)).collect()
 }
 
@@ -143,7 +141,7 @@ mod tests {
     fn run_restore(db: &Arc<Db>, store: &QueueStore, kind: Kind, named: &[i64], can_run: bool, root: &std::path::Path) -> Result<Restored, StoreError> {
         let directory = FakeDirectory { named: named.to_vec() };
         let runner = FakeRunner { kind, can_run };
-        restore(db, store, kind, &directory, &runner, &Layout::new(kind, root))
+        restore(db, store, kind, &directory, &runner, &Layout::new(kind, root), &|u| Layout::source_dir_name(&u.source.name, &u.source.lang))
     }
 
     #[test]

@@ -22,10 +22,11 @@ use super::events::DownloadEvent;
 use super::gate::{Connectivity, DEBOUNCE, Gate, GateAction, verdict};
 use super::index::DownloadIndex;
 use super::layout::{Layout, check_free_space};
+use super::restore;
 use super::queue::{CancelTarget, EnqueueRequest, Enqueued, Place, QueueParams, Layouts, Refusal, Snapshot, bulk_warning, plan_enqueue};
 use super::runner::{RunCtx, SourceDirectory, UnitDone, UnitJob, UnitRunner};
 use super::state::{Lane, RunState, StartMode};
-use super::store::{QueueStore, StoredRow};
+use super::store::{QueueStore, StoreError, StoredRow};
 use super::unit::{Availability, EntryRef, QueuedUnit, SourceKey, UnitRef};
 use crate::downloader::unix_millis;
 use crate::error::{DownloadError, FailureKind};
@@ -231,11 +232,18 @@ impl Actor {
             let layout = self.layouts.of(kind).clone();
             let index = self.index.clone();
             let restored = tokio::task::spawn_blocking(move || {
-                restore_kind(kind, &store, &db, directory.as_ref(), runner.as_ref(), &layout, &index)
+                let restored = restore::restore(&db, &store, kind, directory.as_ref(), runner.as_ref(), &layout, &|unit| {
+                    source_dir(&index, kind, &unit.source, &unit.entry.title)
+                })?;
+                // Only a restore that read every row sweeps: otherwise the owners of the staging folders are unknown.
+                let removed = layout.sweep_staging(&restored.keep);
+                tracing::debug!(target: "kuro_downloads", kind = kind.as_str(), removed, "startup sweep");
+                Ok::<_, StoreError>(restored.units)
             })
             .await;
             match restored {
-                Ok(units) => *self.lanes.lane_mut(kind) = Lane::restored(kind, units),
+                Ok(Ok(units)) => *self.lanes.lane_mut(kind) = Lane::restored(kind, units),
+                Ok(Err(err)) => tracing::error!(target: "kuro_downloads", kind = kind.as_str(), error = %err, "could not read the saved queue"),
                 Err(err) => tracing::error!(target: "kuro_downloads", error = %err, "restoring the queue failed"),
             }
         }
@@ -754,67 +762,6 @@ fn source_dir(index: &DownloadIndex, kind: Kind, source: &SourceKey, title: &str
     computed
 }
 
-/// Reads one lane's saved rows back as queued units (blocking). A row whose item or entry is gone is dropped; a row
-/// whose source cannot be named is kept as a stub that waits (D5). Then the staging folders of every restored unit are
-/// kept and the rest are swept. When the saved rows could not be read nothing is swept: the units that own the
-/// staging folders are unknown.
-fn restore_kind(
-    kind: Kind,
-    store: &QueueStore,
-    db: &Arc<Db>,
-    directory: &dyn SourceDirectory,
-    runner: &dyn UnitRunner,
-    layout: &Layout,
-    index: &DownloadIndex,
-) -> Vec<QueuedUnit> {
-    let rows = match store.load(kind) {
-        Ok(rows) => rows,
-        Err(err) => {
-            tracing::error!(target: "kuro_downloads", kind = kind.as_str(), error = %err, "could not read the saved queue");
-            return Vec::new();
-        }
-    };
-    let entries = EntryRepo::new(db.clone());
-    let items = ItemRepo::new(db.clone());
-    let mut units = Vec::new();
-    for row in rows {
-        let Ok(Some(item)) = items.by_id(row.unit_id) else { continue };
-        let Ok(entry) = entries.by_id(row.entry_id) else { continue };
-        if entry.kind != kind {
-            continue;
-        }
-        let (source, waiting) = match directory.source_key(kind, row.source) {
-            Some(key) => {
-                let waiting = key.availability == Availability::Stub || !runner.can_run(&key);
-                (key, waiting)
-            }
-            None => {
-                let stub = SourceKey {
-                    id: row.source,
-                    name: String::new(),
-                    lang: String::new(),
-                    unmetered: false,
-                    availability: Availability::Stub,
-                };
-                (stub, true)
-            }
-        };
-        let mut unit = QueuedUnit::new(kind, EntryRef::from(&entry), UnitRef::from(&item), source);
-        unit.waiting = waiting;
-        units.push(unit);
-    }
-    let mut keep = Vec::new();
-    for unit in &units {
-        let dir = source_dir(index, kind, &unit.source, &unit.entry.title);
-        if let Some(entry_dir) = layout.find_entry_dir(&dir, &unit.entry.title) {
-            keep.extend(runner.staging_names(&unit.unit).into_iter().map(|name| entry_dir.join(name)));
-        }
-    }
-    let removed = layout.sweep_staging(&keep);
-    tracing::debug!(target: "kuro_downloads", kind = kind.as_str(), removed, "startup sweep");
-    units
-}
-
 fn panic_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_owned()
@@ -1069,13 +1016,7 @@ mod tests {
 
     /// An enqueue of `units` for entry `entry_id` of `source_id`, at the back.
     fn request(kind: Kind, source_id: i64, entry_id: i64, units: Vec<UnitRef>, auto_start: bool) -> EnqueueRequest {
-        let entry = EntryRef {
-            id: entry_id,
-            kind,
-            source: source_id,
-            url: format!("/e{entry_id}"),
-            title: format!("Title {entry_id}"),
-        };
+        let entry = EntryRef::bare(entry_id, kind, source_id, format!("/e{entry_id}"), format!("Title {entry_id}"));
         EnqueueRequest {
             kind,
             entry,
@@ -1491,8 +1432,7 @@ mod tests {
             q.enqueue(request(kind, 1, 1, vec![unit(1, 1)], false)).await.unwrap();
             q.enqueue(request(kind, 2, 2, vec![unit(2, 1)], false)).await.unwrap();
             q.start(kind);
-            settle(|| q.snapshot().run(kind) == RunState::Stopped).await;
-            assert_eq!(state(&q, kind, 1), Some(DownloadState::Error));
+            settle(|| state(&q, kind, 1) == Some(DownloadState::Error) && q.snapshot().run(kind) == RunState::Stopped).await;
             assert_eq!(state(&q, kind, 2), Some(DownloadState::Error), "the other running unit stopped with the lane");
             settle(|| runner.in_flight() == 0).await;
         }
@@ -1576,9 +1516,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_restored_unit_whose_source_is_missing_waits_and_runs_when_the_source_appears() {
+        // the harness knows sources 1 to 9, so this one is not installed
+        const MISSING: i64 = 77;
         for kind in Kind::ALL {
             let h = Harness::new();
-            let (_, unit_id) = h.seed(kind, 7);
+            let (_, unit_id) = h.seed(kind, MISSING);
             let q = h.spawn();
             settle(|| !ids(&q, kind).is_empty()).await;
             let queued = q.queued(kind, unit_id).unwrap();
@@ -1594,7 +1536,7 @@ mod tests {
             settle(|| h.runner(kind).started() == vec![900]).await;
             assert_eq!(state(&q, kind, unit_id), Some(DownloadState::Queue), "a waiting unit is skipped, not failed");
 
-            h.directory.add(kind, fixtures::source(7));
+            h.directory.add(kind, fixtures::source(MISSING));
             q.sources_changed();
             settle(|| ids(&q, kind).is_empty()).await;
             assert!(h.runner(kind).started().contains(&unit_id));

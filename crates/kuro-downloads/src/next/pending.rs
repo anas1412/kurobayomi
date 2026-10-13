@@ -89,13 +89,7 @@ impl PendingStore {
                 Some(g) if g.kind == row.kind && g.entry.id == row.entry_id => g.units.push(unit_of(row)),
                 _ => groups.push(PendingGroup {
                     kind: row.kind,
-                    entry: EntryRef {
-                        id: row.entry_id,
-                        kind: row.kind,
-                        source: row.source,
-                        url: row.entry_url.clone(),
-                        title: row.entry_title.clone(),
-                    },
+                    entry: EntryRef::bare(row.entry_id, row.kind, row.source, row.entry_url.clone(), row.entry_title.clone()),
                     units: vec![unit_of(row)],
                 }),
             }
@@ -141,7 +135,7 @@ mod tests {
     }
 
     fn entry(id: i64, kind: Kind, source: i64) -> EntryRef {
-        EntryRef { id, kind, source, url: format!("/e/{id}"), title: format!("Entry {id}") }
+        EntryRef::bare(id, kind, source, format!("/e/{id}"), format!("Entry {id}"))
     }
 
     fn unit(id: i64, entry_id: i64) -> UnitRef {

@@ -136,7 +136,7 @@ mod tests {
     fn element_order_namespaces_and_escaping_match_the_golden_text() {
         let genre = vec!["Action".to_owned(), "Drama".to_owned()];
         let xml = to_xml(&sample(&genre, &["Reading".to_owned()]));
-        let golden = include_str!("../testdata/comicinfo/golden.xml");
+        let golden = include_str!("../../testdata/comicinfo/golden.xml");
         assert_eq!(xml, golden, "TST-31");
     }
 

@@ -183,21 +183,21 @@ fn finalise_folder(tmp: &Path, target: &Path) -> Result<(), DownloadError> {
     Ok(())
 }
 
-/// Writes `ComicInfo.xml` into the finished tmp folder, replacing an older one (behaviour 10.9). The queue carries the
-/// title only, so `Web` holds the chapter URL and the other fields are omitted.
+/// Writes `ComicInfo.xml` into the finished tmp folder, replacing an older one (behaviour 10.9). Tracker URLs and
+/// category names are not carried by the queue yet, so `Web` holds the chapter URL only and `Categories` is omitted.
 fn write_comic_info(tmp: &Path, entry: &EntryRef, chapter: &UnitRef, source_name: &str) -> io::Result<()> {
     let web = web_value(&[], &chapter.url);
     let info = ComicInfo {
         chapter_name: &chapter.name,
         series: &entry.title,
         number: Some(chapter.number),
-        summary: None,
-        writer: None,
-        penciller: None,
+        summary: entry.description.as_deref(),
+        writer: entry.author.as_deref(),
+        penciller: entry.artist.as_deref(),
         translator: chapter.scanlator.as_deref(),
-        genre: None,
+        genre: entry.genre.as_deref(),
         web: &web,
-        status: 0,
+        status: entry.status,
         categories: &[],
         source_name,
     };

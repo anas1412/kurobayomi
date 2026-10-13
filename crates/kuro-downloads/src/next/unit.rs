@@ -23,11 +23,35 @@ pub struct EntryRef {
     pub source: i64,
     pub url: String,
     pub title: String,
+    /// The details a manga's `ComicInfo.xml` carries.
+    pub description: Option<String>,
+    pub author: Option<String>,
+    pub artist: Option<String>,
+    pub genre: Option<Vec<String>>,
+    pub status: i64,
+}
+
+impl EntryRef {
+    /// An entry with no details (a pending delete or a test needs only these).
+    pub fn bare(id: i64, kind: Kind, source: i64, url: String, title: String) -> Self {
+        Self { id, kind, source, url, title, description: None, author: None, artist: None, genre: None, status: 0 }
+    }
 }
 
 impl From<&Entry> for EntryRef {
     fn from(e: &Entry) -> Self {
-        Self { id: e.id, kind: e.kind, source: e.source, url: e.url.clone(), title: e.title.clone() }
+        Self {
+            id: e.id,
+            kind: e.kind,
+            source: e.source,
+            url: e.url.clone(),
+            title: e.title.clone(),
+            description: e.description.clone(),
+            author: e.author.clone(),
+            artist: e.artist.clone(),
+            genre: e.genre.clone(),
+            status: e.status,
+        }
     }
 }
 
@@ -164,7 +188,7 @@ pub(crate) mod fixtures {
     }
 
     pub fn queued(kind: Kind, source_id: i64, unit_id: i64, entry_id: i64) -> QueuedUnit {
-        let entry = EntryRef { id: entry_id, kind, source: source_id, url: format!("/e{entry_id}"), title: format!("Title {entry_id}") };
+        let entry = EntryRef::bare(entry_id, kind, source_id, format!("/e{entry_id}"), format!("Title {entry_id}"));
         let unit = UnitRef {
             id: unit_id,
             entry_id,
