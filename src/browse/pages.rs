@@ -914,7 +914,8 @@ pub(crate) mod tests {
         // the search options: one menu button with Show only "Has results", and no chip row
         let toggles: Vec<gtk::ToggleButton> = descendants(page.widget());
         assert!(toggles.iter().all(|c| c.label().is_none()), "no chips: {:?}", toggles.iter().map(|c| c.label()).collect::<Vec<_>>());
-        let menus: Vec<gtk::MenuButton> = descendants(page.widget());
+        // the options button is a header action of the page, next to the shared search toggle
+        let menus: Vec<gtk::MenuButton> = page.actions().iter().flat_map(|w| descendants::<gtk::MenuButton>(w)).collect();
         let menu = menus.iter().find(|b| b.tooltip_text().as_deref() == Some(SEARCH_OPTIONS)).expect("the search options");
         let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("the menu"));
         assert_eq!(labels, ["Show only".to_owned(), tr(MsgKey::has_results)]);
@@ -1184,9 +1185,10 @@ pub(crate) mod tests {
             let all = widget.observe_controllers();
             (0..all.n_items()).filter_map(|i| all.item(i)).filter_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).count()
         };
-        // the entry sits in the top row of the page body
-        let body = entry.parent().and_then(|top| top.parent()).expect("body");
-        assert_eq!(controller(&body), 1, "the page carries the Escape step");
+        // the entry sits in the shared search bar at the top of the page body; the body carries the Escape step and the bar's
+        // key capture
+        let body = entry.ancestor(gtk::SearchBar::static_type()).and_then(|bar| bar.parent()).expect("body");
+        assert_eq!(controller(&body), 2, "the page carries the Escape step and the search bar's key capture");
         let all = body.observe_controllers();
         let keys = (0..all.n_items()).filter_map(|i| all.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("controller");
         let none = gtk::gdk::ModifierType::empty();

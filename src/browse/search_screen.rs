@@ -492,15 +492,17 @@ pub(crate) mod tests {
         }
         let rig = rig();
         let start = Start::Search { query: String::new(), extension: None, origin: None };
-        let page = search_widget(&rig.env, &start, false);
-        assert!(pump_until(|| options(&page).is_some()), "the search options menu");
-        let (button, dot) = options(&page).expect("menu");
+        // the options button is a header action of the page
+        let (_page, actions) = search_page(&rig.env, &start, false);
+        let in_header = |actions: &[gtk::Widget]| actions.iter().find_map(options);
+        assert!(pump_until(|| in_header(&actions).is_some()), "the search options menu");
+        let (button, dot) = in_header(&actions).expect("menu");
         assert!(!dot.is_visible(), "Has results starts off on every open");
         button.activate_action("viewopt.has_results", None).expect("the Has results check");
         assert!(dot.is_visible(), "Has results is on in this page");
-        let again = search_widget(&rig.env, &start, true);
-        assert!(pump_until(|| options(&again).is_some()));
-        assert!(!options(&again).expect("menu").1.is_visible(), "the next page does not read it back");
+        let (_again, again) = search_page(&rig.env, &start, true);
+        assert!(pump_until(|| in_header(&again).is_some()));
+        assert!(!in_header(&again).expect("menu").1.is_visible(), "the next page does not read it back");
     }
     fn a_source_arrow_opens_its_listing_with_the_typed_text() {
         let rig = rig();
