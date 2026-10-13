@@ -115,9 +115,24 @@ static INSTALLED: Mutex<Vec<(Kind, Catalogues)>> = Mutex::new(Vec::new());
 
 /// Installs the sources of `kind` the pages read. A second call for the same kind replaces the first.
 pub fn install(kind: Kind, catalogues: Catalogues) {
+    remember_stubs(kind, &catalogues);
     let mut installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     installed.retain(|(of, _)| *of != kind);
     installed.push((kind, catalogues));
+}
+
+/// Records every loaded source (id, language, name) in the stub table, as Aniyomi's sources table does, so a backup made while
+/// the sources are not loaded (`--run-backup`) and the restore screen can still name them.
+fn remember_stubs(kind: Kind, catalogues: &Catalogues) {
+    if !crate::data::is_installed() {
+        return;
+    }
+    let stubs = kuro_data::source::StubSourceRepo::new(crate::data::app().db.clone(), kind);
+    for entry in catalogues.sources() {
+        if let Err(error) = stubs.upsert(entry.source.id, &entry.source.lang, &entry.source.name) {
+            tracing::warn!(source = entry.source.id, %error, "a source could not be recorded for the backup");
+        }
+    }
 }
 
 /// The directory the pages of `kind` read: the installed sources (none before the first load) and, for anime, the

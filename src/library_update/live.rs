@@ -45,6 +45,16 @@ impl SourceRegistry for LiveRegistry {
     }
 }
 
+/// The source as an earlier run recorded it (`browse::directory::install`), for a source that is not loaded now: a backup
+/// made without the GUI and the restore screen still name it.
+fn recorded(source_id: i64) -> Option<kuro_data::source::StubSource> {
+    if !crate::data::is_installed() {
+        return None;
+    }
+    let db = crate::data::app().db.clone();
+    [Kind::Manga, Kind::Anime].into_iter().find_map(|kind| kuro_data::source::StubSourceRepo::new(db.clone(), kind).get(source_id).ok().flatten())
+}
+
 impl LiveRegistry {
     /// The source with this id under either kind: the backup preflight does not know the kind of a row.
     fn find(&self, source_id: i64) -> Option<LiveSource> {
@@ -205,13 +215,13 @@ impl kuro_backup::creator::SourceRegistry for LiveRegistry {
     }
 
     fn name_of(&self, source_id: i64) -> String {
-        self.find(source_id).map(|source| source.name()).unwrap_or_default()
+        self.find(source_id).map(|source| source.name()).or_else(|| recorded(source_id).map(|stub| stub.name)).unwrap_or_default()
     }
 
     fn stub_label(&self, source_id: i64) -> String {
         match self.find(source_id) {
             Some(source) => kuro_source::display_name(&source.name(), &source.lang()),
-            None => source_id.to_string(),
+            None => recorded(source_id).map_or_else(|| source_id.to_string(), |stub| stub.display_name()),
         }
     }
 }
