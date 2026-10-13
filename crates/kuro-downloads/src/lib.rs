@@ -35,6 +35,7 @@ pub mod layout;
 pub mod local;
 pub mod manager;
 pub mod model;
+pub mod next;
 pub mod notify;
 pub mod pending;
 pub mod pipeline;
