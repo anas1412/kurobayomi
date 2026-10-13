@@ -196,7 +196,7 @@ Source of rows: every `preferenceStore.get*(...)` declaration in the 18 `*Prefer
 | 17 | `downloadNewEpisodeCategories()` | `download_new_anime_categories` | normal | Set<String> | {} | `Settings.downloads.download_new_episode_categories` | KEEP | P1 |  |
 | 18 | `downloadNewChapterCategoriesExclude()` | `download_new_categories_exclude` | normal | Set<String> | {} | `Settings.downloads.download_new_chapter_categories_exclude` | KEEP | P1 |  |
 | 19 | `downloadNewEpisodeCategoriesExclude()` | `download_new_anime_categories_exclude` | normal | Set<String> | {} | `Settings.downloads.download_new_episode_categories_exclude` | KEEP | P1 |  |
-| 20 | `numberOfDownloads()` | `download_slots` | normal | Int | 1 | `Settings.downloads.number_of_downloads` | KEEP | P1 | Parallel downloads (UI 1..5). |
+| 20 | `numberOfDownloads()` | `download_slots` | normal | Int | 3 | `Settings.downloads.number_of_downloads` | KEEP | P1 | Parallel downloads (UI 1..5). |
 | 21 | `downloadSpeedLimit()` | `download_speed_limit` | normal | Int | 0 | `Settings.downloads.download_speed_limit` | KEEP | P1 | KiB/s (MangaDownloader.kt:525 multiplies by 1024); 0 = off. |
 | 22 | `downloadNewUnreadChaptersOnly()` | `download_new_unread_chapters_only` | normal | Boolean | false | `Settings.downloads.download_new_unread_chapters_only` | KEEP | P1 |  |
 | 23 | `downloadNewUnseenEpisodesOnly()` | `download_new_unread_episodes_only` | normal | Boolean | false | `Settings.downloads.download_new_unseen_episodes_only` | KEEP | P1 |  |

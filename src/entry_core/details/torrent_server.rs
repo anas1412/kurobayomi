@@ -155,11 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_extension_or_binary_is_a_toast_and_never_a_panic() {
-        assert_eq!(
-            run(true, true, || Err(StartError::MissingBinary), || true, |_| {}),
-            Outcome::Toast("The torrent extension is not installed".to_owned())
-        );
+    fn a_missing_binary_or_a_failed_start_is_a_toast_and_never_a_panic() {
         assert_eq!(
             run(true, true, || Err(StartError::MissingBinary), || true, |_| {}),
             Outcome::Toast("The torrent server was not found".to_owned())
