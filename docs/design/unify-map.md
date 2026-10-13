@@ -213,6 +213,14 @@ title-page mark-as-read):
 | Unlink order differs (stale: the order is the tracker's, one for both kinds; dead `steps` removed) | src/entry_core/tracking/remove.rs |
 
 ### Player / reader (step 9)
+
+Status 2026-10-13: the user-visible drift is fixed, without a new `media_session` module (the reader and the player already
+share the list builder, the idle inhibitor and the download service's pending deletes): screen kept on while a video
+plays, next/previous/autoplay on the reader's list (the entry's sort and filters, downloaded-only), delete-after-watching,
+a downloaded episode of an online source plays from its file, a seen local episode starts at zero, the watched time goes
+onto the anime history. Left: the progress write still runs on the GTK thread (one small write per 5 s), incognito is read
+once per episode, `warm_neighbours` order, and the two decisions in `docs/recommendations.md`. The drift table below is the
+pre-step-4 survey.
 | Drift | Where |
 |---|---|
 | Seen local episode opened from entry resumes near its end | src/local_flow/open.rs:47 |
