@@ -67,7 +67,9 @@ use crate::entry_core::message::{Notice, UserMessage, present};
 use crate::entry_core::info_block::InfoBlock;
 use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::list_model::RowAction;
+use crate::entry_core::flags::scanlator_filter_active;
 use crate::entry_core::list_options::{self, Spec};
+use crate::entry_core::scanlator_sheet;
 use crate::entry_core::list_view::{self, Callbacks, ItemList, Press};
 use crate::entry_core::text::{Expansion, description};
 use crate::entry_core::page_shell::{self, detach};
@@ -701,6 +703,11 @@ impl View {
             }
             EntryEvent::Failed(message) => self.present(UserMessage::Plain(message), None),
             EntryEvent::Related(groups) => *self.related.borrow_mut() = groups,
+            EntryEvent::Scanlators(sets) => {
+                if let Some(m) = self.model.borrow_mut().as_mut() {
+                    m.scanlators = sets;
+                }
+            }
             EntryEvent::SeasonFacts(extras) => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
                     m.set_season_extras(extras);
@@ -770,6 +777,7 @@ impl View {
         }
         let word = if seasons_entry { m.entry.season_flags() } else { m.entry.item_flags };
         self.spec_of(seasons_entry).sync(&self.options, word, m.downloaded_only);
+        self.options.set_extra_filter(scanlator_filter_active(&m.scanlators.available, &m.scanlators.excluded));
         // a selection disables the menu, as it did the old header button
         self.options.widget.set_sensitive(header.enabled);
         self.spinner.set_spinning(m.flow.refreshing);
@@ -1558,6 +1566,9 @@ impl View {
     /// A pick in the list options menu: a masked write of the episode or season flag word, or "Use as default for all
     /// titles" (asked first). The menu shows the stored word again on the next render.
     fn list_option(self: &Rc<Self>, pick: Pick) {
+        if pick == Pick::Action(list_options::SCANLATORS) {
+            return self.open_scanlator_sheet();
+        }
         if pick == Pick::Action(list_options::DEFAULT) {
             let weak = Rc::downgrade(self);
             list_options::confirm_default(move || {
@@ -1583,6 +1594,17 @@ impl View {
         }
         self.runner.send(if seasons { EntryCmd::SetSeasonFlagBits { entry_id, flag, mask } } else { EntryCmd::SetFlagBits { entry_id, flag, mask } });
         self.render();
+    }
+
+    /// The exclusion sheet of the Scanlator filter row. OK writes the set it hands back.
+    fn open_scanlator_sheet(self: &Rc<Self>) {
+        let Some((entry_id, sets)) = self.model.borrow().as_ref().map(|m| (m.entry.id, m.scanlators.clone())) else { return };
+        let weak = Rc::downgrade(self);
+        scanlator_sheet::open(&sets.available, &sets.excluded, move |excluded| {
+            if let Some(view) = weak.upgrade() {
+                view.runner.send(EntryCmd::SetExcludedScanlators { entry_id, excluded });
+            }
+        });
     }
 
     /// "Use as default for all titles": stores the flag word of the list on screen as the default of its scope, and the

@@ -147,6 +147,8 @@ pub enum EntryCmd {
     /// A manual refresh: every part of the entry is fetched again, and the new episodes may auto-download.
     Refresh { entry_id: i64 },
     SetFlagBits { entry_id: i64, flag: i64, mask: i64 },
+    /// The scanlator sheet's OK: the excluded set becomes exactly this.
+    SetExcludedScanlators { entry_id: i64, excluded: std::collections::BTreeSet<String> },
     /// The skip-intro length in seconds; 0 turns the skip off (`setSkipIntroLength`).
     SetSkipIntroLength { entry_id: i64, length: i32 },
     /// A masked write of the season flag word (a pick of the season list options).
@@ -197,6 +199,8 @@ pub enum EntryEvent {
     Failed(String),
     /// The related groups changed (or were read for the first time).
     Related(Vec<AnimeRelationGroup>),
+    /// The available scanlators or the excluded ones changed.
+    Scanlators(super::store::Scanlators),
     /// The result of `ApplyDefaultsToLibrary`: how many entries took the defaults.
     DefaultsApplied { scope: Scope, updated: usize },
     /// The entry being added has the same title as these library entries.
@@ -483,6 +487,40 @@ impl Shared {
         let mut subs = self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner);
         subs.extend(pair);
         subs.push(related_task.abort_handle());
+        if self.store.kind().is_manga() {
+            subs.extend(self.watch_scanlators(entry_id));
+        }
+    }
+
+    /// The available and the excluded scanlators have their own tables: an exclusion or a new chapter source changes
+    /// them, and the sheet and the filter tint follow. Published once both have arrived.
+    fn watch_scanlators(self: &Arc<Self>, entry_id: i64) -> [tokio::task::AbortHandle; 2] {
+        let sets: Arc<Mutex<(Option<Vec<String>>, Option<std::collections::BTreeSet<String>>)>> = Arc::default();
+        let publish = {
+            let (shared, sets) = (Arc::clone(self), Arc::clone(&sets));
+            move || {
+                if let (Some(available), Some(excluded)) = &*sets.lock().unwrap_or_else(PoisonError::into_inner) {
+                    shared.emit(EntryEvent::Scanlators(super::store::Scanlators { available: available.clone(), excluded: excluded.clone() }));
+                }
+            }
+        };
+        let (mut available_sub, mut excluded_sub) = (self.store.watch_available(entry_id), self.store.watch_excluded(entry_id));
+        let available = tokio::spawn({
+            let (sets, publish) = (Arc::clone(&sets), publish.clone());
+            async move {
+                while let Some(Ok(set)) = available_sub.changed().await {
+                    sets.lock().unwrap_or_else(PoisonError::into_inner).0 = Some(set.iter().cloned().collect());
+                    publish();
+                }
+            }
+        });
+        let excluded = tokio::spawn(async move {
+            while let Some(Ok(set)) = excluded_sub.changed().await {
+                sets.lock().unwrap_or_else(PoisonError::into_inner).1 = Some(set.as_ref().clone());
+                publish();
+            }
+        });
+        [available.abort_handle(), excluded.abort_handle()]
     }
 
     /// One write command. Runs in its own task.
@@ -491,6 +529,7 @@ impl Shared {
             EntryCmd::SetFlagBits { entry_id, flag, mask } => {
                 self.blocking(move |s| s.set_flag_bits(entry_id, flag, mask)).await
             }
+            EntryCmd::SetExcludedScanlators { entry_id, excluded } => self.blocking(move |s| s.set_excluded_scanlators(entry_id, &excluded).map(|()| true)).await,
             EntryCmd::SetSkipIntroLength { entry_id, length } => {
                 self.blocking(move |s| s.set_skip_intro_length(entry_id, length)).await
             }

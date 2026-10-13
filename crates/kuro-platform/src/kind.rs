@@ -31,6 +31,10 @@ impl Kind {
         self == Kind::Anime
     }
 
+    pub fn is_manga(self) -> bool {
+        self == Kind::Manga
+    }
+
     /// Upcoming statuses of the library's Upcoming view: manga `[1, 4]`, anime `[1, 4, 7]`.
     pub const fn upcoming_statuses(self) -> &'static [i64] {
         match self {

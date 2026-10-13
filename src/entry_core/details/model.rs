@@ -85,6 +85,8 @@ pub struct EntryModel {
     /// The download count and source language of each season, by season id. The runner sends them after the load, so
     /// a tile shows no download or language badge until they arrive.
     pub season_extras: HashMap<i64, SeasonExtra>,
+    /// The scanlators of a manga's chapters and the excluded ones; empty for an anime.
+    pub scanlators: super::store::Scanlators,
 }
 
 impl EntryModel {
@@ -139,6 +141,7 @@ impl EntryModel {
             queued: HashMap::new(),
             tracking_count,
             season_extras: HashMap::new(),
+            scanlators: store.scanlators(entry_id)?,
         }))
     }
 

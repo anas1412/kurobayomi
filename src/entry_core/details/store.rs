@@ -25,6 +25,13 @@ use crate::entry_core::library_flow::LibraryRepos;
 use crate::entry_core::refresh_rules::{self, Trigger};
 use crate::entry_core::tracking::facts::Summary;
 
+/// The scanlators of a manga's chapters: the ones the chapters have and the ones the reader excluded.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scanlators {
+    pub available: Vec<String>,
+    pub excluded: std::collections::BTreeSet<String>,
+}
+
 /// Typed access to the tables of one details page, for an entry of one kind. Cheap to clone: it shares one `Db`.
 #[derive(Clone)]
 pub struct EntryStore {
@@ -101,7 +108,27 @@ impl EntryStore {
 
     /// Every episode of the entry (the scanlator exclusions are a manga rule).
     pub fn episodes(&self, entry_id: i64) -> DataResult<Vec<Item>> {
-        self.items.by_entry_id(entry_id, false)
+        self.items.by_entry_id(entry_id, self.kind.is_manga())
+    }
+
+    pub fn scanlators(&self, entry_id: i64) -> DataResult<Scanlators> {
+        Ok(Scanlators {
+            available: self.entries.available_scanlators(entry_id)?.into_iter().collect(),
+            excluded: self.entries.excluded_scanlators(entry_id)?,
+        })
+    }
+
+    /// The excluded set becomes exactly `wanted`, in one transaction.
+    pub fn set_excluded_scanlators(&self, entry_id: i64, wanted: &std::collections::BTreeSet<String>) -> DataResult<()> {
+        self.entries.set_excluded_scanlators(entry_id, wanted)
+    }
+
+    pub fn watch_available(&self, entry_id: i64) -> Subscription<std::collections::BTreeSet<String>> {
+        self.entries.subscribe_available_scanlators(entry_id)
+    }
+
+    pub fn watch_excluded(&self, entry_id: i64) -> Subscription<std::collections::BTreeSet<String>> {
+        self.entries.subscribe_excluded_scanlators(entry_id)
     }
 
     pub fn seasons(&self, parent_id: i64) -> DataResult<Vec<SeasonEntry>> {
@@ -190,7 +217,7 @@ impl EntryStore {
     }
 
     pub fn watch_episodes(&self, entry_id: i64) -> Subscription<Vec<Item>> {
-        self.items.subscribe_by_entry_id(entry_id, false)
+        self.items.subscribe_by_entry_id(entry_id, self.kind.is_manga())
     }
 }
 
