@@ -324,7 +324,7 @@ impl EntryModel {
         let episode_numbers: Vec<f64> = self.episodes.iter().map(|e| e.number).collect();
         let season_numbers: Vec<f64> = self.seasons.iter().map(|s| s.entry.season_number()).collect();
         let missing = header_missing_count(&episode_numbers, &season_numbers);
-        item_header(seasons, count, missing, self.selection.is_active())
+        item_header(self.entry.kind, seasons, count, missing, self.selection.is_active())
     }
 }
 

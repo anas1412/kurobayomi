@@ -240,7 +240,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
     let weak_view: Rc<RefCell<Weak<View>>> = Rc::default();
     // nothing listed: the list says so, with Retry (a refresh that finds nothing raises no notification)
-    let (empty, empty_label) = list_view::empty_list(&tr(MsgKey::no_episodes_error), {
+    let (empty, empty_label) = list_view::empty_list(&tr(crate::entry_core::wording::none_found(kind)), {
         let weak = Rc::clone(&weak_view);
         move || {
             if let Some(view) = weak.borrow().upgrade() {
@@ -706,7 +706,7 @@ impl View {
                     m.set_season_extras(extras);
                 }
             }
-            EntryEvent::DefaultsApplied { scope, updated } => self.present(set_default::applied_message(scope, updated), None),
+            EntryEvent::DefaultsApplied { scope, updated } => self.present(set_default::applied_message(self.env.kind, scope, updated), None),
             EntryEvent::Duplicate { existing } => self.show_duplicate(&existing),
             EntryEvent::Tracking(count) => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
@@ -777,7 +777,7 @@ impl View {
         // one refresh runs at a time
         self.refresh_button.set_sensitive(!m.flow.refreshing && !m.selection.is_active());
         self.empty.set_visible(none_shown && !m.flow.refreshing);
-        self.empty_label.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { MsgKey::no_episodes_error }));
+        self.empty_label.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { crate::entry_core::wording::none_found(self.env.kind) }));
         // the anime and manga statuses share the SAnime/SManga completed code (2)
         self.info.action_row.apply(&RowState::of_entry(
             m.entry.favorite,
@@ -816,7 +816,7 @@ impl View {
             .map(|e| Selected { bookmark: e.bookmark, fillermark: e.fillermark, seen: e.done, last_second_seen: e.progress, downloaded: m.downloaded.contains(&e.id) })
             .collect();
         // Download and Delete show only when the app can queue downloads (`onDownloadEpisode != null`)
-        let ctx = MenuContext { has_download_handler: self.env.backend.has_download_handler(), always_external: always_external(&self.env.prefs) };
+        let ctx = MenuContext { kind: self.env.kind, has_download_handler: self.env.backend.has_download_handler(), always_external: always_external(&self.env.prefs) };
         let rows = bottom_actions(&selected, ctx);
         while let Some(child) = self.bottom_row.first_child() {
             self.bottom_row.remove(&child);
@@ -825,7 +825,7 @@ impl View {
             let button = Button::builder().css_classes(["flat"]).build();
             let content = GBox::new(O::Horizontal, 6);
             content.append(&gtk::Image::from_icon_name(action.icon()));
-            content.append(&Label::new(Some(&tr(action.label()))));
+            content.append(&Label::new(Some(&tr(action.label(self.env.kind)))));
             button.set_child(Some(&content));
             let weak = Rc::downgrade(self);
             let action = *action;

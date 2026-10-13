@@ -33,6 +33,7 @@ pub mod action_row_view;
 pub mod fetch_interval;
 pub mod fetch_interval_dialog;
 pub mod backend;
+pub mod wording;
 pub mod bulk_bar;
 pub mod chapter_actions;
 pub mod cover_view;

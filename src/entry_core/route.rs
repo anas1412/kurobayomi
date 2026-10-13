@@ -71,7 +71,7 @@ pub fn target(manga_id: i64) {
 
 /// Pushes the details page of one manga.
 pub fn open(manga_id: i64) {
-    ui::push(&page_for(manga_id));
+    crate::entry_core::details::route::open_kind(Kind::Manga, manga_id);
 }
 
 /// The page for the `manga_entry_details` screen id. Without a target it is the mockup page, so a caller that has no

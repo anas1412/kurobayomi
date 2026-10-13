@@ -4,6 +4,7 @@
 
 use kuro_domain::items::missing::missing_items_count;
 use kuro_i18n::{MsgKey, tr_plural};
+use kuro_platform::kind::Kind;
 
 /// What the header shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,11 +18,11 @@ pub struct ItemHeader {
 }
 
 /// Builds the header for the processed (filtered and sorted) list. `count` is that list's length (OD-1: Kotlin parity).
-pub fn item_header(seasons: bool, count: usize, missing: i32, any_selected: bool) -> ItemHeader {
+pub fn item_header(kind: Kind, seasons: bool, count: usize, missing: i32, any_selected: bool) -> ItemHeader {
     let count_key = if seasons {
         MsgKey::anime_num_seasons
     } else {
-        MsgKey::anime_num_episodes
+        crate::entry_core::wording::count(kind)
     };
     ItemHeader {
         count: tr_plural(count_key, count as i64, &[]),
@@ -41,29 +42,29 @@ mod tests {
 
     #[test]
     fn count_uses_the_singular_and_plural_episode_text() {
-        assert_eq!(item_header(false, 1, 0, false).count, "1 episode");
-        assert_eq!(item_header(false, 3, 0, false).count, "3 episodes");
+        assert_eq!(item_header(Kind::Anime, false, 1, 0, false).count, "1 episode");
+        assert_eq!(item_header(Kind::Anime, false, 3, 0, false).count, "3 episodes");
     }
 
     #[test]
     fn season_list_uses_the_season_plural() {
-        let header = item_header(true, 2, 0, false);
+        let header = item_header(Kind::Anime, true, 2, 0, false);
         assert_eq!(header.count, tr_plural(MsgKey::anime_num_seasons, 2, &[]));
     }
 
     #[test]
     fn missing_text_hidden_at_zero_and_plural_otherwise() {
-        assert_eq!(item_header(false, 4, 0, false).missing, None);
+        assert_eq!(item_header(Kind::Anime, false, 4, 0, false).missing, None);
         assert_eq!(
-            item_header(false, 4, 2, false).missing,
+            item_header(Kind::Anime, false, 4, 2, false).missing,
             Some(tr_plural(MsgKey::missing_items, 2, &[]))
         );
     }
 
     #[test]
     fn header_is_disabled_while_selecting() {
-        assert!(item_header(false, 4, 0, false).enabled);
-        assert!(!item_header(false, 4, 0, true).enabled);
+        assert!(item_header(Kind::Anime, false, 4, 0, false).enabled);
+        assert!(!item_header(Kind::Anime, false, 4, 0, true).enabled);
     }
 
     #[test]

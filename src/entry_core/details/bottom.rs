@@ -3,6 +3,9 @@
 //! the order the shared menu shows them. The bar is hidden when nothing is selected.
 
 use kuro_i18n::MsgKey;
+use kuro_platform::kind::Kind;
+
+use crate::entry_core::wording;
 
 use super::actions::Mark;
 
@@ -18,8 +21,9 @@ pub struct Selected {
 }
 
 /// What the page supplies besides the selection.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MenuContext {
+    pub kind: Kind,
     /// `onDownloadEpisode != null`: the page can start, cancel or delete downloads.
     pub has_download_handler: bool,
     pub always_external: bool,
@@ -73,15 +77,15 @@ impl BottomAction {
     }
 
     /// The label of the row.
-    pub fn label(self) -> MsgKey {
+    pub fn label(self, kind: Kind) -> MsgKey {
         match self {
-            Self::Bookmark => MsgKey::action_bookmark_episode,
-            Self::RemoveBookmark => MsgKey::action_remove_bookmark_episode,
+            Self::Bookmark => wording::bookmark(kind, true),
+            Self::RemoveBookmark => wording::bookmark(kind, false),
             Self::Fillermark => MsgKey::action_fillermark_episode,
             Self::RemoveFillermark => MsgKey::action_remove_fillermark_episode,
-            Self::MarkViewed => MsgKey::action_mark_as_seen,
-            Self::MarkUnviewed => MsgKey::action_mark_as_unseen,
-            Self::MarkPreviousViewed => MsgKey::action_mark_previous_as_seen,
+            Self::MarkViewed => wording::mark_done(kind, true),
+            Self::MarkUnviewed => wording::mark_done(kind, false),
+            Self::MarkPreviousViewed => wording::mark_previous(kind),
             Self::Download => MsgKey::action_download,
             Self::Delete => MsgKey::action_delete,
             Self::External => MsgKey::action_play_externally,
@@ -122,15 +126,17 @@ pub fn bottom_actions(selected: &[Selected], ctx: MenuContext) -> Vec<BottomActi
     };
     push(any(|e| !e.bookmark), BottomAction::Bookmark);
     push(all(|e| e.bookmark), BottomAction::RemoveBookmark);
-    push(any(|e| !e.fillermark), BottomAction::Fillermark);
-    push(all(|e| e.fillermark), BottomAction::RemoveFillermark);
+    // a filler mark and a player choice exist for anime only
+    let anime = ctx.kind.is_anime();
+    push(anime && any(|e| !e.fillermark), BottomAction::Fillermark);
+    push(anime && all(|e| e.fillermark), BottomAction::RemoveFillermark);
     push(any(|e| !e.seen), BottomAction::MarkViewed);
     push(any(|e| e.seen || e.last_second_seen > 0), BottomAction::MarkUnviewed);
     push(single, BottomAction::MarkPreviousViewed);
     push(ctx.has_download_handler && any(|e| !e.downloaded), BottomAction::Download);
     push(ctx.has_download_handler && any(|e| e.downloaded), BottomAction::Delete);
-    push(!ctx.always_external && single, BottomAction::External);
-    push(ctx.always_external && single, BottomAction::Internal);
+    push(anime && !ctx.always_external && single, BottomAction::External);
+    push(anime && ctx.always_external && single, BottomAction::Internal);
     rows
 }
 
@@ -143,7 +149,7 @@ mod tests {
     }
 
     fn ctx(has_download: bool, always_external: bool) -> MenuContext {
-        MenuContext { has_download_handler: has_download, always_external }
+        MenuContext { kind: Kind::Anime, has_download_handler: has_download, always_external }
     }
 
     #[test]
@@ -167,9 +173,9 @@ mod tests {
             BottomAction::Internal,
         ];
         for action in all {
-            assert!(!kuro_i18n::tr(action.label()).is_empty() && !action.icon().is_empty(), "{action:?}");
+            assert!(!kuro_i18n::tr(action.label(Kind::Anime)).is_empty() && !action.icon().is_empty(), "{action:?}");
         }
-        assert_eq!(kuro_i18n::tr(BottomAction::MarkPreviousViewed.label()), "Mark previous as watched");
+        assert_eq!(kuro_i18n::tr(BottomAction::MarkPreviousViewed.label(Kind::Anime)), "Mark previous as watched");
     }
 
     #[test]

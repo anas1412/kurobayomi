@@ -4,6 +4,7 @@
 
 use kuro_data::item::Item;
 use kuro_i18n::{Arg, MsgKey, trf};
+use kuro_platform::kind::Kind;
 
 use super::format::{format_episode_number, watch_progress};
 use crate::entry_core::list_model::{RowItem, subtitle};
@@ -11,9 +12,18 @@ use crate::entry_core::list_model::{RowItem, subtitle};
 /// The title: `Episode {n}` in episode-number mode, otherwise the episode name.
 pub fn title(ep: &Item, display_number: bool) -> String {
     if display_number {
-        trf(MsgKey::display_mode_episode, &[("arg1", Arg::Str(&format_episode_number(ep.number)))])
+        trf(crate::entry_core::wording::numbered(ep.kind), &[("arg1", Arg::Str(&format_episode_number(ep.number)))])
     } else {
         ep.name.clone()
+    }
+}
+
+/// The progress of a partly consumed item: "Page: N" of a chapter (`progress` is the last page read, from zero), the time
+/// left of an episode.
+fn progress(ep: &Item) -> Option<String> {
+    match ep.kind {
+        Kind::Manga => (!ep.done && ep.progress > 0).then(|| trf(MsgKey::chapter_progress, &[("arg1", Arg::Int(ep.progress + 1))])),
+        Kind::Anime => watch_progress(ep.done, ep.progress, ep.total_seconds()),
     }
 }
 
@@ -22,7 +32,7 @@ pub fn title(ep: &Item, display_number: bool) -> String {
 /// milliseconds, as the player stores them (behaviour 3.4). The download state and the button are the page's to set.
 pub fn row(ep: &Item, display_number: bool, show_summaries: bool, selected: bool) -> RowItem {
     RowItem {
-        subtitle: subtitle(ep.date_upload, watch_progress(ep.done, ep.progress, ep.total_seconds()), ep.scanlator.as_deref()),
+        subtitle: subtitle(ep.date_upload, progress(ep), ep.scanlator.as_deref()),
         summary: ep.summary.clone().filter(|t| show_summaries && !t.trim().is_empty()),
         read: ep.done,
         bookmark: ep.bookmark,
