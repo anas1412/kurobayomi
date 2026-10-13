@@ -3,6 +3,7 @@
 //! [`open_episode`] for a file, or [`open_source_episode`] for an episode of an online source. Logic lives in `playback` (mpv), `source` (the source's video) and `store` (watch progress); this
 //! file is widget wiring. Main thread only.
 
+mod after_seen;
 mod controls;
 mod gl;
 mod menu;
@@ -207,6 +208,7 @@ impl Player {
             self.save(true);
             self.playback.stop();
             self.awake.sync_for(false, "Playing video");
+            after_seen::flush();
         }
     }
 }

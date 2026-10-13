@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use kuro_data::entry::EntryRepo;
-use kuro_data::item::ItemRepo;
+use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
 
 use crate::reader::chapters::{ListOptions, build_reader_list};
@@ -22,6 +22,16 @@ pub enum Step {
 /// that does not exist, and when downloaded-only mode left the episode out of the list. `on_disk` holds the ids of the
 /// downloaded episodes of the entry.
 pub fn adjacent(db: &Arc<Db>, episode_id: i64, step: Step, downloaded_only: bool, on_disk: &HashSet<i64>) -> Result<Option<i64>, String> {
+    let Some((list, at)) = playback_list(db, episode_id, downloaded_only, on_disk)? else { return Ok(None) };
+    Ok(match step {
+        Step::Previous => at.checked_sub(1).map(|i| list[i].id),
+        Step::Next => list.get(at + 1).map(|e| e.id),
+    })
+}
+
+/// The entry's playback list and the position of `episode_id` in it. `None` for a row that does not exist and when
+/// downloaded-only mode left the episode out.
+pub fn playback_list(db: &Arc<Db>, episode_id: i64, downloaded_only: bool, on_disk: &HashSet<i64>) -> Result<Option<(Vec<Item>, usize)>, String> {
     let repo = ItemRepo::new(Arc::clone(db));
     let Some(current) = repo.by_id(episode_id).map_err(|e| e.to_string())? else {
         return Ok(None);
@@ -39,13 +49,7 @@ pub fn adjacent(db: &Arc<Db>, episode_id: i64, step: Step, downloaded_only: bool
     let Ok(list) = build_reader_list(&episodes, episode_id, &options, |item| is_local || on_disk.contains(&item.id)) else {
         return Ok(None);
     };
-    let Some(at) = list.iter().position(|e| e.id == episode_id) else {
-        return Ok(None);
-    };
-    Ok(match step {
-        Step::Previous => at.checked_sub(1).map(|i| list[i].id),
-        Step::Next => list.get(at + 1).map(|e| e.id),
-    })
+    Ok(list.iter().position(|e| e.id == episode_id).map(|at| (list, at)))
 }
 
 /// [`adjacent`] over the app's database, its downloads and its downloaded-only mode.
@@ -56,7 +60,7 @@ pub fn neighbour(episode_id: i64, step: Step) -> Result<Option<i64>, String> {
 }
 
 /// The ids of the downloaded episodes of the entry that episode `episode_id` belongs to.
-fn downloaded_ids(db: &Arc<Db>, episode_id: i64) -> HashSet<i64> {
+pub fn downloaded_ids(db: &Arc<Db>, episode_id: i64) -> HashSet<i64> {
     let items = ItemRepo::new(Arc::clone(db));
     let Some(entry_id) = items.by_id(episode_id).ok().flatten().map(|e| e.entry_id) else { return Default::default() };
     let (Ok(entry), Ok(episodes)) = (EntryRepo::new(Arc::clone(db)).by_id(entry_id), items.by_entry_id(entry_id, false)) else { return Default::default() };

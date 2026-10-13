@@ -140,6 +140,7 @@ impl Tracker {
                     apply(&mut self.stored, &changes);
                     if changes.seen == Some(true) {
                         (self.on_seen)(self.stored.entry_id, self.stored.number);
+                        super::after_seen::run(self.episode_id);
                     }
                 }
                 Err(e) => tracing::error!(episode_id = self.episode_id, error = %e, "progress write failed"),
