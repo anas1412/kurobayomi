@@ -10,12 +10,12 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use kuro_data::item::ItemRepo;
 use kuro_db::handle::Db;
-use kuro_downloads::next::delete::DeleteRules;
-use kuro_downloads::next::index::DownloadIndex;
-use kuro_downloads::next::queue::{CancelTarget, Place, Queue};
-use kuro_downloads::next::runner::SourceDirectory as _;
-use kuro_downloads::next::service::Downloads;
-use kuro_downloads::next::unit::Availability;
+use kuro_downloads::delete::DeleteRules;
+use kuro_downloads::index::DownloadIndex;
+use kuro_downloads::queue::{CancelTarget, Place, Queue};
+use kuro_downloads::runner::SourceDirectory as _;
+use kuro_downloads::service::Downloads;
+use kuro_downloads::unit::Availability;
 use kuro_platform::kind::Kind;
 
 use crate::downloads::directory::AppDirectory;
@@ -341,9 +341,9 @@ pub mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_downloads::next::index::IndexRoots;
-    use kuro_downloads::next::runner::{RunCtx, UnitDone, UnitJob, UnitRunner};
-    use kuro_downloads::next::unit::{SourceKey, UnitRef};
+    use kuro_downloads::index::IndexRoots;
+    use kuro_downloads::runner::{RunCtx, UnitDone, UnitJob, UnitRunner};
+    use kuro_downloads::unit::{SourceKey, UnitRef};
     use crate::updates::download_state::DownloadState;
 
     #[test]
@@ -394,11 +394,11 @@ mod tests {
 
     /// A service over runners that run nothing: units queue and wait, nothing downloads.
     fn live_backend(rt: &tokio::runtime::Runtime) -> (tempfile::TempDir, Arc<Db>, LiveBackend) {
-        use kuro_downloads::next::index::IndexRoots;
-        use kuro_downloads::next::layout::Layout;
-        use kuro_downloads::next::pending::PendingStore;
-        use kuro_downloads::next::queue::{Layouts, QueueParams};
-        use kuro_downloads::next::store::QueueStore;
+        use kuro_downloads::index::IndexRoots;
+        use kuro_downloads::layout::Layout;
+        use kuro_downloads::pending::PendingStore;
+        use kuro_downloads::queue::{Layouts, QueueParams};
+        use kuro_downloads::store::QueueStore;
 
         let dir = tempfile::tempdir().unwrap();
         let path = kuro_db::schema_unified::db_path(dir.path());
@@ -410,7 +410,7 @@ mod tests {
         };
         let roots = IndexRoots { manga: dir.path().join("manga"), anime: dir.path().join("anime") };
         let index = DownloadIndex::open(roots, dir.path());
-        let (_tx, connectivity) = tokio::sync::watch::channel(kuro_downloads::next::gate::Connectivity { online: true, metered: false });
+        let (_tx, connectivity) = tokio::sync::watch::channel(kuro_downloads::gate::Connectivity { online: true, metered: false });
         let queue = {
             let _entered = rt.enter();
             Queue::spawn(QueueParams {

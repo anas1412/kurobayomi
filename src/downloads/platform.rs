@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use kuro_downloads::next::gate::Connectivity;
+use kuro_downloads::gate::Connectivity;
 use kuro_platform::power_network::{Conditions, POLL_INTERVAL, PowerNetworkState};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;

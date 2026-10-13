@@ -9,8 +9,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use kuro_data::entry::EntryRepo;
-use kuro_data::item::ItemRepo;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -18,20 +16,18 @@ use tokio::task::{AbortHandle, Id, JoinError, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 
-use super::events::DownloadEvent;
-use super::gate::{Connectivity, DEBOUNCE, Gate, GateAction, verdict};
-use super::index::DownloadIndex;
-use super::layout::{Layout, check_free_space};
-use super::restore;
-use super::queue::{CancelTarget, EnqueueRequest, Enqueued, Place, QueueParams, Layouts, Refusal, Snapshot, bulk_warning, plan_enqueue};
-use super::runner::{RunCtx, SourceDirectory, UnitDone, UnitJob, UnitRunner};
-use super::state::{Lane, RunState, StartMode};
-use super::store::{QueueStore, StoreError, StoredRow};
-use super::unit::{Availability, EntryRef, QueuedUnit, SourceKey, UnitRef};
-use crate::downloader::unix_millis;
+use crate::events::DownloadEvent;
+use crate::gate::{Connectivity, DEBOUNCE, Gate, GateAction, verdict};
+use crate::index::DownloadIndex;
+use crate::layout::{FreeSpaceFn, Layout, check_free_space};
+use crate::restore;
+use crate::queue::{CancelTarget, EnqueueRequest, Enqueued, Place, QueueParams, Layouts, Refusal, Snapshot, bulk_warning, plan_enqueue};
+use crate::runner::{RunCtx, SourceDirectory, UnitDone, UnitJob, UnitRunner};
+use crate::state::{Lane, RunState, StartMode};
+use crate::store::{QueueStore, StoreError, StoredRow};
+use crate::unit::{Availability, QueuedUnit, SourceKey, UnitRef, unix_millis};
 use crate::error::{DownloadError, FailureKind};
 use crate::model::DownloadState;
-use crate::pipeline::FreeSpaceFn;
 
 /// Progress events are coalesced to this interval per unit (10 Hz).
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
@@ -102,7 +98,7 @@ struct Actor {
     gate: Gate,
     /// Units the network stopped, per lane. They go back to QUEUE when it returns.
     network_failed: [HashSet<i64>; 2],
-    /// Open [`super::queue::EntryHold`]s per lane. A held lane starts nothing.
+    /// Open [`crate::queue::EntryHold`]s per lane. A held lane starts nothing.
     holds: [usize; 2],
     /// A unit finished since the lane last started: the end of the run announces it.
     finished_in_run: [bool; 2],
@@ -780,14 +776,18 @@ mod tests {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use async_trait::async_trait;
+    use kuro_data::entry::EntryRepo;
+    use kuro_data::item::ItemRepo;
+
+    use crate::unit::EntryRef;
     use kuro_data::entry::Entry;
     use kuro_data::item::Item;
     use kuro_source::SourceError;
 
-    use crate::next::index::IndexRoots;
-    use crate::next::naming::{UnitName, entry_dir_name, staging_dir_names, unit_dir_name};
-    use crate::next::queue::Queue;
-    use crate::next::unit::fixtures;
+    use crate::index::IndexRoots;
+    use crate::naming::{UnitName, entry_dir_name, staging_dir_names, unit_dir_name};
+    use crate::queue::Queue;
+    use crate::unit::fixtures;
 
     const LONG: u64 = 3_600_000;
 

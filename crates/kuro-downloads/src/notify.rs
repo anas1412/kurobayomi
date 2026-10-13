@@ -1,218 +1,202 @@
-//! Downloader notifications: progress, paused, complete, warning and error (port of MangaDownloadNotifier.kt and the
-//! title rules of Ntf.kt). The text rules are pure functions. [`spawn_notifier`] turns downloader events into calls on
-//! a [`NotificationSink`], which the GUI implements over `gio::Notification`.
+//! The one download notifier, for both kinds (docs/design/unified-downloads.md 2.12). It replaces `notify::dispatch` and
+//! `AnimeNotifier`. Per kind it has its own notification ids, its own error digest and its own "done" text. No progress
+//! and no paused notice (user, 2026-10-12): only the end, warnings and failures are announced.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use kuro_core::text::chop;
-use kuro_platform::notifier::Notifier;
+use kuro_platform::kind::Kind;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::events::DownloadEvent;
+use crate::anime::ffmpeg::FFMPEG_HELP_URL;
+use crate::queue::BULK_WARNING_HELP_URL;
+use crate::notice::{Action, DONE_TITLE, DOWNLOADER_TITLE, Notice, NotificationSink, Priority, UNKNOWN_ERROR_TEXT};
 
-/// Replaces the progress notification on every update, and after pause or completion (pitfall 15).
-pub const PROGRESS_ID: &str = "dl-progress";
-pub const WARNING_ID: &str = "dl-warning";
-pub const ERROR_ID: &str = "dl-error";
+pub const MANGA_PROGRESS_ID: &str = "dl-manga-progress";
+pub const MANGA_WARNING_ID: &str = "dl-manga-warning";
+pub const MANGA_ERROR_ID: &str = "dl-manga-error";
+pub const ANIME_PROGRESS_ID: &str = "dl-anime-progress";
+pub const ANIME_WARNING_ID: &str = "dl-anime-warning";
+pub const ANIME_ERROR_ID: &str = "dl-anime-error";
 
-pub const DOWNLOADER_TITLE: &str = "Downloader";
-/// The one notice a finished download posts (user, 2026-10-12: only the end is announced, besides failures).
-pub const DONE_TITLE: &str = "Downloads finished";
-pub const DONE_TEXT: &str = "Chapters are ready to read offline";
-pub const UNKNOWN_ERROR_TEXT: &str = "Could not download chapter due to unexpected error";
-const MANGA_TITLE_CAP: usize = 15;
-const CONTENT_TITLE_CAP: usize = 30;
-const ELLIPSIS: &str = "…";
+pub const MANGA_DONE_TEXT: &str = "Chapters are ready to read offline";
+pub const ANIME_DONE_TEXT: &str = "Episodes are ready to watch offline";
 
-/// Notification importance class. The downloader only uses `Low`: no sound, for every kind (T-23a-019, D-DL-03).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Priority {
-    Low,
+/// Errors inside this window are summarised into one count (E-U02).
+pub const ERROR_WINDOW: Duration = Duration::from_secs(5);
+
+/// The notification ids of a kind: `(progress and done, warning, error)`.
+fn ids(kind: Kind) -> (&'static str, &'static str, &'static str) {
+    match kind {
+        Kind::Manga => (MANGA_PROGRESS_ID, MANGA_WARNING_ID, MANGA_ERROR_ID),
+        Kind::Anime => (ANIME_PROGRESS_ID, ANIME_WARNING_ID, ANIME_ERROR_ID),
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Notice {
-    pub id: &'static str,
-    pub priority: Priority,
-    pub title: String,
-    pub body: Option<String>,
-    pub ongoing: bool,
-    pub actions: Vec<Action>,
-    /// Seconds before the notice expires on its own (`setTimeoutAfter`).
-    pub expire_secs: Option<u32>,
+fn done_text(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Manga => MANGA_DONE_TEXT,
+        Kind::Anime => ANIME_DONE_TEXT,
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Action {
-    Pause,
-    /// The anime progress line's pause button, labelled "Stop" (T-24a-064). It pauses the run like [`Action::Pause`].
-    Stop,
-    Resume,
-    CancelAll,
-    ShowManga,
-    ShowAnime,
-    /// Opens the help link of a warning in the default browser (T-24a-065). Carries the link.
-    OpenHelp(&'static str),
+fn show_action(kind: Kind) -> Action {
+    match kind {
+        Kind::Manga => Action::ShowManga,
+        Kind::Anime => Action::ShowAnime,
+    }
 }
 
-impl Action {
-    /// The button text. Handled inside the app: the GUI maps each action to a desktop action, not a broadcast.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Pause => "Pause",
-            Self::Stop => "Stop",
-            Self::Resume => "Resume",
-            Self::CancelAll => "Cancel all",
-            Self::ShowManga => "Show manga",
-            Self::ShowAnime => "Show anime",
-            Self::OpenHelp(_) => "Help",
+/// The help link of a warning, when it is one this app knows (the queue-size warning or the ffmpeg help page).
+pub fn known_help_url(url: Option<&str>) -> Option<&'static str> {
+    [BULK_WARNING_HELP_URL, FFMPEG_HELP_URL].into_iter().find(|known| Some(*known) == url)
+}
+
+/// Counts errors in a window that starts at the first one. The first error in a window is shown on its own, each later
+/// one in the same window turns the notice into a summary.
+#[derive(Debug, Default)]
+pub struct ErrorDigest {
+    window_start: Option<Instant>,
+    count: usize,
+}
+
+impl ErrorDigest {
+    /// Records an error at `now`. `true` opens a new window (show the single notice), `false` joins one (show the
+    /// summary of [`ErrorDigest::count`]).
+    pub fn record(&mut self, now: Instant) -> bool {
+        match self.window_start {
+            Some(start) if now.saturating_duration_since(start) <= ERROR_WINDOW => {
+                self.count += 1;
+                false
+            }
+            _ => {
+                self.window_start = Some(now);
+                self.count = 1;
+                true
+            }
         }
     }
-}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Effect {
-    Show(Notice),
-    Withdraw(&'static str),
-}
-
-/// Where notifications go. The GUI implements it over `gio::Notification`, replacing by id.
-pub trait NotificationSink: Send + Sync {
-    fn show(&self, notice: &Notice);
-    fn withdraw(&self, id: &'static str);
-}
-
-/// A [`NotificationSink`] over the platform [`Notifier`]. The text is already final: [`effect_for`] and the anime
-/// notice builder hide names under `hide_content` ("Downloading (x/y)", empty body), so the notice goes out as built.
-/// The platform's blanket replacement (`send` with `sensitive`) is not used: it would overwrite the counts with a
-/// generic text (T-23a-043, T-24a-028).
-pub struct NotifierSink {
-    notifier: Arc<dyn Notifier>,
-}
-
-impl NotifierSink {
-    pub fn new(notifier: Arc<dyn Notifier>) -> Self {
-        Self { notifier }
+    pub fn count(&self) -> usize {
+        self.count
     }
 }
 
-impl NotificationSink for NotifierSink {
-    fn show(&self, notice: &Notice) {
-        self.notifier.show(notice.id, &notice.title, notice.body.as_deref());
-    }
-
-    fn withdraw(&self, id: &'static str) {
-        self.notifier.withdraw(id);
-    }
+pub struct DownloadNotifier {
+    sink: Arc<dyn NotificationSink>,
+    /// "Hide notification content": a failure notice then names neither the title nor the unit.
+    hide_content: Arc<AtomicBool>,
+    /// One digest per kind, in `Kind::ALL` order.
+    errors: [ErrorDigest; 2],
 }
 
-/// Pure mapping from an event to the notification it needs, if any.
-pub fn effect_for(event: &DownloadEvent, _hide_content: bool) -> Option<Effect> {
-    match event {
-        // no notification while downloading: the app's own Downloads item shows the progress; only the end is announced
-        DownloadEvent::Progress { .. } => None,
-        // no "Paused" notice either (user, 2026-10-12): only the end and failures are announced; the Downloads item
-        // shows a paused queue
-        DownloadEvent::Paused => None,
-        DownloadEvent::Complete => Some(Effect::Show(Notice {
-            id: PROGRESS_ID,
-            priority: Priority::Low,
-            title: DONE_TITLE.into(),
-            body: Some(DONE_TEXT.into()),
-            ongoing: false,
-            actions: Vec::new(),
-            expire_secs: None,
-        })),
-        DownloadEvent::Dismiss => Some(Effect::Withdraw(PROGRESS_ID)),
-        DownloadEvent::Warning { text, timeout_secs, .. } => Some(Effect::Show(Notice {
-            id: WARNING_ID,
-            priority: Priority::Low,
-            title: DOWNLOADER_TITLE.into(),
-            body: Some(text.clone()),
-            ongoing: false,
-            actions: Vec::new(),
-            expire_secs: *timeout_secs,
-        })),
-        DownloadEvent::Error { manga_title, chapter_name, message, .. } => {
-            let title = match (manga_title, chapter_name) {
-                (Some(manga), Some(chapter)) => format!("{manga}: {chapter}"),
-                (Some(manga), None) => manga.clone(),
+impl DownloadNotifier {
+    pub fn new(sink: Arc<dyn NotificationSink>, hide_content: Arc<AtomicBool>) -> Self {
+        Self { sink, hide_content, errors: [ErrorDigest::default(), ErrorDigest::default()] }
+    }
+
+    /// Sends the notification an event needs, if any.
+    pub fn dispatch(&mut self, now: Instant, event: &DownloadEvent) {
+        match event {
+            DownloadEvent::Complete { kind } => {
+                let (progress, _, _) = ids(*kind);
+                self.sink.show(&Notice {
+                    id: progress,
+                    priority: Priority::Low,
+                    title: DONE_TITLE.into(),
+                    body: Some(done_text(*kind).into()),
+                    ongoing: false,
+                    actions: Vec::new(),
+                    expire_secs: None,
+                });
+            }
+            DownloadEvent::Dismiss { kind } => self.sink.withdraw(ids(*kind).0),
+            DownloadEvent::Warning { kind, text, timeout_secs, help_url } => {
+                self.sink.show(&Notice {
+                    id: ids(*kind).1,
+                    priority: Priority::Low,
+                    title: DOWNLOADER_TITLE.into(),
+                    body: Some(text.clone()),
+                    ongoing: false,
+                    actions: known_help_url(help_url.as_deref()).map(Action::OpenHelp).into_iter().collect(),
+                    expire_secs: *timeout_secs,
+                });
+            }
+            DownloadEvent::Error { kind, entry_title, unit_name, message, .. } => {
+                self.error(now, *kind, entry_title.as_deref(), unit_name.as_deref(), message);
+            }
+            // The app's own Downloads item shows progress and a paused queue.
+            DownloadEvent::Progress { .. }
+            | DownloadEvent::Paused { .. }
+            | DownloadEvent::Started { .. }
+            | DownloadEvent::Status { .. }
+            | DownloadEvent::Finished { .. }
+            | DownloadEvent::QueueChanged { .. } => {}
+        }
+    }
+
+    fn error(&mut self, now: Instant, kind: Kind, entry_title: Option<&str>, unit_name: Option<&str>, message: &str) {
+        let (_, _, error_id) = ids(kind);
+        let digest = &mut self.errors[kind_slot(kind)];
+        let notice = if digest.record(now) {
+            let hide = self.hide_content.load(Ordering::Relaxed);
+            let (entry_title, unit_name) = if hide { (None, None) } else { (entry_title, unit_name) };
+            let title = match (entry_title, unit_name) {
+                (Some(entry), Some(unit)) => format!("{entry}: {unit}"),
+                (Some(entry), None) => entry.to_owned(),
                 (None, _) => DOWNLOADER_TITLE.into(),
             };
-            let body = if message.is_empty() { UNKNOWN_ERROR_TEXT.into() } else { message.clone() };
-            Some(Effect::Show(Notice {
-                id: ERROR_ID,
+            let body = if message.is_empty() { UNKNOWN_ERROR_TEXT.to_owned() } else { message.to_owned() };
+            Notice {
+                id: error_id,
                 priority: Priority::Low,
                 title,
                 body: Some(body),
                 ongoing: false,
-                actions: if manga_title.is_some() { vec![Action::ShowManga] } else { Vec::new() },
+                actions: if entry_title.is_some() { vec![show_action(kind)] } else { Vec::new() },
                 expire_secs: None,
-            }))
-        }
-        DownloadEvent::Started
-        | DownloadEvent::Status { .. }
-        | DownloadEvent::Finished { .. }
-        | DownloadEvent::QueueChanged => None,
+            }
+        } else {
+            let noun = match kind {
+                Kind::Manga => "chapter",
+                Kind::Anime => "episode",
+            };
+            Notice {
+                id: error_id,
+                priority: Priority::Low,
+                title: DOWNLOADER_TITLE.into(),
+                body: Some(format!("{} {noun} downloads failed", digest.count())),
+                ongoing: false,
+                actions: Vec::new(),
+                expire_secs: None,
+            }
+        };
+        self.sink.show(&notice);
     }
 }
 
-/// Title of the progress notification: the manga title (15 units at most) and the chapter name without its manga
-/// prefix, at most 30 units. The prefix is removed before the title is cut, so long titles strip correctly (EC-108).
-pub fn progress_title(manga_title: &str, chapter_name: &str) -> String {
-    let chapter = strip_title_prefix(chapter_name, manga_title);
-    let manga = chop(manga_title, MANGA_TITLE_CAP, ELLIPSIS).unwrap_or_else(|_| manga_title.to_owned());
-    chop(&format!("{manga} - {chapter}"), CONTENT_TITLE_CAP, ELLIPSIS).unwrap_or_else(|_| format!("{manga} - {chapter}"))
-}
-
-/// Removes a leading manga title (case-insensitive), then whitespace, dashes and whitespace, as Kotlin's
-/// `Regex("$title[\\s]*[-]*[\\s]*", IGNORE_CASE)` does.
-fn strip_title_prefix<'a>(chapter: &'a str, manga_title: &str) -> &'a str {
-    if manga_title.is_empty() {
-        return chapter;
-    }
-    let Some(rest) = strip_prefix_ignore_case(chapter, manga_title) else {
-        return chapter;
-    };
-    let rest = rest.trim_start_matches(char::is_whitespace);
-    let rest = rest.trim_start_matches('-');
-    rest.trim_start_matches(char::is_whitespace)
-}
-
-fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    let mut rest = text;
-    for want in prefix.chars() {
-        let got = rest.chars().next()?;
-        if !got.to_lowercase().eq(want.to_lowercase()) {
-            return None;
-        }
-        rest = &rest[got.len_utf8()..];
-    }
-    Some(rest)
-}
-
-/// Sends the effect of one event to the sink.
-pub fn dispatch(event: &DownloadEvent, hide_content: bool, sink: &dyn NotificationSink) {
-    match effect_for(event, hide_content) {
-        Some(Effect::Show(notice)) => sink.show(&notice),
-        Some(Effect::Withdraw(id)) => sink.withdraw(id),
-        None => {}
+fn kind_slot(kind: Kind) -> usize {
+    match kind {
+        Kind::Manga => 0,
+        Kind::Anime => 1,
     }
 }
 
-/// Forwards events to `sink` until the channel closes. `hide_content` is read per event, so a settings change
-/// applies to the next update (FM-08).
+/// Forwards events to a [`DownloadNotifier`] until the channel closes. `hide_content` is read per event, so a settings
+/// change applies to the next notice.
 pub fn spawn_notifier(
     mut events: broadcast::Receiver<DownloadEvent>,
     sink: Arc<dyn NotificationSink>,
     hide_content: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let mut notifier = DownloadNotifier::new(sink, hide_content);
         loop {
             match events.recv().await {
-                Ok(event) => dispatch(&event, hide_content.load(Ordering::Relaxed), sink.as_ref()),
+                Ok(event) => notifier.dispatch(Instant::now(), &event),
                 Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             }
@@ -225,132 +209,163 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    fn progress(manga: &str, chapter: &str, done: usize, total: usize) -> DownloadEvent {
-        DownloadEvent::Progress {
-            chapter_id: 1,
-            manga_title: manga.into(),
-            chapter_name: chapter.into(),
-            downloaded: done,
-            total,
-        }
-    }
-
-    fn shown(event: &DownloadEvent, hide: bool) -> Notice {
-        match effect_for(event, hide) {
-            Some(Effect::Show(n)) => n,
-            other => panic!("expected a notice, got {other:?}"),
-        }
-    }
-
-    // TST-51
-    #[test]
-    fn progress_title_rules_ec_107_to_ec_109() {
-        // EC-109: the manga title is removed from the chapter name, ignoring case and separators.
-        assert_eq!(progress_title("One Piece", "one piece - Chapter 5"), "One Piece - Chapter 5");
-        // Plain names are kept.
-        assert_eq!(progress_title("Berserk", "Chapter 1"), "Berserk - Chapter 1");
-        // The content title is cut to 30 units with an ellipsis.
-        let long = progress_title("Berserk", &"x".repeat(100));
-        assert_eq!(long.encode_utf16().count(), 30);
-        assert!(long.ends_with('…'));
-        // EC-108: a 30-unit manga title is cut to 15 units before the prefix rule applies.
-        let t = progress_title("A very long manga title here", "A very long manga title here - Chapter 3");
-        assert_eq!(t, "A very long ma… - Chapter 3");
-    }
-
-    #[test]
-    fn downloading_shows_no_notification_only_the_end_does() {
-        assert!(effect_for(&progress("Berserk", "Chapter 1", 3, 10), false).is_none());
-        assert!(effect_for(&progress("Berserk", "Chapter 1", 3, 10), true).is_none());
-    }
-
-    #[test]
-    fn a_finished_queue_says_so_a_pause_says_nothing_and_a_dismiss_withdraws() {
-        let n = shown(&DownloadEvent::Complete, false);
-        assert_eq!((n.title.as_str(), n.body.as_deref()), (DONE_TITLE, Some(DONE_TEXT)));
-        assert!(!n.ongoing && n.actions.is_empty());
-        assert_eq!(effect_for(&DownloadEvent::Paused, false), None);
-        assert_eq!(effect_for(&DownloadEvent::Dismiss, false), Some(Effect::Withdraw(PROGRESS_ID)));
-    }
-
-    #[test]
-    fn error_title_without_chapter_has_no_null_text_ec_110() {
-        let with_chapter = DownloadEvent::Error {
-            chapter_id: Some(1),
-            manga_id: Some(2),
-            manga_title: Some("Berserk".into()),
-            chapter_name: Some("Chapter 1".into()),
-            message: "HTTP error 500".into(),
-        };
-        let n = shown(&with_chapter, false);
-        assert_eq!(n.title, "Berserk: Chapter 1");
-        assert_eq!(n.body.as_deref(), Some("HTTP error 500"));
-        assert_eq!(n.actions, vec![Action::ShowManga]);
-
-        let without = DownloadEvent::Error {
-            chapter_id: None,
-            manga_id: Some(2),
-            manga_title: Some("Berserk".into()),
-            chapter_name: None,
-            message: String::new(),
-        };
-        let n = shown(&without, false);
-        assert_eq!(n.title, "Berserk");
-        assert_eq!(n.body.as_deref(), Some(UNKNOWN_ERROR_TEXT), "TST-52 fallback text");
-        assert!(!n.title.contains("null"));
-        assert!(!n.ongoing);
-    }
-
-    #[test]
-    fn warning_carries_its_timeout_and_low_priority_id() {
-        let w = DownloadEvent::Warning { text: "big".into(), timeout_secs: Some(30), help_url: None };
-        let n = shown(&w, false);
-        assert_eq!(n.id, WARNING_ID);
-        assert_eq!(n.expire_secs, Some(30));
-        assert_eq!(n.title, DOWNLOADER_TITLE);
-    }
-
-    #[test]
-    fn every_downloader_notice_is_low_importance() {
-        let events = [
-            DownloadEvent::Complete,
-            DownloadEvent::Warning { text: "w".into(), timeout_secs: None, help_url: None },
-            DownloadEvent::Error { chapter_id: None, manga_id: None, manga_title: None, chapter_name: None, message: "e".into() },
-        ];
-        for event in &events {
-            assert_eq!(shown(event, false).priority, Priority::Low);
-        }
-    }
-
-    #[test]
-    fn status_and_bookkeeping_events_send_nothing() {
-        assert_eq!(effect_for(&DownloadEvent::Started, false), None);
-        assert_eq!(effect_for(&DownloadEvent::QueueChanged, false), None);
-        assert_eq!(effect_for(&DownloadEvent::Finished { chapter_id: 1 }, false), None);
-    }
-
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<String>>);
+    struct Recorder {
+        shown: Mutex<Vec<Notice>>,
+        withdrawn: Mutex<Vec<&'static str>>,
+    }
 
     impl NotificationSink for Recorder {
         fn show(&self, notice: &Notice) {
-            self.0.lock().unwrap().push(format!("show {}", notice.id));
+            self.shown.lock().unwrap().push(notice.clone());
         }
         fn withdraw(&self, id: &'static str) {
-            self.0.lock().unwrap().push(format!("withdraw {id}"));
+            self.withdrawn.lock().unwrap().push(id);
+        }
+    }
+
+    fn notifier(hide: bool) -> (DownloadNotifier, Arc<Recorder>) {
+        let rec = Arc::new(Recorder::default());
+        let sink: Arc<dyn NotificationSink> = rec.clone();
+        (DownloadNotifier::new(sink, Arc::new(AtomicBool::new(hide))), rec)
+    }
+
+    fn error(kind: Kind, entry: &str, unit: &str, message: &str) -> DownloadEvent {
+        DownloadEvent::Error {
+            kind,
+            unit_id: Some(1),
+            entry_id: Some(2),
+            entry_title: Some(entry.into()),
+            unit_name: Some(unit.into()),
+            message: message.into(),
         }
     }
 
     #[test]
-    fn one_progress_id_across_progress_pause_and_complete() {
-        let sink = Recorder::default();
-        dispatch(&progress("M", "C", 1, 2), false, &sink);
-        dispatch(&DownloadEvent::Paused, false, &sink);
-        dispatch(&DownloadEvent::Complete, false, &sink);
-        assert_eq!(
-            *sink.0.lock().unwrap(),
-            vec![format!("show {PROGRESS_ID}")],
-            "progress and pause show nothing; the end shows the done notice"
-        );
+    fn the_end_says_so_per_kind_with_its_own_text_and_id() {
+        let (mut n, rec) = notifier(false);
+        let now = Instant::now();
+        n.dispatch(now, &DownloadEvent::Complete { kind: Kind::Manga });
+        n.dispatch(now, &DownloadEvent::Complete { kind: Kind::Anime });
+        let shown = rec.shown.lock().unwrap();
+        assert_eq!((shown[0].id, shown[0].body.as_deref()), (MANGA_PROGRESS_ID, Some(MANGA_DONE_TEXT)));
+        assert_eq!((shown[1].id, shown[1].body.as_deref()), (ANIME_PROGRESS_ID, Some(ANIME_DONE_TEXT)));
+        assert!(shown.iter().all(|x| x.title == DONE_TITLE && !x.ongoing && x.actions.is_empty()));
+    }
+
+    #[test]
+    fn progress_pause_and_bookkeeping_show_nothing_and_a_dismiss_withdraws_its_kind() {
+        let (mut n, rec) = notifier(false);
+        let now = Instant::now();
+        for kind in Kind::ALL {
+            n.dispatch(now, &DownloadEvent::Paused { kind });
+            n.dispatch(now, &DownloadEvent::Started { kind });
+            n.dispatch(now, &DownloadEvent::QueueChanged { kind });
+            n.dispatch(now, &DownloadEvent::Finished { kind, unit_id: 1, entry_id: 1 });
+            n.dispatch(
+                now,
+                &DownloadEvent::Progress {
+                    kind,
+                    unit_id: 1,
+                    entry_id: 1,
+                    entry_title: "T".into(),
+                    unit_name: "U".into(),
+                    done: 1,
+                    total: 2,
+                    percent: 50,
+                },
+            );
+        }
+        assert!(rec.shown.lock().unwrap().is_empty());
+        n.dispatch(now, &DownloadEvent::Dismiss { kind: Kind::Anime });
+        assert_eq!(*rec.withdrawn.lock().unwrap(), vec![ANIME_PROGRESS_ID]);
+    }
+
+    #[test]
+    fn a_warning_carries_its_timeout_and_offers_only_a_known_help_link() {
+        let (mut n, rec) = notifier(false);
+        let now = Instant::now();
+        let warning = |kind, help_url: Option<&str>| DownloadEvent::Warning {
+            kind,
+            text: "big".into(),
+            timeout_secs: Some(30),
+            help_url: help_url.map(str::to_owned),
+        };
+        n.dispatch(now, &warning(Kind::Manga, Some(BULK_WARNING_HELP_URL)));
+        n.dispatch(now, &warning(Kind::Anime, Some("https://example.org/unknown")));
+        let shown = rec.shown.lock().unwrap();
+        assert_eq!((shown[0].id, shown[0].title.as_str(), shown[0].expire_secs), (MANGA_WARNING_ID, DOWNLOADER_TITLE, Some(30)));
+        assert_eq!(shown[0].actions, vec![Action::OpenHelp(BULK_WARNING_HELP_URL)]);
+        assert_eq!(shown[1].id, ANIME_WARNING_ID);
+        assert!(shown[1].actions.is_empty(), "an unknown link is not offered");
+    }
+
+    #[test]
+    fn a_single_error_names_the_unit_and_a_second_in_the_window_summarises_per_kind() {
+        let (mut n, rec) = notifier(false);
+        let t0 = Instant::now();
+        n.dispatch(t0, &error(Kind::Anime, "Show", "Episode 2", "HTTP error 500"));
+        n.dispatch(t0 + Duration::from_secs(2), &error(Kind::Anime, "Show", "Episode 3", "timeout"));
+        // The manga digest is separate: its first error is shown alone.
+        n.dispatch(t0 + Duration::from_secs(2), &error(Kind::Manga, "Berserk", "Chapter 1", "timeout"));
+        n.dispatch(t0 + Duration::from_secs(3), &error(Kind::Manga, "Berserk", "Chapter 2", "timeout"));
+        let shown = rec.shown.lock().unwrap();
+        assert_eq!(shown[0].title, "Show: Episode 2");
+        assert_eq!(shown[0].body.as_deref(), Some("HTTP error 500"));
+        assert_eq!(shown[0].actions, vec![Action::ShowAnime]);
+        assert_eq!(shown[1].body.as_deref(), Some("2 episode downloads failed"));
+        assert_eq!(shown[2].title, "Berserk: Chapter 1");
+        assert_eq!(shown[2].actions, vec![Action::ShowManga]);
+        assert_eq!(shown[3].body.as_deref(), Some("2 chapter downloads failed"));
+        assert!(shown[..2].iter().all(|x| x.id == ANIME_ERROR_ID) && shown[2..].iter().all(|x| x.id == MANGA_ERROR_ID));
+    }
+
+    #[test]
+    fn an_error_after_the_window_starts_a_new_single_notice() {
+        let mut digest = ErrorDigest::default();
+        let t0 = Instant::now();
+        assert!(digest.record(t0));
+        assert!(!digest.record(t0 + Duration::from_secs(1)));
+        assert_eq!(digest.count(), 2);
+        assert!(digest.record(t0 + Duration::from_secs(9)));
+        assert_eq!(digest.count(), 1);
+    }
+
+    #[test]
+    fn an_error_without_a_title_or_message_falls_back_to_the_plain_text() {
+        let (mut n, rec) = notifier(false);
+        let bare = DownloadEvent::Error {
+            kind: Kind::Manga,
+            unit_id: None,
+            entry_id: None,
+            entry_title: None,
+            unit_name: None,
+            message: String::new(),
+        };
+        n.dispatch(Instant::now(), &bare);
+        let shown = rec.shown.lock().unwrap();
+        assert_eq!(shown[0].title, DOWNLOADER_TITLE);
+        assert_eq!(shown[0].body.as_deref(), Some(UNKNOWN_ERROR_TEXT));
+        assert!(shown[0].actions.is_empty() && !shown[0].title.contains("null"));
+    }
+
+    #[test]
+    fn hidden_content_keeps_the_title_and_the_unit_out_of_a_failure_notice() {
+        let (mut n, rec) = notifier(true);
+        n.dispatch(Instant::now(), &error(Kind::Manga, "Berserk", "Chapter 1", "HTTP error 500"));
+        let shown = rec.shown.lock().unwrap();
+        assert_eq!(shown[0].title, DOWNLOADER_TITLE);
+        assert_eq!(shown[0].body.as_deref(), Some("HTTP error 500"));
+        assert!(shown[0].actions.is_empty());
+    }
+
+    #[test]
+    fn every_notice_is_low_importance() {
+        let (mut n, rec) = notifier(false);
+        let now = Instant::now();
+        n.dispatch(now, &DownloadEvent::Complete { kind: Kind::Manga });
+        n.dispatch(now, &DownloadEvent::Warning { kind: Kind::Anime, text: "w".into(), timeout_secs: None, help_url: None });
+        n.dispatch(now, &error(Kind::Anime, "S", "E", "e"));
+        assert!(rec.shown.lock().unwrap().iter().all(|x| x.priority == Priority::Low));
     }
 }

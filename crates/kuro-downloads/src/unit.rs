@@ -3,6 +3,7 @@
 
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
@@ -11,6 +12,11 @@ use kuro_platform::kind::Kind;
 use crate::model::DownloadState;
 
 /// Total queued units that make the bulk warning show (decision: 30 for both kinds).
+/// Now, in milliseconds since the epoch.
+pub fn unix_millis() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+}
+
 pub const BULK_TOTAL_THRESHOLD: usize = 30;
 /// Units of one source that make the bulk warning show.
 pub const BULK_PER_SOURCE_THRESHOLD: usize = 15;

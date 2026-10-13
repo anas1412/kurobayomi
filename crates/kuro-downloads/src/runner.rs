@@ -10,9 +10,9 @@ use async_trait::async_trait;
 use kuro_platform::kind::Kind;
 use tokio_util::sync::CancellationToken;
 
-use super::index::DownloadIndex;
-use super::layout::Layout;
-use super::unit::{EntryRef, SourceKey, UnitProgress, UnitRef};
+use crate::index::DownloadIndex;
+use crate::layout::Layout;
+use crate::unit::{EntryRef, SourceKey, UnitProgress, UnitRef};
 use crate::error::DownloadError;
 use crate::source::ChapterSource;
 

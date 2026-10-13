@@ -28,7 +28,7 @@ use kuro_extensions::anime::service::{AnimeExtensions, pump};
 use kuro_extensions::anime::trust::TrustStore;
 use kuro_extensions::registry::{ExtensionRegistry, Snapshot};
 use kuro_domain::source::model::Source;
-use kuro_downloads::next::layout::Layout;
+use kuro_downloads::layout::Layout;
 use kuro_platform::paths::Paths;
 use kuro_prefs::source::{SourcePrefs, system_locale};
 use kuro_prefs::store::PrefStore;

@@ -11,9 +11,9 @@ use kuro_source::SourceError;
 use super::images::{DEFAULT_OPTIMAL_HEIGHT, PageImageCache};
 use super::pipeline::{ChapterJob, PageLists, PipelineCtx, run_chapter};
 use crate::error::DownloadError;
-use crate::next::naming::{CBZ_PART_SUFFIX, UnitName, staging_dir_names, unit_dir_name};
-use crate::next::runner::{ChapterSources, RunCtx, UnitDone, UnitJob, UnitRunner};
-use crate::next::unit::{Availability, SourceKey, UnitRef};
+use crate::naming::{CBZ_PART_SUFFIX, UnitName, staging_dir_names, unit_dir_name};
+use crate::runner::{ChapterSources, RunCtx, UnitDone, UnitJob, UnitRunner};
+use crate::unit::{Availability, SourceKey, UnitRef};
 use crate::throttle::SpeedLimiter;
 
 pub struct ChapterPipeline {
@@ -97,9 +97,9 @@ impl UnitRunner for ChapterPipeline {
 mod tests {
     use super::*;
     use crate::manga::source::ChapterSource;
-    use crate::next::index::{DownloadIndex, IndexRoots};
-    use crate::next::layout::Layout;
-    use crate::next::unit::{EntryRef, fixtures};
+    use crate::index::{DownloadIndex, IndexRoots};
+    use crate::layout::Layout;
+    use crate::unit::{EntryRef, fixtures};
     use crate::testing::{FakeSource, fake, jpeg_bytes};
     use std::path::{Path, PathBuf};
     use tokio_util::sync::CancellationToken;

@@ -5,9 +5,12 @@ use std::time::{Duration, Instant};
 
 use kuro_platform::kind::Kind;
 
-use crate::downloader::{NO_NETWORK_TEXT, NO_WIFI_TEXT};
 
 /// How long a blocked state must last before a lane stops.
+/// The warning texts of a stopped lane.
+pub const NO_NETWORK_TEXT: &str = "No network connection available";
+pub const NO_WIFI_TEXT: &str = "No Wi-Fi connection available";
+
 pub const DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Network state as the app reports it.

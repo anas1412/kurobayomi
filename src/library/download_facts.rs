@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use kuro_platform::kind::Kind;
 use kuro_domain::library::model::LibraryRow;
-use kuro_downloads::next::index::DownloadIndex;
+use kuro_downloads::index::DownloadIndex;
 
 /// How many chapters or episodes of the row's entry are on disk. A local entry has no download folder of its own (its
 /// files are the entry), so it counts 0 here and the filter keeps it through its own local rule.
@@ -24,7 +24,7 @@ pub fn lookup(kind: Kind, index: Option<DownloadIndex>) -> Arc<dyn Fn(&LibraryRo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_downloads::next::index::IndexRoots;
+    use kuro_downloads::index::IndexRoots;
 
     fn index_in(dir: &std::path::Path) -> DownloadIndex {
         DownloadIndex::open(IndexRoots { manga: dir.join("manga"), anime: dir.join("anime") }, dir)

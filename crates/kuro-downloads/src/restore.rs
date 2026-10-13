@@ -16,10 +16,10 @@ use kuro_data::item::ItemRepo;
 use kuro_db::{Db, DbError};
 use kuro_platform::kind::Kind;
 
-use super::layout::Layout;
-use super::runner::{SourceDirectory, UnitRunner};
-use super::store::{QueueStore, StoreError};
-use super::unit::{Availability, EntryRef, QueuedUnit, SourceKey, UnitRef};
+use crate::layout::Layout;
+use crate::runner::{SourceDirectory, UnitRunner};
+use crate::store::{QueueStore, StoreError};
+use crate::unit::{Availability, EntryRef, QueuedUnit, SourceKey, UnitRef};
 
 /// The restored lane and the staging folders its units may be resuming.
 pub struct Restored {
@@ -90,9 +90,9 @@ fn staging_paths(layout: &Layout, runner: &dyn UnitRunner, unit: &QueuedUnit, so
 mod tests {
     use async_trait::async_trait;
 
-    use super::super::runner::{RunCtx, UnitDone, UnitJob};
-    use super::super::store::testing::{row, seed, test_db};
-    use super::super::state::Lane;
+    use crate::runner::{RunCtx, UnitDone, UnitJob};
+    use crate::store::testing::{row, seed, test_db};
+    use crate::state::Lane;
     use super::*;
     use crate::error::DownloadError;
 

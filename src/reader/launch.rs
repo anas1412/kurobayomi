@@ -30,11 +30,11 @@ use kuro_core::sources::SourceGate;
 use crate::downloads::directory::AppDirectory;
 use kuro_data::entry::{Entry, EntryRepo};
 use kuro_data::item::{Item, ItemRepo};
-use kuro_downloads::next::service::Downloads;
-use kuro_downloads::next::unit::UnitRef;
+use kuro_downloads::service::Downloads;
+use kuro_downloads::unit::UnitRef;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
-use kuro_downloads::next::index::DownloadIndex;
+use kuro_downloads::index::DownloadIndex;
 use kuro_local::is_local_source;
 use kuro_platform::paths::Paths;
 use kuro_platform::toast::{Toaster, toast_channel};
@@ -233,7 +233,7 @@ pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_downloads::next::index::IndexRoots;
+    use kuro_downloads::index::IndexRoots;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::super::cache::DiskCache;

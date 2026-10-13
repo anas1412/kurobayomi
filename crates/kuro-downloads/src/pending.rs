@@ -1,204 +1,231 @@
-//! Chapters waiting for the reader to exit before their download is deleted (T-23a-028; port of
-//! `MangaDownloadPendingDeleter`). A chapter is added at enqueue time after the delete filter, deduplicated by chapter
-//! id, and taken in one transaction on flush. The flush plan drops rows of a missing manga and applies the category
-//! exclusion again against the live categories (EC-106).
+//! Units waiting for the reader or player to close before their download is deleted (merges `pending.rs` and
+//! `anime/pending.rs`). Rows live in `download_pending_delete` for both kinds, deduplicated by unit id. A flush takes the
+//! rows whose source can be named and leaves the rest (E-P01); a row that cannot be decoded moves to
+//! `download_pending_corrupt` (E-P04, B28).
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, params};
+use kuro_db::tables::downloads::{self, PendingRow};
+use kuro_db::Db;
+use kuro_platform::kind::Kind;
 
-use crate::manager::{DeleteRules, chapters_to_delete};
-use crate::model::{ChapterRef, MangaRef};
 use crate::store::StoreError;
+use crate::unit::{EntryRef, UnitRef};
 
-/// The chapters pending for one manga, in insertion order.
+/// The units pending for one entry, in insertion order. Only the fields the delete needs are stored; the rest of each
+/// [`UnitRef`] is left at its default.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PendingManga {
-    pub manga: MangaRef,
-    pub chapters: Vec<ChapterRef>,
+pub struct PendingGroup {
+    pub kind: Kind,
+    pub entry: EntryRef,
+    pub units: Vec<UnitRef>,
 }
 
-pub struct MangaPendingStore {
-    conn: Mutex<Connection>,
+pub struct PendingStore {
+    db: Arc<Db>,
 }
 
-impl MangaPendingStore {
-    /// Rows live in `download_pending_delete` with `kind = 'manga'`; the table belongs to the unified schema.
-    pub fn open(conn: Connection) -> Result<Self, StoreError> {
-        Ok(Self { conn: Mutex::new(conn) })
+fn now_ms() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+}
+
+fn row_of(kind: Kind, entry: &EntryRef, unit: &UnitRef, seq: i64, now: i64) -> PendingRow {
+    PendingRow {
+        unit_id: unit.id,
+        kind,
+        entry_id: entry.id,
+        entry_url: entry.url.clone(),
+        entry_title: entry.title.clone(),
+        source: entry.source,
+        unit_url: unit.url.clone(),
+        unit_name: unit.name.clone(),
+        scanlator: unit.scanlator.clone(),
+        done: unit.done,
+        bookmark: unit.bookmark,
+        seq,
+        enqueued_at: now,
+    }
+}
+
+fn unit_of(row: &PendingRow) -> UnitRef {
+    UnitRef {
+        id: row.unit_id,
+        entry_id: row.entry_id,
+        url: row.unit_url.clone(),
+        name: row.unit_name.clone(),
+        scanlator: row.scanlator.clone(),
+        done: row.done,
+        bookmark: row.bookmark,
+        fillermark: false,
+        source_order: 0,
+        date_upload: 0,
+        number: 0.0,
+    }
+}
+
+impl PendingStore {
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 
-    pub fn open_in_memory() -> Result<Self, StoreError> {
-        Self::open(crate::memory_downloads_db()?)
+    /// Adds the units, deduplicated by unit id within the batch and against the stored rows (EC-90). The caller has
+    /// already applied the delete rules. Returns how many were new.
+    pub fn add(&self, kind: Kind, entry: &EntryRef, units: &[UnitRef]) -> Result<usize, StoreError> {
+        let now = now_ms();
+        let rows: Vec<PendingRow> = units.iter().map(|u| row_of(kind, entry, u, 0, now)).collect();
+        Ok(self.db.write(|tx| Ok(downloads::pending_add(tx, &rows)?))?)
     }
 
-    fn lock(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
-        self.conn.lock().map_err(|_| StoreError::Poisoned)
-    }
-
-    /// Adds the chapters after the delete filter of `rules` (EC-94, EC-95). Returns how many rows were new
-    /// (`INSERT OR IGNORE`, TST-44, EC-90).
-    pub fn add_chapters(
-        &self,
-        manga: &MangaRef,
-        chapters: &[ChapterRef],
-        rules: &DeleteRules,
-        now: i64,
-    ) -> Result<usize, StoreError> {
-        let selected = chapters_to_delete(chapters.to_vec(), rules);
-        let mut conn = self.lock()?;
-        let tx = conn.transaction()?;
-        let mut seq: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(seq), -1) + 1 FROM download_pending_delete WHERE entry_id = ?1",
-            params![manga.id],
-            |row| row.get(0),
-        )?;
-        let mut added = 0;
-        for c in &selected {
-            let n = tx.execute(
-                "INSERT OR IGNORE INTO download_pending_delete(unit_id, kind, entry_id, entry_title, entry_url, source, \
-                 unit_name, unit_url, scanlator, seq, enqueued_at) VALUES (?1, 'manga', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![c.id, manga.id, manga.title, manga.url, manga.source_id, c.name, c.url, c.scanlator, seq, now],
-            )?;
-            seq += n as i64;
-            added += n;
+    /// Takes the rows whose `(kind, source)` `known` accepts, grouped by entry in insertion order, and removes exactly
+    /// those rows. The rest stay (E-P01). Rows that cannot be decoded go to `download_pending_corrupt` and are removed
+    /// (B28).
+    pub fn take(&self, known: &dyn Fn(Kind, i64) -> bool) -> Result<Vec<PendingGroup>, StoreError> {
+        let now_secs = now_ms() / 1000;
+        let rows = self.db.write(|tx| Ok(downloads::pending_take(tx, now_secs, known)?))?;
+        let mut groups: Vec<PendingGroup> = Vec::new();
+        for row in &rows {
+            match groups.last_mut() {
+                Some(g) if g.kind == row.kind && g.entry.id == row.entry_id => g.units.push(unit_of(row)),
+                _ => groups.push(PendingGroup {
+                    kind: row.kind,
+                    entry: EntryRef::bare(row.entry_id, row.kind, row.source, row.entry_url.clone(), row.entry_title.clone()),
+                    units: vec![unit_of(row)],
+                }),
+            }
         }
-        tx.commit()?;
-        Ok(added)
+        Ok(groups)
     }
 
-    /// Reads every pending chapter, grouped by manga in insertion order, and deletes the rows in the same transaction
-    /// (TST-45, EC-91, EC-92).
-    pub fn take_all(&self) -> Result<Vec<PendingManga>, StoreError> {
-        let mut conn = self.lock()?;
-        let tx = conn.transaction()?;
-        let rows: Vec<(MangaRef, ChapterRef)> = {
-            let mut stmt = tx.prepare(
-                "SELECT unit_id, entry_id, entry_title, entry_url, source, unit_name, unit_url, scanlator \
-                 FROM download_pending_delete WHERE kind = 'manga' ORDER BY enqueued_at, unit_id",
-            )?;
-            let mapped = stmt.query_map([], |row| {
-                let manga = MangaRef {
-                    id: row.get(1)?,
-                    url: row.get(3)?,
-                    title: row.get(2)?,
-                    source_id: row.get(4)?,
-                    description: None,
-                    author: None,
-                    artist: None,
-                    genre: None,
-                    status: 0,
-                };
-                let chapter = ChapterRef {
-                    id: row.get(0)?,
-                    manga_id: manga.id,
-                    url: row.get(6)?,
-                    name: row.get(5)?,
-                    scanlator: row.get(7)?,
-                    read: false,
-                    bookmark: false,
-                    source_order: 0,
-                    chapter_number: 0.0,
-                    date_upload: 0,
-                };
-                Ok((manga, chapter))
-            })?;
-            mapped.collect::<Result<_, _>>()?
-        };
-        tx.execute("DELETE FROM download_pending_delete WHERE kind = 'manga'", [])?;
-        tx.commit()?;
-        Ok(group(rows))
+    /// Puts a group that could not be flushed back as it was (B29): same flags, same order. A unit that is pending
+    /// again is kept as it is. Returns how many rows were restored.
+    // ponytail: `seq` restarts at 0 for the group, so units added meanwhile may interleave; the flush does not depend on order.
+    pub fn put_back(&self, group: &PendingGroup) -> Result<usize, StoreError> {
+        let now = now_ms();
+        let rows: Vec<PendingRow> =
+            group.units.iter().enumerate().map(|(i, u)| row_of(group.kind, &group.entry, u, i as i64, now)).collect();
+        Ok(self.db.write(|tx| Ok(downloads::pending_put_back(tx, &rows)?))?)
     }
-}
 
-fn group(rows: Vec<(MangaRef, ChapterRef)>) -> Vec<PendingManga> {
-    let mut groups: Vec<PendingManga> = Vec::new();
-    for (manga, chapter) in rows {
-        match groups.iter_mut().find(|g| g.manga.id == manga.id) {
-            Some(g) => g.chapters.push(chapter),
-            None => groups.push(PendingManga { manga, chapters: vec![chapter] }),
-        }
+    /// Number of stored rows, both kinds.
+    pub fn len(&self) -> Result<usize, StoreError> {
+        Ok(self.db.read(|c| {
+            let mut total = 0;
+            for kind in Kind::ALL {
+                total += downloads::pending_len(c, kind)?;
+            }
+            Ok(total)
+        })?)
     }
-    groups
-}
 
-/// The flush plan (EC-93, EC-106): a manga that is no longer in the library is dropped, and the category exclusion is
-/// applied again with the live rules of that manga, because a chapter may have been moved since it was added.
-pub fn flush_plan(
-    pending: Vec<PendingManga>,
-    live_rules: impl Fn(i64) -> Option<DeleteRules>,
-) -> Vec<PendingManga> {
-    pending
-        .into_iter()
-        .filter_map(|p| {
-            let rules = live_rules(p.manga.id)?;
-            let chapters = chapters_to_delete(p.chapters, &rules);
-            (!chapters.is_empty()).then_some(PendingManga { manga: p.manga, chapters })
-        })
-        .collect()
+    pub fn is_empty(&self) -> Result<bool, StoreError> {
+        Ok(self.len()? == 0)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::store::testing::{count, test_db};
     use super::*;
-    use crate::testing::{chapter, manga};
 
-    fn store() -> MangaPendingStore {
-        MangaPendingStore::open_in_memory().unwrap()
+    fn store() -> (tempfile::TempDir, Arc<Db>, PendingStore) {
+        let (dir, db) = test_db();
+        let s = PendingStore::new(db.clone());
+        (dir, db, s)
+    }
+
+    fn entry(id: i64, kind: Kind, source: i64) -> EntryRef {
+        EntryRef::bare(id, kind, source, format!("/e/{id}"), format!("Entry {id}"))
+    }
+
+    fn unit(id: i64, entry_id: i64) -> UnitRef {
+        UnitRef {
+            id,
+            entry_id,
+            url: format!("/u/{id}"),
+            name: format!("Unit {id}"),
+            scanlator: Some("grp".into()),
+            done: true,
+            bookmark: id % 2 == 0,
+            fillermark: false,
+            source_order: 0,
+            date_upload: 0,
+            number: 0.0,
+        }
+    }
+
+    fn ids(group: &PendingGroup) -> Vec<i64> {
+        group.units.iter().map(|u| u.id).collect()
     }
 
     #[test]
-    fn adding_the_same_chapter_twice_keeps_one_row() {
-        let s = store();
-        let m = manga(1, 1, "Berserk");
-        let rules = DeleteRules { remove_bookmarked: true, ..Default::default() };
-        assert_eq!(s.add_chapters(&m, &[chapter(10, 1, "Ch 10")], &rules, 1).unwrap(), 1);
-        assert_eq!(s.add_chapters(&m, &[chapter(10, 1, "Ch 10")], &rules, 2).unwrap(), 0, "EC-90");
+    fn adding_the_same_unit_twice_keeps_one_row() {
+        for kind in Kind::ALL {
+            let (_dir, _db, s) = store();
+            let e = entry(1, kind, 10);
+            assert_eq!(s.add(kind, &e, &[unit(1, 1), unit(1, 1), unit(2, 1)]).unwrap(), 2, "dedupe inside the batch");
+            assert_eq!(s.add(kind, &e, &[unit(2, 1)]).unwrap(), 0, "EC-90: already stored");
+            assert_eq!(s.len().unwrap(), 2);
+        }
     }
 
     #[test]
-    fn take_all_returns_the_rows_grouped_and_empties_the_table() {
-        let s = store();
-        let m = manga(1, 1, "Berserk");
-        let rules = DeleteRules { remove_bookmarked: true, ..Default::default() };
-        s.add_chapters(&m, &[chapter(10, 1, "Ch 10"), chapter(11, 1, "Ch 11")], &rules, 1).unwrap();
-        let taken = s.take_all().unwrap();
-        assert_eq!(taken.len(), 1);
-        assert_eq!(taken[0].chapters.iter().map(|c| c.id).collect::<Vec<_>>(), vec![10, 11], "EC-91");
-        assert!(s.take_all().unwrap().is_empty(), "the table is empty after the take");
-    }
-
-    // TST-46
-    #[test]
-    fn the_filter_runs_at_enqueue_time() {
-        let s = store();
-        let m = manga(1, 1, "Berserk");
-        let mut bookmarked = chapter(20, 1, "Ch 20");
-        bookmarked.bookmark = true;
-        let protected = DeleteRules::default();
-        assert_eq!(s.add_chapters(&m, &[bookmarked], &protected, 1).unwrap(), 0, "EC-94: bookmarks stay");
-        let mut read = chapter(21, 1, "Ch 21");
-        read.read = true;
-        let excluded = DeleteRules { exclude_categories: vec![0], remove_bookmarked: true, ..Default::default() };
-        assert_eq!(s.add_chapters(&m, &[read], &excluded, 1).unwrap(), 0, "EC-95: read chapter in an excluded category");
+    fn take_returns_groups_in_insertion_order_and_empties_the_table() {
+        for kind in Kind::ALL {
+            let (_dir, _db, s) = store();
+            s.add(kind, &entry(2, kind, 20), &[unit(5, 2)]).unwrap();
+            s.add(kind, &entry(1, kind, 10), &[unit(3, 1), unit(4, 1)]).unwrap();
+            s.add(kind, &entry(1, kind, 10), &[unit(1, 1)]).unwrap();
+            let groups = s.take(&|_, _| true).unwrap();
+            assert_eq!(groups.len(), 2);
+            assert_eq!(groups[0].entry, entry(1, kind, 10));
+            assert_eq!(ids(&groups[0]), vec![3, 4, 1], "EC-91");
+            assert_eq!(ids(&groups[1]), vec![5]);
+            assert!(groups[0].units[0].done && groups[0].units[1].bookmark, "the live flags are kept (B30)");
+            assert_eq!(groups[0].units[0].scanlator.as_deref(), Some("grp"));
+            assert!(s.is_empty().unwrap(), "EC-92");
+        }
     }
 
     #[test]
-    fn the_flush_drops_a_missing_manga_and_rechecks_exclusions() {
-        let m1 = manga(1, 1, "Gone");
-        let m2 = manga(2, 1, "Live");
-        let mut read = chapter(31, 2, "Ch 31");
-        read.read = true;
-        let pending = vec![
-            PendingManga { manga: m1, chapters: vec![chapter(30, 1, "Ch 30")] },
-            PendingManga { manga: m2, chapters: vec![read, chapter(32, 2, "Ch 32")] },
-        ];
-        let live = |id: i64| match id {
-            2 => Some(DeleteRules { exclude_categories: vec![0], ..Default::default() }),
-            _ => None,
-        };
-        let plan = flush_plan(pending, live);
-        assert_eq!(plan.len(), 1, "EC-93: the missing manga is dropped");
-        assert_eq!(plan[0].chapters.iter().map(|c| c.id).collect::<Vec<_>>(), vec![32], "EC-106: read chapter kept");
+    fn take_keeps_rows_of_unknown_sources_and_scopes_by_kind() {
+        let (_dir, _db, s) = store();
+        s.add(Kind::Anime, &entry(1, Kind::Anime, 10), &[unit(1, 1)]).unwrap();
+        s.add(Kind::Anime, &entry(2, Kind::Anime, 20), &[unit(2, 2)]).unwrap();
+        s.add(Kind::Manga, &entry(3, Kind::Manga, 10), &[unit(3, 3)]).unwrap();
+        let groups = s.take(&|kind, source| kind == Kind::Anime && source == 10).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!((groups[0].kind, ids(&groups[0])), (Kind::Anime, vec![1]));
+        assert_eq!(s.len().unwrap(), 2, "E-P01: the other rows wait for their source");
+        let rest = s.take(&|_, _| true).unwrap();
+        assert_eq!(rest.iter().map(|g| (g.kind, g.entry.id)).collect::<Vec<_>>(), vec![(Kind::Anime, 2), (Kind::Manga, 3)]);
+    }
+
+    #[test]
+    fn a_failed_group_is_put_back_as_it_was() {
+        for kind in Kind::ALL {
+            let (_dir, _db, s) = store();
+            s.add(kind, &entry(1, kind, 10), &[unit(1, 1), unit(2, 1)]).unwrap();
+            let taken = s.take(&|_, _| true).unwrap();
+            assert_eq!(s.len().unwrap(), 0);
+            assert_eq!(s.put_back(&taken[0]).unwrap(), 2);
+            assert_eq!(s.put_back(&taken[0]).unwrap(), 0, "already pending");
+            let again = s.take(&|_, _| true).unwrap();
+            assert_eq!(again[0].entry, taken[0].entry);
+            assert_eq!(again[0].units, taken[0].units, "same flags, same order (B29)");
+        }
+    }
+
+    #[test]
+    fn a_corrupt_row_is_isolated_in_its_own_table() {
+        for kind in Kind::ALL {
+            let (_dir, db, s) = store();
+            s.add(kind, &entry(1, kind, 10), &[unit(1, 1), unit(2, 1)]).unwrap();
+            db.write(|tx| Ok(tx.execute("UPDATE download_pending_delete SET done = 'yes' WHERE unit_id = 1", [])?)).unwrap();
+            let groups = s.take(&|_, _| true).unwrap();
+            assert_eq!(ids(&groups[0]), vec![2], "the good row is taken");
+            assert!(s.is_empty().unwrap(), "the corrupt row leaves the pending list");
+            assert_eq!(count(&db, "download_pending_corrupt"), 1, "E-P04: it is kept in its own table");
+        }
     }
 }

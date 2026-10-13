@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use kuro_platform::kind::Kind;
 
-use super::unit::QueuedUnit;
+use crate::unit::QueuedUnit;
 use crate::model::DownloadState;
 use crate::scheduler::pick_active;
 
@@ -245,7 +245,7 @@ impl Lane {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::next::unit::fixtures::queued;
+    use crate::unit::fixtures::queued;
     use DownloadState::*;
 
     /// A lane of `kind` with one unit per `(id, state)`, all of source 1 and entry 1.

@@ -12,9 +12,9 @@
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_domain::items::sync::ItemRenames;
-use kuro_downloads::next::runner::SourceDirectory as _;
-use kuro_downloads::next::service::Downloads;
-use kuro_downloads::next::unit::{Availability, EntryRef, UnitRef};
+use kuro_downloads::runner::SourceDirectory as _;
+use kuro_downloads::service::Downloads;
+use kuro_downloads::unit::{Availability, EntryRef, UnitRef};
 
 use crate::downloads::directory::AppDirectory;
 
@@ -57,13 +57,13 @@ mod tests {
     use kuro_data::source::StubSourceRepo;
     use kuro_db::handle::Db;
     use kuro_db::schema_unified;
-    use kuro_downloads::next::gate::Connectivity;
-    use kuro_downloads::next::index::{DownloadIndex, IndexRoots};
-    use kuro_downloads::next::layout::Layout;
-    use kuro_downloads::next::naming::UnitName;
-    use kuro_downloads::next::pending::PendingStore;
-    use kuro_downloads::next::queue::{Layouts, Queue, QueueParams};
-    use kuro_downloads::next::store::QueueStore;
+    use kuro_downloads::gate::Connectivity;
+    use kuro_downloads::index::{DownloadIndex, IndexRoots};
+    use kuro_downloads::layout::Layout;
+    use kuro_downloads::naming::UnitName;
+    use kuro_downloads::pending::PendingStore;
+    use kuro_downloads::queue::{Layouts, Queue, QueueParams};
+    use kuro_downloads::store::QueueStore;
     use kuro_platform::kind::Kind;
 
     use super::*;

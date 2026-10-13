@@ -12,7 +12,7 @@ use kuro_data::entry::EntryRepo;
 use kuro_data::item::Item;
 use kuro_db::tables::{EntryPatch, ItemPatch, TrackRow, categories, entries, items, tracks};
 use kuro_db::{Db, DbError, Transaction};
-use kuro_downloads::next::service::Downloads;
+use kuro_downloads::service::Downloads;
 use kuro_images::cover_paths::{Family, custom_file};
 use kuro_platform::linux::LinuxPaths;
 use kuro_prefs::store::PrefStore;
@@ -401,13 +401,13 @@ mod tests {
     #[test]
     fn delete_downloads_removes_the_old_entrys_folder_and_index_rows_for_both_kinds() {
         use kuro_data::source::StubSourceRepo;
-        use kuro_downloads::next::gate::Connectivity;
-        use kuro_downloads::next::index::{DownloadIndex, IndexRoots};
-        use kuro_downloads::next::layout::Layout;
-        use kuro_downloads::next::naming::UnitName;
-        use kuro_downloads::next::pending::PendingStore;
-        use kuro_downloads::next::queue::{Layouts, Queue, QueueParams};
-        use kuro_downloads::next::store::QueueStore;
+        use kuro_downloads::gate::Connectivity;
+        use kuro_downloads::index::{DownloadIndex, IndexRoots};
+        use kuro_downloads::layout::Layout;
+        use kuro_downloads::naming::UnitName;
+        use kuro_downloads::pending::PendingStore;
+        use kuro_downloads::queue::{Layouts, Queue, QueueParams};
+        use kuro_downloads::store::QueueStore;
 
         let rt = runtime();
         let _entered = rt.enter();

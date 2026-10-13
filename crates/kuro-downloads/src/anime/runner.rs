@@ -7,10 +7,10 @@ use kuro_platform::kind::Kind;
 use super::downloader::EpisodeEngine;
 use super::model::{AnimeDownload, AnimeRef, AnimeSource, EpisodeRef};
 use crate::error::DownloadError;
-use crate::next::layout::Layout;
-use crate::next::naming::{UnitName, staging_dir_names};
-use crate::next::runner::{RunCtx, UnitDone, UnitJob, UnitRunner};
-use crate::next::unit::{Availability, SourceKey, UnitRef};
+use crate::layout::Layout;
+use crate::naming::{UnitName, staging_dir_names};
+use crate::runner::{RunCtx, UnitDone, UnitJob, UnitRunner};
+use crate::unit::{Availability, SourceKey, UnitRef};
 
 /// The engine's view of a job: the old item type its resolver and ffmpeg helpers take.
 fn download_of(job: &UnitJob) -> AnimeDownload {
@@ -93,8 +93,8 @@ impl UnitRunner for EpisodeEngine {
 mod tests {
     use super::*;
     use crate::anime::resolve::HosterResolver;
-    use crate::next::index::{DownloadIndex, IndexRoots};
-    use crate::next::unit::{EntryRef, fixtures};
+    use crate::index::{DownloadIndex, IndexRoots};
+    use crate::unit::{EntryRef, fixtures};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};

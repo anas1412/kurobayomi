@@ -10,7 +10,7 @@ use image::GenericImageView;
 use kuro_core::image::{decode_rgba, dimensions, encode_jpeg_q100, is_animated_supported, kind_from_mime, sniff};
 use tracing::debug;
 
-use crate::next::naming::TMP_DIR_SUFFIX;
+use crate::naming::TMP_DIR_SUFFIX;
 use super::source::{Page, PageState};
 
 /// Page file names are at least this wide.

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_downloads::model::DownloadState;
-use kuro_downloads::next::index::DownloadIndex;
+use kuro_downloads::index::DownloadIndex;
 use kuro_platform::kind::Kind;
 
 use crate::updates::download_host::DownloadBackend;
@@ -36,7 +36,7 @@ pub fn download_states(host: &dyn DownloadBackend, kind: Kind, entry: &Entry, un
 
 #[cfg(test)]
 mod tests {
-    use kuro_downloads::next::index::IndexRoots;
+    use kuro_downloads::index::IndexRoots;
 
     use super::*;
 

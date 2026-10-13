@@ -8,9 +8,9 @@ use kuro_archive::ArchiveReader;
 use kuro_core::image::is_image_name;
 
 use crate::error::DownloadError;
-use crate::next::layout::Layout;
-use crate::next::naming::UnitName;
-use crate::next::unit::{SourceKey, UnitRef};
+use crate::layout::Layout;
+use crate::naming::UnitName;
+use crate::unit::{SourceKey, UnitRef};
 
 /// One page of a downloaded chapter, as the reader opens it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,7 +73,7 @@ fn cbz_pages(cbz: &Path) -> Result<Vec<LocalPage>, DownloadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::next::unit::fixtures;
+    use crate::unit::fixtures;
     use kuro_platform::kind::Kind;
 
     fn chapter(name: &str) -> UnitRef {

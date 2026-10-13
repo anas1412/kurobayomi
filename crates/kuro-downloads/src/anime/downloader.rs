@@ -17,15 +17,14 @@ use tracing::{debug, warn};
 
 use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, check_on_path, hls_input_options, probe_duration, run_remux, with_playlist_options};
 use crate::anime::layout::{AnimeLayout, episode_folder_names, rename_dir};
-use crate::anime::manager::EpisodeRunner;
 use crate::anime::model::{AnimeDownload, Video};
 use crate::anime::progress::ProgressCell;
 use crate::anime::naming::{episode_dir_name, fat_safe, file_component};
 use crate::anime::resolve::{HosterResolver, resolve_video};
 use crate::anime::torrent::{TORRENT_SERVER_HOST, check_torrent};
 use crate::error::DownloadError;
-use crate::layout::TMP_DIR_SUFFIX;
-use crate::next::layout::Layout;
+use crate::naming::TMP_DIR_SUFFIX;
+use crate::layout::Layout;
 use crate::redact::redacted_headers;
 use crate::retry::with_retry;
 
@@ -165,7 +164,7 @@ impl EpisodeEngine {
     }
 
     /// Runs one episode inside `anime_dir`: resolve the video, fetch it into the staging folder, finalise. Returns the
-    /// name of the finished folder. The old queue (`EpisodeRunner`) and `anime::runner` both call this.
+    /// name of the finished folder. `anime::runner` calls this.
     pub(crate) async fn download(
         &self,
         item: &AnimeDownload,
@@ -184,14 +183,6 @@ impl EpisodeEngine {
         }
         finalise(&staging, &anime_dir.join(&target))?;
         Ok(target)
-    }
-}
-
-#[async_trait]
-impl EpisodeRunner for EpisodeEngine {
-    async fn run(&self, item: Arc<AnimeDownload>, cancel: CancellationToken) -> Result<(), DownloadError> {
-        let anime_dir = self.layout.anime_dir(&item.source, &item.anime.title)?;
-        self.download(&item, &anime_dir, &cancel).await.map(|_| ())
     }
 }
 
@@ -278,6 +269,14 @@ mod tests {
 
     async fn spawn_guard() -> tokio::sync::MutexGuard<'static, ()> {
         SPAWN_LOCK.lock().await
+    }
+
+    impl EpisodeEngine {
+        /// One download of `item` into its anime folder, as `anime::runner` does it.
+        async fn run(&self, item: Arc<AnimeDownload>, cancel: CancellationToken) -> Result<(), DownloadError> {
+            let anime_dir = self.layout.anime_dir(&item.source, &item.anime.title)?;
+            self.download(&item, &anime_dir, &cancel).await.map(|_| ())
+        }
     }
 
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -598,147 +597,5 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(4), "the probe is killed, not waited for");
         assert_eq!(runs(&log), 0, "ffmpeg was never started");
         assert_eq!(fs::read(&partial).unwrap(), b"newer run", "the newer run's partial is untouched");
-    }
-
-    /// Engine and queue together, with fake ffmpeg and ffprobe (edge-cases 4.2).
-    mod with_queue {
-        use super::*;
-        use crate::anime::cache::AnimeIndex;
-        use crate::anime::manager::{AnimeQueue, AnimeQueueParams, Command, QueueEntry, spawn};
-        use crate::anime::pending::AnimePendingStore;
-        use crate::anime::store::AnimeQueueStore;
-
-        fn plenty(_: &Path) -> Option<u64> {
-            Some(u64::MAX)
-        }
-
-        fn entry(id: i64, name: &str) -> QueueEntry {
-            QueueEntry { source: source("Src"), anime: anime(), episode: episode(id, name), alt: false, video: None }
-        }
-
-        fn start_queue(root: &Path, ffmpeg: &Path, ffprobe: &Path, restored: Vec<QueueEntry>) -> AnimeQueue {
-            let (engine, _) = engine(root, ffmpeg, ffprobe);
-            spawn(AnimeQueueParams {
-                layout: AnimeLayout::new(Some(root.to_path_buf())),
-                store: Arc::new(AnimeQueueStore::open_in_memory().unwrap()),
-                pending: Arc::new(AnimePendingStore::open_in_memory().unwrap()),
-                free_space: plenty,
-                runner: Arc::new(engine),
-                settings: Default::default(),
-                restored,
-                index: AnimeIndex::open(root, &root.join("cache")),
-                max_active: Arc::new(|| crate::anime::manager::ANIME_MAX_ACTIVE_SOURCES),
-            })
-        }
-
-        /// Waits for `cond` while real child processes run: each turn moves the paused clock 100 ms (so retry waits
-        /// elapse) and sleeps 5 ms of real time.
-        async fn until(what: &str, cond: impl Fn() -> bool) {
-            for _ in 0..2000 {
-                if cond() {
-                    return;
-                }
-                tokio::time::advance(Duration::from_millis(100)).await;
-                std::thread::sleep(Duration::from_millis(5));
-                tokio::task::yield_now().await;
-            }
-            panic!("never held: {what}");
-        }
-
-        fn status_of(q: &AnimeQueue, id: i64) -> Option<DownloadState> {
-            q.snapshot().iter().find(|d| d.episode.id == id).map(|d| d.status())
-        }
-
-        /// ffmpeg that logs the output path of each run, writes the partial file and then stays alive.
-        const SLEEPING_FFMPEG: &str = "prev=; last=; for a; do prev=$last; last=$a; done\n\
-            echo \"$prev\" >> \"$KURO_LOG\"\nprintf partial > \"$prev\"\nexec sleep 30";
-
-        fn sleeping_ffmpeg(dir: &Path, log: &Path) -> PathBuf {
-            script(dir, "ffmpeg", &SLEEPING_FFMPEG.replace("$KURO_LOG", &log.display().to_string()))
-        }
-
-        #[tokio::test(start_paused = true)]
-        async fn download_recovers_on_retry() {
-            let _guard = spawn_guard().await;
-            let tmp = tempfile::tempdir().unwrap();
-            let partial = anime_folder(tmp.path()).join("Episode 1_tmp").join("Episode 1.tmp");
-            let log = tmp.path().join("ffmpeg.log");
-            // The first run exits 1, the second one produces the file.
-            let body = format!(
-                "echo run >> '{log}'\nif [ \"$(wc -l < '{log}')\" -lt 2 ]; then exit 1; fi\nprintf video > '{p}'\n\
-                 printf 'out_time_us=30000000\\nprogress=end\\n'",
-                log = log.display(),
-                p = partial.display()
-            );
-            let ffmpeg = script(tmp.path(), "ffmpeg", &body);
-            let ffprobe = script(tmp.path(), "ffprobe", "echo 30.0");
-            let q = start_queue(tmp.path(), &ffmpeg, &ffprobe, vec![entry(1, "Episode 1")]);
-            let item = q.snapshot()[0].clone();
-            let started = tokio::time::Instant::now();
-
-            q.send(Command::Start).unwrap();
-            until("downloaded", || item.status() == DownloadState::Downloaded).await;
-
-            assert_eq!(runs(&log), 2, "one failed attempt and one retry");
-            assert!(started.elapsed() >= Duration::from_secs(2), "the retry waited the 2 s delay");
-            assert!(anime_folder(tmp.path()).join("Episode 1").join("Episode 1.mkv").is_file());
-            until("queue empty", || q.snapshot().is_empty()).await;
-        }
-
-        #[tokio::test(start_paused = true)]
-        async fn pause_discards_partial_and_resume_restarts_from_zero() {
-            let _guard = spawn_guard().await;
-            let tmp = tempfile::tempdir().unwrap();
-            let partial = anime_folder(tmp.path()).join("Episode 1_tmp").join("Episode 1.tmp");
-            let log = tmp.path().join("ffmpeg.log");
-            // The first run stays alive; the second one finishes.
-            let body = format!(
-                "echo run >> '{log}'\nprintf partial > '{p}'\nif [ \"$(wc -l < '{log}')\" -ge 2 ]; then\n\
-                 printf 'out_time_us=30000000\\nprogress=end\\n'\nexit 0\nfi\nexec sleep 30",
-                log = log.display(),
-                p = partial.display()
-            );
-            let ffmpeg = script(tmp.path(), "ffmpeg", &body);
-            let ffprobe = script(tmp.path(), "ffprobe", "echo 30.0");
-            let q = start_queue(tmp.path(), &ffmpeg, &ffprobe, vec![entry(1, "Episode 1")]);
-            let item = q.snapshot()[0].clone();
-
-            q.send(Command::Start).unwrap();
-            until("ffmpeg running", || runs(&log) == 1 && partial.exists()).await;
-            q.send(Command::Pause).unwrap();
-            until("partial removed", || !partial.exists() && item.status() == DownloadState::Queue).await;
-            assert_eq!(runs(&log), 1, "no second run while paused");
-
-            q.send(Command::Start).unwrap();
-            until("downloaded", || item.status() == DownloadState::Downloaded).await;
-            assert_eq!(runs(&log), 2, "the resume runs ffmpeg again from the start");
-            assert!(anime_folder(tmp.path()).join("Episode 1").join("Episode 1.mkv").is_file());
-        }
-
-        #[tokio::test(start_paused = true)]
-        async fn reorder_while_running_requeues_the_item_and_restarts_in_the_new_order() {
-            let _guard = spawn_guard().await;
-            let tmp = tempfile::tempdir().unwrap();
-            let folder = anime_folder(tmp.path());
-            let log = tmp.path().join("ffmpeg.log");
-            let ffmpeg = sleeping_ffmpeg(tmp.path(), &log);
-            let ffprobe = script(tmp.path(), "ffprobe", "echo 30.0");
-            let p1 = folder.join("Episode 1_tmp").join("Episode 1.tmp");
-            let p2 = folder.join("Episode 2_tmp").join("Episode 2.tmp");
-            let q = start_queue(tmp.path(), &ffmpeg, &ffprobe, vec![entry(1, "Episode 1"), entry(2, "Episode 2")]);
-
-            q.send(Command::Start).unwrap();
-            until("episode 1 running", || p1.exists() && status_of(&q, 1) == Some(DownloadState::Downloading)).await;
-
-            q.send(Command::Reorder { episode_ids: vec![2, 1] }).unwrap();
-            until("episode 2 running", || p2.exists() && status_of(&q, 2) == Some(DownloadState::Downloading)).await;
-
-            assert!(!p1.exists(), "the partial of the interrupted item is removed");
-            assert_eq!(status_of(&q, 1), Some(DownloadState::Queue), "the interrupted item waits in QUEUE");
-            let order: Vec<i64> = q.snapshot().iter().map(|d| d.episode.id).collect();
-            assert_eq!(order, vec![2, 1]);
-            assert_eq!(runs(&log), 2, "episode 1 once, then episode 2");
-            q.send(Command::Pause).unwrap();
-        }
     }
 }

@@ -121,7 +121,7 @@ impl Shell {
     }
 
     /// The one download service of both kinds, or `None` before [`Shell::start_downloads`] has started it.
-    pub fn download_service(&self) -> Option<kuro_downloads::next::service::Downloads> {
+    pub fn download_service(&self) -> Option<kuro_downloads::service::Downloads> {
         self.download_service.borrow().as_ref().map(|service| service.downloads.clone())
     }
 

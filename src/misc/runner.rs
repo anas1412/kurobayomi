@@ -20,12 +20,12 @@ use kuro_db::handle::Db;
 use kuro_domain::items::source_sync::EntrySyncLocks;
 use kuro_data::source::StubSourceRepo;
 use kuro_platform::kind::Kind;
-use kuro_downloads::download_prefs::DownloadPrefs;
+use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_prefs::Prefs;
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
-use kuro_downloads::next::queue::Place;
-use kuro_downloads::next::service::Downloads;
+use kuro_downloads::queue::Place;
+use kuro_downloads::service::Downloads;
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
@@ -208,13 +208,13 @@ pub struct Inputs {
 pub fn download_policy(kind: Kind, download: &DownloadPrefs) -> DownloadPolicy {
     match kind {
         Kind::Manga => DownloadPolicy {
-            enabled: download.download_new_chapters().get(),
+            enabled: download.download_new_chapters.get(),
             unread_only: diet::DOWNLOAD_NEW_UNREAD_ONLY,
             include_categories: Vec::new(),
             exclude_categories: Vec::new(),
         },
         Kind::Anime => DownloadPolicy {
-            enabled: download.download_new_episodes().get(),
+            enabled: download.download_new_episodes.get(),
             unread_only: diet::DOWNLOAD_NEW_UNREAD_ONLY,
             include_categories: Vec::new(),
             exclude_categories: Vec::new(),
@@ -343,7 +343,7 @@ pub fn start() {
     RUNNING.with(|r| *r.borrow_mut() = Some(runner.clone()));
     let app = crate::data::app();
     let inputs = Arc::new(Inputs {
-        download: DownloadPrefs::new(app.base.store().clone()),
+        download: DownloadPrefs::new(app.base.store()),
     });
     METADATA.with(|m| *m.borrow_mut() = Some(metadata_passes()));
 
@@ -453,7 +453,7 @@ pub fn run_headless(trigger: Trigger) -> u8 {
     };
     let store = library.prefs.clone();
     let inputs = Inputs {
-        download: DownloadPrefs::new(store.clone()),
+        download: DownloadPrefs::new(&store),
     };
     let runner = runner_over(library.db, &store);
     runtime.block_on(headless_passes(&runner, &inputs, trigger))
@@ -466,7 +466,7 @@ mod tests {
 
     fn inputs() -> (PrefStore, Inputs) {
         let store = PrefStore::in_memory();
-        (store.clone(), Inputs { download: DownloadPrefs::new(store) })
+        (store.clone(), Inputs { download: DownloadPrefs::new(&store) })
     }
 
     #[test]
@@ -497,11 +497,11 @@ mod tests {
         let off = pass_settings(Kind::Manga, None, &inputs).download;
         assert_eq!(off, DownloadPolicy::default(), "download_new is off by default");
         assert!(!pass_settings(Kind::Anime, None, &inputs).download.enabled);
-        inputs.download.download_new_chapters().set(true).unwrap();
+        inputs.download.download_new_chapters.set(true).unwrap();
         let manga = pass_settings(Kind::Manga, None, &inputs).download;
         assert_eq!(manga, DownloadPolicy { enabled: true, unread_only: false, include_categories: vec![], exclude_categories: vec![] });
         assert!(!pass_settings(Kind::Anime, None, &inputs).download.enabled, "the chapter toggle does not turn anime on");
-        inputs.download.download_new_episodes().set(true).unwrap();
+        inputs.download.download_new_episodes.set(true).unwrap();
         assert!(pass_settings(Kind::Anime, None, &inputs).download.enabled);
     }
     #[test]

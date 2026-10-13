@@ -1,437 +1,365 @@
-//! Pure in-memory queue state machine: no I/O, no clocks, no async. Every transition of `MangaDownload.State` in
-//! `p1-behavior.md` section 1.1 that touches the queue goes through here.
+//! The `Queue` handle and its value types (docs/design/unified-downloads.md 2.5). The handle is a cheap clone: commands go
+//! to the actor on an unbounded channel, so none is ever dropped, and reads come from a `watch` snapshot of both kinds.
+//! Also the enqueue plan and the bulk warning, which are pure.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::model::{DownloadState, QueuedDownload};
-use crate::scheduler::pick_active;
+use kuro_db::Db;
+use kuro_platform::kind::Kind;
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum QueueError {
-    #[error("chapter {0} is not in the queue")]
-    UnknownId(i64),
-    #[error("chapter {id} cannot go from {from:?} to {to:?}")]
-    Transition { id: i64, from: DownloadState, to: DownloadState },
+use crate::actor::{self, Command};
+use crate::events::{DownloadEvent, EVENT_CAPACITY};
+use crate::gate::Connectivity;
+use crate::index::DownloadIndex;
+use crate::layout::{FreeSpaceFn, Layout};
+use crate::runner::{SourceDirectory, UnitRunner};
+use crate::state::RunState;
+use crate::store::QueueStore;
+use crate::unit::{BULK_PER_SOURCE_THRESHOLD, BULK_TOTAL_THRESHOLD, EntryRef, QueuedUnit, SourceKey, UnitRef};
+use crate::error::DownloadError;
+
+/// How long the bulk-download warning stays.
+pub const WARNING_TIMEOUT_SECS: u32 = 30;
+pub const BULK_WARNING_TEXT: &str =
+    "Warning: large bulk downloads may lead to sources becoming slower and/or blocking Aniyomi. Tap to learn more.";
+pub const BULK_WARNING_HELP_URL: &str =
+    "https://aniyomi.org/docs/faq/library#why-am-i-warned-about-large-bulk-updates-and-downloads";
+
+pub struct Layouts {
+    pub manga: Layout,
+    pub anime: Layout,
 }
 
-/// The queue in order, plus the user pause flag. Invariants kept by every method:
-/// a chapter id is in the queue at most once, and no item is `Downloaded` (finished items are removed).
-#[derive(Default)]
-pub struct QueueState {
-    items: Vec<Arc<QueuedDownload>>,
-    paused: bool,
+impl Layouts {
+    pub fn of(&self, kind: Kind) -> &Layout {
+        match kind {
+            Kind::Manga => &self.manga,
+            Kind::Anime => &self.anime,
+        }
+    }
 }
 
-impl QueueState {
-    pub fn new() -> Self {
-        Self::default()
+pub struct QueueParams {
+    /// The one database: restore reads the entry and item rows through it.
+    pub db: Arc<Db>,
+    pub store: Arc<QueueStore>,
+    /// One runner per kind.
+    pub runners: Vec<Arc<dyn UnitRunner>>,
+    pub directory: Arc<dyn SourceDirectory>,
+    pub layouts: Layouts,
+    pub index: DownloadIndex,
+    pub free_space: FreeSpaceFn,
+    /// The "Maximum downloads" pref, read at every scheduling pass.
+    pub max_active: Arc<dyn Fn() -> usize + Send + Sync>,
+    pub connectivity: watch::Receiver<Connectivity>,
+    /// `false`: the diet cut the switch, a metered link does not stop the downloads.
+    pub only_over_wifi: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Back,
+    Front,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnqueueRequest {
+    pub kind: Kind,
+    pub entry: EntryRef,
+    pub source: SourceKey,
+    pub units: Vec<UnitRef>,
+    pub place: Place,
+    pub auto_start: bool,
+    /// Skip fillermarked units. Only the automatic download after a refresh sets it; a hand pick never does (D6).
+    pub skip_fillermarked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    LocalSource,
+    NothingToDo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BulkWarning {
+    pub text: &'static str,
+    pub timeout_secs: u32,
+    pub help_url: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Enqueued {
+    /// The unit ids added, in queue order.
+    pub added: Vec<i64>,
+    /// A run began with this call.
+    pub started: bool,
+    pub warning: Option<BulkWarning>,
+    /// Units were added to a lane that is not running: the app offers a "Continue" action.
+    pub continue_toast: bool,
+    pub refused: Option<Refusal>,
+}
+
+impl Enqueued {
+    pub(crate) fn refused(why: Refusal) -> Self {
+        Self { added: Vec::new(), started: false, warning: None, continue_toast: false, refused: Some(why) }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum CancelTarget {
+    Units(Vec<i64>),
+    Entry(i64),
+}
+
+/// Both lanes at one moment. Units are immutable behind their `Arc`; a change swaps the `Arc`.
+pub struct Snapshot {
+    pub items: Vec<Arc<QueuedUnit>>,
+    pub manga: RunState,
+    pub anime: RunState,
+}
+
+impl Snapshot {
+    pub fn empty() -> Self {
+        Self { items: Vec::new(), manga: RunState::Stopped, anime: RunState::Stopped }
     }
 
-    /// A queue restored at startup: every item is QUEUE, repeats are skipped (E-Q02).
-    pub fn restored(downloads: Vec<QueuedDownload>) -> Self {
-        let mut state = Self::new();
-        state.add_all(downloads);
-        state
+    /// The units of one lane, in queue order.
+    pub fn of(&self, kind: Kind) -> impl Iterator<Item = &Arc<QueuedUnit>> {
+        self.items.iter().filter(move |d| d.kind == kind)
     }
 
-    pub fn items(&self) -> &[Arc<QueuedDownload>] {
-        &self.items
-    }
-
-    pub fn snapshot(&self) -> Vec<Arc<QueuedDownload>> {
-        self.items.clone()
-    }
-
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
-    pub fn get(&self, chapter_id: i64) -> Option<&Arc<QueuedDownload>> {
-        self.items.iter().find(|d| d.chapter.id == chapter_id)
-    }
-
-    pub fn contains(&self, chapter_id: i64) -> bool {
-        self.get(chapter_id).is_some()
-    }
-
-    /// `true` after a user pause, until the next explicit start.
-    pub fn is_paused(&self) -> bool {
-        self.paused
-    }
-
-    pub fn set_paused(&mut self, paused: bool) {
-        self.paused = paused;
-    }
-
-    /// Appends every download as QUEUE. Chapters already in the queue, and repeats within `downloads`, are skipped.
-    /// Returns the ids that were added.
-    pub fn add_all(&mut self, downloads: Vec<QueuedDownload>) -> Vec<i64> {
-        let mut added = Vec::new();
-        for mut download in downloads {
-            if self.contains(download.chapter.id) {
-                continue;
-            }
-            download.status = DownloadState::Queue;
-            added.push(download.chapter.id);
-            self.items.push(Arc::new(download));
-        }
-        added
-    }
-
-    /// Adds the chapters at the front, in the order given (`addAllToQueue` with `addFirst`, EC-11). Chapters already in
-    /// the queue are skipped, as in [`Self::add_all`].
-    pub fn add_front(&mut self, downloads: Vec<QueuedDownload>) -> Vec<i64> {
-        let added = self.add_all(downloads);
-        self.items.rotate_right(added.len());
-        added
-    }
-
-    /// Removes the chapters. Returned copies carry the status they had when removed, but DOWNLOADING and QUEUE
-    /// become NOT_DOWNLOADED (`Dl.removeFromQueueIf`).
-    pub fn remove_chapters(&mut self, ids: &[i64]) -> Vec<QueuedDownload> {
-        self.remove_where(|d| ids.contains(&d.chapter.id))
-    }
-
-    /// Removes every chapter of one manga, with the same status rule as [`Self::remove_chapters`].
-    pub fn remove_manga(&mut self, manga_id: i64) -> Vec<QueuedDownload> {
-        self.remove_where(|d| d.manga.id == manga_id)
-    }
-
-    /// Empties the queue (`Dl.internalClearQueue`).
-    pub fn clear(&mut self) -> Vec<QueuedDownload> {
-        self.remove_where(|_| true)
-    }
-
-    fn remove_where(&mut self, pred: impl Fn(&QueuedDownload) -> bool) -> Vec<QueuedDownload> {
-        let (removed, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.items).into_iter().partition(|d| pred(d));
-        self.items = kept;
-        removed
-            .into_iter()
-            .map(|d| {
-                let mut owned = Arc::unwrap_or_clone(d);
-                if matches!(owned.status, DownloadState::Downloading | DownloadState::Queue) {
-                    owned.status = DownloadState::NotDownloaded;
-                }
-                owned
-            })
-            .collect()
-    }
-
-    /// DOWNLOADING becomes QUEUE. The paused flag is untouched (used for a removal that restarts afterwards).
-    pub fn requeue_running(&mut self) -> Vec<i64> {
-        self.set_all_with_status(DownloadState::Downloading, DownloadState::Queue)
-    }
-
-    /// `Dl.pause`: DOWNLOADING becomes QUEUE and the queue is marked paused.
-    pub fn pause_running(&mut self) -> Vec<i64> {
-        self.paused = true;
-        self.requeue_running()
-    }
-
-    /// `Dl.stop`: DOWNLOADING becomes ERROR.
-    pub fn stop_running(&mut self) -> Vec<i64> {
-        self.set_all_with_status(DownloadState::Downloading, DownloadState::Error)
-    }
-
-    /// `Dl.start`: every item that is not QUEUE becomes QUEUE, so ERROR items are retried.
-    pub fn reset_for_start(&mut self) -> Vec<i64> {
-        let mut changed = Vec::new();
-        for d in self.items.iter_mut().filter(|d| d.status != DownloadState::Queue) {
-            Arc::make_mut(d).status = DownloadState::Queue;
-            changed.push(d.chapter.id);
-        }
-        changed
-    }
-
-    /// Automatic resume after the network returns: only the ERROR items in `ids` go back to QUEUE.
-    pub fn requeue_errors(&mut self, ids: &HashSet<i64>) -> Vec<i64> {
-        let mut changed = Vec::new();
-        for d in self.items.iter_mut().filter(|d| d.status == DownloadState::Error && ids.contains(&d.chapter.id)) {
-            Arc::make_mut(d).status = DownloadState::Queue;
-            changed.push(d.chapter.id);
-        }
-        changed
-    }
-
-    /// Puts the queue in the given order. Unknown and repeated ids are ignored, queued items that are not listed follow in
-    /// their current order, and an empty list does nothing (E-15). ERROR items keep their status (Proposal, unlike
-    /// Kotlin `updateQueue`).
-    pub fn reorder(&mut self, ordered_ids: &[i64]) {
-        if ordered_ids.is_empty() {
-            return;
-        }
-        let mut rest = std::mem::take(&mut self.items);
-        let mut out = Vec::with_capacity(rest.len());
-        for id in ordered_ids {
-            if let Some(pos) = rest.iter().position(|d| d.chapter.id == *id) {
-                out.push(rest.remove(pos));
-            }
-        }
-        out.append(&mut rest);
-        self.items = out;
-    }
-
-    /// Checked status change. Starting a download needs QUEUE. ERROR and QUEUE can be set from any state. Removal
-    /// and completion use [`Self::remove_chapters`] and [`Self::mark_downloaded`], never this method.
-    pub fn set_status(&mut self, chapter_id: i64, to: DownloadState) -> Result<bool, QueueError> {
-        let item = self.items.iter_mut().find(|d| d.chapter.id == chapter_id).ok_or(QueueError::UnknownId(chapter_id))?;
-        let from = item.status;
-        if from == to {
-            return Ok(false);
-        }
-        let allowed = match to {
-            DownloadState::Downloading => from == DownloadState::Queue,
-            DownloadState::Queue | DownloadState::Error => true,
-            DownloadState::NotDownloaded | DownloadState::Downloaded => false,
-        };
-        if !allowed {
-            return Err(QueueError::Transition { id: chapter_id, from, to });
-        }
-        Arc::make_mut(item).status = to;
-        Ok(true)
-    }
-
-    /// Completion: removes the chapter and returns it with status DOWNLOADED.
-    pub fn mark_downloaded(&mut self, chapter_id: i64) -> Option<QueuedDownload> {
-        let pos = self.items.iter().position(|d| d.chapter.id == chapter_id)?;
-        let mut done = Arc::unwrap_or_clone(self.items.remove(pos));
-        done.status = DownloadState::Downloaded;
-        Some(done)
-    }
-
-    /// Mutates one item in place. Copies it first only when a snapshot still shares it.
-    pub fn update(&mut self, chapter_id: i64, f: impl FnOnce(&mut QueuedDownload)) -> bool {
-        match self.items.iter_mut().find(|d| d.chapter.id == chapter_id) {
-            Some(item) => {
-                f(Arc::make_mut(item));
-                true
-            }
-            None => false,
+    pub fn run(&self, kind: Kind) -> RunState {
+        match kind {
+            Kind::Manga => self.manga,
+            Kind::Anime => self.anime,
         }
     }
 
-    /// The chapters the scheduler runs now (see [`pick_active`]).
-    pub fn active_ids(&self, max_sources: usize) -> Vec<i64> {
-        pick_active(self.items.iter().map(|d| (d.source.id(), d.chapter.id, d.status)), max_sources)
+    pub fn find(&self, kind: Kind, unit_id: i64) -> Option<&Arc<QueuedUnit>> {
+        self.items.iter().find(|d| d.kind == kind && d.unit.id == unit_id)
     }
 
-    /// `true` when no item is NOT_DOWNLOADED, QUEUE or DOWNLOADING (`Dl.areAllDownloadsFinished`).
-    pub fn all_finished(&self) -> bool {
-        self.items.iter().all(|d| !d.status.is_active())
+    /// `true` when `other` shows the same units in the same order and the same run states.
+    pub(crate) fn same_as(&self, other: &Snapshot) -> bool {
+        self.manga == other.manga
+            && self.anime == other.anime
+            && self.items.len() == other.items.len()
+            && self.items.iter().zip(&other.items).all(|(a, b)| Arc::ptr_eq(a, b))
     }
+}
 
-    fn set_all_with_status(&mut self, from: DownloadState, to: DownloadState) -> Vec<i64> {
-        let mut changed = Vec::new();
-        for d in self.items.iter_mut().filter(|d| d.status == from) {
-            Arc::make_mut(d).status = to;
-            changed.push(d.chapter.id);
+/// Holds a lane still while the disk changes under it. Dropping it lets the lane run again.
+pub struct EntryHold {
+    tx: mpsc::UnboundedSender<Command>,
+    kind: Kind,
+    /// `false` when no run held a unit of the entry, so there was nothing to stop and there is nothing to release.
+    registered: bool,
+}
+
+impl Drop for EntryHold {
+    fn drop(&mut self) {
+        if self.registered {
+            let _ = self.tx.send(Command::Release { kind: self.kind });
         }
-        changed
     }
+}
+
+#[derive(Clone)]
+pub struct Queue {
+    tx: mpsc::UnboundedSender<Command>,
+    snapshot: watch::Receiver<Arc<Snapshot>>,
+    events: broadcast::Sender<DownloadEvent>,
+}
+
+fn gone() -> DownloadError {
+    DownloadError::Internal("the download queue is not running".to_owned())
+}
+
+impl Queue {
+    /// Starts the actor on the current Tokio runtime. It restores the saved queue and sweeps stray staging folders
+    /// before it serves the first command.
+    pub fn spawn(params: QueueParams) -> Queue {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (snapshot_tx, snapshot) = watch::channel(Arc::new(Snapshot::empty()));
+        let (events, _) = broadcast::channel(EVENT_CAPACITY);
+        tokio::spawn(actor::run(params, rx, snapshot_tx, events.clone()));
+        Queue { tx, snapshot, events }
+    }
+
+    pub async fn enqueue(&self, req: EnqueueRequest) -> Result<Enqueued, DownloadError> {
+        let (reply, answer) = oneshot::channel();
+        self.tx.send(Command::Enqueue { req, reply }).map_err(|_| gone())?;
+        answer.await.map_err(|_| gone())?
+    }
+
+    /// Puts the units at the front and starts the lane. `AlreadyDownloaded` when one is on disk.
+    pub async fn start_now(&self, req: EnqueueRequest) -> Result<(), DownloadError> {
+        let (reply, answer) = oneshot::channel();
+        self.tx.send(Command::StartNow { req, reply }).map_err(|_| gone())?;
+        answer.await.map_err(|_| gone())?
+    }
+
+    /// Explicit start: retries every ERROR unit of the lane.
+    pub fn start(&self, kind: Kind) {
+        let _ = self.tx.send(Command::Start { kind });
+    }
+
+    pub fn pause(&self, kind: Kind) {
+        let _ = self.tx.send(Command::Pause { kind });
+    }
+
+    pub fn clear(&self, kind: Kind) {
+        let _ = self.tx.send(Command::Clear { kind });
+    }
+
+    /// Puts the lane in this order. Unknown ids are ignored, units not listed follow, an empty list does nothing.
+    pub fn reorder(&self, kind: Kind, unit_ids: Vec<i64>) {
+        let _ = self.tx.send(Command::Reorder { kind, unit_ids });
+    }
+
+    /// Removes units from the queue. Returns the ids that were queued. Other units are left as they are: a failed unit
+    /// stays failed.
+    pub async fn cancel(&self, kind: Kind, target: CancelTarget) -> Result<Vec<i64>, DownloadError> {
+        let (reply, answer) = oneshot::channel();
+        self.tx.send(Command::Cancel { kind, target, reply }).map_err(|_| gone())?;
+        answer.await.map_err(|_| gone())
+    }
+
+    /// Stops the lane when it is running a unit of this entry, so the disk can change under it. Drop the hold to let
+    /// the lane run on.
+    pub async fn hold_entry(&self, kind: Kind, entry_id: i64) -> Result<EntryHold, DownloadError> {
+        let (reply, answer) = oneshot::channel();
+        self.tx.send(Command::Hold { kind, entry_id, reply }).map_err(|_| gone())?;
+        let registered = answer.await.map_err(|_| gone())?;
+        Ok(EntryHold { tx: self.tx.clone(), kind, registered })
+    }
+
+    /// The set of installed sources changed: every waiting flag is asked again.
+    pub fn sources_changed(&self) {
+        let _ = self.tx.send(Command::SourcesChanged);
+    }
+
+    pub fn snapshot(&self) -> Arc<Snapshot> {
+        self.snapshot.borrow().clone()
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<Arc<Snapshot>> {
+        self.snapshot.clone()
+    }
+
+    pub fn queued(&self, kind: Kind, unit_id: i64) -> Option<Arc<QueuedUnit>> {
+        self.snapshot.borrow().find(kind, unit_id).cloned()
+    }
+
+    pub fn events(&self) -> broadcast::Receiver<DownloadEvent> {
+        self.events.subscribe()
+    }
+}
+
+/// The units an enqueue adds, in queue order: highest source order first (the sort is stable). Dropped: fillermarked
+/// units when `skip_fillermarked`, units already queued, units already downloaded, and repeats.
+pub fn plan_enqueue(
+    units: &[UnitRef],
+    skip_fillermarked: bool,
+    mut queued: impl FnMut(i64) -> bool,
+    mut downloaded: impl FnMut(&UnitRef) -> bool,
+) -> Vec<UnitRef> {
+    let mut candidates: Vec<&UnitRef> = units.iter().filter(|u| !(skip_fillermarked && u.fillermark)).collect();
+    candidates.sort_by_key(|u| std::cmp::Reverse(u.source_order));
+    let mut taken = HashSet::new();
+    let mut picked = Vec::new();
+    for unit in candidates {
+        if queued(unit.id) || taken.contains(&unit.id) || downloaded(unit) {
+            continue;
+        }
+        taken.insert(unit.id);
+        picked.push(unit.clone());
+    }
+    picked
+}
+
+/// The warning for a large queue: more than [`BULK_TOTAL_THRESHOLD`] queued units, or more than
+/// [`BULK_PER_SOURCE_THRESHOLD`] of one source. `queue` is `(source id, unmetered)` per queued unit; units of an
+/// unmetered source count for neither.
+pub fn bulk_warning(queue: impl IntoIterator<Item = (i64, bool)>) -> Option<BulkWarning> {
+    let mut total = 0usize;
+    let mut per_source: HashMap<i64, usize> = HashMap::new();
+    for (source_id, unmetered) in queue {
+        if unmetered {
+            continue;
+        }
+        total += 1;
+        *per_source.entry(source_id).or_default() += 1;
+    }
+    let widest = per_source.values().copied().max().unwrap_or(0);
+    (total > BULK_TOTAL_THRESHOLD || widest > BULK_PER_SOURCE_THRESHOLD).then_some(BulkWarning {
+        text: BULK_WARNING_TEXT,
+        timeout_secs: WARNING_TIMEOUT_SECS,
+        help_url: BULK_WARNING_HELP_URL,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler::MAX_ACTIVE_SOURCES;
-    use crate::testing::{download, fake_source};
-    use DownloadState::*;
 
-    fn queue_with(statuses: &[(i64, DownloadState)]) -> QueueState {
-        let mut q = QueueState::new();
-        let src = fake_source(1);
-        q.add_all(statuses.iter().map(|(id, _)| download(&src, *id, 1, Queue)).collect());
-        for (id, status) in statuses {
-            q.update(*id, |d| d.status = *status);
+    fn unit(id: i64, source_order: i64, fillermark: bool) -> UnitRef {
+        UnitRef {
+            id,
+            entry_id: 1,
+            url: format!("/u{id}"),
+            name: format!("Unit {id}"),
+            scanlator: None,
+            done: false,
+            bookmark: false,
+            fillermark,
+            source_order,
+            date_upload: 0,
+            number: id as f64,
         }
-        q
     }
 
-    fn statuses(q: &QueueState) -> Vec<(i64, DownloadState)> {
-        q.items().iter().map(|d| (d.chapter.id, d.status)).collect()
-    }
-
-    #[test]
-    fn add_front_puts_the_new_chapters_first_in_the_given_order() {
-        let mut q = queue_with(&[(1, Queue), (2, Queue)]);
-        let src = fake_source(1);
-        let added = q.add_front(vec![download(&src, 7, 1, Queue), download(&src, 8, 1, Queue), download(&src, 1, 1, Queue)]);
-        assert_eq!(added, vec![7, 8], "a chapter already queued is skipped");
-        assert_eq!(statuses(&q), vec![(7, Queue), (8, Queue), (1, Queue), (2, Queue)]);
-    }
-
-    // TST-01
-    #[test]
-    fn add_all_sets_queue_status_and_appends_in_order() {
-        let mut q = QueueState::new();
-        let src = fake_source(1);
-        let added = q.add_all(vec![download(&src, 3, 1, Downloaded), download(&src, 1, 1, Error), download(&src, 2, 1, Queue)]);
-        assert_eq!(added, vec![3, 1, 2]);
-        assert_eq!(statuses(&q), vec![(3, Queue), (1, Queue), (2, Queue)]);
+    fn ids(units: Vec<UnitRef>) -> Vec<i64> {
+        units.iter().map(|u| u.id).collect()
     }
 
     #[test]
-    fn add_all_skips_duplicates_in_queue_and_in_the_input() {
-        let mut q = queue_with(&[(1, Queue)]);
-        let src = fake_source(1);
-        let added = q.add_all(vec![download(&src, 1, 1, Queue), download(&src, 2, 1, Queue), download(&src, 2, 1, Queue)]);
-        assert_eq!(added, vec![2]);
-        assert_eq!(q.len(), 2);
-    }
-
-    // TST-02
-    #[test]
-    fn remove_resets_downloading_and_queue_but_not_error() {
-        let mut q = queue_with(&[(1, Downloading), (2, Queue), (3, Error)]);
-        let removed = q.remove_chapters(&[1, 2, 3]);
-        let got: Vec<_> = removed.iter().map(|d| (d.chapter.id, d.status)).collect();
-        assert_eq!(got, vec![(1, NotDownloaded), (2, NotDownloaded), (3, Error)]);
-        assert!(q.is_empty());
-    }
-
-    // TST-03
-    #[test]
-    fn pause_running_sets_queue_and_the_paused_flag() {
-        let mut q = queue_with(&[(1, Downloading), (2, Downloading), (3, Queue)]);
-        assert_eq!(q.pause_running(), vec![1, 2]);
-        assert_eq!(statuses(&q), vec![(1, Queue), (2, Queue), (3, Queue)]);
-        assert!(q.is_paused());
-    }
-
-    // TST-04
-    #[test]
-    fn stop_running_sets_error() {
-        let mut q = queue_with(&[(1, Downloading), (2, Queue)]);
-        assert_eq!(q.stop_running(), vec![1]);
-        assert_eq!(statuses(&q), vec![(1, Error), (2, Queue)]);
-    }
-
-    // TST-05
-    #[test]
-    fn reset_for_start_retries_error_and_not_downloaded() {
-        let mut q = queue_with(&[(1, Error), (2, NotDownloaded), (3, Queue), (4, Downloading)]);
-        let changed = q.reset_for_start();
-        assert_eq!(changed, vec![1, 2, 4]);
-        assert!(q.items().iter().all(|d| d.status == Queue));
+    fn the_plan_drops_downloaded_queued_and_repeated_units_and_sorts_newest_first() {
+        let units = vec![unit(1, 1, false), unit(3, 3, false), unit(4, 4, false), unit(4, 4, false), unit(2, 2, false)];
+        let picked = plan_enqueue(&units, false, |id| id == 2, |u| u.id == 1);
+        assert_eq!(ids(picked), vec![4, 3], "1 is on disk, 2 is queued, 4 is listed twice");
     }
 
     #[test]
-    fn requeue_errors_only_touches_the_given_ids() {
-        let mut q = queue_with(&[(1, Error), (2, Error), (3, Queue)]);
-        let only: HashSet<i64> = [2].into_iter().collect();
-        assert_eq!(q.requeue_errors(&only), vec![2]);
-        assert_eq!(statuses(&q), vec![(1, Error), (2, Queue), (3, Queue)]);
-    }
-
-    // TST-09
-    #[test]
-    fn reorder_ignores_unknown_and_repeats_and_appends_unlisted_in_current_order() {
-        let mut q = queue_with(&[(1, Queue), (2, Queue), (3, Queue)]);
-        q.reorder(&[3, 9, 3]);
-        assert_eq!(statuses(&q), vec![(3, Queue), (1, Queue), (2, Queue)]);
-        q.reorder(&[]);
-        assert_eq!(statuses(&q), vec![(3, Queue), (1, Queue), (2, Queue)], "an empty list is a no-op");
-    }
-
-    // TST-10
-    #[test]
-    fn reorder_keeps_error_status() {
-        let mut q = queue_with(&[(1, Error), (2, Queue)]);
-        q.reorder(&[2, 1]);
-        assert_eq!(statuses(&q), vec![(2, Queue), (1, Error)]);
+    fn fillermarked_units_are_skipped_only_when_asked() {
+        let units = vec![unit(1, 1, false), unit(2, 2, true)];
+        assert_eq!(ids(plan_enqueue(&units, true, |_| false, |_| false)), vec![1], "the automatic download skips them");
+        assert_eq!(ids(plan_enqueue(&units, false, |_| false, |_| false)), vec![2, 1], "a hand pick keeps them");
     }
 
     #[test]
-    fn every_edge_of_the_state_diagram_is_allowed_and_the_others_are_refused() {
-        // QUEUE -> DOWNLOADING -> ERROR -> QUEUE (start re-queues an error), then DOWNLOADING -> QUEUE (pause).
-        let mut q = queue_with(&[(1, Queue)]);
-        assert_eq!(q.set_status(1, Downloading), Ok(true));
-        assert_eq!(q.set_status(1, Error), Ok(true));
-        assert_eq!(q.set_status(1, Queue), Ok(true));
-        assert_eq!(q.set_status(1, Downloading), Ok(true));
-        assert_eq!(q.set_status(1, Queue), Ok(true));
-        // ERROR -> DOWNLOADING is refused: it has to go through QUEUE first.
-        q.set_status(1, Error).unwrap();
-        assert!(matches!(q.set_status(1, Downloading), Err(QueueError::Transition { .. })));
-        // DOWNLOADING -> DOWNLOADED is completion: the item leaves the queue.
-        let mut q = queue_with(&[(2, Queue)]);
-        q.set_status(2, Downloading).unwrap();
-        let done = q.mark_downloaded(2).expect("the item is queued");
-        assert_eq!(done.status, Downloaded);
-        assert!(q.is_empty());
-        // QUEUE and DOWNLOADING -> NOT_DOWNLOADED is removal.
-        let mut q = queue_with(&[(3, Queue), (4, Downloading)]);
-        let removed = q.remove_chapters(&[3, 4]);
-        assert!(removed.iter().all(|d| d.status == NotDownloaded));
-        // NOT_DOWNLOADED and DOWNLOADED are never set directly.
-        let mut q = queue_with(&[(5, Queue)]);
-        assert!(matches!(q.set_status(5, Downloaded), Err(QueueError::Transition { .. })));
-        assert!(matches!(q.set_status(5, NotDownloaded), Err(QueueError::Transition { .. })));
+    fn equal_source_orders_keep_their_input_order() {
+        let units = vec![unit(7, 5, false), unit(3, 5, false), unit(9, 5, false)];
+        assert_eq!(ids(plan_enqueue(&units, false, |_| false, |_| false)), vec![7, 3, 9]);
     }
 
     #[test]
-    fn set_status_enforces_the_transition_table() {
-        let mut q = queue_with(&[(1, Queue)]);
-        assert_eq!(q.set_status(1, Downloading), Ok(true));
-        assert_eq!(q.set_status(1, Downloading), Ok(false));
-        assert_eq!(q.set_status(1, Error), Ok(true));
-        assert!(matches!(q.set_status(1, Downloaded), Err(QueueError::Transition { .. })));
-        assert!(matches!(q.set_status(1, NotDownloaded), Err(QueueError::Transition { .. })));
-        assert_eq!(q.set_status(1, Queue), Ok(true));
-        assert!(q.set_status(1, Downloading).is_ok());
-        assert_eq!(q.set_status(7, Queue), Err(QueueError::UnknownId(7)));
+    fn the_bulk_warning_needs_more_than_the_total_or_the_per_source_threshold() {
+        let one_source = |n: usize| (0..n).map(|_| (1, false));
+        assert!(bulk_warning(one_source(15)).is_none(), "15 of one source is not more than 15");
+        assert!(bulk_warning(one_source(16)).is_some(), "16 of one source warns");
+        let many_sources = |n: i64| (0..n).map(|i| (i, false));
+        assert!(bulk_warning(many_sources(30)).is_none(), "30 in all is not more than 30");
+        let warning = bulk_warning(many_sources(31)).expect("31 in all warns");
+        assert_eq!((warning.timeout_secs, warning.text), (WARNING_TIMEOUT_SECS, BULK_WARNING_TEXT));
     }
 
     #[test]
-    fn mark_downloaded_removes_the_item_so_no_finished_item_stays() {
-        let mut q = queue_with(&[(1, Downloading), (2, Queue)]);
-        let done = q.mark_downloaded(1).unwrap();
-        assert_eq!(done.status, Downloaded);
-        assert_eq!(statuses(&q), vec![(2, Queue)]);
-        assert!(q.mark_downloaded(1).is_none());
-    }
-
-    #[test]
-    fn remove_manga_only_removes_rows_with_that_manga_id() {
-        let mut q = QueueState::new();
-        let src = fake_source(1);
-        q.add_all(vec![download(&src, 1, 7, Queue), download(&src, 2, 8, Queue), download(&src, 3, 7, Error)]);
-        let removed = q.remove_manga(7);
-        assert_eq!(removed.len(), 2);
-        assert_eq!(statuses(&q), vec![(2, Queue)]);
-    }
-
-    #[test]
-    fn clear_empties_and_resets_active_statuses() {
-        let mut q = queue_with(&[(1, Downloading), (2, Error)]);
-        let removed = q.clear();
-        assert_eq!(removed.len(), 2);
-        assert_eq!(removed[0].status, NotDownloaded);
-        assert!(q.is_empty());
-        assert!(q.all_finished());
-    }
-
-    #[test]
-    fn active_ids_and_all_finished_follow_the_scheduler_rules() {
-        let q = queue_with(&[(1, Error), (2, Queue)]);
-        assert_eq!(q.active_ids(MAX_ACTIVE_SOURCES), vec![2]);
-        assert!(!q.all_finished());
-        let finished = queue_with(&[(1, Error)]);
-        assert!(finished.active_ids(MAX_ACTIVE_SOURCES).is_empty());
-        assert!(finished.all_finished());
-    }
-
-    #[test]
-    fn snapshots_keep_their_copy_when_the_queue_changes() {
-        let mut q = queue_with(&[(1, Queue)]);
-        let before = q.snapshot();
-        q.set_status(1, Downloading).unwrap();
-        assert_eq!(before[0].status, Queue);
-        assert_eq!(q.get(1).unwrap().status, Downloading);
+    fn unmetered_sources_never_trigger_the_warning() {
+        assert!(bulk_warning((0..100).map(|_| (1, true))).is_none());
+        let mixed = (0..16).map(|_| (1, true)).chain((0..15).map(|_| (2, false)));
+        assert!(bulk_warning(mixed).is_none());
     }
 }

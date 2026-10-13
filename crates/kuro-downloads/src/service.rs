@@ -13,16 +13,16 @@ use kuro_db::Db;
 use kuro_platform::kind::Kind;
 use tokio::sync::{broadcast, watch};
 
-use super::delete::{DeleteRules, select_for_delete};
-use super::events::DownloadEvent;
-use super::index::DownloadIndex;
-use super::layout::Layout;
-use super::locks::SeriesLocks;
-use super::naming::{UnitName, unit_dir_names};
-use super::pending::{PendingGroup, PendingStore};
-use super::queue::{CancelTarget, EnqueueRequest, Enqueued, Layouts, Queue, Snapshot};
-use super::runner::SourceDirectory;
-use super::unit::{Availability, EntryRef, SourceKey, UnitRef};
+use crate::delete::{DeleteRules, select_for_delete};
+use crate::events::DownloadEvent;
+use crate::index::DownloadIndex;
+use crate::layout::Layout;
+use crate::locks::SeriesLocks;
+use crate::naming::{UnitName, unit_dir_names};
+use crate::pending::{PendingGroup, PendingStore};
+use crate::queue::{CancelTarget, EnqueueRequest, Enqueued, Layouts, Queue, Snapshot};
+use crate::runner::SourceDirectory;
+use crate::unit::{Availability, EntryRef, SourceKey, UnitRef};
 use crate::error::DownloadError;
 
 fn join_err(e: tokio::task::JoinError) -> DownloadError {
@@ -398,10 +398,10 @@ mod tests {
     use kuro_data::item::{Item, ItemUpdate};
     use kuro_db::schema_unified;
 
-    use super::super::gate::Connectivity;
-    use super::super::index::IndexRoots;
-    use super::super::queue::QueueParams;
-    use super::super::store::QueueStore;
+    use crate::gate::Connectivity;
+    use crate::index::IndexRoots;
+    use crate::queue::QueueParams;
+    use crate::store::QueueStore;
     use super::*;
 
     struct KnownSources(SourceKey);

@@ -1,101 +1,64 @@
-//! The shared delete filter (T-25a-012) and the source lookup the pending-delete flush uses. The settings diet cut the
-//! category exclusions of the delete rules.
+//! The delete filter, the same for both kinds. The category exclusions are cut (docs/design/unified-downloads.md D3):
+//! delete-after-read keeps bookmarked units, an explicit delete removes them.
 
-use std::sync::Arc;
+use crate::unit::UnitRef;
 
-use crate::anime::model::EpisodeRef;
-use crate::model::ChapterRef;
-use crate::source::ChapterSource;
-
-/// Looks up an installed manga or novel source by id (`sourceManager.get`). `None` means the source is not installed.
-pub trait ChapterSourceResolver: Send + Sync {
-    fn chapter_source(&self, source_id: i64) -> Option<Arc<dyn ChapterSource>>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeleteRules {
+    /// Allow deleting bookmarked units.
+    pub remove_bookmarked: bool,
 }
 
-/// What the delete filter reads from one downloaded item: a chapter (`read`, `bookmark`) or an episode (`seen`,
-/// `bookmark`).
-pub trait DeleteCandidate {
-    fn watched(&self) -> bool;
-    fn bookmarked(&self) -> bool;
+impl DeleteRules {
+    /// Every explicit delete (a button the user pressed).
+    pub const EXPLICIT: Self = Self { remove_bookmarked: true };
+    /// Delete after read or watched.
+    pub const AFTER_READ: Self = Self { remove_bookmarked: false };
 }
 
-impl DeleteCandidate for ChapterRef {
-    fn watched(&self) -> bool {
-        self.read
-    }
-    fn bookmarked(&self) -> bool {
-        self.bookmark
-    }
-}
-
-impl DeleteCandidate for EpisodeRef {
-    fn watched(&self) -> bool {
-        self.seen
-    }
-    fn bookmarked(&self) -> bool {
-        self.bookmark
-    }
-}
-
-/// The pure delete filter of p1-behavior 1.4, the same for both kinds (T-25a-012). An empty `categories` counts as
-/// `[0]`. When one of the categories is in `exclude`, watched items are kept. Bookmarked items are kept unless
-/// `remove_bookmarked` is set. Empty input gives empty output (E-01).
-pub fn select_for_delete<T: DeleteCandidate>(
-    items: Vec<T>,
-    exclude: &[i64],
-    categories: &[i64],
-    remove_bookmarked: bool,
-) -> Vec<T> {
-    let categories: &[i64] = if categories.is_empty() { &[0] } else { categories };
-    let protect_watched = categories.iter().any(|c| exclude.contains(c));
-    items
-        .into_iter()
-        .filter(|item| !(protect_watched && item.watched()))
-        .filter(|item| remove_bookmarked || !item.bookmarked())
-        .collect()
+/// The units a delete may remove: bookmarked ones are kept unless `rules.remove_bookmarked`. Empty in, empty out.
+pub fn select_for_delete(units: Vec<UnitRef>, rules: DeleteRules) -> Vec<UnitRef> {
+    units.into_iter().filter(|u| rules.remove_bookmarked || !u.bookmark).collect()
 }
 
 #[cfg(test)]
-mod select_tests {
+mod tests {
     use super::*;
-    use crate::testing::chapter;
 
-    fn read(id: i64) -> ChapterRef {
-        let mut c = chapter(id, 1, "c");
-        c.read = true;
-        c
+    fn unit(id: i64, bookmark: bool) -> UnitRef {
+        UnitRef {
+            id,
+            entry_id: 1,
+            url: String::new(),
+            name: format!("Unit {id}"),
+            scanlator: None,
+            done: true,
+            bookmark,
+            fillermark: false,
+            source_order: id,
+            date_upload: 0,
+            number: id as f64,
+        }
     }
 
-    fn bookmarked(id: i64) -> ChapterRef {
-        let mut c = chapter(id, 1, "c");
-        c.bookmark = true;
-        c
-    }
-
-    fn ids(items: Vec<ChapterRef>) -> Vec<i64> {
-        items.iter().map(|c| c.id).collect()
+    fn ids(units: Vec<UnitRef>) -> Vec<i64> {
+        units.iter().map(|u| u.id).collect()
     }
 
     #[test]
     fn empty_input_gives_empty_output() {
-        assert!(select_for_delete(Vec::<ChapterRef>::new(), &[1], &[1], true).is_empty(), "E-01");
+        assert!(select_for_delete(Vec::new(), DeleteRules::EXPLICIT).is_empty());
     }
 
     #[test]
-    fn no_categories_counts_as_category_zero_for_the_exclusion() {
-        let out = select_for_delete(vec![read(1), chapter(2, 1, "c")], &[0], &[], true);
-        assert_eq!(ids(out), vec![2], "T-E04: the watched item is protected through category 0");
+    fn after_read_keeps_bookmarked_units() {
+        let all = vec![unit(1, false), unit(2, true), unit(3, false)];
+        assert_eq!(ids(select_for_delete(all, DeleteRules::AFTER_READ)), vec![1, 3]);
     }
 
     #[test]
-    fn a_watched_item_in_an_excluded_category_is_not_selected() {
-        let out = select_for_delete(vec![read(1), chapter(2, 1, "c")], &[5], &[5, 6], true);
-        assert_eq!(ids(out), vec![2], "T-E18 and T-E18b");
-    }
-
-    #[test]
-    fn bookmarks_are_kept_unless_removal_of_bookmarks_is_allowed() {
-        assert!(select_for_delete(vec![bookmarked(3)], &[], &[], false).is_empty(), "T-E19: kept");
-        assert_eq!(ids(select_for_delete(vec![bookmarked(3)], &[], &[], true)), vec![3], "T-E19: deleted");
+    fn an_explicit_delete_removes_bookmarked_units_too() {
+        let all = vec![unit(1, false), unit(2, true)];
+        assert_eq!(ids(select_for_delete(all, DeleteRules::EXPLICIT)), vec![1, 2]);
     }
 }

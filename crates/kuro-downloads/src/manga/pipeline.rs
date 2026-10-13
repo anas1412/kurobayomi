@@ -24,10 +24,10 @@ use super::images::{
 };
 use super::source::{ChapterRef, ChapterSource, Page, PageState};
 use crate::error::{DownloadError, error_chain};
-use crate::next::index::DownloadIndex;
-use crate::next::layout::Layout;
-use crate::next::naming::{CBZ_EXTENSION, CBZ_PART_SUFFIX, UnitName, unit_dir_name};
-use crate::next::unit::{EntryRef, SourceKey, UnitProgress, UnitRef};
+use crate::index::DownloadIndex;
+use crate::layout::Layout;
+use crate::naming::{CBZ_EXTENSION, CBZ_PART_SUFFIX, UnitName, unit_dir_name};
+use crate::unit::{EntryRef, SourceKey, UnitProgress, UnitRef};
 use crate::throttle::SpeedLimiter;
 
 /// Pages in flight per chapter (`flatMapMerge(concurrency = 2)`).
@@ -417,8 +417,8 @@ async fn stream_to_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::next::index::IndexRoots;
-    use crate::next::unit::fixtures;
+    use crate::index::IndexRoots;
+    use crate::unit::fixtures;
     use crate::testing::{FakeSource, fake, jpeg_bytes};
     use std::sync::atomic::Ordering;
     use std::time::Duration;
@@ -706,8 +706,8 @@ mod tests {
 #[cfg(test)]
 mod cache_and_split_tests {
     use super::*;
-    use crate::next::index::IndexRoots;
-    use crate::next::unit::fixtures;
+    use crate::index::IndexRoots;
+    use crate::unit::fixtures;
     use crate::testing::{FakeSource, jpeg_bytes};
     use std::collections::HashMap;
     use std::sync::Mutex;

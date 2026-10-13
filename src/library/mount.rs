@@ -286,7 +286,7 @@ fn open_secrets() -> Arc<dyn kuro_platform::secrets::SecretStore> {
 }
 
 /// Whether a chapter or an episode is on disk, for the continue button's downloaded filter. A local entry has every unit.
-fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::next::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
+fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
     Rc::new(move |id| {
         let Some(item) = ItemRepo::new(db.clone()).by_id(id).ok().flatten() else { return false };
         let Ok(entry) = EntryRepo::new(db.clone()).by_id(item.entry_id) else { return false };

@@ -13,8 +13,8 @@ use tracing::error;
 use crate::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
 use crate::anime::naming::{anime_dir_name, episode_dir_name, source_dir_name, unique_episode_dir_name, valid_episode_dir_names};
 use crate::error::DownloadError;
-use crate::layout::TMP_DIR_SUFFIX;
-use crate::pipeline::MIN_FREE_BYTES;
+use crate::naming::TMP_DIR_SUFFIX;
+use crate::layout::MIN_FREE_BYTES;
 
 /// Shown in the error when no downloads root is set.
 const UNSET_ROOT: &str = "(unset)";

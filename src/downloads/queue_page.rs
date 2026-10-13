@@ -14,9 +14,9 @@ use gtk::glib::{self, prelude::*};
 use gtk::prelude::*;
 use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
-use kuro_downloads::next::queue_model::{QueueItem, QueueModel};
-use kuro_downloads::next::service::Downloads;
-use kuro_downloads::next::state::RunState;
+use kuro_downloads::queue_model::{QueueItem, QueueModel};
+use kuro_downloads::service::Downloads;
+use kuro_downloads::state::RunState;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::browse::look;

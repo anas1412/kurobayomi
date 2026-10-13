@@ -10,9 +10,9 @@ use std::time::Duration;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_downloads::DownloadState;
-use kuro_downloads::next::queue::{CancelTarget, Snapshot};
-use kuro_downloads::next::service::Downloads;
-use kuro_downloads::next::unit::QueuedUnit;
+use kuro_downloads::queue::{CancelTarget, Snapshot};
+use kuro_downloads::service::Downloads;
+use kuro_downloads::unit::QueuedUnit;
 use kuro_platform::kind::Kind;
 
 // ponytail: each follower polls the snapshot 4 times a second (progress moves inside the units, not in the snapshot);

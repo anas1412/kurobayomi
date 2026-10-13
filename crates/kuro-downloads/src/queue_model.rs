@@ -3,7 +3,11 @@
 //! The engine only knows the flat queue. The page groups it by source, moves rows inside a group, then sends the flat
 //! order back. No GTK and no engine here.
 
+use std::sync::Arc;
+
 use kuro_platform::kind::Kind;
+
+use crate::unit::QueuedUnit;
 use crate::model::DownloadState;
 
 /// One row of the queue. `parent_id` is the series key (anime id or manga id).
@@ -30,6 +34,8 @@ pub struct QueueItem {
     pub pages_total: Option<u32>,
     /// Anime: percent 0..=100. Manga: the sum of page progress, each page at most 100.
     pub progress: i64,
+    /// The source cannot be reached: the page shows "Waiting for source" and the unit does not run.
+    pub waiting: bool,
 }
 
 /// One section: a source and its rows in queue order.
@@ -48,6 +54,34 @@ pub struct QueueModel {
 
 impl QueueModel {
     pub fn from_flat(flat: Vec<QueueItem>) -> Self {
+        Self { flat }
+    }
+
+    /// The rows of one lane, in queue order. `units` is the lane's items (`Snapshot::of(kind)` once the snapshot type
+    /// exists). Pages come from the live progress; `progress` is the percent for both kinds.
+    pub fn from_units<'a>(units: impl IntoIterator<Item = &'a Arc<QueuedUnit>>) -> Self {
+        let flat = units
+            .into_iter()
+            .map(|d| {
+                let pages = d.progress.pages();
+                QueueItem {
+                    kind: d.kind,
+                    item_id: d.unit.id,
+                    parent_id: d.entry.id,
+                    source_id: d.source.id,
+                    source_name: d.source.display_name(),
+                    title: d.entry.title.clone(),
+                    item_name: d.unit.name.clone(),
+                    date_upload: d.unit.date_upload,
+                    number: d.unit.number,
+                    state: d.state,
+                    pages_done: pages.map_or(0, |(done, _)| done),
+                    pages_total: pages.map(|(_, total)| total),
+                    progress: i64::from(d.progress.percent()),
+                    waiting: d.waiting,
+                }
+            })
+            .collect();
         Self { flat }
     }
 
@@ -147,6 +181,7 @@ mod tests {
             pages_done: 0,
             pages_total: None,
             progress: 0,
+            waiting: false,
         }
     }
 
@@ -207,5 +242,25 @@ mod tests {
         assert_eq!(normalize_order(&[1, 2, 3], &[2, 2]), Some(vec![2, 1, 3]), "repeats keep their first place");
         assert_eq!(normalize_order(&[1, 2, 3], &[1, 2, 3]), None, "the same order is no reorder");
         assert_eq!(normalize_order(&[1, 2, 3], &[1, 99]), None, "unknown ids and the rest keep the order");
+    }
+
+    #[test]
+    fn from_units_maps_both_kinds_and_the_waiting_flag() {
+        use crate::unit::fixtures::queued;
+        let mut manga = queued(Kind::Manga, 1, 10, 5);
+        manga.progress.set_pages(3, 12);
+        manga.progress.set_percent(25);
+        let mut anime = queued(Kind::Anime, 2, 20, 6);
+        anime.waiting = true;
+        let units = vec![Arc::new(manga), Arc::new(anime)];
+        let model = QueueModel::from_units(&units);
+        let rows = model.flat();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].kind, rows[0].item_id, rows[0].parent_id), (Kind::Manga, 10, 5));
+        assert_eq!((rows[0].pages_done, rows[0].pages_total, rows[0].progress), (3, Some(12), 25));
+        assert_eq!(rows[0].source_name, "Source 1 (en)");
+        assert!(!rows[0].waiting);
+        assert_eq!((rows[1].kind, rows[1].pages_total, rows[1].state), (Kind::Anime, None, DownloadState::Queue));
+        assert!(rows[1].waiting);
     }
 }
