@@ -85,9 +85,17 @@ pub trait EntryBackend: Send + Sync + 'static {
     fn has_logged_in_tracker(&self) -> bool {
         false
     }
-    /// Whether the source is an HTTP source: only then does the action row offer WebView (E-26).
-    fn is_http_source(&self, _source_id: i64) -> bool {
-        false
+    /// The address of the source's site, when it has one: the entry urls of such a source are paths on it.
+    fn home_url(&self, _source_id: i64) -> Option<String> {
+        None
+    }
+    /// Whether the source is an HTTP source: only then does the action row offer WebView, Share and Open in browser (E-26).
+    fn is_http_source(&self, source_id: i64) -> bool {
+        self.home_url(source_id).is_some()
+    }
+    /// The web address of an entry of the source: its url when that is one, else the url joined to the site's address.
+    fn web_url(&self, source_id: i64, url: &str) -> Option<String> {
+        crate::browse::nav::entry_web_url(self.home_url(source_id).as_deref(), url)
     }
     /// Whether the source is configurable: only then does the overflow menu offer Settings (T-39a-057).
     fn is_configurable_source(&self, _source_id: i64) -> bool {

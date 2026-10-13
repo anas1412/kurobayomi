@@ -263,6 +263,10 @@ impl EntryBackend for SourceBackend {
         crate::entry_core::tracking::session::has_logged_in()
     }
 
+    fn home_url(&self, source_id: i64) -> Option<String> {
+        crate::browse::directory::home_url(Kind::Manga, source_id)
+    }
+
     fn is_configurable_source(&self, source_id: i64) -> bool {
         (self.lookup)(source_id).is_some_and(|source| source.is_configurable())
     }

@@ -119,6 +119,11 @@ pub fn install(kind: Kind, catalogues: Catalogues) {
     installed.push((kind, catalogues));
 }
 
+/// The address of the site of a loaded source of `kind`, when the source has one (the repository sources do).
+pub fn home_url(kind: Kind, source_id: i64) -> Option<String> {
+    current(kind).sources().into_iter().find(|entry| entry.source.id == source_id).and_then(|entry| entry.home_url)
+}
+
 /// Records every loaded source (id, language, name) in the stub table, as Aniyomi's sources table does, so a backup made while
 /// the sources are not loaded (`--run-backup`) and the restore screen can still name them.
 fn remember_stubs(kind: Kind, catalogues: &Catalogues) {

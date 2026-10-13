@@ -1056,7 +1056,7 @@ impl View {
 
     /// The WebView button (an HTTP source only): the entry's page in the WebView.
     fn webview_pressed(&self) {
-        let request = self.model.borrow().as_ref().map(|m| WebViewRequest { url: m.entry.url.clone(), title: m.entry.title.clone() });
+        let request = self.model.borrow().as_ref().and_then(|m| Some(WebViewRequest { url: self.env.backend.web_url(m.entry.source, &m.entry.url)?, title: m.entry.title.clone() }));
         if let Some(request) = request {
             handoff::open_webview(request);
         }
@@ -1248,7 +1248,7 @@ impl View {
 
     /// Share (T-39a-075): copies the entry's address to the clipboard and says so (`overflow_menu::share`).
     fn share(self: &Rc<Self>) {
-        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.url.clone());
+        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).and_then(|m| self.env.backend.web_url(m.entry.source, &m.entry.url));
         if let Some(text) = url.and_then(|url| overflow_menu::share(&url)) {
             self.present(UserMessage::Plain(text), None);
         }
@@ -1256,7 +1256,7 @@ impl View {
 
     /// Open in browser (T-39b-051): the entry's address in the desktop's browser. Offered for an HTTP source only.
     fn open_in_browser(self: &Rc<Self>) {
-        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.url.clone());
+        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).and_then(|m| self.env.backend.web_url(m.entry.source, &m.entry.url));
         if let Some(url) = url {
             overflow_menu::open_in_browser(&url);
         }
