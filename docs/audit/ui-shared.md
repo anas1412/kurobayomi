@@ -2,6 +2,17 @@
 
 Method: grep sweep of src/ (tests excluded) plus reading of every shared piece named in the brief. "Callers" were found by grep, so confirm with the compiler before deleting anything marked dead.
 
+## Status 2026-10-13
+
+Done since the audit: F1 (shared selection header on Library, Updates and the entry page), F2 (`look::SMALL`/`MEDIUM` row
+covers), F3 (real cover art on season and related tiles), F8 (one toast layer), F9 (one entry page for both kinds),
+F11 (one search width), F12 (the queue page scrolls), F13 (the dead pieces were deleted by the dead-code cleanup),
+F14 (theme colours), F15 (`ui::row_title`), the global search box (shared search bar). Still open and small: F4 (three empty-state helpers:
+`look::empty_state`, `look::empty_state_with`, `browse::view::empty_state`), F5 (10 spinners, one `ui::loading`), F6 (two
+`HeaderBar::new()` left in `ui.rs`), F7 (7 hand-built popovers), F10 (linked buttons and StackSwitcher side by side),
+F16, F17 (box spacing numbers), F18 (dialog widths, a few more English button literals: reporter, queue "Clear", tracker
+"Connect AniList"), F19. They are listed in the later-list memory; none changes behaviour.
+
 ## Summary table
 
 | # | Pattern | Count | Impact | Proposed shared piece |
