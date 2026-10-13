@@ -135,16 +135,6 @@ fn run_check(done: impl FnOnce(Result<Outcome, ReleaseError>) + 'static) {
     });
 }
 
-/// Opens `url` with the desktop's handler; `failed` runs when it cannot be opened.
-fn launch(url: &str, failed: impl FnOnce() + 'static) {
-    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, move |result| {
-        if let Err(e) = result {
-            tracing::warn!(error = %e, "could not open the link");
-            failed();
-        }
-    });
-}
-
 /// The update page (T-47ba-030, ui-parity 3.5): a 48 px icon, the heading, the version, the notes in a scrolling body
 /// and the pinned Download and Not now buttons. Enter is Download, Escape is Not now.
 ///
@@ -162,7 +152,7 @@ fn show_update(release: &Release) {
     let notes = gtk::Label::builder().use_markup(true).wrap(true).xalign(0.0).yalign(0.0).selectable(true).build();
     notes.set_markup(&changelog::to_pango(&release.info));
     notes.connect_activate_link(|_, url| {
-        launch(url, || {});
+        crate::ui::open_link(url, None);
         gtk::glib::Propagation::Stop
     });
     let scroll = gtk::ScrolledWindow::builder().child(&notes).propagate_natural_height(true).max_content_height(360).hscrollbar_policy(gtk::PolicyType::Never).build();
@@ -172,13 +162,13 @@ fn show_update(release: &Release) {
         let open = gtk::Button::builder().label(tr(MsgKey::update_check_open)).icon_name("web-browser-symbolic").halign(gtk::Align::Start).build();
         open.add_css_class("flat");
         let link = release.release_link.clone();
-        open.connect_clicked(move |_| launch(&link, || {}));
+        open.connect_clicked(move |_| crate::ui::open_link(&link, None));
         column.append(&open);
     }
 
     let file = release.download_link.clone();
     let download = DialogButton::new(tr(MsgKey::update_check_confirm), Role::Suggested, move || {
-        launch(&file, || crate::toast::notify(tr(MsgKey::update_check_notification_download_error)));
+        crate::ui::open_link_or(&file, None, |_| crate::toast::notify(tr(MsgKey::update_check_notification_download_error)));
     });
     let title = tr(MsgKey::update_check_notification_update_available);
     crate::ui::dialog(&title, &column, 520, vec![DialogButton::cancel(tr(MsgKey::action_not_now)), download]).present();
@@ -237,21 +227,12 @@ pub fn release_page_url(repo: &str, tag: &str) -> String {
     format!("https://github.com/{repo}/releases/tag/{tag}")
 }
 
-/// Opens a link in the desktop's browser; a failure is logged only.
-fn open_url(url: &str) {
-    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-        if let Err(err) = result {
-            tracing::warn!(%err, "the link did not open");
-        }
-    });
-}
-
 /// A row that opens `url` when tapped.
 fn link_row(title: &str, url: &str, enabled: bool) -> PreferenceItem {
     let mut row = text(title, None, enabled);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         let url = url.to_owned();
-        *on_click = Some(Rc::new(move || open_url(&url)));
+        *on_click = Some(Rc::new(move || crate::ui::open_link(&url, None)));
     }
     row
 }
@@ -272,7 +253,7 @@ fn links_row() -> PreferenceItem {
         for (label, url) in [("GitHub", PROJECT_URL), ("Report an issue", ISSUES_URL)] {
             let button = gtk::Button::with_label(label);
             button.add_css_class("flat");
-            button.connect_clicked(move |_| open_url(url));
+            button.connect_clicked(move |_| crate::ui::open_link(url, None));
             bar.append(&button);
         }
         bar.upcast()

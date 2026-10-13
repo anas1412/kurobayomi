@@ -136,7 +136,7 @@ fn open_filter(kind: Kind, prefs: &Rc<SourcePrefs>) {
 fn sources_page(kind: Kind, prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, snapshot: Rc<dyn Fn(&SourcePrefs) -> SourcesSnapshot>) -> super::sources_page::SourcesPage {
     let nav = SourcesNav {
         open_listing: Rc::new(move |source_id, query| open_route(&BrowseRoute::BrowseSource { kind, source_id, query, migrating: false })),
-        open_url: Rc::new(|url: &str| super::nav::open_external(url, None)),
+        open_url: Rc::new(|url: &str| crate::ui::open_link(url, None)),
     };
     let page = super::pages::sources(nav, ready);
     let show = {

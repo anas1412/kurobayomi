@@ -325,11 +325,7 @@ fn open_entry(kind: Kind, id: i64) {
 fn help_button() -> Button {
     let button = crate::ui::icon_button("help-browser-symbolic", &tr(MsgKey::upcoming_guide));
     button.connect_clicked(|_| {
-        gtk::UriLauncher::new(layout::help_url()).launch(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, |result| {
-            if let Err(error) = result {
-                tracing::warn!("the Upcoming guide did not open: {error}");
-            }
-        });
+        crate::ui::open_link(layout::help_url(), Some(crate::ui::window().upcast_ref()));
     });
     button
 }

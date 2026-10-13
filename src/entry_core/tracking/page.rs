@@ -319,7 +319,7 @@ fn edit_rows(list: &ListBox, entry: &Entry, shown: Shown, bound: Bound, redraw: 
 
     if !shown.url.is_empty() {
         let url = shown.url.clone();
-        list.append(&button_row("Open on AniList", &["flat"], move || crate::pref_model::stores_page::open_url(&url)));
+        list.append(&button_row("Open on AniList", &["flat"], move || crate::ui::open_link(&url, None)));
     }
     let deletable = shown.deletable;
     list.append(&button_row("Stop tracking", &["flat", "destructive-action"], move || confirm_stop(&bound, deletable, Rc::clone(&redraw))));

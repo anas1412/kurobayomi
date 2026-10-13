@@ -3,33 +3,8 @@
 //! Pure: the widget reads these and sets the opacity or the menu items.
 
 use crate::entry_core::detail::EntryState;
+use crate::entry_core::overflow_menu;
 use crate::entry_core::view::{selection_counts, view};
-
-/// The overflow entries in the order they are shown (behaviour: Refresh, Edit categories, Migrate, Share, Settings).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Overflow {
-    Refresh,
-    EditCategories,
-    Migrate,
-    Share,
-    Settings,
-}
-
-/// Refresh is always there. The rest depend on the entry and its source.
-pub fn overflow_items(favorite: bool, http_source: bool, configurable_source: bool) -> Vec<Overflow> {
-    let mut items = vec![Overflow::Refresh];
-    if favorite {
-        items.push(Overflow::EditCategories);
-        items.push(Overflow::Migrate);
-    }
-    if http_source {
-        items.push(Overflow::Share);
-    }
-    if configurable_source {
-        items.push(Overflow::Settings);
-    }
-    items
-}
 
 /// The title is opaque only in the small layout, once the first item has scrolled off. The large layout is always
 /// opaque.
@@ -65,8 +40,8 @@ pub struct BarState {
     pub download_menu: bool,
     /// A filter is on: the Filter button is tinted (the forced downloaded-only filter counts).
     pub filter_active: bool,
-    /// The overflow entries, in order.
-    pub overflow: Vec<Overflow>,
+    /// The overflow entries, in order (`overflow_menu`).
+    pub overflow: Vec<overflow_menu::Item>,
 }
 
 /// The header bar state of `page`. `http_source` and `configurable_source` come from the source, which the page does
@@ -81,7 +56,12 @@ pub fn bar_state(page: &EntryState, http_source: bool, configurable_source: bool
         selected_visible,
         download_menu: !page.manga.local,
         filter_active: page.manga.flags.filter_active(page.downloaded_only),
-        overflow: overflow_items(page.manga.favorite, http_source, configurable_source),
+        overflow: overflow_menu::items(overflow_menu::Entry {
+            favorite: page.manga.favorite,
+            has_intro_length: false,
+            http_source,
+            configurable_source,
+        }),
     }
 }
 
@@ -124,12 +104,12 @@ mod tests {
         let mut p = page(0x200, false, true, rows.clone());
         let bar = bar_state(&p, false, false);
         assert_eq!((bar.menu, bar.download_menu, bar.filter_active), (ActionMenu::Normal, true, false));
-        assert_eq!(bar.overflow, vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate]);
+        assert_eq!(bar.overflow, vec![overflow_menu::Item::Refresh, overflow_menu::Item::EditCategories, overflow_menu::Item::Migrate]);
         // the Download menu is not offered for a local manga, and a library filter tints the Filter button
         let local = page(0x200 | kuro_db::flags::item::SHOW_UNDONE, true, true, rows);
         let bar = bar_state(&local, true, true);
         assert!(!bar.download_menu && bar.filter_active);
-        assert_eq!(bar.overflow, vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate, Overflow::Share, Overflow::Settings]);
+        assert_eq!(bar.overflow, vec![overflow_menu::Item::Refresh, overflow_menu::Item::EditCategories, overflow_menu::Item::Migrate, overflow_menu::Item::Share, overflow_menu::Item::OpenInBrowser, overflow_menu::Item::Settings]);
         // a selection on a visible row switches to the action mode; one the filter hides counts in the total only
         p.selection.set_all(&[1, 2], true);
         let bar = bar_state(&p, false, false);
@@ -138,16 +118,6 @@ mod tests {
         hidden.selection.set_all(&[2], true);
         let bar = bar_state(&hidden, false, false);
         assert_eq!((bar.menu, bar.selected_total, bar.selected_visible), (ActionMenu::Normal, 1, 0));
-    }
-
-    #[test]
-    fn overflow_order_and_conditions() {
-        assert_eq!(overflow_items(false, false, false), vec![Overflow::Refresh]);
-        assert_eq!(
-            overflow_items(true, true, true),
-            vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate, Overflow::Share, Overflow::Settings]
-        );
-        assert_eq!(overflow_items(false, true, false), vec![Overflow::Refresh, Overflow::Share]);
     }
 
     #[test]

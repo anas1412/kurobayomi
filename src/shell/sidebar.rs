@@ -143,7 +143,7 @@ fn open_about() {
 }
 
 fn open_help() {
-    crate::pref_model::stores_page::open_url(crate::pref_model::widgets::HELP_URL);
+    crate::ui::open_link(crate::pref_model::widgets::HELP_URL, None);
 }
 
 /// A menu button with the app menu: Incognito mode (the `app.incognito` check item), then Keyboard shortcuts, Help and

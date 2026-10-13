@@ -1429,7 +1429,7 @@ fn chapter_web_url(screen: &Screen) -> Option<String> {
 /// Opens the chapter in the web view or the browser.
 fn open_in_browser(screen: &Rc<Screen>) {
     let Some(url) = chapter_web_url(screen) else { return };
-    gtk::UriLauncher::new(&url).launch(window_of(screen).as_ref(), None::<&gtk::gio::Cancellable>, |_| {});
+    crate::ui::open_link(&url, window_of(screen).as_ref());
 }
 
 /// Shares (copies) the chapter's web address.

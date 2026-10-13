@@ -38,7 +38,7 @@ use super::details_error::{DetailsError, required};
 use crate::entry_core::download_menu::{self, DownloadAmount, menu_visible};
 use super::intro_dialog;
 use super::torrent_server;
-use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem, LINK_COPIED, can_launch};
+use crate::entry_core::overflow_menu::{self, Entry as OverflowEntry, Item as OverflowItem};
 use super::viewer;
 use super::dialog_state::{AnimeDialog, DialogSlot};
 use crate::duplicate_dialog::{self, DuplicateChoice};
@@ -70,7 +70,7 @@ use crate::entry_core::list_model::RowAction;
 use crate::entry_core::list_options::{self, Spec};
 use crate::entry_core::list_view::{self, Callbacks, ItemList, Press};
 use crate::entry_core::text::{Expansion, description};
-use crate::entry_core::page_shell::{self, detach, plain_row};
+use crate::entry_core::page_shell::{self, detach};
 use crate::ui;
 use crate::widgets::download_button::Request;
 use crate::widgets::view_options::{Pick, ViewOptions};
@@ -1158,11 +1158,8 @@ impl View {
         *self.seasons_shown.borrow_mut() = Some(key);
     }
 
-    /// The overflow menu (T-39a-075, T-39a-057). Built each time it opens, so the items follow the entry.
+    /// The overflow menu (`overflow_menu`). Built each time it opens, so the items follow the entry.
     fn overflow_popover(self: &Rc<Self>) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        let col = GBox::new(O::Vertical, 2);
-        ui::margins(&col, 6);
         let entry = {
             let model = self.model.borrow();
             model.as_ref().filter(|m| m.accepts_dispatch()).map(|m| {
@@ -1170,7 +1167,7 @@ impl View {
                 (
                     OverflowEntry {
                         favorite: m.anime.favorite,
-                        episodes: m.anime.fetch_type() == FetchType::Episodes,
+                        has_intro_length: m.anime.fetch_type() == FetchType::Episodes,
                         http_source: self.env.backend.is_http_source(source),
                         configurable_source: self.env.backend.is_configurable_source(source),
                     },
@@ -1178,29 +1175,20 @@ impl View {
                 )
             })
         };
-        let Some((entry, refreshing)) = entry else { return popover };
-        for item in overflow::items(entry) {
-            let (label, action): (String, fn(&Rc<View>)) = match item {
-                OverflowItem::ChangeIntro => (tr(MsgKey::action_change_intro_length), |v: &Rc<View>| v.open_intro_length()),
-                OverflowItem::Refresh => (tr(MsgKey::action_webview_refresh), |v: &Rc<View>| v.refresh()),
-                OverflowItem::EditCategories => (tr(MsgKey::action_edit_categories), |v: &Rc<View>| v.open_categories()),
-                OverflowItem::Migrate => (tr(MsgKey::action_migrate), |v: &Rc<View>| v.migrate()),
-                OverflowItem::Share => (tr(MsgKey::action_share), |v: &Rc<View>| v.share()),
-                OverflowItem::OpenInBrowser => (tr(MsgKey::action_open_in_browser), |v: &Rc<View>| v.open_in_browser()),
-                OverflowItem::Settings => (tr(MsgKey::action_settings), |v: &Rc<View>| v.open_source_preferences()),
-            };
-            let weak = Rc::downgrade(self);
-            let button = plain_row(&label, &popover, move |_| {
-                if let Some(view) = weak.upgrade() {
-                    action(&view);
-                }
-            });
-            // one refresh runs at a time
-            button.set_sensitive(item != OverflowItem::Refresh || !refreshing);
-            col.append(&button);
-        }
-        popover.set_child(Some(&col));
-        popover
+        let Some((entry, refreshing)) = entry else { return gtk::Popover::new() };
+        let weak = Rc::downgrade(self);
+        overflow_menu::popover(entry, refreshing, move |item| {
+            let Some(view) = weak.upgrade() else { return };
+            match item {
+                OverflowItem::ChangeIntro => view.open_intro_length(),
+                OverflowItem::Refresh => view.refresh(),
+                OverflowItem::EditCategories => view.open_categories(),
+                OverflowItem::Migrate => view.migrate(),
+                OverflowItem::Share => view.share(),
+                OverflowItem::OpenInBrowser => view.open_in_browser(),
+                OverflowItem::Settings => view.open_source_preferences(),
+            }
+        })
     }
 
     /// Change intro length (T-39a-075): the wheel of the entry's skip-intro length. OK stores it through the runner.
@@ -1240,26 +1228,20 @@ impl View {
         }
     }
 
-    /// Share (T-39a-075): copies the entry's address to the clipboard and says so, as the manga page does.
+    /// Share (T-39a-075): copies the entry's address to the clipboard and says so (`overflow_menu::share`).
     fn share(self: &Rc<Self>) {
         let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
-        if let (Some(url), Some(display)) = (url, gtk::gdk::Display::default()) {
-            display.clipboard().set_text(&url);
-            self.present(UserMessage::Plain(LINK_COPIED.to_owned()), None);
+        if let Some(text) = url.and_then(|url| overflow_menu::share(&url)) {
+            self.present(UserMessage::Plain(text), None);
         }
     }
 
-    /// Open in browser (T-39b-051): the entry's address in the desktop's browser through `gtk::UriLauncher`. A launch
-    /// that fails is a toast, never a panic. Offered for an HTTP source only (`overflow::items`).
+    /// Open in browser (T-39b-051): the entry's address in the desktop's browser. Offered for an HTTP source only.
     fn open_in_browser(self: &Rc<Self>) {
         let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
-        let Some(url) = url.filter(|u| can_launch(u)) else { return };
-        let weak = Rc::downgrade(self);
-        gtk::UriLauncher::new(&url).launch(Some(&ui::window()), None::<&gtk::gio::Cancellable>, move |result| {
-            if let (Err(error), Some(view)) = (result, weak.upgrade()) {
-                view.present(UserMessage::Plain(error.to_string()), None);
-            }
-        });
+        if let Some(url) = url {
+            overflow_menu::open_in_browser(&url);
+        }
     }
 
     /// The Download menu (`download_menu`): the next 1, 5, 10 or 25 unseen episodes, or every unseen one.

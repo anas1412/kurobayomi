@@ -337,6 +337,23 @@ pub fn sized(child: &impl IsA<gtk::Widget>, width: i32, height: i32) -> gtk::Ove
     sized
 }
 
+/// Opens a web link in the default browser through `gtk::UriLauncher`, the one way the app does it. A launch that fails
+/// is logged and shown as a toast.
+pub fn open_link(url: &str, parent: Option<&gtk::Window>) {
+    open_link_or(url, parent, |error| crate::toast::notify(error));
+}
+
+/// [`open_link`] that runs `on_failed` with the error text instead of the toast.
+pub fn open_link_or(url: &str, parent: Option<&gtk::Window>, on_failed: impl FnOnce(String) + 'static) {
+    let link = url.to_owned();
+    gtk::UriLauncher::new(url).launch(parent, gtk::gio::Cancellable::NONE, move |result| {
+        if let Err(error) = result {
+            tracing::warn!(%error, link = %link, "could not open a link");
+            on_failed(error.to_string());
+        }
+    });
+}
+
 pub fn margins(w: &impl IsA<gtk::Widget>, m: i32) {
     w.set_margin_top(m);
     w.set_margin_bottom(m);

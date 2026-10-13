@@ -260,14 +260,6 @@ fn show(app: &gio::Application, post: &Post) {
     }
 }
 
-fn open_url(url: &str) {
-    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gio::Cancellable>, |result| {
-        if let Err(error) = result {
-            tracing::warn!(%error, "the notification link could not be opened");
-        }
-    });
-}
-
 /// Shows the folder of `path` in the file manager.
 fn reveal(path: &Path) {
     gtk::FileLauncher::new(Some(&gio::File::for_path(path))).open_containing_folder(
@@ -382,7 +374,7 @@ impl ActionHost for GtkHost {
     }
 
     fn open_url(&self, url: &str) {
-        open_url(url);
+        crate::ui::open_link(url, None);
     }
 
     fn reveal(&self, path: &Path) {

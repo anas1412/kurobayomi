@@ -44,13 +44,14 @@ use crate::entry_core::list_model::{RowAction, list_header};
 use crate::entry_core::list_view::{self, Callbacks, ItemList, Press};
 use crate::entry_core::live::DownloadEvent;
 use crate::entry_core::page::{Page, RowMenuAction, UiAction};
-use crate::entry_core::page_shell::{self, detach, plain_row};
+use crate::entry_core::page_shell::{self, detach};
 use crate::entry_core::runner::{self, Runner};
 use crate::entry_core::scanlator_sheet;
 use crate::entry_core::selection::{Key, Mods, key_command};
 use crate::entry_core::store::DbStore;
 use crate::entry_core::text::{Expansion, description};
-use crate::entry_core::toolbar::{ActionMenu, Overflow, bar_state};
+use crate::entry_core::overflow_menu::{self, Item as OverflowItem};
+use crate::entry_core::toolbar::{ActionMenu, bar_state};
 use crate::ui;
 use crate::widgets::download_button::Request;
 use crate::widgets::view_options::{Pick, ViewOptions};
@@ -970,34 +971,32 @@ impl View {
         })
     }
 
-    /// The overflow menu: Refresh, Edit categories, Migrate, Share and Settings, as `toolbar::overflow_items` says.
+    /// The overflow menu (`overflow_menu`): the items follow the entry and its source.
     fn overflow_popover(self: &Rc<Self>) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        let col = GBox::new(O::Vertical, 2);
-        ui::margins(&col, 6);
-        let weak = Rc::downgrade(self);
-        let (items, refreshing) = {
+        let (entry, refreshing) = {
             let page = self.page.borrow();
             match page.ready() {
-                Some(ready) => (bar_state(ready, ready.http_source, false).overflow, ready.is_refreshing),
-                None => (Vec::new(), false),
+                Some(ready) => (
+                    overflow_menu::Entry { favorite: ready.manga.favorite, has_intro_length: false, http_source: ready.http_source, configurable_source: false },
+                    ready.is_refreshing,
+                ),
+                None => return gtk::Popover::new(),
             }
         };
-        for item in items {
-            let (label, action): (String, fn(&Rc<View>)) = match item {
-                Overflow::Refresh => (tr(MsgKey::action_webview_refresh), |v| v.act(UiAction::Refresh)),
-                Overflow::EditCategories => (tr(MsgKey::action_edit_categories), View::open_category_dialog),
-                Overflow::Migrate => (tr(MsgKey::action_migrate), View::migrate),
-                Overflow::Share => (tr(MsgKey::action_share), View::share),
-                Overflow::Settings => (tr(MsgKey::action_settings), View::open_source_preferences),
-            };
-            let row = plain_row(&label, &popover, on_view(&weak, action));
-            // one refresh runs at a time
-            row.set_sensitive(item != Overflow::Refresh || !refreshing);
-            col.append(&row);
-        }
-        popover.set_child(Some(&col));
-        popover
+        let weak = Rc::downgrade(self);
+        overflow_menu::popover(entry, refreshing, move |item| {
+            let Some(view) = weak.upgrade() else { return };
+            match item {
+                OverflowItem::Refresh => view.act(UiAction::Refresh),
+                OverflowItem::EditCategories => view.open_category_dialog(),
+                OverflowItem::Migrate => view.migrate(),
+                OverflowItem::Share => view.share(),
+                OverflowItem::OpenInBrowser => view.open_in_browser(),
+                OverflowItem::Settings => view.open_source_preferences(),
+                // a manga has no intro length
+                OverflowItem::ChangeIntro => {}
+            }
+        })
     }
 
     /// Settings: the preferences screen of this manga's source, which the request names.
@@ -1076,9 +1075,16 @@ impl View {
     /// Copies the link of the entry.
     fn share(self: &Rc<Self>) {
         let url = self.page.borrow().ready().map(|p| p.manga.url.clone());
-        if let (Some(url), Some(display)) = (url, gtk::gdk::Display::default()) {
-            display.clipboard().set_text(&url);
-            self.toast(trf(MsgKey::copied_to_clipboard, &[("arg1", Arg::Str(&url))]));
+        if let Some(text) = url.and_then(|url| overflow_menu::share(&url)) {
+            self.toast(text);
+        }
+    }
+
+    /// Open in browser: the manga's address in the desktop's browser (an HTTP source only, `overflow_menu`).
+    fn open_in_browser(self: &Rc<Self>) {
+        let url = self.page.borrow().ready().map(|p| p.manga.url.clone());
+        if let Some(url) = url {
+            overflow_menu::open_in_browser(&url);
         }
     }
 

@@ -112,15 +112,6 @@ pub fn shortcut_for(key: gtk::gdk::Key, state: gtk::gdk::ModifierType, ready: bo
     }
 }
 
-/// Opens a link in the default browser. A failure is logged and nothing else happens.
-pub fn open_url(url: &str) {
-    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gio::Cancellable>, |result| {
-        if let Err(err) = result {
-            tracing::warn!(%err, "could not open the link");
-        }
-    });
-}
-
 fn copy_to_clipboard(text: &str) {
     if let Some(display) = gtk::gdk::Display::default() {
         display.clipboard().set_text(text);
@@ -447,11 +438,11 @@ impl<T: Keyed + Send + 'static> Inner<T> {
         let globe = crate::ui::icon_button("web-browser-symbolic", &self.texts.open_website);
         globe.set_sensitive(actions.globe_enabled);
         let website = card.website.clone();
-        globe.connect_clicked(move |_| open_url(&website));
+        globe.connect_clicked(move |_| crate::ui::open_link(&website, None));
         h.append(&globe);
         if let Some(link) = actions.discord {
             let discord = crate::ui::icon_button("user-available-symbolic", "Discord");
-            discord.connect_clicked(move |_| open_url(&link));
+            discord.connect_clicked(move |_| crate::ui::open_link(&link, None));
             h.append(&discord);
         }
         let copy = crate::ui::icon_button("edit-copy-symbolic", &self.texts.copy);

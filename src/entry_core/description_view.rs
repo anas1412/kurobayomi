@@ -97,7 +97,7 @@ pub fn build(description: &Description, expansion: Rc<Cell<Expansion>>, genres: 
     let genres = genres.map(|(chips, handlers)| Genres::new(chips, handlers));
     let label = gtk::Label::builder().xalign(0.0).wrap(true).build();
     label.connect_activate_link(|label, uri| {
-        crate::browse::nav::open_external(uri, label.root().and_downcast_ref::<gtk::Window>());
+        crate::ui::open_link(uri, label.root().and_downcast_ref::<gtk::Window>());
         gtk::glib::Propagation::Stop
     });
     let overlay = gtk::Overlay::new();

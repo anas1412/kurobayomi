@@ -7,15 +7,6 @@ pub fn help_url() -> Option<&'static str> {
     kuro_local::ux::LOCAL_HELP_URL
 }
 
-/// Opens an external page in the default browser through `gtk::UriLauncher`. A launch that fails is logged, not shown.
-pub fn open_external(url: &str, parent: Option<&gtk::Window>) {
-    gtk::UriLauncher::new(url).launch(parent, gtk::gio::Cancellable::NONE, |result| {
-        if let Err(error) = result {
-            tracing::warn!(%error, "could not open an external link");
-        }
-    });
-}
-
 /// The web address of a browsed entry for Open in browser: an `http` or `https` url as it is, or a path on the source's
 /// site joined to `home`. `None` when neither gives a web address.
 pub fn entry_web_url(home: Option<&str>, url: &str) -> Option<String> {

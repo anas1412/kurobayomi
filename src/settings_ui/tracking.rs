@@ -46,15 +46,6 @@ pub fn warning_rows(fallback: bool) -> Vec<Preference> {
         .collect()
 }
 
-fn launch(url: &str) {
-    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-        if let Err(err) = result {
-            tracing::warn!(%err, "the login page did not open");
-            crate::toast::notify("Could not open the browser");
-        }
-    });
-}
-
 /// The login dialog (Kitsu and MangaUpdates): the username or email field, the password field with its show toggle, and
 /// the Login button, which stays disabled until both fields have text and shows `Loading…` while the login runs.
 fn open_login_dialog(tracker: Arc<dyn Tracker>, changed: Rc<dyn Fn()>) {
@@ -156,7 +147,7 @@ fn tapped(index: usize, changed: &Rc<dyn Fn()>) {
         Some(RowTap::OpenCredentials) => open_login_dialog(tracker, Rc::clone(changed)),
         Some(RowTap::OpenBrowser(url)) => {
             host.begin_waiting(id, now_ms());
-            launch(&url);
+            crate::ui::open_link(&url, None);
             changed();
         }
         // MyAnimeList and Simkl are switched off: their rows are not shown, so no tap reaches these arms

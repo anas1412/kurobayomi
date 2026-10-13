@@ -45,14 +45,6 @@ pub fn libraries() -> Vec<Library> {
     parse(include_str!("licenses.json"))
 }
 
-fn open_website(url: &str) {
-    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-        if let Err(err) = result {
-            tracing::warn!(%err, "could not open the website");
-        }
-    });
-}
-
 /// The detail page of `library`.
 pub fn detail_page(library: &Library) -> gtk::Box {
     let label = gtk::Label::builder().label(library.text.as_str()).xalign(0.0).yalign(0.0).wrap(true).selectable(true).build();
@@ -61,7 +53,7 @@ pub fn detail_page(library: &Library) -> gtk::Box {
     if let Some(site) = library.site() {
         let button = crate::ui::icon_button("web-browser-symbolic", "Website");
         let site = site.to_owned();
-        button.connect_clicked(move |_| open_website(&site));
+        button.connect_clicked(move |_| crate::ui::open_link(&site, None));
         end.push(button.upcast());
     }
     page(&library.name, &scrolled(&label), end, true)

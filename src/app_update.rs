@@ -128,11 +128,7 @@ fn update_text(release: &Release) -> String {
 fn show_update(release: &Release) {
     let link = release.release_link.clone();
     let open = DialogButton::new(tr(MsgKey::update_check_open), Role::Suggested, move || {
-        gtk::UriLauncher::new(&link).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-            if let Err(e) = result {
-                tracing::warn!(error = %e, "could not open the release page");
-            }
-        });
+        crate::ui::open_link(&link, None);
     });
     let body = crate::ui::message(&release.info);
     crate::ui::dialog(&update_text(release), &body, 420, vec![DialogButton::cancel(tr(MsgKey::action_not_now)), open]).present();

@@ -161,7 +161,7 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
             let flow = flow_slot.borrow().clone();
             let web = super::nav::entry_web_url(homes.get(&source_id).map(String::as_str), &item.url);
             let open = Rc::clone(&open);
-            cover_menu(&item, Rc::new(move |item: &ListItem| open(item.id)), flow, web, Rc::new(|url: &str| super::nav::open_external(url, None)))
+            cover_menu(&item, Rc::new(move |item: &ListItem| open(item.id)), flow, web, Rc::new(|url: &str| crate::ui::open_link(url, None)))
         }
     };
     let nav = GlobalSearchNav {

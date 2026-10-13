@@ -20,7 +20,6 @@ pub mod format;
 pub mod header;
 pub mod info;
 pub mod layout;
-pub mod overflow;
 pub mod intro_dialog;
 #[cfg(test)]
 mod acceptance;

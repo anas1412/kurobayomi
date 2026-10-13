@@ -45,7 +45,7 @@ pub fn card(on_retry: impl Fn() + 'static, image_url: Option<String>) -> gtk::Bo
         let url = image_url.unwrap_or_default();
         open.connect_clicked(move |button| {
             let window = button.root().and_downcast::<gtk::Window>();
-            gtk::UriLauncher::new(&url).launch(window.as_ref(), None::<&gtk::gio::Cancellable>, |_| {});
+            crate::ui::open_link(&url, window.as_ref());
         });
         root.append(&open);
     }

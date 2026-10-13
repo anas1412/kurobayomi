@@ -62,6 +62,7 @@ pub mod numfmt;
 pub mod page;
 /// The GTK pieces both details pages build the same way (the state stack, the item header row, the Start button, Back,
 /// menu rows, the scroll fade).
+pub mod overflow_menu;
 pub mod page_shell;
 pub mod readstate;
 pub mod refresh_rules;

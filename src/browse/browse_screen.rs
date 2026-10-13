@@ -224,7 +224,7 @@ fn production_env(kind: Kind) -> BrowseEnv {
         migrate: Rc::new(move |old, new| (super::search_screen::migrate_dialog(kind, old))(new)),
         edit_categories: Rc::new(move || super::glue::open_categories(kind)),
         on_back: Rc::new(crate::ui::pop),
-        open_url: Rc::new(|url| super::nav::open_external(url, None)),
+        open_url: Rc::new(|url| crate::ui::open_link(url, None)),
         open_webview: Rc::new(|url, title| handoff::open_webview(WebViewRequest { url, title })),
         on_settings: Rc::new(move |source_id| handoff::open_source_preferences(SourcePrefsRequest { source_id, kind })),
         toast: Rc::new(|spec| crate::toast::notify(spec.message)),
