@@ -3,9 +3,7 @@
 
 pub mod delete_download;
 pub mod domain;
-pub mod entries;
 pub mod items;
 pub mod mappers;
 pub mod rx;
 pub mod source;
-pub mod status;

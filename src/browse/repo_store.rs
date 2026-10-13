@@ -181,7 +181,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use kuro_data::category::Category;
     use kuro_db::handle::Db;
     use kuro_domain::category::target::AddTarget;
     use kuro_domain::entries::defaults::item_default_word;
@@ -197,6 +196,7 @@ mod tests {
         store: RepoStore,
         entries: EntryRepo,
         categories: CategoryRepo,
+        db: Arc<Db>,
         default: Pref<i32>,
     }
 
@@ -206,12 +206,12 @@ mod tests {
         let writer = kuro_db::schema_unified::open_file(&path).expect("schema");
         let db = Arc::new(Db::new(&path, writer).expect("db"));
         let entries = EntryRepo::new(Arc::clone(&db));
-        let categories = CategoryRepo::new(db, kind);
+        let categories = CategoryRepo::new(Arc::clone(&db), kind);
         let default = PrefStore::in_memory().pref("default_category", default);
         let clear_cover: CoverClearer = Arc::new(move |_| covers.load(Ordering::SeqCst));
         let clear_background: CoverClearer = Arc::new(move |_| backgrounds.load(Ordering::SeqCst));
         let store = RepoStore::new(kind, entries.clone(), categories.clone(), default.clone(), clear_cover, clear_background);
-        Rig { _dir: dir, store, entries, categories, default }
+        Rig { _dir: dir, store, entries, categories, db, default }
     }
 
     fn rig(kind: Kind) -> Rig {
@@ -223,7 +223,7 @@ mod tests {
     }
 
     fn category(rig: &Rig, name: &str) -> i64 {
-        rig.categories.insert(&Category { id: 0, name: name.into(), order: 1, flags: 0, hidden: false }).expect("category")
+        kuro_testkit::insert_category(&rig.db, rig.categories.kind(), name)
     }
 
     #[test]

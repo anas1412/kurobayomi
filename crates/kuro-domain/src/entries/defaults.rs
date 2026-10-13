@@ -4,21 +4,15 @@
 //! default is written from the downloaded bits (Q2).
 
 use kuro_data::DataResult;
-use kuro_data::anime::{Anime, AnimeRepo};
-use kuro_data::entry::Entry;
-use kuro_data::manga::{Manga, MangaRepo};
-use kuro_db::flags::{chapter, manga_item_flags_from_unified as from_unified, manga_item_flags_to_unified as to_unified};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_db::flags::{item, season as se};
 use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore;
 
 use crate::error::DomainError;
 use crate::flags::set_flag;
 
-#[cfg(test)]
-use super::anime::episode_flags as ep;
-use super::anime::season_flags as se;
 use super::flag_setters::{SeasonAll, SeasonOverlay, item_all, season_all};
-use super::store::EntryFlagStore;
 
 const CHAPTER_UNREAD: &str = "default_chapter_filter_by_read";
 const CHAPTER_DOWNLOADED: &str = "default_chapter_filter_by_downloaded";
@@ -53,6 +47,18 @@ const SEASON_LANG_OVERLAY: &str = "default_season_lang_overlay";
 const SEASON_CONTINUE_OVERLAY: &str = "default_season_continue_overlay";
 const SEASON_DISPLAY: &str = "default_season_display_mode";
 
+/// The stored chapter sort preference keeps Aniyomi's values (0, 0x100, 0x200, 0x300), one place below the item word's
+/// sorting group (`item::SORTING_MASK`, 0x600). The pref is part of the preference wire, so it is not moved.
+const PREF_SORTING_MASK: i64 = 0x300;
+
+fn sorting_from_pref(value: i64) -> i64 {
+    (value & PREF_SORTING_MASK) << 1
+}
+
+fn sorting_to_pref(word: i64) -> i64 {
+    (word & item::SORTING_MASK) >> 1
+}
+
 fn long(store: &PrefStore, key: &'static str) -> i64 {
     store.pref::<i64>(key, 0).get()
 }
@@ -75,8 +81,8 @@ pub fn item_default_word(store: &PrefStore, kind: Kind) -> i64 {
             long(store, CHAPTER_DOWNLOADED),
             long(store, CHAPTER_BOOKMARKED),
             0,
-            // the stored sort value is the manga layout; a stray bit outside its group is not a sort
-            to_unified(long(store, CHAPTER_SORT) & chapter::SORTING_MASK),
+            // a stray bit outside the sorting group of the pref is not a sort
+            sorting_from_pref(long(store, CHAPTER_SORT)),
             long(store, SHARED_DIRECTION),
             long(store, CHAPTER_DISPLAY),
             0,
@@ -94,16 +100,6 @@ pub fn item_default_word(store: &PrefStore, kind: Kind) -> i64 {
             long(store, EPISODE_SUMMARIES),
         ),
     }
-}
-
-/// The default chapter word in the manga layout (the old name of `item_default_word(Manga)`).
-pub fn chapter_default_word(store: &PrefStore) -> i64 {
-    from_unified(item_default_word(store, Kind::Manga))
-}
-
-/// The default episode word (the old name of `item_default_word(Anime)`).
-pub fn episode_default_word(store: &PrefStore) -> i64 {
-    item_default_word(store, Kind::Anime)
 }
 
 /// The default season word, as the preferences describe it. With the registry defaults this is `0x5800000`.
@@ -132,20 +128,20 @@ pub fn season_default_word(store: &PrefStore) -> i64 {
 
 /// Writes the default item word of the entry's kind to it (on add to library, and "apply to all"). Returns whether the
 /// row changed.
-pub fn apply_item_defaults(repo: &impl EntryFlagStore, store: &PrefStore, e: &Entry) -> DataResult<bool> {
+pub fn apply_item_defaults(repo: &EntryRepo, store: &PrefStore, e: &Entry) -> DataResult<bool> {
     let word = item_default_word(store, e.kind);
     repo.update_item_flags(e.id, |_| word)
 }
 
 /// Writes the default season word to an anime parent.
-pub fn apply_season_defaults(repo: &impl EntryFlagStore, store: &PrefStore, e: &Entry) -> DataResult<bool> {
+pub fn apply_season_defaults(repo: &EntryRepo, store: &PrefStore, e: &Entry) -> DataResult<bool> {
     let word = season_default_word(store);
     repo.update_season_flags(e.id, |_| word)
 }
 
 /// Applies the item defaults (and, for anime, the season defaults) to every favourite of the kind. Callers run this on a
 /// detached task so closing the dialog does not stop it. Returns how many entries changed.
-pub fn apply_defaults_to_library(repo: &kuro_data::entry::EntryRepo, store: &PrefStore, kind: Kind) -> DataResult<usize> {
+pub fn apply_defaults_to_library(repo: &EntryRepo, store: &PrefStore, kind: Kind) -> DataResult<usize> {
     let mut changed = 0;
     for entry in repo.favorites(kind)? {
         let items = apply_item_defaults(repo, store, &entry)?;
@@ -160,7 +156,7 @@ pub fn apply_defaults_to_library(repo: &kuro_data::entry::EntryRepo, store: &Pre
 /// [`apply_defaults_to_library`] on a blocking task the caller does not own: dropping the returned future (the dialog
 /// closed) does not stop the run, which continues to every favourite (`withNonCancellableContext`).
 pub async fn defaults_to_library_detached(
-    repo: kuro_data::entry::EntryRepo,
+    repo: EntryRepo,
     store: PrefStore,
     kind: Kind,
 ) -> Result<usize, DomainError> {
@@ -210,37 +206,6 @@ impl SessionFlags {
     }
 }
 
-/// Writes the default chapter word to a manga (`applyDefaultChapterFlags`).
-pub fn apply_default_chapter_flags(repo: &MangaRepo, store: &PrefStore, manga: &Manga) -> DataResult<bool> {
-    apply_item_defaults(repo, store, &Entry::from(manga))
-}
-
-/// Writes the default episode word to an anime.
-pub fn apply_default_episode_flags(repo: &AnimeRepo, store: &PrefStore, anime: &Anime) -> DataResult<bool> {
-    apply_item_defaults(repo, store, &Entry::from(anime))
-}
-
-/// Writes the default season word to an anime parent.
-pub fn apply_default_season_flags(repo: &AnimeRepo, store: &PrefStore, anime: &Anime) -> DataResult<bool> {
-    apply_season_defaults(repo, store, &Entry::from(anime))
-}
-
-/// The old name of [`defaults_to_library_detached`] for manga.
-pub async fn chapter_defaults_to_library_detached(repo: MangaRepo, store: PrefStore) -> Result<usize, DomainError> {
-    tokio::task::spawn_blocking(move || {
-        let mut changed = 0;
-        for manga in repo.favorites()? {
-            if apply_default_chapter_flags(&repo, &store, &manga)? {
-                changed += 1;
-            }
-        }
-        Ok::<usize, kuro_data::DataError>(changed)
-    })
-    .await
-    .map_err(DomainError::Join)?
-    .map_err(DomainError::from)
-}
-
 /// "Set as default" for the items of a kind: writes the groups of the (unified) `word` into the kind's keys. The direction
 /// and display keys are the chapter ones for both kinds (Q3). Returns the snackbar key.
 pub fn set_item_settings_default(store: &PrefStore, kind: Kind, word: i64) -> &'static str {
@@ -252,8 +217,7 @@ pub fn set_item_settings_default(store: &PrefStore, kind: Kind, word: i64) -> &'
             put_long(store, CHAPTER_UNREAD, word & i::UNDONE_MASK);
             put_long(store, CHAPTER_DOWNLOADED, word & i::DOWNLOADED_MASK);
             put_long(store, CHAPTER_BOOKMARKED, word & i::BOOKMARKED_MASK);
-            // the stored sort value is the manga layout
-            put_long(store, CHAPTER_SORT, from_unified(word & i::SORTING_MASK));
+            put_long(store, CHAPTER_SORT, sorting_to_pref(word));
             "updated_default_chapter_settings"
         }
         Kind::Anime => {
@@ -269,16 +233,6 @@ pub fn set_item_settings_default(store: &PrefStore, kind: Kind, word: i64) -> &'
     }
 }
 
-/// "Set as default" for chapters (the manga layout in).
-pub fn set_chapter_settings_default(store: &PrefStore, flags: i64) -> &'static str {
-    set_item_settings_default(store, Kind::Manga, to_unified(flags))
-}
-
-/// "Set as default" for episodes.
-pub fn set_episode_settings_default(store: &PrefStore, flags: i64) -> &'static str {
-    set_item_settings_default(store, Kind::Anime, flags)
-}
-
 /// "Set as default" for seasons. The downloaded key takes the downloaded bits (Q2).
 pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static str {
     put_long(store, SEASON_DOWNLOADED, flags & se::DOWNLOADED_MASK);
@@ -289,8 +243,8 @@ pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static st
     put_long(store, SEASON_FILLERMARKED, flags & se::FILLERMARKED_MASK);
     put_long(store, SEASON_SORT, flags & se::SORT_MASK);
     put_long(store, SEASON_SORT_DIRECTION, flags & se::SORT_DIR_MASK);
-    put_long(store, SEASON_GRID_MODE, (flags & se::GRID_DISPLAY_MODE_MASK) >> se::GRID_DISPLAY_MODE_BIT_OFFSET);
-    store.pref::<i32>(SEASON_GRID_SIZE, 0).set(((flags & se::GRID_DISPLAY_SIZE_MASK) >> se::GRID_DISPLAY_SIZE_BIT_OFFSET) as i32);
+    put_long(store, SEASON_GRID_MODE, (flags & se::GRID_DISPLAY_MODE_MASK) >> se::GRID_DISPLAY_MODE_SHIFT);
+    store.pref::<i32>(SEASON_GRID_SIZE, 0).set(((flags & se::GRID_DISPLAY_SIZE_MASK) >> se::GRID_DISPLAY_SIZE_SHIFT) as i32);
     for (key, overlay) in [
         (SEASON_DOWNLOAD_OVERLAY, SeasonOverlay::Downloaded),
         (SEASON_UNSEEN_OVERLAY, SeasonOverlay::Unseen),
@@ -308,17 +262,15 @@ pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static st
 mod tests {
     use super::*;
     use crate::testdb::test_db;
-    use kuro_data::entry::EntryRepo;
-
     fn store() -> PrefStore {
         PrefStore::in_memory()
     }
 
     #[test]
-    fn all_defaults_give_zero_chapter_and_episode_words_and_the_season_word() {
+    fn all_defaults_give_zero_item_words_and_the_season_word() {
         let s = store();
-        assert_eq!(chapter_default_word(&s), 0);
-        assert_eq!(episode_default_word(&s), 0);
+        assert_eq!(item_default_word(&s, Kind::Manga), 0);
+        assert_eq!(item_default_word(&s, Kind::Anime), 0);
         assert_eq!(season_default_word(&s), 0x5800000);
     }
 
@@ -333,11 +285,11 @@ mod tests {
     #[test]
     fn the_default_word_of_a_manga_has_only_the_manga_groups() {
         let s = store();
-        set_item_settings_default(&s, Kind::Anime, ep::SHOW_NOT_PREVIEWS | ep::SHOW_NOT_SUMMARIES | ep::SHOW_FILLERMARKED);
-        assert_eq!(item_default_word(&s, Kind::Manga) & !kuro_db::flags::item::MANGA_MASK, 0);
-        set_item_settings_default(&s, Kind::Manga, kuro_db::flags::item::SORTING_ALPHABET | 0x1);
-        assert_eq!(item_default_word(&s, Kind::Manga), kuro_db::flags::item::SORTING_ALPHABET | 0x1);
-        assert_eq!(chapter_default_word(&s), 0x300 | 0x1, "the old name answers in the manga layout");
+        set_item_settings_default(&s, Kind::Anime, item::SHOW_NOT_PREVIEWS | item::SHOW_NOT_SUMMARIES | item::SHOW_FILLERMARKED);
+        assert_eq!(item_default_word(&s, Kind::Manga) & !item::MANGA_MASK, 0);
+        set_item_settings_default(&s, Kind::Manga, item::SORTING_ALPHABET | 0x1);
+        assert_eq!(item_default_word(&s, Kind::Manga), item::SORTING_ALPHABET | 0x1);
+        assert_eq!(long(&s, CHAPTER_SORT), 0x300, "the sort pref keeps Aniyomi's chapter value");
     }
 
     #[test]
@@ -375,10 +327,10 @@ mod tests {
             assert_eq!(shown.item_flags, 0, "{kind}: the page shows the defaults");
             assert_eq!(repo.by_id(e.id).unwrap().item_flags, 0x201, "{kind}: the row is untouched");
             // a user write goes to the row (one masked statement) and to the copy
-            crate::entries::flag_setters::set_item_flag(&repo, e.id, crate::entries::flag_setters::ItemFlagGroup::Undone, ep::SHOW_UNSEEN).unwrap();
-            copy.note_item_write(ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
-            assert_eq!(repo.by_id(e.id).unwrap().item_flags, 0x201 | ep::SHOW_UNSEEN);
-            assert_eq!(copy.item_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN);
+            crate::entries::flag_setters::set_item_flag(&repo, e.id, crate::entries::flag_setters::ItemFlagGroup::Undone, item::SHOW_UNDONE).unwrap();
+            copy.note_item_write(item::SHOW_UNDONE, item::UNDONE_MASK);
+            assert_eq!(repo.by_id(e.id).unwrap().item_flags, 0x201 | item::SHOW_UNDONE);
+            assert_eq!(copy.item_flags & item::UNDONE_MASK, item::SHOW_UNDONE);
             // joining the library drops the copy
             repo.update(&{ let mut u = kuro_data::entry::EntryUpdate::new(e.id); u.favorite = Some(true); u }).unwrap();
             assert_eq!(SessionFlags::for_entry(&s, &repo.by_id(e.id).unwrap()), None, "{kind}: a favourite follows its row");
@@ -400,7 +352,7 @@ mod tests {
             repo.update_item_flags(fav, |_| 0x201).unwrap();
             repo.update_item_flags(other, |_| 0x201).unwrap();
             let s = store();
-            set_item_settings_default(&s, kind, ep::SHOW_UNSEEN);
+            set_item_settings_default(&s, kind, item::SHOW_UNDONE);
             let word = item_default_word(&s, kind);
             assert_eq!(apply_defaults_to_library(&repo, &s, kind).unwrap(), 1, "{kind}: only the favourite counts");
             assert_eq!(repo.by_id(fav).unwrap().item_flags, word);
@@ -413,7 +365,7 @@ mod tests {
         let (_d, repo, e) = entry_repo(Kind::Manga, true);
         repo.update_item_flags(e.id, |_| 0x201).unwrap();
         let s = store();
-        set_item_settings_default(&s, Kind::Manga, ep::SHOW_UNSEEN);
+        set_item_settings_default(&s, Kind::Manga, item::SHOW_UNDONE);
         let caller = tokio::spawn(defaults_to_library_detached(repo.clone(), s.clone(), Kind::Manga));
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         caller.abort();
@@ -428,24 +380,12 @@ mod tests {
     }
 
     #[test]
-    fn the_old_apply_names_go_through_the_legacy_repositories() {
-        let (_d, db) = test_db();
-        let repo = MangaRepo::new(db);
-        let mut fav = Manga { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::manga() };
-        fav.id = repo.insert(&fav).unwrap();
-        repo.update_chapter_flags(fav.id, |_| 0x101).unwrap();
-        let s = store();
-        set_chapter_settings_default(&s, 0x2);
-        assert!(apply_default_chapter_flags(&repo, &s, &fav).unwrap());
-        assert_eq!(repo.by_id(fav.id).unwrap().chapter_flags, 0x2);
-    }
-
-    #[test]
     fn set_as_default_round_trips_and_shares_the_direction_key() {
         let s = store();
-        set_chapter_settings_default(&s, 0x2 | 0x20 | 0x1 | 0x100000);
-        assert_eq!(chapter_default_word(&s), 0x2 | 0x20 | 0x1 | 0x100000);
-        set_episode_settings_default(&s, 0x0);
+        let word = item::SHOW_UNDONE | item::SHOW_BOOKMARKED | item::SORT_ASC | item::DISPLAY_NUMBER;
+        set_item_settings_default(&s, Kind::Manga, word);
+        assert_eq!(item_default_word(&s, Kind::Manga), word);
+        set_item_settings_default(&s, Kind::Anime, 0x0);
         assert_eq!(long(&s, SHARED_DIRECTION), 0, "episode direction overwrote the shared key (Q3)");
     }
 
@@ -462,8 +402,8 @@ mod tests {
     #[test]
     fn snackbar_keys_name_the_three_default_kinds() {
         let s = store();
-        assert_eq!(set_chapter_settings_default(&s, 0), "updated_default_chapter_settings");
-        assert_eq!(set_episode_settings_default(&s, 0), "updated_default_episode_settings");
+        assert_eq!(set_item_settings_default(&s, Kind::Manga, 0), "updated_default_chapter_settings");
+        assert_eq!(set_item_settings_default(&s, Kind::Anime, 0), "updated_default_episode_settings");
         assert_eq!(set_season_settings_default(&s, 0), "updated_default_season_settings");
     }
 }

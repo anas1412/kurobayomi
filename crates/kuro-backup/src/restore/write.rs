@@ -15,7 +15,7 @@ use kuro_platform::kind::Kind;
 
 use super::categories::{differs_from_stored, membership_ids};
 use super::merge::{RunClock, merge_progress};
-use kuro_db::statements_manga::excluded_scanlators;
+use kuro_db::tables::excluded;
 
 /// One backup history row, its item named by url.
 pub struct HistoryIn {
@@ -266,10 +266,10 @@ fn restore_scanlators(tx: &Transaction<'_>, entry_id: i64, backup: &[String]) ->
         return Ok(());
     }
     // ponytail: `kuro_db::tables` has no excluded_scanlators statements yet (phase E); this is the one legacy call.
-    let mut seen: HashSet<String> = excluded_scanlators::get_by_manga_id(tx, entry_id)?.into_iter().collect();
+    let mut seen: HashSet<String> = excluded::by_entry_id(tx, entry_id)?.into_iter().collect();
     for s in backup {
         if seen.insert(s.clone()) {
-            excluded_scanlators::insert(tx, entry_id, s)?;
+            excluded::insert(tx, entry_id, s)?;
         }
     }
     Ok(())

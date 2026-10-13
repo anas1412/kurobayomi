@@ -1,7 +1,5 @@
-//! Chapter and episode behaviour: models, number recognition, sorting, missing items and update checks.
+//! Item behaviour of both kinds: models, number recognition, sorting, missing items and update checks.
 
-pub mod chapter_sync;
-pub mod episode_sync;
 pub mod facades;
 pub mod missing;
 pub mod model;

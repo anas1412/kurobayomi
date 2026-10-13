@@ -5,11 +5,12 @@
 use std::collections::BTreeSet;
 
 use kuro_data::DataResult;
-use kuro_data::anime::{Anime, AnimeRelationGroup, AnimeRepo};
-use kuro_data::anime_relation::AnimeRelationRepo;
+use kuro_data::anime_relation::{AnimeRelationGroup, AnimeRelationRepo};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_platform::kind::Kind;
 use kuro_source::anime::{AnimeSource, SAnime, related_animes};
 
-use crate::entries::network_to_local::network_to_local_anime;
+use crate::entries::network_to_local::network_to_local;
 use crate::error::DomainError;
 
 /// Seven days in milliseconds. A stored fetch younger than this is reused unless the caller forces a refresh.
@@ -25,9 +26,9 @@ pub const MAX_PER_GROUP: usize = 10;
 /// [`MAX_PER_GROUP`] anime, maps them to local rows of the entry's source, and is dropped when empty.
 pub async fn sync_related_anime_with_source(
     source: Option<&dyn AnimeSource>,
-    animes: &AnimeRepo,
+    entries: &EntryRepo,
     relations: &AnimeRelationRepo,
-    anime: &Anime,
+    anime: &Entry,
     force_refresh: bool,
     now_ms: i64,
 ) -> Result<bool, DomainError> {
@@ -53,17 +54,17 @@ pub async fn sync_related_anime_with_source(
             .filter(|s| s.url != anime.url && seen.insert(s.url.as_str()))
             .take(MAX_PER_GROUP)
             .collect();
-        let mapped: Vec<Anime> = kept
+        let mapped: Vec<Entry> = kept
             .into_iter()
             .map(|s| {
-                let wanted = Anime {
+                let wanted = Entry {
                     url: s.url.clone(),
                     title: s.title.clone(),
                     source: anime.source,
                     thumbnail_url: s.thumbnail_url.clone(),
-                    ..Anime::create()
+                    ..Entry::create(Kind::Anime)
                 };
-                network_to_local_anime(animes, &wanted)
+                network_to_local(entries, &wanted)
             })
             .collect::<DataResult<_>>()?;
         if !mapped.is_empty() {
@@ -130,11 +131,11 @@ mod tests {
         SAnime { url: url.into(), title: url.into(), ..SAnime::default() }
     }
 
-    fn setup() -> (tempfile::TempDir, Arc<kuro_db::handle::Db>, Anime) {
+    fn setup() -> (tempfile::TempDir, Arc<kuro_db::handle::Db>, Entry) {
         let (dir, db) = test_db();
-        let animes = AnimeRepo::new(db.clone());
-        let id = animes.insert(&Anime { url: "/parent".into(), title: "Parent".into(), source: 42, status: 1, ..Anime::create() }).unwrap();
-        let parent = animes.by_id(id).unwrap();
+        let entries = EntryRepo::new(db.clone());
+        let id = entries.insert(&Entry { url: "/parent".into(), title: "Parent".into(), source: 42, status: 1, ..Entry::create(Kind::Anime) }).unwrap();
+        let parent = entries.by_id(id).unwrap();
         (dir, db, parent)
     }
 
@@ -146,7 +147,7 @@ mod tests {
     #[tokio::test]
     async fn no_source_or_no_support_returns_without_touching_the_database() {
         let (_dir, db, parent) = setup();
-        let animes = AnimeRepo::new(db.clone());
+        let animes = EntryRepo::new(db.clone());
         let relations = AnimeRelationRepo::new(db);
         assert!(!sync_related_anime_with_source(None, &animes, &relations, &parent, true, 1).await.unwrap());
         let (src, calls) = fake(false, Vec::new());
@@ -158,7 +159,7 @@ mod tests {
     #[tokio::test]
     async fn a_fresh_fetch_is_reused_and_a_week_old_one_refreshes() {
         let (_dir, db, parent) = setup();
-        let animes = AnimeRepo::new(db.clone());
+        let animes = EntryRepo::new(db.clone());
         let relations = AnimeRelationRepo::new(db);
         let (src, calls) = fake(true, vec![AnimeRelation { name: "Sequels".into(), animes: vec![sanime("/s1")] }]);
         assert!(sync_related_anime_with_source(Some(&src), &animes, &relations, &parent, false, 1_000).await.unwrap());
@@ -173,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn groups_are_deduplicated_capped_without_the_parent_and_empty_groups_are_dropped() {
         let (_dir, db, parent) = setup();
-        let animes = AnimeRepo::new(db.clone());
+        let animes = EntryRepo::new(db.clone());
         let relations = AnimeRelationRepo::new(db);
         let mut many: Vec<SAnime> = vec![sanime("/parent"), sanime("/dup"), sanime("/dup")];
         many.extend((0..12).map(|i| sanime(&format!("/n{i}"))));

@@ -4,14 +4,11 @@
 //! so the vectors can be checked without a database.
 
 use kuro_data::DataResult;
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
-use kuro_db::flags::{manga_item_flags_from_unified as from_unified, manga_item_flags_to_unified as to_unified};
+use kuro_data::entry::EntryRepo;
+use kuro_db::flags::{item, season as se};
 use kuro_platform::kind::Kind;
 
-use super::anime::{episode_flags as ep, season_flags as se};
 use super::season_display::SeasonDisplayMode;
-use super::store::EntryFlagStore;
 use crate::flags::set_flag;
 
 /// Sort-or-flip state machine (`p1-behavior.md` 3.1.1). When `flag` is the sort already in use, the direction bit
@@ -74,39 +71,15 @@ pub fn item_all(
     previews: i64,
     summaries: i64,
 ) -> i64 {
-    let word = set_flag(0, unread, ep::UNSEEN_MASK);
-    let word = set_flag(word, downloaded, ep::DOWNLOADED_MASK);
-    let word = set_flag(word, bookmarked, ep::BOOKMARKED_MASK);
-    let word = set_flag(word, fillermarked, ep::FILLERMARKED_MASK);
-    let word = set_flag(word, sorting, ep::SORTING_MASK);
-    let word = set_flag(word, direction, ep::SORT_DIR_MASK);
-    let word = set_flag(word, display, ep::DISPLAY_MASK);
-    let word = set_flag(word, previews, ep::PREVIEWS_MASK);
-    set_flag(word, summaries, ep::SUMMARIES_MASK)
-}
-
-/// Words of the chapter set-all, applied from 0 in the order unread, downloaded, bookmarked, sorting, direction,
-/// display. The inputs and the result are the manga layout (`kuro_db::flags::chapter`).
-pub fn chapter_all(unread: i64, downloaded: i64, bookmarked: i64, sorting: i64, direction: i64, display: i64) -> i64 {
-    use kuro_db::flags::chapter as c;
-    let sorting = to_unified(sorting & c::SORTING_MASK);
-    from_unified(item_all(unread, downloaded, bookmarked, 0, sorting, direction, display, 0, 0))
-}
-
-/// Words of the episode set-all, applied from 0 in the documented order.
-#[allow(clippy::too_many_arguments)]
-pub fn episode_all(
-    unseen: i64,
-    downloaded: i64,
-    bookmarked: i64,
-    fillermarked: i64,
-    sorting: i64,
-    direction: i64,
-    display: i64,
-    previews: i64,
-    summaries: i64,
-) -> i64 {
-    item_all(unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries)
+    let word = set_flag(0, unread, item::UNDONE_MASK);
+    let word = set_flag(word, downloaded, item::DOWNLOADED_MASK);
+    let word = set_flag(word, bookmarked, item::BOOKMARKED_MASK);
+    let word = set_flag(word, fillermarked, item::FILLERMARKED_MASK);
+    let word = set_flag(word, sorting, item::SORTING_MASK);
+    let word = set_flag(word, direction, item::SORT_DIR_MASK);
+    let word = set_flag(word, display, item::DISPLAY_MASK);
+    let word = set_flag(word, previews, item::PREVIEWS_MASK);
+    set_flag(word, summaries, item::SUMMARIES_MASK)
 }
 
 /// The season set-all inputs, in the order of `SetAnimeSeasonFlags.awaitSetAllFlags`.
@@ -136,15 +109,14 @@ pub fn season_all(a: SeasonAll) -> i64 {
     let word = set_flag(word, a.fillermarked, se::FILLERMARKED_MASK);
     let word = set_flag(word, a.sorting, se::SORT_MASK);
     let word = set_flag(word, a.direction, se::SORT_DIR_MASK);
-    let word = set_flag(word, a.grid_mode << se::GRID_DISPLAY_MODE_BIT_OFFSET, se::GRID_DISPLAY_MODE_MASK);
-    let word = set_flag(word, clamp_grid_size(a.grid_size) << se::GRID_DISPLAY_SIZE_BIT_OFFSET, se::GRID_DISPLAY_SIZE_MASK);
+    let word = set_flag(word, a.grid_mode << se::GRID_DISPLAY_MODE_SHIFT, se::GRID_DISPLAY_MODE_MASK);
+    let word = set_flag(word, clamp_grid_size(a.grid_size) << se::GRID_DISPLAY_SIZE_SHIFT, se::GRID_DISPLAY_SIZE_MASK);
     let overlays = [SeasonOverlay::Downloaded, SeasonOverlay::Unseen, SeasonOverlay::Local, SeasonOverlay::Language, SeasonOverlay::Continue];
     let word = overlays.iter().zip(a.overlays).fold(word, |w, (o, on)| overlay_flag(w, *o, on));
     set_flag(word, a.display, se::DISPLAY_MODE_MASK)
 }
 
-// The setters. Each one is a single function over any [`EntryFlagStore`] (the shared `EntryRepo`, and until phase E the
-// two per-kind repositories); the `set_chapter_*` and `set_episode_*` names below are one-line views of them.
+// The setters. Each one is a single function over the shared `EntryRepo`.
 
 /// The groups of the item word a user can set. The last three exist for anime only.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -161,13 +133,13 @@ pub enum ItemFlagGroup {
 impl ItemFlagGroup {
     pub const fn mask(self) -> i64 {
         match self {
-            Self::Undone => ep::UNSEEN_MASK,
-            Self::Downloaded => ep::DOWNLOADED_MASK,
-            Self::Bookmarked => ep::BOOKMARKED_MASK,
-            Self::Fillermarked => ep::FILLERMARKED_MASK,
-            Self::Display => ep::DISPLAY_MASK,
-            Self::Previews => ep::PREVIEWS_MASK,
-            Self::Summaries => ep::SUMMARIES_MASK,
+            Self::Undone => item::UNDONE_MASK,
+            Self::Downloaded => item::DOWNLOADED_MASK,
+            Self::Bookmarked => item::BOOKMARKED_MASK,
+            Self::Fillermarked => item::FILLERMARKED_MASK,
+            Self::Display => item::DISPLAY_MASK,
+            Self::Previews => item::PREVIEWS_MASK,
+            Self::Summaries => item::SUMMARIES_MASK,
         }
     }
 
@@ -178,163 +150,82 @@ impl ItemFlagGroup {
 
 /// Sets one group of the item word (unified layout) in one masked statement, so two setters on different groups never
 /// overwrite each other (EC-23). `Ok(false)` for an entry that does not exist or a group its kind lacks.
-pub fn set_item_flag(repo: &impl EntryFlagStore, id: i64, group: ItemFlagGroup, flag: i64) -> DataResult<bool> {
-    if group.anime_only() && repo.kind_of(id)? != Some(Kind::Anime) {
+pub fn set_item_flag(repo: &EntryRepo, id: i64, group: ItemFlagGroup, flag: i64) -> DataResult<bool> {
+    if group.anime_only() && !matches!(repo.by_id(id), Ok(e) if e.kind == Kind::Anime) {
         return Ok(false);
     }
     repo.set_item_flags_masked(id, flag, group.mask())
 }
 
 /// Sort-or-flip of the item list (unified layout), read and written in one writer transaction.
-pub fn set_item_sort_or_flip(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
-    repo.update_item_flags(id, |cur| sort_or_flip(cur, flag, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC))
+pub fn set_item_sort_or_flip(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
+    repo.update_item_flags(id, |cur| sort_or_flip(cur, flag, item::SORTING_MASK, item::SORT_DIR_MASK, item::SORT_ASC))
 }
 
 /// Overwrites the whole item word (see [`item_all`]).
-pub fn set_item_all(repo: &impl EntryFlagStore, id: i64, word: i64) -> DataResult<bool> {
+pub fn set_item_all(repo: &EntryRepo, id: i64, word: i64) -> DataResult<bool> {
     repo.update_item_flags(id, |_| word)
 }
 
-// Chapter (manga) setters: the manga layout in, the shared setter over the unified word.
-
-/// Sets the downloaded filter group.
-pub fn set_chapter_downloaded(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Downloaded, flag)
-}
-
-/// Sets the unread filter group.
-pub fn set_chapter_unread(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Undone, flag)
-}
-
-/// Sets the bookmarked filter group.
-pub fn set_chapter_bookmarked(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Bookmarked, flag)
-}
-
-/// Sets the display group (name or number).
-pub fn set_chapter_display(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Display, flag)
-}
-
-/// Sort-or-flip of the chapter list. `flag` is a manga-layout sorting value.
-pub fn set_chapter_sort_or_flip(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_sort_or_flip(repo, id, to_unified(flag))
-}
-
-/// Overwrites the whole chapter word with the six groups (manga layout).
-pub fn set_chapter_all(repo: &MangaRepo, id: i64, groups: [i64; 6]) -> DataResult<bool> {
-    let [unread, downloaded, bookmarked, sorting, direction, display] = groups;
-    set_item_all(repo, id, to_unified(chapter_all(unread, downloaded, bookmarked, sorting, direction, display)))
-}
-
-// Episode (anime) setters.
-
-/// Sets the unseen filter group.
-pub fn set_episode_unseen(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Undone, flag)
-}
-
-/// Sets the downloaded filter group.
-pub fn set_episode_downloaded(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Downloaded, flag)
-}
-
-/// Sets the bookmarked filter group.
-pub fn set_episode_bookmarked(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Bookmarked, flag)
-}
-
-/// Sets the fillermarked filter group.
-pub fn set_episode_fillermarked(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Fillermarked, flag)
-}
-
-/// Sets the display group (name or number).
-pub fn set_episode_display(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Display, flag)
-}
-
-/// Sets the previews group.
-pub fn set_episode_previews(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Previews, flag)
-}
-
-/// Sets the summaries group.
-pub fn set_episode_summaries(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_flag(repo, id, ItemFlagGroup::Summaries, flag)
-}
-
-/// Sort-or-flip of the episode list.
-pub fn set_episode_sort_or_flip(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    set_item_sort_or_flip(repo, id, flag)
-}
-
-/// Overwrites the whole episode word with the nine groups, in the documented order.
-pub fn set_episode_all(repo: &AnimeRepo, id: i64, groups: [i64; 9]) -> DataResult<bool> {
-    let [unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries] = groups;
-    set_item_all(repo, id, item_all(unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries))
-}
-
-// Season (anime parent) setters, over any entry repository.
+// Season (anime parent) setters.
 
 /// Sets the season downloaded filter.
-pub fn set_season_downloaded(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_downloaded(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::DOWNLOADED_MASK)
 }
 
 /// Sets the season unseen filter.
-pub fn set_season_unseen(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_unseen(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::UNSEEN_MASK)
 }
 
 /// Sets the season started filter.
-pub fn set_season_started(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_started(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::STARTED_MASK)
 }
 
 /// Sets the season completed filter.
-pub fn set_season_completed(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_completed(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::COMPLETED_MASK)
 }
 
 /// Sets the season bookmarked filter.
-pub fn set_season_bookmarked(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_bookmarked(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::BOOKMARKED_MASK)
 }
 
 /// Sets the season fillermarked filter.
-pub fn set_season_fillermarked(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_fillermarked(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::FILLERMARKED_MASK)
 }
 
 /// Sort-or-flip of the season list (mask `0xE000`, direction `0x1`).
-pub fn set_season_sort_or_flip(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_sort_or_flip(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.update_season_flags(id, |cur| sort_or_flip(cur, flag, se::SORT_MASK, se::SORT_DIR_MASK, se::SORT_ASC))
 }
 
 /// Grid layout of the season list (bits 16-17).
-pub fn set_season_grid_mode(repo: &impl EntryFlagStore, id: i64, mode: SeasonDisplayMode) -> DataResult<bool> {
-    repo.set_season_flags_masked(id, mode.to_i64() << se::GRID_DISPLAY_MODE_BIT_OFFSET, se::GRID_DISPLAY_MODE_MASK)
+pub fn set_season_grid_mode(repo: &EntryRepo, id: i64, mode: SeasonDisplayMode) -> DataResult<bool> {
+    repo.set_season_flags_masked(id, mode.to_i64() << se::GRID_DISPLAY_MODE_SHIFT, se::GRID_DISPLAY_MODE_MASK)
 }
 
 /// Grid size (bits 18-21), clamped to 0..=15.
-pub fn set_season_grid_size(repo: &impl EntryFlagStore, id: i64, size: i64) -> DataResult<bool> {
-    repo.set_season_flags_masked(id, clamp_grid_size(size) << se::GRID_DISPLAY_SIZE_BIT_OFFSET, se::GRID_DISPLAY_SIZE_MASK)
+pub fn set_season_grid_size(repo: &EntryRepo, id: i64, size: i64) -> DataResult<bool> {
+    repo.set_season_flags_masked(id, clamp_grid_size(size) << se::GRID_DISPLAY_SIZE_SHIFT, se::GRID_DISPLAY_SIZE_MASK)
 }
 
 /// Sets exactly one overlay bit.
-pub fn set_season_overlay(repo: &impl EntryFlagStore, id: i64, overlay: SeasonOverlay, on: bool) -> DataResult<bool> {
+pub fn set_season_overlay(repo: &EntryRepo, id: i64, overlay: SeasonOverlay, on: bool) -> DataResult<bool> {
     repo.set_season_flags_masked(id, if on { overlay.mask() } else { 0 }, overlay.mask())
 }
 
 /// Season display mode (`SEASON_DISPLAY_MODE`, one bit).
-pub fn set_season_display(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_display(repo: &EntryRepo, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::DISPLAY_MODE_MASK)
 }
 
 /// Overwrites the whole season word with the 16 inputs.
-pub fn set_season_all(repo: &impl EntryFlagStore, id: i64, all: SeasonAll) -> DataResult<bool> {
+pub fn set_season_all(repo: &EntryRepo, id: i64, all: SeasonAll) -> DataResult<bool> {
     let word = season_all(all);
     repo.update_season_flags(id, |_| word)
 }
@@ -342,46 +233,38 @@ pub fn set_season_all(repo: &impl EntryFlagStore, id: i64, all: SeasonAll) -> Da
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_db::flags::chapter as c;
+    use kuro_data::entry::Entry;
 
     #[test]
     fn sort_or_flip_vector_from_zero() {
         let mut w = 0;
-        w = sort_or_flip(w, c::SORTING_NUMBER, c::SORTING_MASK, c::SORT_DIR_MASK, c::SORT_ASC);
-        assert_eq!(w, 0x100 | 0x1, "new column forces ascending");
-        w = sort_or_flip(w, c::SORTING_NUMBER, c::SORTING_MASK, c::SORT_DIR_MASK, c::SORT_ASC);
-        assert_eq!(w, 0x100, "same column flips the direction");
+        w = sort_or_flip(w, item::SORTING_NUMBER, item::SORTING_MASK, item::SORT_DIR_MASK, item::SORT_ASC);
+        assert_eq!(w, 0x200 | 0x1, "new column forces ascending");
+        w = sort_or_flip(w, item::SORTING_NUMBER, item::SORTING_MASK, item::SORT_DIR_MASK, item::SORT_ASC);
+        assert_eq!(w, 0x200, "same column flips the direction");
     }
 
     #[test]
     fn a_new_column_forces_ascending_even_when_the_old_one_was_descending() {
-        let w = sort_or_flip(0x100, c::SORTING_UPLOAD_DATE, c::SORTING_MASK, c::SORT_DIR_MASK, c::SORT_ASC);
-        assert_eq!(w, 0x200 | 0x1);
+        let w = sort_or_flip(0x200, item::SORTING_UPLOAD_DATE, item::SORTING_MASK, item::SORT_DIR_MASK, item::SORT_ASC);
+        assert_eq!(w, 0x400 | 0x1);
     }
 
     #[test]
-    fn episode_sort_or_flip_uses_its_own_masks() {
-        let w = sort_or_flip(0, ep::SORTING_NUMBER, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC);
+    fn item_vectors_reproduce_through_the_setters() {
+        // 0x201 -> 0x200 (flip) -> 0x202 (unseen = SHOW_UNDONE) -> 0x242 (not bookmarked) -> 0x342 (not fillermarked)
+        let mut w = sort_or_flip(0, item::SORTING_NUMBER, item::SORTING_MASK, item::SORT_DIR_MASK, item::SORT_ASC);
         assert_eq!(w, 0x201);
-        let w = sort_or_flip(w, ep::SORTING_NUMBER, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC);
+        w = sort_or_flip(w, item::SORTING_NUMBER, item::SORTING_MASK, item::SORT_DIR_MASK, item::SORT_ASC);
         assert_eq!(w, 0x200);
-    }
-
-    #[test]
-    fn episode_vectors_reproduce_through_the_setters() {
-        // 0x201 -> 0x200 (flip) -> 0x202 (unseen = SHOW_UNSEEN) -> 0x242 (not bookmarked) -> 0x342 (not fillermarked)
-        let mut w = sort_or_flip(0, ep::SORTING_NUMBER, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC);
-        assert_eq!(w, 0x201);
-        w = sort_or_flip(w, ep::SORTING_NUMBER, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC);
-        assert_eq!(w, 0x200);
-        w = set_flag(w, ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
+        w = set_flag(w, item::SHOW_UNDONE, item::UNDONE_MASK);
         assert_eq!(w, 0x202);
-        w = set_flag(w, ep::SHOW_NOT_BOOKMARKED, ep::BOOKMARKED_MASK);
+        w = set_flag(w, item::SHOW_NOT_BOOKMARKED, item::BOOKMARKED_MASK);
         assert_eq!(w, 0x242);
-        w = set_flag(w, ep::SHOW_NOT_FILLERMARKED, ep::FILLERMARKED_MASK);
+        w = set_flag(w, item::SHOW_NOT_FILLERMARKED, item::FILLERMARKED_MASK);
         assert_eq!(w, 0x342);
         // 0x101B42: number display, not summaries, not previews, number sort, not filler, not bookmarked, unseen.
-        let end = episode_all(ep::SHOW_UNSEEN, 0, ep::SHOW_NOT_BOOKMARKED, ep::SHOW_NOT_FILLERMARKED, ep::SORTING_NUMBER, 0, ep::DISPLAY_NUMBER, ep::SHOW_NOT_PREVIEWS, ep::SHOW_NOT_SUMMARIES);
+        let end = item_all(item::SHOW_UNDONE, 0, item::SHOW_NOT_BOOKMARKED, item::SHOW_NOT_FILLERMARKED, item::SORTING_NUMBER, 0, item::DISPLAY_NUMBER, item::SHOW_NOT_PREVIEWS, item::SHOW_NOT_SUMMARIES);
         assert_eq!(end, 0x101B42);
     }
 
@@ -421,120 +304,93 @@ mod tests {
         assert_eq!(clamp_grid_size(7), 7);
     }
 
-    #[test]
-    fn chapter_set_all_applies_in_the_documented_order() {
-        let word = chapter_all(c::SHOW_UNREAD, c::SHOW_DOWNLOADED, c::SHOW_BOOKMARKED, c::SORTING_NUMBER, c::SORT_ASC, c::DISPLAY_NUMBER);
-        assert_eq!(word, 0x2 | 0x8 | 0x20 | 0x100 | 0x1 | 0x100000);
-    }
-
-    fn manga_repo_with_one_entry() -> (tempfile::TempDir, MangaRepo, i64) {
+    fn repo_with_one_entry(kind: Kind) -> (tempfile::TempDir, EntryRepo, i64) {
         let (dir, db) = crate::testdb::test_db();
-        let repo = MangaRepo::new(db);
-        let id = repo
-            .insert(&kuro_data::manga::Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() })
-            .unwrap();
-        (dir, repo, id)
-    }
-
-    fn anime_repo_with_one_entry() -> (tempfile::TempDir, AnimeRepo, i64) {
-        let (dir, db) = crate::testdb::test_db();
-        let repo = AnimeRepo::new(db);
-        let id = repo
-            .insert(&kuro_data::anime::Anime { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::anime() })
-            .unwrap();
+        let repo = EntryRepo::new(db);
+        let id = repo.insert(&Entry { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..Entry::create(kind) }).unwrap();
         (dir, repo, id)
     }
 
     #[test]
-    fn each_chapter_setter_writes_only_its_group() {
-        let (_d, repo, id) = manga_repo_with_one_entry();
-        assert!(set_chapter_unread(&repo, id, c::SHOW_UNREAD).unwrap());
-        assert!(set_chapter_downloaded(&repo, id, c::SHOW_DOWNLOADED).unwrap());
-        assert!(set_chapter_bookmarked(&repo, id, c::SHOW_NOT_BOOKMARKED).unwrap());
-        assert!(set_chapter_display(&repo, id, c::DISPLAY_NUMBER).unwrap());
-        assert_eq!(repo.by_id(id).unwrap().chapter_flags, 0x2 | 0x8 | 0x40 | 0x100000);
-        assert!(set_chapter_unread(&repo, id, c::SHOW_READ).unwrap());
-        assert_eq!(repo.by_id(id).unwrap().chapter_flags, 0x4 | 0x8 | 0x40 | 0x100000, "only the unread group changed");
+    fn each_item_setter_writes_only_its_group() {
+        for kind in Kind::ALL {
+            let (_d, repo, id) = repo_with_one_entry(kind);
+            assert!(set_item_flag(&repo, id, ItemFlagGroup::Undone, item::SHOW_UNDONE).unwrap());
+            assert!(set_item_flag(&repo, id, ItemFlagGroup::Downloaded, item::SHOW_DOWNLOADED).unwrap());
+            assert!(set_item_flag(&repo, id, ItemFlagGroup::Bookmarked, item::SHOW_NOT_BOOKMARKED).unwrap());
+            assert!(set_item_flag(&repo, id, ItemFlagGroup::Display, item::DISPLAY_NUMBER).unwrap());
+            assert_eq!(repo.by_id(id).unwrap().item_flags, 0x2 | 0x8 | 0x40 | 0x100000, "{kind}");
+            assert!(set_item_flag(&repo, id, ItemFlagGroup::Undone, item::SHOW_DONE).unwrap());
+            assert_eq!(repo.by_id(id).unwrap().item_flags, 0x4 | 0x8 | 0x40 | 0x100000, "only the unread group changed");
+        }
     }
 
     #[test]
-    fn chapter_sort_or_flip_and_set_all_persist() {
-        let (_d, repo, id) = manga_repo_with_one_entry();
-        set_chapter_sort_or_flip(&repo, id, c::SORTING_NUMBER).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().chapter_flags, 0x101);
-        set_chapter_sort_or_flip(&repo, id, c::SORTING_NUMBER).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().chapter_flags, 0x100);
-        set_chapter_all(&repo, id, [c::SHOW_UNREAD, 0, 0, c::SORTING_ALPHABET, c::SORT_ASC, 0]).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().chapter_flags, 0x2 | 0x300 | 0x1);
+    fn the_anime_only_groups_do_nothing_for_manga() {
+        let (_d, repo, manga) = repo_with_one_entry(Kind::Manga);
+        for group in [ItemFlagGroup::Fillermarked, ItemFlagGroup::Previews, ItemFlagGroup::Summaries] {
+            assert!(!set_item_flag(&repo, manga, group, group.mask()).unwrap(), "{group:?}");
+        }
+        assert_eq!(repo.by_id(manga).unwrap().item_flags, 0);
+        let (_d, repo, anime) = repo_with_one_entry(Kind::Anime);
+        assert!(set_item_flag(&repo, anime, ItemFlagGroup::Fillermarked, item::SHOW_NOT_FILLERMARKED).unwrap());
+        assert_eq!(repo.by_id(anime).unwrap().item_flags, item::SHOW_NOT_FILLERMARKED);
+    }
+
+    #[test]
+    fn item_sort_or_flip_and_set_all_persist() {
+        for kind in Kind::ALL {
+            let (_d, repo, id) = repo_with_one_entry(kind);
+            set_item_sort_or_flip(&repo, id, item::SORTING_NUMBER).unwrap();
+            assert_eq!(repo.by_id(id).unwrap().item_flags, 0x201);
+            set_item_sort_or_flip(&repo, id, item::SORTING_NUMBER).unwrap();
+            assert_eq!(repo.by_id(id).unwrap().item_flags, 0x200);
+            set_item_all(&repo, id, item_all(item::SHOW_UNDONE, 0, 0, 0, item::SORTING_ALPHABET, item::SORT_ASC, 0, 0, 0)).unwrap();
+            assert_eq!(repo.by_id(id).unwrap().item_flags, 0x2 | 0x600 | 0x1, "{kind}");
+        }
     }
 
     #[test]
     fn a_missing_row_gives_false_not_an_error() {
-        let (_d, repo, _id) = manga_repo_with_one_entry();
-        assert!(!set_chapter_unread(&repo, 9_999, c::SHOW_UNREAD).unwrap());
-        assert!(!set_chapter_sort_or_flip(&repo, 9_999, c::SORTING_NUMBER).unwrap());
+        let (_d, repo, _id) = repo_with_one_entry(Kind::Manga);
+        assert!(!set_item_flag(&repo, 9_999, ItemFlagGroup::Undone, item::SHOW_UNDONE).unwrap());
+        assert!(!set_item_sort_or_flip(&repo, 9_999, item::SORTING_NUMBER).unwrap());
     }
 
     #[test]
     fn concurrent_setters_on_different_groups_both_persist() {
-        let (_d, repo, id) = manga_repo_with_one_entry();
-        let repo = std::sync::Arc::new(repo);
-        std::thread::scope(|scope| {
-            let a = repo.clone();
-            let b = repo.clone();
-            scope.spawn(move || {
-                for _ in 0..50 {
-                    set_chapter_unread(&a, id, c::SHOW_UNREAD).unwrap();
-                }
+        for kind in Kind::ALL {
+            let (_d, repo, id) = repo_with_one_entry(kind);
+            let repo = std::sync::Arc::new(repo);
+            std::thread::scope(|scope| {
+                let a = repo.clone();
+                let b = repo.clone();
+                scope.spawn(move || {
+                    for _ in 0..50 {
+                        set_item_flag(&a, id, ItemFlagGroup::Undone, item::SHOW_UNDONE).unwrap();
+                    }
+                });
+                scope.spawn(move || {
+                    for _ in 0..50 {
+                        set_item_flag(&b, id, ItemFlagGroup::Bookmarked, item::SHOW_BOOKMARKED).unwrap();
+                    }
+                });
             });
-            scope.spawn(move || {
-                for _ in 0..50 {
-                    set_chapter_bookmarked(&b, id, c::SHOW_BOOKMARKED).unwrap();
-                }
-            });
-        });
-        let word = repo.by_id(id).unwrap().chapter_flags;
-        assert_eq!(word & (c::UNREAD_MASK | c::BOOKMARKED_MASK), c::SHOW_UNREAD | c::SHOW_BOOKMARKED);
+            let word = repo.by_id(id).unwrap().item_flags;
+            assert_eq!(word & (item::UNDONE_MASK | item::BOOKMARKED_MASK), item::SHOW_UNDONE | item::SHOW_BOOKMARKED, "{kind}");
+        }
     }
 
     #[test]
-    fn episode_and_season_setters_round_trip_through_the_database() {
-        let (_d, repo, id) = anime_repo_with_one_entry();
-        set_episode_sort_or_flip(&repo, id, ep::SORTING_NUMBER).unwrap();
-        set_episode_sort_or_flip(&repo, id, ep::SORTING_NUMBER).unwrap();
-        set_episode_unseen(&repo, id, ep::SHOW_UNSEEN).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().episode_flags, 0x202);
+    fn season_setters_round_trip_through_the_database() {
+        let (_d, repo, id) = repo_with_one_entry(Kind::Anime);
         set_season_grid_mode(&repo, id, SeasonDisplayMode::List).unwrap();
         set_season_grid_size(&repo, id, 5).unwrap();
         set_season_overlay(&repo, id, SeasonOverlay::Unseen, true).unwrap();
         set_season_overlay(&repo, id, SeasonOverlay::Local, true).unwrap();
         set_season_overlay(&repo, id, SeasonOverlay::Continue, true).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().season_flags, 0x5970000);
+        assert_eq!(repo.by_id(id).unwrap().season_flags(), 0x5970000);
         set_season_overlay(&repo, id, SeasonOverlay::Local, false).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().season_flags, 0x5970000 & !0x1000000);
-        set_episode_all(&repo, id, [0, 0, 0, 0, ep::SORTING_NUMBER, ep::SORT_ASC, 0, 0, 0]).unwrap();
-        assert_eq!(repo.by_id(id).unwrap().episode_flags, 0x201);
-    }
-
-    #[test]
-    fn concurrent_episode_setters_on_different_groups_both_persist() {
-        let (_d, repo, id) = anime_repo_with_one_entry();
-        let repo = std::sync::Arc::new(repo);
-        std::thread::scope(|scope| {
-            let a = repo.clone();
-            let b = repo.clone();
-            scope.spawn(move || {
-                for _ in 0..50 {
-                    set_episode_unseen(&a, id, ep::SHOW_UNSEEN).unwrap();
-                }
-            });
-            scope.spawn(move || {
-                for _ in 0..50 {
-                    set_episode_bookmarked(&b, id, ep::SHOW_BOOKMARKED).unwrap();
-                }
-            });
-        });
-        let word = repo.by_id(id).unwrap().episode_flags;
-        assert_eq!(word & (ep::UNSEEN_MASK | ep::BOOKMARKED_MASK), ep::SHOW_UNSEEN | ep::SHOW_BOOKMARKED);
+        assert_eq!(repo.by_id(id).unwrap().season_flags(), 0x5970000 & !0x1000000);
     }
 }

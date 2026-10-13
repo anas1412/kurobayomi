@@ -6,9 +6,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use kuro_data::anime::Anime;
 use kuro_data::entry::Entry;
-use kuro_data::episode::Episode;
 use kuro_data::item::Item;
 use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_downloads::anime::manager::{AnimeQueue, Command, QueueEntry};
@@ -65,21 +63,6 @@ pub(crate) fn item_ref(e: &Item) -> EpisodeRef {
         upload_date: e.date_upload,
         episode_number: e.number,
     }
-}
-
-// The three functions below are the seam of the download queue (`downloads::anime_queue`), which still holds the legacy
-// `Anime` and `Episode`. Phase E deletes them with the shapes.
-
-pub(crate) fn source_of(anime: &Anime, info: &SourceInfo) -> AnimeSource {
-    entry_source(&Entry::from(anime), info)
-}
-
-pub(crate) fn anime_ref(anime: &Anime) -> AnimeRef {
-    entry_ref(&Entry::from(anime))
-}
-
-pub(crate) fn episode_ref(e: &Episode) -> EpisodeRef {
-    item_ref(&Item::from(e))
 }
 
 /// The downloads folder and, when the app has one, the queue.
@@ -156,14 +139,6 @@ mod tests {
 
     fn episodes(n: i64) -> Vec<Item> {
         (1..=n).map(|id| Item { id, entry_id: 1, name: format!("Episode {id}"), url: format!("/e{id}"), ..Item::create(Kind::Anime) }).collect()
-    }
-
-    #[test]
-    fn the_queue_seam_answers_like_the_shared_refs() {
-        let (entry, item) = (anime(), episodes(1).remove(0));
-        assert_eq!(anime_ref(&Anime::from(entry.clone())).id, entry_ref(&entry).id);
-        assert_eq!(episode_ref(&Episode::from(item.clone())).anime_id, item_ref(&item).anime_id);
-        assert_eq!(source_of(&Anime::from(entry.clone()), &info()).id, entry_source(&entry, &info()).id);
     }
 
     /// A downloads folder with the finished folders of `names` for `Frieren`.

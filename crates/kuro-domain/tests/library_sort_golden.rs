@@ -7,7 +7,7 @@ use kuro_platform::kind::Kind;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::order::{SortContext, sort_page};
 use kuro_domain::library::page::LibraryItem;
-use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SortType};
 
 /// (id, title, total, read, last read, latest upload, fetched, date added); every entry is in the Default page
 /// except id 3, and id 2 is also in Hold.

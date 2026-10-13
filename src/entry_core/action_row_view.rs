@@ -33,7 +33,7 @@ impl RowState {
     pub fn of_entry(favorite: bool, next_update_ms: i64, status: i64, fetch_interval: i32, tracking_count: i64, http_source: bool) -> Self {
         Self {
             favorite,
-            next: next_update(Some(next_update_ms), chrono::Utc::now().timestamp_millis(), status == kuro_domain::entries::manga::STATUS_COMPLETED),
+            next: next_update(Some(next_update_ms), chrono::Utc::now().timestamp_millis(), status == kuro_domain::entries::flags::STATUS_COMPLETED),
             user_interval: fetch_interval < 0,
             tracking_count,
             has_tracking: true,

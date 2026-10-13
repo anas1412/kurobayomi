@@ -133,8 +133,9 @@ impl LibraryStore for SqliteLibraryStore {
 mod tests {
     use super::*;
     use kuro_db::codec::UpdateStrategy as DbUpdateStrategy;
-    use kuro_db::schema_anime::FetchType as DbFetchType;
-    use kuro_testkit::{AnimeBuilder, TempDir, TestDb};
+    use kuro_db::codec::FetchType as DbFetchType;
+    use kuro_data::entry::{Entry, EntryRepo};
+    use kuro_testkit::{TempDir, TestDb};
 
     #[test]
     fn stored_update_strategy_maps_zero_and_one() {
@@ -157,11 +158,8 @@ mod tests {
         // T-26a-004: -3 written, -3 read.
         let dir = TempDir::new().expect("temp dir");
         let db = TestDb::handle(&dir);
-        db
-            .write(|tx| {
-                AnimeBuilder::new().title("Show").source(1).url("/s").favorite(true).with(|a| a.calculate_interval = -3).insert(tx);
-                Ok(())
-            })
+        EntryRepo::new(db.clone())
+            .insert(&Entry { title: "Show".into(), source: 1, url: "/s".into(), favorite: true, fetch_interval: -3, ..Entry::create(Kind::Anime) })
             .expect("insert anime");
         let store = SqliteLibraryStore::new(db);
         let rows = store.library(Kind::Anime).await.expect("library");
@@ -174,13 +172,10 @@ mod tests {
     async fn library_rows_carry_counts_and_favourite_checks_read_correctly() {
         let dir = TempDir::new().expect("temp dir");
         let db = TestDb::handle(&dir);
-        db
-            .write(|tx| {
-                AnimeBuilder::new().title("Fav").source(1).url("/f").favorite(true).insert(tx);
-                AnimeBuilder::new().title("NotFav").source(1).url("/n").favorite(false).insert(tx);
-                Ok(())
-            })
-            .expect("insert anime");
+        let entries = EntryRepo::new(db.clone());
+        for (title, url, favorite) in [("Fav", "/f", true), ("NotFav", "/n", false)] {
+            entries.insert(&Entry { title: title.into(), source: 1, url: url.into(), favorite, ..Entry::create(Kind::Anime) }).expect("insert anime");
+        }
         let store = SqliteLibraryStore::new(db.clone());
         let rows = store.library(Kind::Anime).await.expect("library");
         // Only favourites are in the library view.

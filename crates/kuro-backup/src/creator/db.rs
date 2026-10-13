@@ -9,7 +9,7 @@ use std::sync::Arc;
 use kuro_data::DataError;
 use kuro_data::category::{Category, CategoryRepo};
 use kuro_data::entry::{Entry, EntryRepo};
-use kuro_data::entry_history::HistoryRepo;
+use kuro_data::history::HistoryRepo;
 use kuro_data::item::ItemRepo;
 use kuro_data::track::TrackRepo;
 use kuro_db::handle::Db;

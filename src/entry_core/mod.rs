@@ -58,7 +58,6 @@ pub mod list_view;
 pub mod live;
 pub mod message;
 pub mod markdown;
-pub mod numbered;
 pub mod numfmt;
 pub mod page;
 /// The GTK pieces both details pages build the same way (the state stack, the item header row, the Start button, Back,

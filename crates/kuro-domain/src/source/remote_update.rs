@@ -11,16 +11,15 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
-use kuro_data::anime::{Anime, AnimeRepo, SeasonAnime};
-use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
-use kuro_data::episode::{Episode, EpisodeRepo};
+use kuro_data::entry::{Entry, EntryRepo, EntryUpdate, SeasonEntry};
+use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
 use kuro_source::SourceError;
 use kuro_source::anime::{AnimeSource, AnimeStatus, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
 
 use crate::error::{DomainError, NoEpisodes, NoSeasons};
 use crate::app::source::LOCAL_SOURCE_ID;
-use crate::entries::update::{CacheFiles as EntryCacheFiles, prepare_update, remote_from_anime};
+use crate::entries::update::{CacheFiles, prepare_update, remote_from_anime};
 pub use crate::entries::update::CacheAction;
 use crate::source::model::Id;
 
@@ -39,15 +38,15 @@ pub struct FetchFlags {
 /// (`RemoteAnimeEpisodeUpdate`). Both fields are required.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemoteEpisodeUpdate {
-    pub anime: Anime,
-    pub new_episodes: Vec<Episode>,
+    pub anime: Entry,
+    pub new_episodes: Vec<Item>,
 }
 
 /// The result of a season refresh (`RemoteAnimeSeasonUpdate`). Both fields are required.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemoteSeasonUpdate {
-    pub anime: Anime,
-    pub new_seasons: Vec<Anime>,
+    pub anime: Entry,
+    pub new_seasons: Vec<Entry>,
 }
 
 /// Why a remote update failed. `Cancelled` is not a failure: it is never logged as an error (E-S5).
@@ -155,57 +154,31 @@ pub trait ListSync: Send + Sync {
     fn sync_episodes(
         &self,
         raw: &[SEpisode],
-        anime: &Anime,
+        anime: &Entry,
         manual: bool,
         window: (i64, i64),
-    ) -> Result<Vec<Episode>, DomainError>;
+    ) -> Result<Vec<Item>, DomainError>;
 
     fn sync_seasons(
         &self,
         raw: &[SAnime],
-        anime: &Anime,
+        anime: &Entry,
         manual: bool,
         window: (i64, i64),
-    ) -> Result<Vec<Anime>, DomainError>;
+    ) -> Result<Vec<Entry>, DomainError>;
 }
 
 /// The reads and the metadata write of a remote update. [`DbRemoteStore`] is the database form.
 pub trait RemoteStore: Send + Sync {
-    fn anime(&self, id: i64) -> Result<Anime, DomainError>;
-    fn episodes(&self, anime_id: i64) -> Result<Vec<Episode>, DomainError>;
-    fn seasons(&self, parent_id: i64) -> Result<Vec<SeasonAnime>, DomainError>;
+    fn anime(&self, id: i64) -> Result<Entry, DomainError>;
+    fn episodes(&self, anime_id: i64) -> Result<Vec<Item>, DomainError>;
+    fn seasons(&self, parent_id: i64) -> Result<Vec<SeasonEntry>, DomainError>;
     /// Writes the metadata. An error stops the update before the list sync (E-S4).
     fn update_entry(&self, update: &EntryUpdate) -> Result<(), DomainError>;
 }
 
-/// The cover and background files of an entry (`AnimeCoverCache`, `AnimeBackgroundCache`). Area 34 owns the files.
-pub trait CacheFiles: Send + Sync {
-    fn has_custom_cover(&self, anime: &Anime) -> bool;
-    fn has_custom_background(&self, anime: &Anime) -> bool;
-    fn delete_cover(&self, anime: &Anime);
-    fn delete_background(&self, anime: &Anime);
-}
-
-/// A legacy [`CacheFiles`] as the shared [`EntryCacheFiles`] port: the entry becomes the old anime shape.
-struct EntryFiles<'a>(&'a dyn CacheFiles);
-
-impl EntryCacheFiles for EntryFiles<'_> {
-    fn has_custom_cover(&self, e: &Entry) -> bool {
-        self.0.has_custom_cover(&Anime::from(e.clone()))
-    }
-    fn has_custom_background(&self, e: &Entry) -> bool {
-        self.0.has_custom_background(&Anime::from(e.clone()))
-    }
-    fn delete_cover(&self, e: &Entry) {
-        self.0.delete_cover(&Anime::from(e.clone()));
-    }
-    fn delete_background(&self, e: &Entry) {
-        self.0.delete_background(&Anime::from(e.clone()));
-    }
-}
-
 /// The source view of a stored anime (`Anime.toSAnime`).
-pub fn to_s_anime(anime: &Anime) -> SAnime {
+pub fn to_s_anime(anime: &Entry) -> SAnime {
     SAnime {
         url: anime.url.clone(),
         title: anime.title.clone(),
@@ -217,50 +190,49 @@ pub fn to_s_anime(anime: &Anime) -> SAnime {
         thumbnail_url: anime.thumbnail_url.clone(),
         background_url: anime.background_url.clone(),
         update_strategy: crate::entries::source_convert::to_source_strategy(anime.update_strategy),
-        fetch_type: kuro_source::anime::FetchType::from(anime.fetch_type as i64),
-        season_number: anime.season_number,
+        fetch_type: kuro_source::anime::FetchType::from(anime.fetch_type() as i64),
+        season_number: anime.season_number(),
         initialized: anime.initialized,
-        memo: anime.memo.clone(),
+        memo: anime.memo(),
     }
 }
 
 /// The source view of a stored episode (`Episode.toSEpisode`).
-pub fn to_s_episode(episode: &Episode) -> SEpisode {
+pub fn to_s_episode(episode: &Item) -> SEpisode {
     SEpisode {
         url: episode.url.clone(),
         name: episode.name.clone(),
-        episode_number: episode.episode_number as f32,
+        episode_number: episode.number as f32,
         fillermark: episode.fillermark,
         scanlator: episode.scanlator.clone(),
         date_upload: episode.date_upload,
         summary: episode.summary.clone(),
         preview_url: episode.preview_url.clone(),
-        memo: episode.memo.clone(),
+        memo: episode.memo(),
     }
 }
 
-/// The database form of [`RemoteStore`], over the anime and episode repositories.
+/// The database form of [`RemoteStore`], over the entry and item repositories.
 pub struct DbRemoteStore {
-    anime: AnimeRepo,
-    episodes: EpisodeRepo,
     entries: EntryRepo,
+    items: ItemRepo,
 }
 
 impl DbRemoteStore {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { anime: AnimeRepo::new(db.clone()), episodes: EpisodeRepo::new(db.clone()), entries: EntryRepo::new(db) }
+        Self { entries: EntryRepo::new(db.clone()), items: ItemRepo::new(db) }
     }
 }
 
 impl RemoteStore for DbRemoteStore {
-    fn anime(&self, id: i64) -> Result<Anime, DomainError> {
-        Ok(self.anime.by_id(id)?)
+    fn anime(&self, id: i64) -> Result<Entry, DomainError> {
+        Ok(self.entries.by_id(id)?)
     }
-    fn episodes(&self, anime_id: i64) -> Result<Vec<Episode>, DomainError> {
-        Ok(self.episodes.by_anime_id(anime_id)?)
+    fn episodes(&self, anime_id: i64) -> Result<Vec<Item>, DomainError> {
+        Ok(self.items.by_entry_id(anime_id, false)?)
     }
-    fn seasons(&self, parent_id: i64) -> Result<Vec<SeasonAnime>, DomainError> {
-        Ok(self.anime.seasons_by_parent(parent_id)?)
+    fn seasons(&self, parent_id: i64) -> Result<Vec<SeasonEntry>, DomainError> {
+        Ok(self.entries.seasons_by_parent(parent_id)?)
     }
     fn update_entry(&self, update: &EntryUpdate) -> Result<(), DomainError> {
         Ok(self.entries.update(update)?)
@@ -301,7 +273,7 @@ impl UpdateFromRemote {
     /// `awaitEpisodesUpdate`. The source is asked before anything is written, so a stub writes nothing (E-S3).
     pub async fn episodes<A: AnimeRemote + ?Sized>(
         &self,
-        anime: &Anime,
+        anime: &Entry,
         source: &A,
         flags: FetchFlags,
     ) -> Result<RemoteEpisodeUpdate, RemoteError> {
@@ -314,7 +286,7 @@ impl UpdateFromRemote {
 
     async fn episodes_inner<A: AnimeRemote + ?Sized>(
         &self,
-        anime: &Anime,
+        anime: &Entry,
         source: &A,
         flags: FetchFlags,
     ) -> Result<RemoteEpisodeUpdate, RemoteError> {
@@ -340,7 +312,7 @@ impl UpdateFromRemote {
     /// `awaitSeasonsUpdate`, the season twin of [`UpdateFromRemote::episodes`].
     pub async fn seasons<A: AnimeRemote + ?Sized>(
         &self,
-        anime: &Anime,
+        anime: &Entry,
         source: &A,
         flags: FetchFlags,
     ) -> Result<RemoteSeasonUpdate, RemoteError> {
@@ -353,13 +325,13 @@ impl UpdateFromRemote {
 
     async fn seasons_inner<A: AnimeRemote + ?Sized>(
         &self,
-        anime: &Anime,
+        anime: &Entry,
         source: &A,
         flags: FetchFlags,
     ) -> Result<RemoteSeasonUpdate, RemoteError> {
         let mut stored = self.store.seasons(anime.id).map_err(RemoteError::Db)?;
-        stored.sort_by_key(|season| season.anime.season_source_order);
-        let raw: Vec<SAnime> = stored.iter().map(|season| to_s_anime(&season.anime)).collect();
+        stored.sort_by_key(|season| season.entry.season_source_order());
+        let raw: Vec<SAnime> = stored.iter().map(|season| to_s_anime(&season.entry)).collect();
         let update = source
             .season_update(to_s_anime(anime), raw, flags.fetch_details, flags.fetch_seasons)
             .await
@@ -378,9 +350,8 @@ impl UpdateFromRemote {
 
     /// `awaitUpdateFromSource`: decides the cache actions, deletes the files they name, then writes the metadata. A
     /// failed write is an error, so the list sync does not run (E-S4, the documented difference from Kotlin).
-    fn apply_metadata(&self, local: &Anime, remote: &SAnime, manual: bool) -> Result<(), RemoteError> {
-        let files = EntryFiles(self.files.as_ref());
-        let update = prepare_update(&Entry::from(local), &remote_from_anime(remote), manual, &files, (self.now_ms)());
+    fn apply_metadata(&self, local: &Entry, remote: &SAnime, manual: bool) -> Result<(), RemoteError> {
+        let update = prepare_update(local, &remote_from_anime(remote), manual, self.files.as_ref(), (self.now_ms)());
         self.store.update_entry(&update).map_err(RemoteError::Db)
     }
 }
@@ -415,6 +386,8 @@ mod tests {
 mod orchestration_tests {
     use std::sync::Arc;
 
+    use kuro_platform::kind::Kind;
+
     use super::*;
     use crate::source::fakes::{CallLog, FakeAnimeSource, FakeCacheFiles, FakeListSync, MemRemoteStore};
 
@@ -428,8 +401,8 @@ mod orchestration_tests {
         files: Arc<FakeCacheFiles>,
     }
 
-    fn anime(source: i64, favorite: bool) -> Anime {
-        let mut anime = Anime::create();
+    fn anime(source: i64, favorite: bool) -> Entry {
+        let mut anime = Entry::create(Kind::Anime);
         anime.id = 5;
         anime.source = source;
         anime.url = "/show".into();
@@ -440,8 +413,8 @@ mod orchestration_tests {
         anime
     }
 
-    fn episode(url: &str, source_order: i64) -> Episode {
-        let mut episode = Episode::create();
+    fn episode(url: &str, source_order: i64) -> Item {
+        let mut episode = Item::create(Kind::Anime);
         episode.url = url.into();
         episode.source_order = source_order;
         episode
@@ -455,7 +428,7 @@ mod orchestration_tests {
         SEpisode { url: url.into(), name: url.into(), ..SEpisode::default() }
     }
 
-    fn make_rig(stored: Anime) -> Rig {
+    fn make_rig(stored: Entry) -> Rig {
         let log = Arc::new(CallLog::default());
         let source = FakeAnimeSource::new(log.clone(), s_anime("Fresh"));
         let store = Arc::new(MemRemoteStore::new(log.clone(), stored));
@@ -502,7 +475,7 @@ mod orchestration_tests {
         let wait = std::time::Duration::from_millis(50);
         let same = tokio::time::timeout(wait, updater.episodes(&stored, &rig.source, FetchFlags::default())).await;
         assert!(same.is_err(), "E-C4: the second refresh of anime 5 waits for the first");
-        let other = Anime { id: 6, ..stored.clone() };
+        let other = Entry { id: 6, ..stored.clone() };
         let free = tokio::time::timeout(wait, updater.episodes(&other, &rig.source, FetchFlags::default())).await;
         assert!(free.is_ok(), "a refresh of another anime is not blocked");
     }

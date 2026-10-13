@@ -7,14 +7,10 @@
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Offset, TimeZone};
 use kuro_data::DataResult;
-use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate};
-use kuro_data::chapter::{Chapter, ChapterRepo};
 use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
-use kuro_data::episode::{Episode, EpisodeRepo};
 use kuro_data::item::{Item, ItemRepo};
-use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
 
-use crate::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id, get_items_by_entry};
+use crate::items::facades::get_items_by_entry;
 
 /// Largest interval in days (`MAX_INTERVAL`).
 pub const MAX_INTERVAL: i32 = 28;
@@ -39,24 +35,6 @@ impl From<&Item> for ItemDates {
         Self {
             date_upload: i.date_upload,
             date_fetch: i.date_fetch,
-        }
-    }
-}
-
-impl From<&Chapter> for ItemDates {
-    fn from(c: &Chapter) -> Self {
-        Self {
-            date_upload: c.date_upload,
-            date_fetch: c.date_fetch,
-        }
-    }
-}
-
-impl From<&Episode> for ItemDates {
-    fn from(e: &Episode) -> Self {
-        Self {
-            date_upload: e.date_upload,
-            date_fetch: e.date_fetch,
         }
     }
 }
@@ -261,87 +239,7 @@ pub fn set_fetch_interval<Tz: TimeZone>(
     repo.update(&to_entry_update(items, &entry, now, window, clock_now_ms))
 }
 
-/// `MangaFetchInterval.toMangaUpdate`: the interval fields of `manga`. Chapters are read only when the stored
-/// interval is automatic, and the scanlator-filtered list is the sample (`getChaptersByMangaId`, filter on).
-pub fn to_manga_update<Tz: TimeZone>(
-    chapters: &ChapterRepo,
-    manga: &Manga,
-    now: &DateTime<Tz>,
-    window: (i64, i64),
-    clock_now_ms: i64,
-) -> MangaUpdate {
-    let stored = Stored {
-        fetch_interval: manga.fetch_interval,
-        next_update: manga.next_update,
-        last_update: manga.last_update,
-    };
-    let sample = || get_chapters_by_manga_id(chapters, manga.id, true).iter().map(ItemDates::from).collect();
-    let out = interval_update(stored, sample, now, window, clock_now_ms);
-    MangaUpdate {
-        next_update: Some(out.next_update),
-        fetch_interval: Some(out.fetch_interval),
-        ..MangaUpdate::new(manga.id)
-    }
-}
-
-/// `AnimeFetchInterval.toAnimeUpdate`: as [`to_manga_update`], over every episode of the anime (no filter).
-pub fn to_anime_update<Tz: TimeZone>(
-    episodes: &EpisodeRepo,
-    anime: &Anime,
-    now: &DateTime<Tz>,
-    window: (i64, i64),
-    clock_now_ms: i64,
-) -> AnimeUpdate {
-    let stored = Stored {
-        fetch_interval: anime.fetch_interval,
-        next_update: anime.next_update,
-        last_update: anime.last_update,
-    };
-    let sample = || get_episodes_by_anime_id(episodes, anime.id).iter().map(ItemDates::from).collect();
-    let out = interval_update(stored, sample, now, window, clock_now_ms);
-    AnimeUpdate {
-        next_update: Some(out.next_update),
-        fetch_interval: Some(out.fetch_interval),
-        ..AnimeUpdate::new(anime.id)
-    }
-}
-
-/// `MangaScreenModel.setFetchInterval(manga, wheel)`: `wheel` is stored as `-wheel` (0 means automatic), the
-/// interval fields are recomputed and the row is written.
-pub fn set_manga_fetch_interval<Tz: TimeZone>(
-    mangas: &MangaRepo,
-    chapters: &ChapterRepo,
-    manga: &Manga,
-    wheel: i32,
-    now: &DateTime<Tz>,
-    window: (i64, i64),
-    clock_now_ms: i64,
-) -> DataResult<()> {
-    let entry = Manga {
-        fetch_interval: stored_for_wheel(wheel),
-        ..manga.clone()
-    };
-    mangas.update(&to_manga_update(chapters, &entry, now, window, clock_now_ms))
-}
-
-/// The anime twin of [`set_manga_fetch_interval`].
-pub fn set_anime_fetch_interval<Tz: TimeZone>(
-    animes: &AnimeRepo,
-    episodes: &EpisodeRepo,
-    anime: &Anime,
-    wheel: i32,
-    now: &DateTime<Tz>,
-    window: (i64, i64),
-    clock_now_ms: i64,
-) -> DataResult<()> {
-    let entry = Anime {
-        fetch_interval: stored_for_wheel(wheel),
-        ..anime.clone()
-    };
-    animes.update(&to_anime_update(episodes, &entry, now, window, clock_now_ms))
-}
-
-/// The user override of the interval, as `set_manga_fetch_interval` and `set_anime_fetch_interval` store it: the
+/// The user override of the interval, as [`set_fetch_interval`] stores it: the
 /// wheel value 0..=28 is stored as `-wheel`. Zero stores 0, which is automatic mode.
 pub fn stored_for_wheel(wheel: i32) -> i32 {
     -wheel
@@ -671,14 +569,9 @@ mod tests {
 }
 
 #[cfg(test)]
-mod wrappers {
+mod entry_updates {
     use chrono::Utc;
-    use kuro_data::anime::{Anime, AnimeRepo};
-    use kuro_data::chapter::ChapterRepo;
-    use kuro_data::episode::EpisodeRepo;
-    use kuro_data::manga::{Manga, MangaRepo};
-    use kuro_db::statements_anime::{EpisodeRow, insert_episode};
-    use kuro_db::statements_manga::{ChapterRow, chapters, excluded_scanlators};
+    use kuro_platform::kind::Kind;
 
     use super::*;
     use crate::testdb::test_db;
@@ -696,86 +589,32 @@ mod wrappers {
         T0 + d * DAY_MS
     }
 
-    fn chapter_row(manga_id: i64, url: &str, scanlator: &str, upload: i64) -> ChapterRow {
-        ChapterRow {
-            id: -1,
-            manga_id,
+    fn item(kind: Kind, entry_id: i64, url: &str, scanlator: &str, upload: i64) -> Item {
+        Item {
+            entry_id,
             url: url.into(),
             name: url.into(),
             scanlator: Some(scanlator.into()),
-            read: false,
-            bookmark: false,
-            last_page_read: 0,
-            chapter_number: 1.0,
-            source_order: 0,
+            number: 1.0,
             date_fetch: upload,
             date_upload: upload,
-            last_modified_at: 0,
             version: 0,
-            is_syncing: false,
+            ..Item::create(kind)
         }
     }
 
-    fn episode_row(anime_id: i64, url: &str, upload: i64) -> EpisodeRow {
-        EpisodeRow {
-            anime_id,
-            url: url.into(),
-            name: url.into(),
-            episode_number: 1.0,
-            date_fetch: upload,
-            date_upload: upload,
-            ..Default::default()
-        }
-    }
-
-    /// A manga whose kept scanlator has uploads on days 0, 2, 4 and 6; the excluded scanlator uploads on
-    /// every day 0 to 6. Counting the excluded chapters would give interval 1 instead of 2.
-    fn manga_fixture() -> (tempfile::TempDir, std::sync::Arc<kuro_db::handle::Db>, MangaRepo, ChapterRepo, Manga) {
+    /// An entry whose kept scanlator has uploads on days 0, 2, 4 and 6; the excluded scanlator uploads on every day
+    /// 0 to 6. Counting the excluded items would give interval 1 instead of 2.
+    fn fixture(kind: Kind) -> (tempfile::TempDir, std::sync::Arc<kuro_db::handle::Db>, EntryRepo, ItemRepo, Entry) {
         let (dir, db) = test_db();
-        let mangas = MangaRepo::new(db.clone());
-        let id = mangas
-            .insert(&Manga {
-                url: "/m".into(),
-                title: "M".into(),
-                source: 1,
-                ..Manga::create()
-            })
-            .expect("manga");
-        db.write(|tx| {
-            for d in [0, 2, 4, 6] {
-                chapters::insert(tx, &chapter_row(id, &format!("kept{d}"), "Kept", day(d)))?;
-            }
-            for d in 0..7 {
-                chapters::insert(tx, &chapter_row(id, &format!("gone{d}"), "Excluded", day(d)))?;
-            }
-            excluded_scanlators::insert(tx, id, "Excluded")?;
-            Ok(())
-        })
-        .expect("chapters");
-        let manga = mangas.by_id(id).expect("row");
-        (dir, db.clone(), mangas, ChapterRepo::new(db), manga)
-    }
-
-    fn anime_fixture() -> (tempfile::TempDir, AnimeRepo, EpisodeRepo, Anime) {
-        let (dir, db) = test_db();
-        let animes = AnimeRepo::new(db.clone());
-        let id = animes
-            .insert(&Anime {
-                url: "/a".into(),
-                title: "A".into(),
-                source: 1,
-                ..Anime::create()
-            })
-            .expect("anime");
-        db.write(|tx| {
-            for d in [0, 2, 4, 6] {
-                insert_episode(tx, &episode_row(id, &format!("e{d}"), day(d)))?;
-            }
-            Ok(())
-        })
-        .expect("episodes");
-        let anime = animes.by_id(id).expect("row");
-        (dir, animes, EpisodeRepo::new(db), anime)
+        let entries = EntryRepo::new(db.clone());
+        let id = entries.insert(&Entry { url: "/m".into(), title: "M".into(), source: 1, ..Entry::create(kind) }).expect("entry");
+        let mut rows: Vec<Item> = [0, 2, 4, 6].iter().map(|&d| item(kind, id, &format!("kept{d}"), "Kept", day(d))).collect();
+        rows.extend((0..7).map(|d| item(kind, id, &format!("gone{d}"), "Excluded", day(d))));
+        ItemRepo::new(db.clone()).add_all(&rows).expect("items");
+        entries.set_excluded_scanlators(id, &["Excluded".to_owned()].into()).expect("excluded");
+        let entry = entries.by_id(id).expect("row");
+        (dir, db.clone(), entries, ItemRepo::new(db), entry)
     }
 
     fn window() -> (i64, i64) {
@@ -783,63 +622,49 @@ mod wrappers {
     }
 
     #[test]
-    fn manga_update_samples_only_the_included_scanlators() {
-        let (_d, _db, _mangas, chapters, manga) = manga_fixture();
-        let update = to_manga_update(&chapters, &manga, &now(), window(), day(7));
-        assert_eq!(update.fetch_interval, Some(2));
-        assert_eq!(update.id, manga.id);
-    }
-
-    #[test]
-    fn anime_update_samples_every_episode() {
-        let (_d, _animes, episodes, anime) = anime_fixture();
-        let update = to_anime_update(&episodes, &anime, &now(), window(), day(7));
-        assert_eq!(update.fetch_interval, Some(2));
+    fn the_update_samples_only_the_included_scanlators() {
+        for kind in Kind::ALL {
+            let (_d, _db, _entries, items, entry) = fixture(kind);
+            let update = to_entry_update(&items, &entry, &now(), window(), day(7));
+            assert_eq!(update.fetch_interval, Some(2), "{kind}");
+            assert_eq!(update.id, entry.id);
+        }
     }
 
     #[test]
     fn a_negative_stored_interval_is_kept_without_reading_items() {
-        let (_d, _db, _mangas, chapters, manga) = manga_fixture();
-        let entry = Manga {
-            fetch_interval: -3,
-            ..manga
-        };
-        let update = to_manga_update(&chapters, &entry, &now(), window(), day(7));
+        let (_d, _db, _entries, items, entry) = fixture(Kind::Manga);
+        let entry = Entry { fetch_interval: -3, ..entry };
+        let update = to_entry_update(&items, &entry, &now(), window(), day(7));
         assert_eq!(update.fetch_interval, Some(-3));
     }
 
     #[test]
-    fn a_failed_chapter_read_samples_nothing_and_gives_the_seven_day_default() {
-        let (_d, db, _mangas, chapters, manga) = manga_fixture();
-        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?))
-            .expect("rename");
-        let update = to_manga_update(&chapters, &manga, &now(), window(), day(7));
+    fn a_failed_item_read_samples_nothing_and_gives_the_seven_day_default() {
+        let (_d, db, _entries, items, entry) = fixture(Kind::Manga);
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?)).expect("rename");
+        let update = to_entry_update(&items, &entry, &now(), window(), day(7));
         assert_eq!(update.fetch_interval, Some(7), "an empty sample gives the default");
     }
 
     #[test]
-    fn set_manga_fetch_interval_wheel_five_stores_minus_five() {
-        let (_d, _db, mangas, chapters, manga) = manga_fixture();
-        set_manga_fetch_interval(&mangas, &chapters, &manga, 5, &now(), window(), day(7)).expect("set");
-        let stored = mangas.by_id(manga.id).expect("row");
-        assert_eq!(stored.fetch_interval, -5);
-        assert!(stored.next_update > 0, "the next update is recomputed");
+    fn set_fetch_interval_wheel_five_stores_minus_five() {
+        for kind in Kind::ALL {
+            let (_d, _db, entries, items, entry) = fixture(kind);
+            set_fetch_interval(&entries, &items, &entry, 5, &now(), window(), day(7)).expect("set");
+            let stored = entries.by_id(entry.id).expect("row");
+            assert_eq!(stored.fetch_interval, -5, "{kind}");
+            assert!(stored.next_update > 0, "the next update is recomputed");
+        }
     }
 
     #[test]
-    fn set_manga_fetch_interval_wheel_zero_restores_automatic_mode() {
-        let (_d, _db, mangas, chapters, manga) = manga_fixture();
-        set_manga_fetch_interval(&mangas, &chapters, &manga, 5, &now(), window(), day(7)).expect("set 5");
-        let overridden = mangas.by_id(manga.id).expect("row");
-        set_manga_fetch_interval(&mangas, &chapters, &overridden, 0, &now(), window(), day(7)).expect("set 0");
-        assert_eq!(mangas.by_id(manga.id).expect("row").fetch_interval, 2, "automatic: recomputed from the sample");
-    }
-
-    #[test]
-    fn set_anime_fetch_interval_stores_the_negated_wheel() {
-        let (_d, animes, episodes, anime) = anime_fixture();
-        set_anime_fetch_interval(&animes, &episodes, &anime, 3, &now(), window(), day(7)).expect("set");
-        assert_eq!(animes.by_id(anime.id).expect("row").fetch_interval, -3);
+    fn set_fetch_interval_wheel_zero_restores_automatic_mode() {
+        let (_d, _db, entries, items, entry) = fixture(Kind::Manga);
+        set_fetch_interval(&entries, &items, &entry, 5, &now(), window(), day(7)).expect("set 5");
+        let overridden = entries.by_id(entry.id).expect("row");
+        set_fetch_interval(&entries, &items, &overridden, 0, &now(), window(), day(7)).expect("set 0");
+        assert_eq!(entries.by_id(entry.id).expect("row").fetch_interval, 2, "automatic: recomputed from the sample");
     }
 
     #[test]

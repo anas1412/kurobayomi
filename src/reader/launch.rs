@@ -27,10 +27,8 @@ use std::sync::Arc;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_core::sources::SourceGate;
-use kuro_data::chapter::Chapter;
 use kuro_data::entry::{Entry, EntryRepo};
 use kuro_data::item::{Item, ItemRepo};
-use kuro_data::manga::Manga;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
 use kuro_downloads::index::DownloadIndex;
@@ -121,13 +119,6 @@ pub fn downloaded_items(index: Option<DownloadIndex>, manga: &Entry) -> Arc<dyn 
         Some(index) => Arc::new(crate::entry_core::downloaded::downloaded_lookup(index, source, title, local)),
         None => Arc::new(move |_| local),
     }
-}
-
-/// [`downloaded_items`] for a caller outside the entry flow that still holds the legacy shapes (`library::mount`).
-// seam: deleted in phase E with `Manga` and `Chapter`
-pub fn downloaded_lookup(index: Option<DownloadIndex>, manga: &Manga) -> Arc<dyn Fn(&Chapter) -> bool + Send + Sync> {
-    let lookup = downloaded_items(index, &Entry::from(manga));
-    Arc::new(move |chapter| lookup(&Item::from(chapter)))
 }
 
 /// What closing the reader does with the chapters delete-after-read queued: a worker deletes their downloads.
@@ -377,8 +368,6 @@ mod tests {
         manga.source = kuro_local::LOCAL_SOURCE_ID;
         assert!(downloaded_items(Some(index), &manga)(&plain("Chapter 9")));
         assert!(downloaded_items(None, &manga)(&plain("Chapter 9")));
-        let legacy = downloaded_lookup(None, &Manga::from(manga));
-        assert!(legacy(&Chapter::from(plain("Chapter 9"))), "the seam for the library answers the same");
     }
 
     #[test]

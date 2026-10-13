@@ -7,10 +7,8 @@ use std::sync::Arc;
 use kuro_db::handle::Db;
 use tempfile::TempDir;
 
-use crate::anime::{Anime, AnimeRepo};
-use crate::chapter::ChapterRepo;
-use crate::episode::EpisodeRepo;
-use crate::manga::{Manga, MangaRepo};
+use crate::entry::{Entry, EntryRepo};
+use crate::item::{Item, ItemRepo};
 use crate::time::Clock;
 
 /// A migrated unified file in a fresh directory, behind a `Db`. Keep the `TempDir` alive.
@@ -31,42 +29,40 @@ impl Clock for FixedClock {
     }
 }
 
-/// A favourite or non-favourite manga with the given url and title, every other field default.
-pub(crate) fn manga(url: &str, title: &str, favorite: bool) -> Manga {
-    Manga { url: url.to_owned(), title: title.to_owned(), favorite, source: 1, status: 1, ..Manga::create() }
+/// A favourite or non-favourite entry with the given url and title, every other field default.
+pub(crate) fn entry(kind: Kind, url: &str, title: &str, favorite: bool) -> Entry {
+    Entry { url: url.to_owned(), title: title.to_owned(), favorite, source: 1, status: 1, ..Entry::create(kind) }
 }
 
-/// An anime with the given url and title, every other field default.
-pub(crate) fn anime(url: &str, title: &str, favorite: bool) -> Anime {
-    Anime { url: url.to_owned(), title: title.to_owned(), favorite, source: 1, status: 1, ..Anime::create() }
+/// An item of `entry_id` with the given url (also its name) and scanlator, every other field default.
+pub(crate) fn item(kind: Kind, entry_id: i64, url: &str, scanlator: Option<&str>) -> Item {
+    Item { entry_id, url: url.to_owned(), name: url.to_owned(), scanlator: scanlator.map(str::to_owned), ..Item::create(kind) }
 }
 
-/// Inserts one manga and returns its id.
+/// Inserts one entry of `kind` and returns its id.
+pub(crate) fn insert_entry(db: &Arc<Db>, kind: Kind, url: &str, favorite: bool) -> i64 {
+    EntryRepo::new(Arc::clone(db)).insert(&entry(kind, url, url, favorite)).expect("insert entry")
+}
+
+/// Inserts one item of `entry_id` and returns its id.
+pub(crate) fn insert_item(db: &Arc<Db>, kind: Kind, entry_id: i64, url: &str) -> i64 {
+    ItemRepo::new(Arc::clone(db)).add_all(&[item(kind, entry_id, url, None)]).expect("insert item")[0].id
+}
+
 pub(crate) fn insert_manga(db: &Arc<Db>, url: &str, favorite: bool) -> i64 {
-    MangaRepo::new(Arc::clone(db)).insert(&manga(url, url, favorite)).expect("insert manga")
+    insert_entry(db, Kind::Manga, url, favorite)
 }
 
-/// Inserts one anime and returns its id.
 pub(crate) fn insert_anime(db: &Arc<Db>, url: &str, favorite: bool) -> i64 {
-    AnimeRepo::new(Arc::clone(db)).insert(&anime(url, url, favorite)).expect("insert anime")
+    insert_entry(db, Kind::Anime, url, favorite)
 }
 
-/// Inserts one chapter of `manga_id` and returns its id.
 pub(crate) fn insert_chapter(db: &Arc<Db>, manga_id: i64, url: &str) -> i64 {
-    let mut chapter = crate::chapter::Chapter::create();
-    chapter.manga_id = manga_id;
-    chapter.url = url.to_owned();
-    chapter.name = url.to_owned();
-    ChapterRepo::new(Arc::clone(db)).add_all(&[chapter]).expect("insert chapter")[0].id
+    insert_item(db, Kind::Manga, manga_id, url)
 }
 
-/// Inserts one episode of `anime_id` and returns its id.
 pub(crate) fn insert_episode(db: &Arc<Db>, anime_id: i64, url: &str) -> i64 {
-    let mut episode = crate::episode::Episode::create();
-    episode.anime_id = anime_id;
-    episode.url = url.to_owned();
-    episode.name = url.to_owned();
-    EpisodeRepo::new(Arc::clone(db)).add_all(&[episode]).expect("insert episode")[0].id
+    insert_item(db, Kind::Anime, anime_id, url)
 }
 
 /// Inserts one category of the given kind and returns its id.

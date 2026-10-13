@@ -18,7 +18,7 @@ use gtk::prelude::*;
 use gtk::{Orientation as O, gdk, gio, glib};
 use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 use kuro_domain::category::service::CategoryService;
 use kuro_platform::kind::Kind;
 use kuro_domain::library::active::clamp_page;

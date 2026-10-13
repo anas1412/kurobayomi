@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use kuro_data::entry_history::HistoryRepo;
+use kuro_data::history::HistoryRepo;
 use kuro_data::item::{Item, ItemRepo, ItemUpdate};
 use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;

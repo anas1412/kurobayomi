@@ -10,7 +10,7 @@ pub mod preferences;
 
 use kuro_data::category::Category;
 use kuro_data::entry::Entry;
-use kuro_data::entry_history::History;
+use kuro_data::history::History;
 use kuro_data::item::Item;
 use kuro_data::track::Track;
 use kuro_platform::kind::Kind;
@@ -167,7 +167,7 @@ mod tests {
     use std::cell::Cell;
 
     use kuro_data::category::Category;
-    use kuro_data::entry_history::History;
+    use kuro_data::history::History;
     use kuro_data::item::Item;
     use kuro_data::track::Track;
 

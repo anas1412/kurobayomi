@@ -601,7 +601,7 @@ impl View {
         let (interval, expected, favorite) = {
             let page = self.page.borrow();
             let Some(r) = page.ready() else { return };
-            let expected = (r.manga.status != kuro_domain::entries::manga::STATUS_COMPLETED).then_some(r.manga.next_update);
+            let expected = (r.manga.status != kuro_domain::entries::flags::STATUS_COMPLETED).then_some(r.manga.next_update);
             (r.manga.fetch_interval, expected, r.manga.favorite)
         };
         if !interval_click_opens_dialog(favorite) {

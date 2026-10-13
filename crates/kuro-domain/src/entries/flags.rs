@@ -2,8 +2,7 @@
 //! `kuro_db::flags::item`), the season word, the viewer bits, the expected-update rule and the cover key.
 //!
 //! The logic is on three small word types ([`ItemFlags`], [`SeasonFlags`], [`ViewerFlags`]). [`EntryFlags`] answers
-//! from an [`Entry`]; the per-kind `MangaExt` and `AnimeExt` wrappers answer from the same types after translating
-//! their own word. Anime-only questions answer from the `Option` fields and read as zero or "off" for manga.
+//! from an [`Entry`]. Anime-only questions answer from the `Option` fields and read as zero or "off" for manga.
 
 use kuro_data::entry::{Entry, EntryUpdate};
 pub use kuro_db::flags::item;
@@ -18,12 +17,6 @@ pub const STATUS_COMPLETED: i64 = 2;
 /// `None` only for a completed entry; otherwise the stored `next_update`. The one rule of both kinds.
 pub fn expected_next_update(status: i64, next_update: i64) -> Option<i64> {
     (status != STATUS_COMPLETED).then_some(next_update)
-}
-
-/// A manga sorting value (`chapter_flags & SORTING_MASK`, the manga layout) in the unified layout. `None` for a value
-/// outside the sorting group, which has no sorting to translate.
-pub fn manga_sorting_to_unified(sorting: i64) -> Option<i64> {
-    (sorting & !kuro_db::flags::chapter::SORTING_MASK == 0).then(|| kuro_db::flags::manga_item_flags_to_unified(sorting))
 }
 
 /// The cache key of a cover: a change of `last_modified` or of `favorite` yields a different key.
@@ -421,6 +414,16 @@ mod tests {
             let e = Entry { id: 7, source: 3, favorite: true, thumbnail_url: Some("u".into()), cover_last_modified: 9, ..Entry::create(kind) };
             assert_eq!(e.as_cover(), Cover { entry_id: 7, source_id: 3, favorite: true, url: Some("u".into()), last_modified: 9 });
         }
+    }
+
+    #[test]
+    fn the_cover_key_changes_with_last_modified_or_favorite() {
+        let base = Entry { id: 7, source: 3, favorite: true, thumbnail_url: Some("u".into()), cover_last_modified: 1000, ..Entry::create(Kind::Manga) };
+        let mut keys = std::collections::HashSet::new();
+        keys.insert(base.as_cover());
+        assert!(keys.insert(Entry { cover_last_modified: 1001, ..base.clone() }.as_cover()), "last_modified must change the key");
+        assert!(keys.insert(Entry { favorite: false, ..base.clone() }.as_cover()), "favorite must change the key");
+        assert!(!keys.insert(base.as_cover()), "identical descriptor is the same key");
     }
 
     #[test]

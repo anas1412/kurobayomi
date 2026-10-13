@@ -112,7 +112,7 @@ fn track_of(b: &BackupTracking) -> Track {
 mod tests {
     use chrono::{Local, TimeZone};
     use kuro_db::schema_unified;
-    use kuro_db::statements_manga::excluded_scanlators;
+    use kuro_db::tables::excluded;
     use kuro_db::tables::{EntryRow, categories, entries, history, items, tracks};
     use rusqlite::Connection;
 
@@ -495,7 +495,7 @@ mod tests {
         restore_manga_entry(&tx, &clock(), &m, &HashMap::new()).unwrap();
         tx.commit().unwrap();
         let id = row(&c, "sc").id;
-        let mut got = excluded_scanlators::get_by_manga_id(&c, id).unwrap();
+        let mut got = excluded::by_entry_id(&c, id).unwrap();
         got.sort();
         assert_eq!(got, vec!["A".to_string(), "B".to_string()]);
     }

@@ -10,7 +10,7 @@
 
 use gtk::prelude::*;
 use kuro_db::flags::item as c;
-use kuro_domain::entries::anime::season_flags as sf;
+use kuro_db::flags::season as sf;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
@@ -145,9 +145,9 @@ pub fn season_spec() -> Spec {
         (MsgKey::action_display_show_continue_watching_button, sf::OVERLAY_CONT_MASK),
     ];
     const OVERLAY_NAMES: [&str; 5] = ["badge_downloaded", "badge_unseen", "badge_local", "badge_language", "badge_continue"];
-    let sizes = (0..=10).map(|n| (n << sf::GRID_DISPLAY_SIZE_BIT_OFFSET, if n == 0 { "Auto".to_owned() } else { n.to_string() })).collect();
+    let sizes = (0..=10).map(|n| (n << sf::GRID_DISPLAY_SIZE_SHIFT, if n == 0 { "Auto".to_owned() } else { n.to_string() })).collect();
     let mut display = vec![
-        choice("grid", sf::GRID_DISPLAY_MODE_MASK, grid_modes.iter().map(|(label, mode)| (mode.to_i64() << sf::GRID_DISPLAY_MODE_BIT_OFFSET, tr(*label))).collect()),
+        choice("grid", sf::GRID_DISPLAY_MODE_MASK, grid_modes.iter().map(|(label, mode)| (mode.to_i64() << sf::GRID_DISPLAY_MODE_SHIFT, tr(*label))).collect()),
         Entry::Choice(Choice { name: "size", mask: sf::GRID_DISPLAY_SIZE_MASK, options: sizes, submenu: Some("Items per row".to_owned()) }),
     ];
     display.extend(overlays.iter().zip(OVERLAY_NAMES).map(|((label, mask), name)| check(name, tr(*label), *mask, *mask)));

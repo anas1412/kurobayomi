@@ -44,10 +44,4 @@ mod tests {
         let codes = [UNKNOWN, ONGOING, COMPLETED, LICENSED, PUBLISHING_FINISHED, CANCELLED, ON_HIATUS, UPCOMING];
         assert_eq!(codes, [0, 1, 2, 3, 4, 5, 6, 7]);
     }
-
-    #[test]
-    fn the_data_layer_agrees_with_these_sets() {
-        assert_eq!(kuro_data::manga::UPCOMING_STATUSES, UPCOMING_MANGA_STATUSES);
-        assert_eq!(kuro_data::anime::UPCOMING_STATUSES, UPCOMING_ANIME_STATUSES);
-    }
 }

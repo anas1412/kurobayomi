@@ -5,7 +5,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
-use crate::entry_core::numbered::AutoDownloadItem;
 
 /// A zero-episode entry is fetched again on open only after this long (fix 23.24).
 pub const EMPTY_OPEN_REFRESH_GAP_MS: i64 = 10 * 60 * 1000;
@@ -65,9 +64,7 @@ pub fn auto_download_targets(
     if !auto_download_allowed(trigger) {
         return Vec::new();
     }
-    let new: Vec<AutoDownloadItem> = new_episodes.iter().cloned().map(AutoDownloadItem).collect();
-    let existing: Vec<AutoDownloadItem> = existing.iter().cloned().map(AutoDownloadItem).collect();
-    kuro_domain::download::filter::filter_new(enabled, eligible, unseen_only, &new, &existing).into_iter().map(|e| e.0).collect()
+    kuro_domain::download::filter::filter_new(enabled, eligible, unseen_only, new_episodes, existing)
 }
 
 /// An open-time refresh of an entry with no episodes waits for the 10-minute guard. A manual refresh always runs,

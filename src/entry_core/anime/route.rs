@@ -15,10 +15,10 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
-use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::anime_relation::AnimeRelationGroup;
 use kuro_data::entry::SeasonEntry;
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 use kuro_domain::entries::defaults::{set_item_settings_default, set_season_settings_default};
 use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
@@ -1191,7 +1191,7 @@ impl View {
         let items: Vec<SeasonItem> = process_seasons(&m.anime, &seasons, m.downloaded_only);
         let layout = Layout {
             mode,
-            number_mode: m.anime.season().display_mode() == kuro_domain::entries::anime::season_flags::DISPLAY_MODE_NUMBER,
+            number_mode: m.anime.season().display_mode() == kuro_db::flags::season::DISPLAY_MODE_NUMBER,
             // the page can continue watching: a tile shows the button when its season has an unseen episode
             has_continue: true,
             columns: Layout::columns_for(width, i64::from(size), mode),
@@ -1745,7 +1745,7 @@ mod tests {
             let _owner = ctx.acquire().expect("main context");
             let rt = kuro_core::runtime::build().expect("runtime");
             let (_dir, store, id) = super::super::store::fixture::with_episodes(false, false, 2, 0);
-            let category = kuro_data::category::create_anime_category(&store.db(), "Watching", 0).expect("category");
+            let category = kuro_testkit::insert_category(&store.db(), Kind::Anime, "Watching");
             let prefs = PrefStore::in_memory();
             kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(category as i32).expect("default category");
             let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), prefs, Arc::new(Stub), AnimeLoadContext::default()));

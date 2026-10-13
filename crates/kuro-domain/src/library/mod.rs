@@ -13,4 +13,3 @@ pub mod page;
 pub mod repo;
 pub mod restrictions;
 pub mod search;
-pub mod sort;

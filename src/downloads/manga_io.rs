@@ -1,5 +1,5 @@
 //! The app-side port of the manga downloads: the live manga source as the downloader's `ChapterSource`, and the database
-//! rows as the downloader's chapter and manga refs. Page lists come from the source; each image goes over the shared
+//! rows as the downloader's chapter and manga refs (`entry_core::downloaded`). Page lists come from the source; each image goes over the shared
 //! client with the source's request headers, and its bytes pass through the source's fix-up, as the reader's page images
 //! do. No GTK here. The calls run on the runtime or the blocking pool.
 
@@ -7,18 +7,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kuro_data::chapter::Chapter;
 use kuro_data::entry::EntryRepo;
 use kuro_data::item::ItemRepo;
-use kuro_data::manga::Manga;
 use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;
-use kuro_downloads::model::{ChapterRef, DownloadState, MangaRef, Page, QueuedDownload};
+use kuro_downloads::model::{ChapterRef, DownloadState, Page, QueuedDownload};
 use kuro_downloads::source::{ChapterSource, ImageResponse};
 use kuro_downloads::store::QueueRow;
 use kuro_source::model::SChapter;
 use kuro_source::{MangaSource, SourceError};
 use reqwest::header::CONTENT_TYPE;
+
+use crate::entry_core::downloaded::{chapter_ref, manga_ref};
 
 /// The live manga source of a download. Its display name and id are the ones the downloads folder and the index use.
 pub struct LiveChapterSource(Arc<dyn MangaSource>);
@@ -79,37 +79,6 @@ impl ChapterSource for LiveChapterSource {
     }
 }
 
-/// A chapter row as the downloader reads it.
-pub fn chapter_ref(chapter: &Chapter) -> ChapterRef {
-    ChapterRef {
-        id: chapter.id,
-        manga_id: chapter.manga_id,
-        url: chapter.url.clone(),
-        name: chapter.name.clone(),
-        scanlator: chapter.scanlator.clone(),
-        read: chapter.read,
-        bookmark: chapter.bookmark,
-        source_order: chapter.source_order,
-        chapter_number: chapter.chapter_number,
-        date_upload: chapter.date_upload,
-    }
-}
-
-/// A manga row as the downloader reads it.
-pub fn manga_ref(manga: &Manga) -> MangaRef {
-    MangaRef {
-        id: manga.id,
-        url: manga.url.clone(),
-        title: manga.title.clone(),
-        source_id: manga.source,
-        description: manga.description.clone(),
-        author: manga.author.clone(),
-        artist: manga.artist.clone(),
-        genre: manga.genre.clone(),
-        status: manga.status,
-    }
-}
-
 /// A saved manga row whose source is not installed. The queue page lists it as Waiting for source until the source is back.
 #[derive(Clone, Debug)]
 pub struct Waiting {
@@ -130,9 +99,8 @@ pub struct RestorePass {
 pub fn restore_rows(rows: &[QueueRow], db: &Arc<Db>, source_of: &dyn Fn(i64) -> Option<Arc<dyn MangaSource>>) -> RestorePass {
     let mut pass = RestorePass::default();
     for row in rows {
-        // the downloader's refs still take the per-kind rows: converted here, at the seam
-        let manga = EntryRepo::new(Arc::clone(db)).by_id(row.manga_id).ok().filter(|e| e.kind == Kind::Manga).map(Manga::from);
-        let chapter = ItemRepo::new(Arc::clone(db)).by_id(row.chapter_id).ok().flatten().filter(|i| i.kind == Kind::Manga).map(Chapter::from);
+        let manga = EntryRepo::new(Arc::clone(db)).by_id(row.manga_id).ok().filter(|e| e.kind == Kind::Manga);
+        let chapter = ItemRepo::new(Arc::clone(db)).by_id(row.chapter_id).ok().flatten().filter(|i| i.kind == Kind::Manga);
         let (Some(manga), Some(chapter)) = (manga, chapter) else {
             tracing::info!(chapter_id = row.chapter_id, "dropped a saved download whose chapter or manga is gone");
             continue;

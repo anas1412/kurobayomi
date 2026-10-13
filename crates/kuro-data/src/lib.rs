@@ -1,7 +1,5 @@
 //! Typed repositories over `kuro-db`: one `Entry`, `Item`, `Track` and `History` for both kinds (the kind is a field
-//! or a parameter), their repositories over `kuro_db::tables`, and the per-kind legacy shapes and repositories that
-//! wrap them until phase E (`manga`, `anime`, `chapter`, `episode`, `legacy`, the `Manga*`/`Anime*` track, history and
-//! stub-source names). No GTK and no OS code in this crate.
+//! or a parameter) and their repositories over `kuro_db::tables`. No GTK and no OS code in this crate.
 //!
 //! Repositories are concrete structs that share one `kuro_db::handle::Db` through an `Arc`. Reads and
 //! writes are synchronous. A `subscribe_*` method returns a live query from `kuro-db`, which must be
@@ -11,21 +9,15 @@ use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode};
 
-pub mod anime;
 pub mod anime_relation;
 pub mod category;
-pub mod chapter;
 pub mod columns;
 pub mod compat;
 pub mod dropped;
 pub mod entry;
-pub mod entry_history;
-pub mod episode;
 pub mod error;
 pub mod history;
 pub mod item;
-pub mod legacy;
-pub mod manga;
 pub mod sanitize;
 pub mod source;
 pub mod time;

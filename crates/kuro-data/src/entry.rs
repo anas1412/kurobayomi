@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use kuro_db::codecs::{GenreList, UpdateStrategy};
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::{FetchType, Memo};
-use kuro_db::statements_manga::excluded_scanlators as excluded;
+use kuro_db::codec::{FetchType, Memo};
+use kuro_db::tables::excluded;
 use kuro_db::subscribe::Subscription;
 use kuro_db::tables::entries::{self as t, FlagColumn};
 use kuro_db::tables::{self, DeletableRow, EntryPatch, EntryRow, LibraryRow, SeasonRow};
@@ -532,7 +532,7 @@ impl EntryRepo {
     }
 
     pub fn excluded_scanlators(&self, id: i64) -> DataResult<BTreeSet<String>> {
-        self.db.read(|c| Ok(excluded::get_by_manga_id(c, id)?.into_iter().collect()))
+        self.db.read(|c| Ok(excluded::by_entry_id(c, id)?.into_iter().collect()))
     }
 
     /// The distinct, non-blank scanlators of an entry's items.
@@ -544,73 +544,35 @@ impl EntryRepo {
 
     /// The row with `id`, published again after each change. `None` once the row is deleted.
     pub fn subscribe_by_id(&self, id: i64) -> Subscription<Option<Entry>> {
-        self.subscribe_by_id_as(id)
-    }
-
-    /// [`Self::subscribe_by_id`] with the row turned into `T` inside the query (the legacy shapes publish too).
-    pub(crate) fn subscribe_by_id_as<T: From<Entry> + PartialEq + Send + Sync + 'static>(&self, id: i64) -> Subscription<Option<T>> {
-        self.db.subscribe(ENTRY_TABLE, ENTRY_DEBOUNCE, move |c| none_if_not_found(t::by_id(c, id).map(|r| Entry::from(r).into())))
+        self.db.subscribe(ENTRY_TABLE, ENTRY_DEBOUNCE, move |c| none_if_not_found(t::by_id(c, id).map(Entry::from)))
     }
 
     pub fn subscribe_by_url_and_source(&self, kind: Kind, url: &str, source: i64) -> Subscription<Option<Entry>> {
-        self.subscribe_by_url_and_source_as(kind, url, source)
-    }
-
-    pub(crate) fn subscribe_by_url_and_source_as<T: From<Entry> + PartialEq + Send + Sync + 'static>(
-        &self,
-        kind: Kind,
-        url: &str,
-        source: i64,
-    ) -> Subscription<Option<T>> {
         let url = url.to_owned();
-        self.db.subscribe(ENTRY_TABLE, ENTRY_DEBOUNCE, move |c| {
-            Ok(t::by_url_and_source(c, kind, &url, source)?.map(|r| Entry::from(r).into()))
-        })
+        self.db.subscribe(ENTRY_TABLE, ENTRY_DEBOUNCE, move |c| Ok(t::by_url_and_source(c, kind, &url, source)?.map(Entry::from)))
     }
 
     pub fn subscribe_favorites_by_source(&self, kind: Kind, source: i64) -> Subscription<Vec<Entry>> {
-        self.subscribe_favorites_by_source_as(kind, source)
-    }
-
-    pub(crate) fn subscribe_favorites_by_source_as<T: From<Entry> + PartialEq + Send + Sync + 'static>(
-        &self,
-        kind: Kind,
-        source: i64,
-    ) -> Subscription<Vec<T>> {
         self.db.subscribe(ENTRY_TABLE, ENTRY_DEBOUNCE, move |c| {
-            Ok(t::favorites_by_source(c, kind, source)?.into_iter().map(|r| Entry::from(r).into()).collect::<Vec<_>>())
+            Ok(t::favorites_by_source(c, kind, source)?.into_iter().map(Entry::from).collect::<Vec<_>>())
         })
     }
 
     /// The `library()` rows, published again after a change to any table they read. A transient lock is retried (see
     /// `retrying`); after the last retry the error text is published instead of the rows.
     pub fn subscribe_library(&self, kind: Kind) -> Subscription<LibraryState<LibraryEntry>> {
-        self.subscribe_library_as(kind)
-    }
-
-    pub(crate) fn subscribe_library_as<L: From<LibraryEntry> + PartialEq + Send + Sync + 'static>(
-        &self,
-        kind: Kind,
-    ) -> Subscription<LibraryState<L>> {
         self.db.subscribe(
             LIBRARY_TABLES,
             LIBRARY_DEBOUNCE,
             retrying(LIBRARY_RETRIES, LIBRARY_RETRY_DELAY, move |c| {
-                Ok(tables::library::library(c, kind)?.into_iter().map(|r| LibraryEntry::from(r).into()).collect::<Vec<_>>())
+                Ok(tables::library::library(c, kind)?.into_iter().map(LibraryEntry::from).collect::<Vec<_>>())
             }),
         )
     }
 
     pub fn subscribe_seasons_by_parent(&self, parent_id: i64) -> Subscription<Vec<SeasonEntry>> {
-        self.subscribe_seasons_by_parent_as(parent_id)
-    }
-
-    pub(crate) fn subscribe_seasons_by_parent_as<S: From<SeasonEntry> + PartialEq + Send + Sync + 'static>(
-        &self,
-        parent_id: i64,
-    ) -> Subscription<Vec<S>> {
         self.db.subscribe(LIBRARY_TABLES, LIBRARY_DEBOUNCE, move |c| {
-            Ok(t::seasons_of(c, parent_id)?.into_iter().map(|r| SeasonEntry::from(r).into()).collect::<Vec<_>>())
+            Ok(t::seasons_of(c, parent_id)?.into_iter().map(SeasonEntry::from).collect::<Vec<_>>())
         })
     }
 
@@ -621,14 +583,6 @@ impl EntryRepo {
     /// Favourites due from local midnight of the day `clock` reads, soonest first, published again after a change and
     /// at each local midnight. The cut-off is recomputed on every run.
     pub fn subscribe_upcoming_with_clock(&self, kind: Kind, clock: Arc<dyn Clock>) -> Subscription<Vec<Entry>> {
-        self.subscribe_upcoming_as(kind, clock)
-    }
-
-    pub(crate) fn subscribe_upcoming_as<T: From<Entry> + PartialEq + Send + Sync + 'static>(
-        &self,
-        kind: Kind,
-        clock: Arc<dyn Clock>,
-    ) -> Subscription<Vec<T>> {
         let timer = Arc::clone(&clock);
         self.db.subscribe_timed(
             ENTRY_TABLE,
@@ -636,10 +590,7 @@ impl EntryRepo {
             move || time::until_next_local_midnight(timer.now_millis()),
             move |c| {
                 let start_of_day = time::start_of_local_day_millis(clock.now_millis());
-                Ok(t::upcoming(c, kind, start_of_day, kind.upcoming_statuses())?
-                    .into_iter()
-                    .map(|r| Entry::from(r).into())
-                    .collect::<Vec<_>>())
+                Ok(t::upcoming(c, kind, start_of_day, kind.upcoming_statuses())?.into_iter().map(Entry::from).collect::<Vec<_>>())
             },
         )
     }
@@ -654,16 +605,7 @@ impl EntryRepo {
 
     /// `deletable_parents`, published again after a change to an entry, its items or its history.
     pub fn subscribe_deletable_parents(&self, kind: Kind) -> Subscription<Vec<DeletableEntry>> {
-        self.subscribe_deletable_parents_as(kind)
-    }
-
-    pub(crate) fn subscribe_deletable_parents_as<D: From<DeletableEntry> + PartialEq + Send + Sync + 'static>(
-        &self,
-        kind: Kind,
-    ) -> Subscription<Vec<D>> {
-        self.db.subscribe(LIBRARY_TABLES, LIBRARY_DEBOUNCE, move |c| {
-            Ok(deletable(c, kind)?.into_iter().map(D::from).collect::<Vec<_>>())
-        })
+        self.db.subscribe(LIBRARY_TABLES, LIBRARY_DEBOUNCE, move |c| Ok(deletable(c, kind)?))
     }
 
     /// `(source, entry id)` rows of the non-library entries and of the orphaned children (`non_library_tree`).
@@ -672,7 +614,7 @@ impl EntryRepo {
     }
 
     pub fn subscribe_excluded_scanlators(&self, id: i64) -> Subscription<BTreeSet<String>> {
-        self.db.subscribe(EXCLUDED_TABLE, ENTRY_DEBOUNCE, move |c| Ok(excluded::get_by_manga_id(c, id)?.into_iter().collect()))
+        self.db.subscribe(EXCLUDED_TABLE, ENTRY_DEBOUNCE, move |c| Ok(excluded::by_entry_id(c, id)?.into_iter().collect()))
     }
 
     /// The available scanlators, published again after each change of the items.

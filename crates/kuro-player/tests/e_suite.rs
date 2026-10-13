@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use kuro_domain::entries::anime::episode_flags as flags;
+use kuro_domain::entries::flags::item as flags;
 use kuro_player::aniskip::{TrackerRef, parse_mal_id, parse_skip_times, resolve_mal_id};
 use kuro_player::chapters;
 use kuro_player::progress::on_second;
@@ -261,13 +261,13 @@ fn t53_completion_threshold_is_eighty_five_percent() {
 fn t79_episode_flag_masks_match_the_source_values() {
     let doc = json("anime_flags.json");
     let table = [
-        ("UNSEEN_MASK", flags::UNSEEN_MASK),
+        ("UNSEEN_MASK", flags::UNDONE_MASK),
         ("DOWNLOADED_MASK", flags::DOWNLOADED_MASK),
         ("BOOKMARKED_MASK", flags::BOOKMARKED_MASK),
         ("FILLERMARKED_MASK", flags::FILLERMARKED_MASK),
         ("SORTING_MASK", flags::SORTING_MASK),
-        ("SHOW_UNSEEN", flags::SHOW_UNSEEN),
-        ("SHOW_SEEN", flags::SHOW_SEEN),
+        ("SHOW_UNSEEN", flags::SHOW_UNDONE),
+        ("SHOW_SEEN", flags::SHOW_DONE),
         ("SHOW_DOWNLOADED", flags::SHOW_DOWNLOADED),
         ("SHOW_NOT_DOWNLOADED", flags::SHOW_NOT_DOWNLOADED),
         ("SHOW_BOOKMARKED", flags::SHOW_BOOKMARKED),
@@ -287,7 +287,7 @@ fn t79_episode_flag_masks_match_the_source_values() {
     // The four filter masks of the playlist predicate (D§3.1).
     assert_eq!(
         [
-            flags::UNSEEN_MASK,
+            flags::UNDONE_MASK,
             flags::DOWNLOADED_MASK,
             flags::BOOKMARKED_MASK,
             flags::FILLERMARKED_MASK

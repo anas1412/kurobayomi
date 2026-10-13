@@ -7,9 +7,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use kuro_data::anime::Anime;
-use kuro_db::schema_anime::FetchType;
-use kuro_domain::entries::manga::STATUS_COMPLETED;
+use kuro_data::entry::Entry;
+use kuro_db::codec::FetchType;
+use kuro_domain::entries::flags::STATUS_COMPLETED;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -17,15 +17,15 @@ use tokio::task::JoinSet;
 pub const MAX_PARALLEL: usize = 8;
 
 /// Whether a season's episodes are fetched by a season refresh.
-pub fn needs_episodes(season: &Anime) -> bool {
-    season.fetch_type == FetchType::Episodes && (season.last_update == 0 || season.status != STATUS_COMPLETED)
+pub fn needs_episodes(season: &Entry) -> bool {
+    season.fetch_type() == FetchType::Episodes && (season.last_update == 0 || season.status != STATUS_COMPLETED)
 }
 
 /// Runs `fetch` for each season that `needs_episodes`. `fetch` reports its own failures, so one failing season does not
 /// stop the others.
-pub async fn fetch_episodes_of<F, Fut>(seasons: Vec<Anime>, unmetered: bool, fetch: F)
+pub async fn fetch_episodes_of<F, Fut>(seasons: Vec<Entry>, unmetered: bool, fetch: F)
 where
-    F: Fn(Anime) -> Fut,
+    F: Fn(Entry) -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
     let seasons = seasons.into_iter().filter(needs_episodes);
@@ -54,10 +54,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use kuro_platform::kind::Kind;
+
     use super::*;
 
-    fn season(id: i64, fetch_type: FetchType, last_update: i64, status: i64) -> Anime {
-        Anime { id, fetch_type, last_update, status, ..Anime::create() }
+    fn season(id: i64, fetch_type: FetchType, last_update: i64, status: i64) -> Entry {
+        Entry { id, fetch_type: Some(fetch_type), last_update, status, ..Entry::create(Kind::Anime) }
     }
 
     #[test]
@@ -72,7 +74,7 @@ mod tests {
     #[tokio::test]
     async fn a_metered_source_fetches_one_season_at_a_time_in_order() {
         let (now, peak, order) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(Mutex::new(Vec::new())));
-        let seasons: Vec<Anime> = (1..=4).map(|id| season(id, FetchType::Episodes, 0, 0)).collect();
+        let seasons: Vec<Entry> = (1..=4).map(|id| season(id, FetchType::Episodes, 0, 0)).collect();
         fetch_episodes_of(seasons, false, |s| {
             let (now, peak, order) = (Arc::clone(&now), Arc::clone(&peak), Arc::clone(&order));
             async move {
@@ -90,7 +92,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn an_unmetered_source_fetches_in_parallel_but_never_more_than_eight_at_once() {
         let (now, peak, done) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-        let seasons: Vec<Anime> = (1..=20).map(|id| season(id, FetchType::Episodes, 0, 0)).collect();
+        let seasons: Vec<Entry> = (1..=20).map(|id| season(id, FetchType::Episodes, 0, 0)).collect();
         fetch_episodes_of(seasons, true, |_| {
             let (now, peak, done) = (Arc::clone(&now), Arc::clone(&peak), Arc::clone(&done));
             async move {
@@ -108,7 +110,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_a_metered_run_stops_it_before_the_next_season() {
         let started = Arc::new(AtomicUsize::new(0));
-        let seasons: Vec<Anime> = (1..=5).map(|id| season(id, FetchType::Episodes, 0, 0)).collect();
+        let seasons: Vec<Entry> = (1..=5).map(|id| season(id, FetchType::Episodes, 0, 0)).collect();
         let run = fetch_episodes_of(seasons, false, |_| {
             let started = Arc::clone(&started);
             async move {

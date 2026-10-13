@@ -4,13 +4,12 @@
 
 use std::collections::BTreeSet;
 
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 
 /// `UNCATEGORIZED_ID`: the category of an entry that has no category. Used when an entry has none (E-DL-06).
 pub const DEFAULT_CATEGORY_ID: i64 = 0;
 
-/// A chapter or episode that may be downloaded: its number, with a negative number meaning "not recognised".
+/// An item that may be downloaded: its number, with a negative number meaning "not recognised".
 pub trait NewItem {
     fn number(&self) -> f64;
 
@@ -20,32 +19,20 @@ pub trait NewItem {
     }
 }
 
-/// Whether an existing item counts as read: `read` for chapters, `seen` for episodes.
+/// Whether an existing item counts as read: `done`, which is `read` for a chapter and `seen` for an episode.
 pub trait ReadState {
     fn is_read(&self) -> bool;
 }
 
-impl NewItem for Chapter {
+impl NewItem for Item {
     fn number(&self) -> f64 {
-        self.chapter_number
+        self.number
     }
 }
 
-impl ReadState for Chapter {
+impl ReadState for Item {
     fn is_read(&self) -> bool {
-        self.read
-    }
-}
-
-impl NewItem for Episode {
-    fn number(&self) -> f64 {
-        self.episode_number
-    }
-}
-
-impl ReadState for Episode {
-    fn is_read(&self) -> bool {
-        self.seen
+        self.done
     }
 }
 
@@ -102,27 +89,10 @@ where
 mod tests {
     use super::*;
 
-    /// One fixture item for both kinds: the test suite runs the same table through chapters and episodes.
-    #[derive(Clone, Debug, PartialEq)]
-    struct Item {
-        number: f64,
-        read: bool,
-    }
+    use kuro_platform::kind::Kind;
 
-    impl NewItem for Item {
-        fn number(&self) -> f64 {
-            self.number
-        }
-    }
-
-    impl ReadState for Item {
-        fn is_read(&self) -> bool {
-            self.read
-        }
-    }
-
-    fn item(number: f64, read: bool) -> Item {
-        Item { number, read }
+    fn item(number: f64, done: bool) -> Item {
+        Item { number, done, ..Item::create(Kind::Manga) }
     }
 
     fn set(ids: &[i64]) -> BTreeSet<i64> {
@@ -214,10 +184,11 @@ mod tests {
     }
 
     #[test]
-    fn the_real_chapter_and_episode_types_use_their_own_number_and_read_flag() {
-        let chapter = Chapter { chapter_number: 4.0, read: true, ..Chapter::create() };
-        let episode = Episode { episode_number: 4.0, seen: true, ..Episode::create() };
-        assert_eq!((chapter.number(), chapter.is_read(), chapter.is_recognized()), (4.0, true, true));
-        assert_eq!((episode.number(), episode.is_read()), (4.0, true));
+    fn an_item_of_either_kind_uses_its_number_and_done_flag() {
+        for kind in Kind::ALL {
+            let it = Item { number: 4.0, done: true, ..Item::create(kind) };
+            assert_eq!((it.number(), it.is_read(), it.is_recognized()), (4.0, true, true), "{kind}");
+        }
+        assert!(!Item { number: -1.0, ..Item::create(Kind::Anime) }.is_recognized());
     }
 }

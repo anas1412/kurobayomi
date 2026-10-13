@@ -10,8 +10,8 @@ use rand::seq::SliceRandom;
 
 use super::model::LibraryRow;
 use super::page::LibraryItem;
-use super::sort::{Direction, LibrarySort, SortType};
-use crate::entries::anime::viewer_flags::AIRING_TIME_MASK;
+use kuro_platform::sort::{Direction, LibrarySort, SortType};
+use crate::entries::flags::AIRING_TIME_MASK;
 use crate::items::sorter::collate;
 
 /// The tracker value of an entry with no usable score, and of a NaN mean.
@@ -139,7 +139,7 @@ pub fn click(current: LibrarySort, tapped: SortType) -> (LibrarySort, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::sort::SortType::*;
+    use kuro_platform::sort::SortType::*;
 
     fn item(id: i64, title: &str, total: i64, done: i64, last_read: i64, latest: i64) -> LibraryItem {
         LibraryItem {

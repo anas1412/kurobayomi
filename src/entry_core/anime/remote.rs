@@ -7,25 +7,21 @@
 //! entry syncs its season list through the domain's `SyncSeasons`, and with "update seasons on refresh" on, the episodes
 //! of its seasons are fetched after it (`season_fetch`).
 //!
-//! Known gap: no cover cache is wired, so a changed cover is stamped but its file is not deleted. The domain's remote
-//! update still holds the legacy `Anime` and `Episode` (its season sync is not moved yet), so the list sync and the results
-//! cross that seam with `From`.
+//! Known gap: no cover cache is wired, so a changed cover is stamped but its file is not deleted.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use kuro_data::anime::Anime;
 use kuro_data::entry::Entry;
-use kuro_data::episode::Episode;
 use kuro_data::item::Item;
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 use kuro_domain::error::DomainError;
 use async_trait::async_trait;
 use kuro_domain::items::season_sync::SyncSeasons;
 use kuro_domain::items::source_sync::EntrySyncLocks;
 use kuro_domain::items::sync::{NoRenames, SourceItem, SyncItems, SyncItemsError, SyncOptions, source_item_from_episode};
-use kuro_domain::source::remote_update::{AnimeRemote, CacheFiles, DbRemoteStore, FetchFlags, ListSync, RemoteError, RemoteStore, UpdateFromRemote};
+use kuro_domain::source::remote_update::{AnimeRemote, DbRemoteStore, FetchFlags, ListSync, RemoteError, RemoteStore, UpdateFromRemote};
 use kuro_prefs::store::PrefStore;
 use kuro_source::SourceError;
 use kuro_source::anime::{AnimeSource, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
@@ -133,18 +129,6 @@ impl AnimeSourceLookup for LiveSources {
     }
 }
 
-/// The domain's remote update still asks its own `CacheFiles` for the legacy `Anime`; the shared no-files port answers it too.
-impl CacheFiles for NoCoverFiles {
-    fn has_custom_cover(&self, _anime: &Anime) -> bool {
-        false
-    }
-    fn has_custom_background(&self, _anime: &Anime) -> bool {
-        false
-    }
-    fn delete_cover(&self, _anime: &Anime) {}
-    fn delete_background(&self, _anime: &Anime) {}
-}
-
 /// The list sync of `UpdateFromRemote` over the domain's async episode sync and its season sync. It runs on a tokio
 /// worker, so the wait for the episode sync is `block_in_place`.
 struct EpisodeListSync {
@@ -155,7 +139,7 @@ struct EpisodeListSync {
 }
 
 impl ListSync for EpisodeListSync {
-    fn sync_episodes(&self, raw: &[SEpisode], anime: &Anime, manual: bool, window: (i64, i64)) -> Result<Vec<Episode>, DomainError> {
+    fn sync_episodes(&self, raw: &[SEpisode], anime: &Entry, manual: bool, window: (i64, i64)) -> Result<Vec<Item>, DomainError> {
         let opts = SyncOptions {
             now_ms: chrono::Utc::now().timestamp_millis(),
             manual,
@@ -164,17 +148,15 @@ impl ListSync for EpisodeListSync {
             is_local: anime.source == kuro_source::local::LOCAL_SOURCE_ID,
         };
         let items: Vec<SourceItem> = raw.iter().map(source_item_from_episode).collect();
-        let entry = Entry::from(anime);
-        let run = self.sync.run(items, &entry, opts, None);
+        let run = self.sync.run(items, anime, opts, None);
         tokio::task::block_in_place(|| self.handle.block_on(run))
-            .map(|new| new.into_iter().map(Episode::from).collect())
             .map_err(|e| match e {
                 SyncItemsError::Db(e) => DomainError::Db(e),
                 SyncItemsError::NoItems => DomainError::Invalid("the source returned no episodes"),
             })
     }
 
-    fn sync_seasons(&self, raw: &[SAnime], anime: &Anime, manual: bool, window: (i64, i64)) -> Result<Vec<Anime>, DomainError> {
+    fn sync_seasons(&self, raw: &[SAnime], anime: &Entry, manual: bool, window: (i64, i64)) -> Result<Vec<Entry>, DomainError> {
         self.seasons.run(raw, anime, manual, window, chrono::Utc::now().timestamp_millis())
     }
 }
@@ -239,11 +221,11 @@ impl AnimeBackend for RemoteAnimeBackend {
                 manual_fetch: trigger == Trigger::Manual,
                 fetch_window: (0, 0),
             };
-            match anime.fetch_type {
+            match anime.fetch_type() {
                 FetchType::Episodes => update
                     .episodes(&anime, &*remote, flags)
                     .await
-                    .map(|r| r.new_episodes.iter().map(Item::from).collect())
+                    .map(|r| r.new_episodes)
                     .map_err(|e| detail_error(e, &name)),
                 FetchType::Seasons => {
                     let seasons = update.seasons(&anime, &*remote, flags).await.map_err(|e| detail_error(e, &name))?.new_seasons;

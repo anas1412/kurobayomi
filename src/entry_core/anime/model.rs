@@ -22,7 +22,7 @@ use kuro_data::DataResult;
 use kuro_data::entry::{Entry, SeasonEntry};
 use kuro_data::item::Item;
 use kuro_db::flags::item;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 use kuro_domain::app::items::{ListFilters, apply_filters, item_filters};
 use kuro_domain::entries::defaults::SessionFlags;
 use kuro_domain::entries::flags::EntryFlags;
@@ -44,7 +44,6 @@ use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::list_model::RowItem;
-use crate::entry_core::numbered::NumberedItem;
 
 /// What the load reads besides the rows: values read once at open (behaviour 2.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -283,12 +282,11 @@ impl AnimeEntryModel {
         let shown = self.processed();
         // a gap is only a missing episode when no filter hides any: a hidden episode is not missing
         let complete = shown.len() == self.episodes.len();
-        let numbered: Vec<NumberedItem> = shown.iter().map(NumberedItem).collect();
-        insert_missing_separators(numbered, descending)
+        insert_missing_separators(shown, descending)
             .into_iter()
             .filter(|row| complete || matches!(row, ListRow::Item(_)))
             .map(|row| match row {
-                ListRow::Item(ep) => self.row_of(ep.0),
+                ListRow::Item(ep) => self.row_of(&ep),
                 ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(MsgKey::missing_items, i64::from(count), &[])),
             })
             .collect()
@@ -496,7 +494,7 @@ mod tests {
 
     #[test]
     fn a_season_write_on_an_entry_outside_the_library_survives_the_next_snapshot_and_leaves_the_episode_flags() {
-        use kuro_domain::entries::anime::season_flags as sf;
+        use kuro_db::flags::season as sf;
         let (_dir, store, id) = with_episodes(false, true, 1, 0);
         let mut model = load(&store, id);
         let episode_word = model.anime.item_flags;

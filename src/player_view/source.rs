@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use gtk::glib;
 use kuro_data::entry::EntryRepo;
-use kuro_data::episode::Episode;
 use kuro_data::item::{Item, ItemRepo};
 use kuro_domain::source::remote_update::to_s_episode;
 use kuro_i18n::{MsgKey, tr};
@@ -85,7 +84,7 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
         return false;
     };
     let SourceEpisode { source, episode, title } = found;
-    let s_episode = to_s_episode(&Episode::from(episode));
+    let s_episode = to_s_episode(&episode);
     let preferred = super::stored_text("pref_subtitle_lang");
     let preferred_audio = super::stored_text("pref_audio_lang");
     let (tx, rx) = async_channel::bounded(1);

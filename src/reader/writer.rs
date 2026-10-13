@@ -14,7 +14,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use kuro_data::entry::EntryRepo;
-use kuro_data::entry_history::HistoryRepo;
+use kuro_data::history::HistoryRepo;
 use kuro_data::item::{ItemRepo, ItemUpdate};
 use kuro_db::Db;
 

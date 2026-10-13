@@ -305,9 +305,7 @@ pub(crate) mod fixture {
 
         /// A user category.
         pub fn insert_category_for_test(&self, name: &str) -> i64 {
-            self.categories
-                .insert(&kuro_data::category::Category { id: 0, name: name.into(), order: 1, flags: 0, hidden: false })
-                .expect("insert category")
+            kuro_testkit::insert_category(&self.db, Kind::Manga, name)
         }
     }
 
@@ -435,15 +433,7 @@ mod tests {
     #[test]
     fn add_to_library_sets_favorite_and_categories_together_and_a_failed_link_leaves_it_out() {
         let (_dir, store, id) = store(false, 0);
-        let cat = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), Kind::Manga)
-            .insert(&kuro_data::category::Category {
-                id: 0,
-                name: "Reading".into(),
-                order: 1,
-                flags: 0,
-                hidden: false,
-            })
-            .unwrap();
+        let cat = kuro_testkit::insert_category(&store.db, Kind::Manga, "Reading");
         let prefs = PrefStore::in_memory();
         store.add_to_library(id, &[cat], &prefs, 1_000).unwrap();
         assert!(store.manga(id).unwrap().unwrap().favorite);
@@ -497,16 +487,8 @@ mod tests {
     #[test]
     fn set_categories_replaces_the_links_and_categories_reload() {
         let (_dir, store, id) = store(true, 0);
-        let repo = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), Kind::Manga);
-        let mk = |name: &str, order| kuro_data::category::Category {
-            id: 0,
-            name: name.into(),
-            order,
-            flags: 0,
-            hidden: false,
-        };
-        let a = repo.insert(&mk("A", 1)).unwrap();
-        let b = repo.insert(&mk("B", 2)).unwrap();
+        let a = kuro_testkit::insert_category(&store.db, Kind::Manga, "A");
+        let b = kuro_testkit::insert_category(&store.db, Kind::Manga, "B");
         store.set_categories(id, &[a]).unwrap();
         store.set_categories(id, &[b]).unwrap();
         let (all, membership) = store.categories(id).unwrap();

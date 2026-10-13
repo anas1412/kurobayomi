@@ -1,8 +1,7 @@
 //! Item and season comparators (`ChapterSorter.kt`, `EpisodeSorter.kt`, `SeasonSorter.kt`) and the collator used for
 //! alphabetical order (`SortUtil.kt`). Table: `p1-topic-sorting-and-filtering.md`.
 //!
-//! One comparator serves both kinds: the sort value is the unified `item_flags` group (`kuro_db::flags::item`). The
-//! per-kind `chapter_*` and `episode_*` names translate their word and call it.
+//! One comparator serves both kinds: the sort value is the unified `item_flags` group (`kuro_db::flags::item`).
 //!
 //! Numbers compare with `f64::total_cmp` (the same total order as `Double.compare`). Sorts are stable.
 //! An unknown sorting value falls back to SOURCE with a warning; the Kotlin code throws there.
@@ -10,22 +9,15 @@
 use std::cmp::Ordering;
 use std::sync::LazyLock;
 
-use crate::entries::anime::season_flags;
-use crate::entries::flags::{SeasonFlags, manga_sorting_to_unified};
+use crate::entries::flags::SeasonFlags;
 use icu_collator::options::{CollatorOptions, Strength};
 use icu_collator::{Collator, CollatorBorrowed, CollatorPreferences};
 use icu_locale::Locale;
-use kuro_data::anime::{Anime, SeasonAnime};
-use kuro_data::chapter::Chapter;
 use kuro_data::entry::{Entry, SeasonEntry};
-use kuro_data::episode::Episode;
 use kuro_data::item::Item;
-use kuro_db::flags::item;
+use kuro_db::flags::{item, season as season_flags};
 
-pub use crate::entries::anime::episode_flags;
-pub use crate::entries::manga::chapter_flags;
-
-/// The four item sort keys shared by chapters and episodes.
+/// The four item sort keys of both kinds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortKey {
     Source,
@@ -48,36 +40,6 @@ impl SortItem for Item {
     }
     fn number(&self) -> f64 {
         self.number
-    }
-    fn date_upload(&self) -> i64 {
-        self.date_upload
-    }
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl SortItem for Chapter {
-    fn source_order(&self) -> i64 {
-        self.source_order
-    }
-    fn number(&self) -> f64 {
-        self.chapter_number
-    }
-    fn date_upload(&self) -> i64 {
-        self.date_upload
-    }
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl SortItem for Episode {
-    fn source_order(&self) -> i64 {
-        self.source_order
-    }
-    fn number(&self) -> f64 {
-        self.episode_number
     }
     fn date_upload(&self) -> i64 {
         self.date_upload
@@ -135,16 +97,6 @@ fn unknown_key(sorting: i64) -> SortKey {
     SortKey::Source
 }
 
-/// The key of a chapter sorting value (`chapter_flags & SORTING_MASK`, the manga layout).
-pub fn chapter_key(sorting: i64) -> SortKey {
-    manga_sorting_to_unified(sorting).map_or_else(|| unknown_key(sorting), item_key)
-}
-
-/// The key of an episode sorting value (`episode_flags & SORTING_MASK`): the unified layout.
-pub fn episode_key(sorting: i64) -> SortKey {
-    item_key(sorting)
-}
-
 /// Compares two items by `key`. Number, upload date and name are ascending when not descending. Source
 /// order is the inverse: a source lists newest first, so descending means ascending `source_order`.
 pub fn compare_items<T: SortItem>(key: SortKey, descending: bool, a: &T, b: &T) -> Ordering {
@@ -168,18 +120,6 @@ pub fn compare_items<T: SortItem>(key: SortKey, descending: bool, a: &T, b: &T) 
 /// The comparator of an entry's item list: `sorting` is `Entry::sorting()` (unified layout).
 pub fn item_cmp(sorting: i64, descending: bool) -> impl Fn(&Item, &Item) -> Ordering {
     let key = item_key(sorting);
-    move |a, b| compare_items(key, descending, a, b)
-}
-
-/// `getChapterSort(manga, sortDescending)`. `sorting` is `Manga::sorting()` (the manga layout).
-pub fn chapter_cmp(sorting: i64, descending: bool) -> impl Fn(&Chapter, &Chapter) -> Ordering {
-    let key = chapter_key(sorting);
-    move |a, b| compare_items(key, descending, a, b)
-}
-
-/// `getEpisodeSort(anime, sortDescending)`. `sorting` is `Anime::sorting()`.
-pub fn episode_cmp(sorting: i64, descending: bool) -> impl Fn(&Episode, &Episode) -> Ordering {
-    let key = episode_key(sorting);
     move |a, b| compare_items(key, descending, a, b)
 }
 
@@ -218,30 +158,6 @@ impl SortSeason for SeasonEntry {
     }
 }
 
-impl SortSeason for SeasonAnime {
-    fn season_number(&self) -> f64 {
-        self.anime.season_number
-    }
-    fn season_source_order(&self) -> i64 {
-        self.anime.season_source_order
-    }
-    fn title(&self) -> &str {
-        &self.anime.title
-    }
-    fn latest_upload(&self) -> i64 {
-        self.latest_upload
-    }
-    fn pending(&self) -> i64 {
-        self.unseen_count()
-    }
-    fn last_seen(&self) -> i64 {
-        self.last_seen
-    }
-    fn fetched_at(&self) -> i64 {
-        self.fetched_at
-    }
-}
-
 /// Ascending by the season sort code (`season_flags & SORT_MASK`). Unknown codes (0xE000) fall back to SOURCE with a
 /// warning.
 fn season_cmp_by<T: SortSeason>(sorting: i64) -> impl Fn(&T, &T) -> Ordering {
@@ -260,32 +176,15 @@ fn season_cmp_by<T: SortSeason>(sorting: i64) -> impl Fn(&T, &T) -> Ordering {
     }
 }
 
-/// The parent entry whose `season_flags` word orders its seasons: an [`Entry`] or the legacy [`Anime`].
-pub trait SeasonParent {
-    fn season_word(&self) -> i64;
-}
-
-impl SeasonParent for Entry {
-    fn season_word(&self) -> i64 {
-        self.season_flags()
-    }
-}
-
-impl SeasonParent for Anime {
-    fn season_word(&self) -> i64 {
-        self.season_flags
-    }
-}
-
 /// `getSeasonSortComparator(anime)`: ascending by the season sort code of the parent.
-pub fn season_cmp<T: SortSeason>(parent: &impl SeasonParent) -> impl Fn(&T, &T) -> Ordering {
-    season_cmp_by(SeasonFlags(parent.season_word()).sorting())
+pub fn season_cmp<T: SortSeason>(parent: &Entry) -> impl Fn(&T, &T) -> Ordering {
+    season_cmp_by(SeasonFlags(parent.season_flags()).sorting())
 }
 
 /// `sort_seasons`: the key comparator, reversed when the season sort is descending, then the alphabetical title as a
 /// tie-break that is never reversed.
-pub fn sort_seasons<T: SortSeason>(list: &mut [T], parent: &impl SeasonParent) {
-    let flags = SeasonFlags(parent.season_word());
+pub fn sort_seasons<T: SortSeason>(list: &mut [T], parent: &Entry) {
+    let flags = SeasonFlags(parent.season_flags());
     let by_key = season_cmp_by::<T>(flags.sorting());
     let descending = flags.sort_descending();
     list.sort_by(|a, b| {
@@ -298,91 +197,48 @@ pub fn sort_seasons<T: SortSeason>(list: &mut [T], parent: &impl SeasonParent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::anime::Anime;
+    use kuro_platform::kind::Kind;
 
-    fn chapter(name: &str, source_order: i64, number: f64, upload: i64) -> Chapter {
-        Chapter {
-            name: name.into(),
-            source_order,
-            chapter_number: number,
-            date_upload: upload,
-            ..Chapter::create()
-        }
+    fn chapter(name: &str, source_order: i64, number: f64, upload: i64) -> Item {
+        Item { name: name.into(), source_order, number, date_upload: upload, ..Item::create(Kind::Manga) }
     }
 
     fn names<T: SortItem>(items: &[T]) -> Vec<String> {
         items.iter().map(|i| i.name().to_owned()).collect()
     }
 
-    fn sorted(mut items: Vec<Chapter>, sorting: i64, descending: bool) -> Vec<String> {
-        items.sort_by(chapter_cmp(sorting, descending));
+    fn sorted(mut items: Vec<Item>, sorting: i64, descending: bool) -> Vec<String> {
+        items.sort_by(item_cmp(sorting, descending));
         names(&items)
     }
 
     #[test]
     fn source_row_is_inverted_against_the_other_keys() {
-        let items = vec![
-            chapter("s0", 0, 0.0, 0),
-            chapter("s1", 1, 0.0, 0),
-            chapter("s2", 2, 0.0, 0),
-        ];
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_SOURCE, true),
-            ["s0", "s1", "s2"]
-        );
-        assert_eq!(
-            sorted(items, chapter_flags::SORTING_SOURCE, false),
-            ["s2", "s1", "s0"]
-        );
+        let items = vec![chapter("s0", 0, 0.0, 0), chapter("s1", 1, 0.0, 0), chapter("s2", 2, 0.0, 0)];
+        assert_eq!(sorted(items.clone(), item::SORTING_SOURCE, true), ["s0", "s1", "s2"]);
+        assert_eq!(sorted(items, item::SORTING_SOURCE, false), ["s2", "s1", "s0"]);
     }
 
     #[test]
     fn numbers_use_total_order_with_unrecognised_first_ascending() {
-        let items = vec![
-            chapter("five", 0, 5.0, 0),
-            chapter("unknown", 1, -1.0, 0),
-            chapter("zero", 2, 0.0, 0),
-            chapter("two-and-half", 3, 2.5, 0),
-        ];
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_NUMBER, false),
-            ["unknown", "zero", "two-and-half", "five"]
-        );
-        assert_eq!(
-            sorted(items, chapter_flags::SORTING_NUMBER, true),
-            ["five", "two-and-half", "zero", "unknown"]
-        );
+        let items = vec![chapter("five", 0, 5.0, 0), chapter("unknown", 1, -1.0, 0), chapter("zero", 2, 0.0, 0), chapter("two-and-half", 3, 2.5, 0)];
+        assert_eq!(sorted(items.clone(), item::SORTING_NUMBER, false), ["unknown", "zero", "two-and-half", "five"]);
+        assert_eq!(sorted(items, item::SORTING_NUMBER, true), ["five", "two-and-half", "zero", "unknown"]);
         assert_eq!((-0.0f64).total_cmp(&0.0), Ordering::Less);
     }
 
     #[test]
     fn upload_date_follows_the_same_direction_rule() {
         let items = vec![chapter("old", 0, 0.0, 10), chapter("new", 1, 0.0, 20)];
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_UPLOAD_DATE, true),
-            ["new", "old"]
-        );
-        assert_eq!(
-            sorted(items, chapter_flags::SORTING_UPLOAD_DATE, false),
-            ["old", "new"]
-        );
+        assert_eq!(sorted(items.clone(), item::SORTING_UPLOAD_DATE, true), ["new", "old"]);
+        assert_eq!(sorted(items, item::SORTING_UPLOAD_DATE, false), ["old", "new"]);
     }
 
     #[test]
     fn sorts_are_stable_for_equal_keys() {
-        let items = vec![
-            chapter("first", 0, 3.0, 0),
-            chapter("second", 1, 3.0, 0),
-            chapter("third", 2, 3.0, 0),
-        ];
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_NUMBER, false),
-            ["first", "second", "third"]
-        );
-        assert_eq!(
-            sorted(items, chapter_flags::SORTING_NUMBER, true),
-            ["first", "second", "third"]
-        );
+        let items = vec![chapter("first", 0, 3.0, 0), chapter("second", 1, 3.0, 0), chapter("third", 2, 3.0, 0)];
+        assert_eq!(sorted(items.clone(), item::SORTING_NUMBER, false), ["first", "second", "third"]);
+        assert_eq!(sorted(items, item::SORTING_NUMBER, true), ["first", "second", "third"]);
     }
 
     #[test]
@@ -396,119 +252,70 @@ mod tests {
 
     #[test]
     fn primary_equal_names_keep_input_order() {
-        let items = vec![
-            chapter("Chapter 2A", 0, 0.0, 0),
-            chapter("chapter 2a", 1, 0.0, 0),
-        ];
-        assert_eq!(
-            sorted(items, chapter_flags::SORTING_ALPHABET, false),
-            ["Chapter 2A", "chapter 2a"]
-        );
+        let items = vec![chapter("Chapter 2A", 0, 0.0, 0), chapter("chapter 2a", 1, 0.0, 0)];
+        assert_eq!(sorted(items, item::SORTING_ALPHABET, false), ["Chapter 2A", "chapter 2a"]);
     }
 
     #[test]
     fn descending_false_is_playback_order_for_every_sorting() {
         // Source: the highest source_order is the oldest item, so ascending playback lists it first.
-        let items = vec![
-            chapter("n", 0, 2.0, 30),
-            chapter("o", 1, 1.0, 10),
-            chapter("p", 2, 3.0, 20),
-        ];
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_SOURCE, false),
-            ["p", "o", "n"]
-        );
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_NUMBER, false),
-            ["o", "n", "p"]
-        );
-        assert_eq!(
-            sorted(items.clone(), chapter_flags::SORTING_UPLOAD_DATE, false),
-            ["o", "p", "n"]
-        );
-        assert_eq!(
-            sorted(items, chapter_flags::SORTING_ALPHABET, false),
-            ["n", "o", "p"]
-        );
+        let items = vec![chapter("n", 0, 2.0, 30), chapter("o", 1, 1.0, 10), chapter("p", 2, 3.0, 20)];
+        assert_eq!(sorted(items.clone(), item::SORTING_SOURCE, false), ["p", "o", "n"]);
+        assert_eq!(sorted(items.clone(), item::SORTING_NUMBER, false), ["o", "n", "p"]);
+        assert_eq!(sorted(items.clone(), item::SORTING_UPLOAD_DATE, false), ["o", "p", "n"]);
+        assert_eq!(sorted(items, item::SORTING_ALPHABET, false), ["n", "o", "p"]);
     }
 
     #[test]
     fn unknown_sorting_falls_back_to_source_without_panicking() {
         let items = vec![chapter("s0", 0, 9.0, 0), chapter("s1", 1, 1.0, 0)];
-        assert_eq!(chapter_key(0x400), SortKey::Source);
-        assert_eq!(
-            sorted(items.clone(), 0x400, true),
-            sorted(items, chapter_flags::SORTING_SOURCE, true)
-        );
+        assert_eq!(item_key(0x800), SortKey::Source);
+        assert_eq!(sorted(items.clone(), 0x800, true), sorted(items, item::SORTING_SOURCE, true));
     }
 
     #[test]
-    fn episode_comparator_uses_the_episode_masks() {
-        let ep = |name: &str, n: f64| Episode {
-            name: name.into(),
-            episode_number: n,
-            ..Episode::create()
-        };
-        let mut items = [ep("b", 2.0), ep("a", 1.0)];
-        items.sort_by(episode_cmp(episode_flags::SORTING_NUMBER, false));
-        assert_eq!(
-            items.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["a", "b"]
-        );
-        assert_eq!(
-            episode_key(episode_flags::SORTING_ALPHABET),
-            SortKey::Alphabet
-        );
-        assert_eq!(episode_key(0x800), SortKey::Source);
+    fn the_keys_of_the_four_sortings() {
+        assert_eq!(item_key(item::SORTING_NUMBER), SortKey::Number);
+        assert_eq!(item_key(item::SORTING_ALPHABET), SortKey::Alphabet);
+        assert_eq!(item_key(item::SORTING_UPLOAD_DATE), SortKey::UploadDate);
     }
 
-    fn season(title: &str, source_order: i64, number: f64) -> SeasonAnime {
-        SeasonAnime {
-            anime: Anime {
+    fn season(title: &str, source_order: i64, number: f64) -> SeasonEntry {
+        SeasonEntry {
+            entry: Entry {
                 title: title.into(),
-                season_source_order: source_order,
-                season_number: number,
-                ..Anime::create()
+                season_source_order: Some(source_order),
+                season_number: Some(number),
+                ..Entry::create(Kind::Anime)
             },
-            total_count: 1,
-            seen_count: 0,
-            bookmark_count: 0,
-            fillermark_count: 0,
+            total: 1,
+            done: 0,
+            bookmarks: 0,
+            fillermarks: 0,
             latest_upload: 0,
             fetched_at: 0,
-            last_seen: 0,
+            last_activity: 0,
         }
     }
 
-    fn titles(list: &[SeasonAnime]) -> Vec<String> {
-        list.iter().map(|s| s.anime.title.clone()).collect()
+    fn titles(list: &[SeasonEntry]) -> Vec<String> {
+        list.iter().map(|s| s.entry.title.clone()).collect()
     }
 
-    fn parent(flags: i64) -> Anime {
-        Anime {
-            season_flags: flags,
-            ..Anime::create()
-        }
+    fn parent(flags: i64) -> Entry {
+        Entry { season_flags: Some(flags), ..Entry::create(Kind::Anime) }
     }
 
     #[test]
     fn default_word_zero_lists_highest_source_order_first() {
-        let mut list = vec![
-            season("a", 0, 1.0),
-            season("b", 1, 2.0),
-            season("c", 2, 3.0),
-        ];
+        let mut list = vec![season("a", 0, 1.0), season("b", 1, 2.0), season("c", 2, 3.0)];
         sort_seasons(&mut list, &parent(0));
         assert_eq!(titles(&list), ["c", "b", "a"]);
     }
 
     #[test]
     fn ascending_flag_reverses_back_to_source_order() {
-        let mut list = vec![
-            season("a", 0, 1.0),
-            season("b", 1, 2.0),
-            season("c", 2, 3.0),
-        ];
+        let mut list = vec![season("a", 0, 1.0), season("b", 1, 2.0), season("c", 2, 3.0)];
         sort_seasons(&mut list, &parent(season_flags::SORT_ASC));
         assert_eq!(titles(&list), ["a", "b", "c"]);
     }
@@ -517,18 +324,11 @@ mod tests {
     fn alphabetical_tie_break_is_not_reversed() {
         let tied = || vec![season("Zeta", 0, 2.0), season("Alpha", 1, 2.0)];
         let mut asc = tied();
-        sort_seasons(
-            &mut asc,
-            &parent(season_flags::SORT_ASC | season_flags::SORT_SEASON),
-        );
+        sort_seasons(&mut asc, &parent(season_flags::SORT_ASC | season_flags::SORT_SEASON));
         assert_eq!(titles(&asc), ["Alpha", "Zeta"]);
         let mut desc = tied();
         sort_seasons(&mut desc, &parent(season_flags::SORT_SEASON));
-        assert_eq!(
-            titles(&desc),
-            ["Alpha", "Zeta"],
-            "descending reverses the key, not the name tie-break"
-        );
+        assert_eq!(titles(&desc), ["Alpha", "Zeta"], "descending reverses the key, not the name tie-break");
     }
 
     #[test]
@@ -539,34 +339,5 @@ mod tests {
         let mut sorted_items = items.clone();
         sorted_items.sort_by(&cmp);
         assert_eq!(titles(&sorted_items), ["a", "b"]);
-    }
-
-    /// One comparator for both kinds: the shared `item_cmp` orders items exactly like the per-kind names for every stored
-    /// sorting value and direction.
-    #[test]
-    fn item_cmp_orders_like_chapter_cmp_and_episode_cmp() {
-        use kuro_db::flags::manga_item_flags_from_unified;
-        use kuro_platform::kind::Kind;
-        let numbers = [3.0, -1.0, 2.5, 0.0, 2.5, 7.0];
-        let names = ["b", "A", "c10", "c2", "a", "B"];
-        let rows: Vec<(String, i64, f64, i64)> = (0..6).map(|i| (names[i].to_owned(), i as i64, numbers[i], (i as i64 * 37) % 11)).collect();
-        let items: Vec<Item> = rows
-            .iter()
-            .map(|(n, order, number, upload)| Item { name: n.clone(), source_order: *order, number: *number, date_upload: *upload, ..Item::create(Kind::Manga) })
-            .collect();
-        let chapters: Vec<Chapter> = items.iter().cloned().map(Chapter::from).collect();
-        let episodes: Vec<Episode> = items.iter().cloned().map(Episode::from).collect();
-        for sorting in [item::SORTING_SOURCE, item::SORTING_NUMBER, item::SORTING_UPLOAD_DATE, item::SORTING_ALPHABET] {
-            for descending in [false, true] {
-                let mut by_item = items.clone();
-                by_item.sort_by(item_cmp(sorting, descending));
-                let mut by_chapter = chapters.clone();
-                by_chapter.sort_by(chapter_cmp(manga_item_flags_from_unified(sorting), descending));
-                let mut by_episode = episodes.clone();
-                by_episode.sort_by(episode_cmp(sorting, descending));
-                assert_eq!(by_item.iter().map(|i| i.name.clone()).collect::<Vec<_>>(), by_chapter.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "chapter {sorting:#x} {descending}");
-                assert_eq!(by_item.iter().map(|i| i.name.clone()).collect::<Vec<_>>(), by_episode.iter().map(|e| e.name.clone()).collect::<Vec<_>>(), "episode {sorting:#x} {descending}");
-            }
-        }
     }
 }

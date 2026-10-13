@@ -51,7 +51,7 @@ mod tests {
     use std::sync::Arc;
 
     use kuro_data::entry::{Entry, EntryRepo};
-    use kuro_data::entry_history::HistoryRepo;
+    use kuro_data::history::HistoryRepo;
     use kuro_data::item::{Item, ItemRepo};
     use kuro_db::Db;
     use kuro_domain::history::recorder::SessionTimer;

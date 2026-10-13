@@ -1,7 +1,6 @@
 //! The unified SQL statements (docs/design/unified-model.md section 1.2): one function per statement, `kind` is a
 //! parameter, rows hold the stored layout (no translation, no old-name aliases). Plain functions over
-//! `&Connection` (a `&Transaction` derefs to one). Nothing calls this module yet: `statements_manga` and
-//! `statements_anime` stay until their last caller moves (phase E deletes them).
+//! `&Connection` (a `&Transaction` derefs to one).
 
 use kuro_platform::kind::Kind;
 use rusqlite::types::{ToSql, Type};
@@ -9,6 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Result, Row};
 
 pub mod categories;
 pub mod entries;
+pub mod excluded;
 pub mod history;
 pub mod items;
 pub mod library;

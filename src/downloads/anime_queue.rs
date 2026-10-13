@@ -10,9 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use kuro_data::anime::Anime;
 use kuro_data::entry::EntryRepo;
-use kuro_data::episode::Episode;
 use kuro_data::item::ItemRepo;
 use kuro_data::source::StubSourceRepo;
 use kuro_db::handle::Db;
@@ -35,7 +33,7 @@ use kuro_prefs::store::PrefStore;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::downloads::anime_io::{HttpVideoFetch, LiveHosters, live_source};
-use crate::entry_core::anime::download_backend::{anime_ref, episode_ref, source_of};
+use crate::entry_core::anime::download_backend::{entry_ref, entry_source, item_ref};
 use crate::entry_core::detail::SourceInfo;
 
 /// How often the progress line is checked. The notifier itself shows at most one update a second.
@@ -94,19 +92,17 @@ fn restore(store: &AnimeQueueStore, db: &Arc<Db>) -> Result<Vec<QueueEntry>, Str
 
 /// One saved row as a queue entry, or `None` when its episode, anime or source name is unknown.
 fn restore_entry(db: &Arc<Db>, anime_id: i64, episode_id: i64) -> Option<QueueEntry> {
-    // the download refs still take the per-kind rows: converted here, at the seam
     let episode = ItemRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
     let anime = EntryRepo::new(Arc::clone(db)).by_id(anime_id).ok()?;
     if episode.kind != Kind::Anime || anime.kind != Kind::Anime {
         return None;
     }
-    let (episode, anime) = (Episode::from(episode), Anime::from(anime));
     let (name, stub) = source_name(db, anime.source)?;
     let info = SourceInfo { name, stub };
     Some(QueueEntry {
-        source: source_of(&anime, &info),
-        anime: anime_ref(&anime),
-        episode: episode_ref(&episode),
+        source: entry_source(&anime, &info),
+        anime: entry_ref(&anime),
+        episode: item_ref(&episode),
         alt: false,
         video: None,
     })

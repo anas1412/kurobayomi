@@ -6,6 +6,14 @@ testkit}` and every caller in `src/` on 2026-10-12. Read only; nothing was built
 `Kind`, one `kurobayomi.db` (schema v1), per-kind statement modules (`statements_manga`, `statements_anime`) that
 alias the unified columns back to the old names, per-kind row structs and repos still in place.
 
+**Status (2026-10-13): phase E is done.** The per-kind wrappers and shims of sections 2.1 to 2.5 are deleted:
+`MangaRepo`/`AnimeRepo`/`ChapterRepo`/`EpisodeRepo`, the legacy track, history and stub-source repos, `MangaExt`/`AnimeExt`,
+`SyncChapters`/`SyncEpisodes`, `EntryFlagStore`, `EntryKindExt`, `statements_manga`, `statements_anime`, `models`,
+`flags::{chapter, library_sort, manga_item_flags_*}`, `kuro_db::schema_anime` (FetchType and Memo live in `codec`) and
+`kuro_data::entry_history` is now `kuro_data::history`. The kept per-kind shapes are the source wire types (`SManga`,
+`SChapter`, `SAnime`, `SEpisode`), the backup wire structs and the kuro-track `TrackCtx` seams (step 8). The sentences
+below describe the plan before E.
+
 Counts below are `rg` line counts of the word, split `src` (lines/files) and other crates (lines/files, kuro-data and
 kuro-db excluded unless stated). They include comments and tests, so read them as size, not as exact edit counts.
 

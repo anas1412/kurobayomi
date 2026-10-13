@@ -14,7 +14,7 @@ use super::service::{CategoryService, set_display_mode};
 use crate::SYSTEM_CATEGORY_ID;
 use crate::error::DomainError;
 use crate::library::display_mode::LibraryDisplayMode;
-use crate::library::sort::{Direction, LibrarySort, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SortType};
 
 fn service(kind: Kind) -> (tempfile::TempDir, CategoryService, Arc<LibraryPrefs>) {
     let (dir, db) = crate::testdb::test_db();
@@ -190,9 +190,9 @@ async fn deleting_a_category_drops_its_links_and_the_entry_falls_back_to_default
     let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
     let svc = CategoryService::new(db.clone(), Kind::Manga, prefs);
     let cat = svc.create("A").await.unwrap();
-    let manga = kuro_data::manga::MangaRepo::new(db);
+    let manga = kuro_data::entry::EntryRepo::new(db);
     let entry = manga
-        .insert(&kuro_data::manga::Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() })
+        .insert(&kuro_data::entry::Entry { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_data::entry::Entry::create(Kind::Manga) })
         .unwrap();
     svc.set_entry_categories(entry, &[cat.id]).await.unwrap();
     assert_eq!(svc.repo().by_entry(entry, false).unwrap().len(), 1);
@@ -207,8 +207,8 @@ async fn set_entry_categories_drops_default_unknown_and_duplicate_ids() {
     let svc = CategoryService::new(db.clone(), Kind::Manga, prefs);
     let two = svc.create("Two").await.unwrap();
     let _one = svc.create("One").await.unwrap();
-    let entry = kuro_data::manga::MangaRepo::new(db)
-        .insert(&kuro_data::manga::Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() })
+    let entry = kuro_data::entry::EntryRepo::new(db)
+        .insert(&kuro_data::entry::Entry { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_data::entry::Entry::create(Kind::Manga) })
         .unwrap();
     svc.set_entry_categories(entry, &[two.id, two.id, SYSTEM_CATEGORY_ID, 99]).await.unwrap();
     let got = svc.repo().by_entry(entry, false).unwrap();
@@ -274,8 +274,8 @@ async fn by_entry_is_ordered_and_visible_filter_drops_hidden() {
     let svc = CategoryService::new(db.clone(), Kind::Manga, prefs);
     let a = svc.create("A").await.unwrap();
     let b = svc.create("B").await.unwrap();
-    let entry = kuro_data::manga::MangaRepo::new(db)
-        .insert(&kuro_data::manga::Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() })
+    let entry = kuro_data::entry::EntryRepo::new(db)
+        .insert(&kuro_data::entry::Entry { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_data::entry::Entry::create(Kind::Manga) })
         .unwrap();
     svc.set_entry_categories(entry, &[b.id, a.id]).await.unwrap();
     svc.toggle_hidden(b.id).await.unwrap();

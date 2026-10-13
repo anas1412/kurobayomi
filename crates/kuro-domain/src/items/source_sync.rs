@@ -14,15 +14,12 @@ pub struct EntrySyncLocks {
     locks: Mutex<HashMap<i64, Arc<AsyncMutex<()>>>>,
 }
 
-/// The old name of [`EntrySyncLocks`] (phase E deletes it).
-pub type MangaSyncLocks = EntrySyncLocks;
-
 impl EntrySyncLocks {
     /// Waits until no other sync of `entry_id` holds the lock, then holds it until the guard is dropped.
-    pub async fn lock(&self, manga_id: i64) -> OwnedMutexGuard<()> {
+    pub async fn lock(&self, entry_id: i64) -> OwnedMutexGuard<()> {
         let lock = {
             let mut locks = self.locks.lock().unwrap_or_else(PoisonError::into_inner);
-            Arc::clone(locks.entry(manga_id).or_default())
+            Arc::clone(locks.entry(entry_id).or_default())
         };
         lock.lock_owned().await
     }
@@ -36,8 +33,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn syncs_of_one_manga_run_one_at_a_time() {
-        let locks = Arc::new(MangaSyncLocks::default());
+    async fn syncs_of_one_entry_run_one_at_a_time() {
+        let locks = Arc::new(EntrySyncLocks::default());
         let inside = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
         let mut tasks = Vec::new();
@@ -58,19 +55,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_sync_of_another_manga_does_not_wait_for_the_held_lock() {
-        let locks = MangaSyncLocks::default();
+    async fn a_sync_of_another_entry_does_not_wait_for_the_held_lock() {
+        let locks = EntrySyncLocks::default();
         let _held = locks.lock(1).await;
         let other = tokio::time::timeout(Duration::from_secs(1), locks.lock(2)).await;
-        assert!(other.is_ok(), "a different manga must not wait");
+        assert!(other.is_ok(), "a different entry must not wait");
     }
 
     #[tokio::test]
-    async fn a_second_sync_of_the_same_manga_waits_until_the_first_guard_drops() {
-        let locks = MangaSyncLocks::default();
+    async fn a_second_sync_of_the_same_entry_waits_until_the_first_guard_drops() {
+        let locks = EntrySyncLocks::default();
         let first = locks.lock(3).await;
         let blocked = tokio::time::timeout(Duration::from_millis(50), locks.lock(3)).await;
-        assert!(blocked.is_err(), "the same manga must wait");
+        assert!(blocked.is_err(), "the same entry must wait");
         drop(first);
         let second = tokio::time::timeout(Duration::from_secs(1), locks.lock(3)).await;
         assert!(second.is_ok());

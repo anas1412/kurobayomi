@@ -29,17 +29,17 @@ impl LibraryRepo {
 
 #[cfg(test)]
 mod tests {
-    use kuro_data::anime::Anime;
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::Entry;
 
     use super::*;
     use crate::testdb::test_db;
+    use kuro_testkit::insert_category;
 
-    fn favourite(title: &str) -> Manga {
-        Manga { favorite: true, source: 7, url: format!("u/{title}"), title: title.into(), ..Manga::create() }
+    fn favourite(kind: Kind, title: &str) -> Entry {
+        Entry { favorite: true, source: 7, url: format!("u/{title}"), title: title.into(), ..Entry::create(kind) }
     }
 
-    /// One chapter row, inserted through the writer. `scanlator` may be excluded.
+    /// One item row, inserted through the writer. `scanlator` may be excluded.
     fn chapter(db: &Db, manga: i64, scanlator: Option<&str>, read: bool) {
         db.write(|tx| {
             tx.execute(
@@ -63,24 +63,24 @@ mod tests {
     #[test]
     fn an_entry_in_three_categories_gives_three_rows_and_no_category_gives_zero() {
         let (_d, db) = test_db();
-        let repo = MangaRepo::new(db.clone());
-        let in_three = repo.insert(&favourite("three")).unwrap();
-        let none = repo.insert(&favourite("none")).unwrap();
-        let cats: Vec<i64> = (0..3)
-            .map(|n| kuro_data::category::create_manga_category(&db, &format!("c{n}"), 0).unwrap())
-            .collect();
-        repo.set_categories(in_three, &cats).unwrap();
-        let rows = LibraryRepo::new(db).all(Kind::Manga).unwrap();
-        assert_eq!(rows.iter().filter(|r| r.id == in_three).count(), 3);
-        let lone: Vec<&LibraryRow> = rows.iter().filter(|r| r.id == none).collect();
-        assert_eq!((lone.len(), lone[0].category), (1, 0));
+        let repo = EntryRepo::new(db.clone());
+        for kind in Kind::ALL {
+            let in_three = repo.insert(&favourite(kind, "three")).unwrap();
+            let none = repo.insert(&favourite(kind, "none")).unwrap();
+            let cats: Vec<i64> = (0..3).map(|n| insert_category(&db, kind, &format!("c{n}"))).collect();
+            repo.set_categories(in_three, &cats).unwrap();
+            let rows = LibraryRepo::new(db.clone()).all(kind).unwrap();
+            assert_eq!(rows.iter().filter(|r| r.id == in_three).count(), 3, "{kind}");
+            let lone: Vec<&LibraryRow> = rows.iter().filter(|r| r.id == none).collect();
+            assert_eq!((lone.len(), lone[0].category), (1, 0));
+        }
     }
 
     #[test]
     fn counts_exclude_chapters_of_excluded_scanlators_and_derive_pending() {
         let (_d, db) = test_db();
-        let repo = MangaRepo::new(db.clone());
-        let id = repo.insert(&favourite("counted")).unwrap();
+        let repo = EntryRepo::new(db.clone());
+        let id = repo.insert(&favourite(Kind::Manga, "counted")).unwrap();
         chapter(&db, id, Some("A"), true);
         chapter(&db, id, Some("A"), false);
         chapter(&db, id, Some("B"), true);
@@ -93,19 +93,10 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_library_gives_no_rows_and_anime_rows_follow_the_same_rule() {
+    fn an_empty_library_gives_no_rows() {
         let (_d, db) = test_db();
-        assert!(LibraryRepo::new(db.clone()).all(Kind::Manga).unwrap().is_empty());
-        let adb = db;
-        let anime = kuro_data::anime::AnimeRepo::new(adb.clone());
-        let id = anime
-            .insert(&Anime { favorite: true, source: 3, url: "a".into(), title: "A".into(), ..Anime::create() })
-            .unwrap();
-        let c1 = kuro_data::category::create_anime_category(&adb, "one", 0).unwrap();
-        let c2 = kuro_data::category::create_anime_category(&adb, "two", 0).unwrap();
-        anime.set_categories(id, &[c1, c2]).unwrap();
-        let rows = LibraryRepo::new(adb).all(Kind::Anime).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r.id == id && r.done == 0 && r.total == 0));
+        for kind in Kind::ALL {
+            assert!(LibraryRepo::new(db.clone()).all(kind).unwrap().is_empty());
+        }
     }
 }

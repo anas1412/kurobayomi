@@ -4,7 +4,7 @@
 //! Entry messages are plain structs; the SQL-side conversion lives in `creator`.
 
 use kuro_db::codecs::UpdateStrategy;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 
 use crate::wire::{Message, Reader, WireError, Writer, required};
 

@@ -1,23 +1,20 @@
-//! Tests of the shared repos (`EntryRepo`, `ItemRepo`, `HistoryRepo`, `TrackRepo`, `StubSourceRepo`) and of the legacy
-//! wrappers' flag translation: what the unified model must do the same for both kinds, and what a kind must not leak
-//! into the other.
+//! Tests of the shared repos (`EntryRepo`, `ItemRepo`, `HistoryRepo`, `TrackRepo`, `StubSourceRepo`): what the unified
+//! model must do the same for both kinds, and what a kind must not leak into the other.
 
 use std::time::Duration;
 
-use kuro_db::flags::{chapter, item, season};
+use kuro_db::flags::{item, season};
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::{FetchType, Memo};
+use kuro_db::codec::{FetchType, Memo};
 use kuro_platform::kind::Kind;
 
-use crate::anime::AnimeRepo;
 use crate::entry::{Entry, EntryRepo, EntryUpdate};
-use crate::entry_history::HistoryRepo;
+use crate::history::HistoryRepo;
 use crate::error::DataErrorExt;
 use crate::item::{Item, ItemRepo};
-use crate::manga::{Manga, MangaRepo, MangaUpdate};
 use crate::source::StubSourceRepo;
 use crate::support::test_db;
-use crate::track::{AnimeTrackRepo, Track, TrackRepo};
+use crate::track::{Track, TrackRepo};
 use crate::{DataError, LookupOrInsert};
 
 fn entry(kind: Kind, url: &str, favorite: bool) -> Entry {
@@ -138,35 +135,6 @@ fn a_manga_row_only_takes_the_manga_groups_and_has_no_season_flags() {
 }
 
 #[test]
-fn the_legacy_manga_repo_translates_chapter_flags_both_ways() {
-    let (_d, db) = test_db();
-    let repo = MangaRepo::new(db.clone());
-    let flags = chapter::SORTING_NUMBER | chapter::SORT_ASC | chapter::SHOW_READ;
-    let id = repo.insert(&Manga { chapter_flags: flags, ..Manga::create() }).unwrap();
-    assert_eq!(flags_of(&db, id), item::SORTING_NUMBER | item::SORT_ASC | item::SHOW_DONE, "stored in the unified layout");
-    assert_eq!(repo.by_id(id).unwrap().chapter_flags, flags, "read back in the manga layout");
-
-    assert!(repo.set_chapter_flags_masked(id, chapter::SORTING_UPLOAD_DATE, chapter::SORTING_MASK).unwrap());
-    assert_eq!(flags_of(&db, id), item::SORTING_UPLOAD_DATE | item::SORT_ASC | item::SHOW_DONE);
-    assert_eq!(repo.by_id(id).unwrap().chapter_flags, chapter::SORTING_UPLOAD_DATE | chapter::SORT_ASC | chapter::SHOW_READ);
-
-    assert!(repo.update_chapter_flags(id, |word| word | chapter::SHOW_BOOKMARKED).unwrap());
-    assert_eq!(flags_of(&db, id), item::SORTING_UPLOAD_DATE | item::SORT_ASC | item::SHOW_DONE | item::SHOW_BOOKMARKED);
-
-    repo.update(&MangaUpdate { chapter_flags: Some(chapter::SORTING_ALPHABET), ..MangaUpdate::new(id) }).unwrap();
-    assert_eq!(flags_of(&db, id), item::SORTING_ALPHABET);
-    assert_eq!(repo.by_id(id).unwrap().chapter_flags, chapter::SORTING_ALPHABET);
-}
-
-#[test]
-fn a_legacy_repo_does_not_find_an_entry_of_the_other_kind() {
-    let (_d, db) = test_db();
-    let m = EntryRepo::new(db.clone()).insert(&entry(Kind::Manga, "m", false)).unwrap();
-    assert!(matches!(AnimeRepo::new(db.clone()).by_id(m), Err(DataError::NotFound)));
-    assert!(MangaRepo::new(db).by_id(m).is_ok());
-}
-
-#[test]
 fn items_of_both_kinds_share_one_repo() {
     let (_d, db) = test_db();
     let entries = EntryRepo::new(db.clone());
@@ -232,7 +200,7 @@ fn history_is_one_repo_whose_lists_and_totals_are_per_kind() {
 }
 
 #[test]
-fn tracks_are_scoped_by_kind_and_a_legacy_repo_hides_the_other_kind() {
+fn tracks_are_scoped_by_kind() {
     let (_d, db) = test_db();
     let entries = EntryRepo::new(db.clone());
     let tracks = TrackRepo::new(db.clone());
@@ -243,9 +211,7 @@ fn tracks_are_scoped_by_kind_and_a_legacy_repo_hides_the_other_kind() {
     assert_eq!(tracks.all(Kind::Manga).unwrap().iter().map(|t| t.id).collect::<Vec<_>>(), [mt]);
     assert_eq!(tracks.all(Kind::Anime).unwrap().iter().map(|t| t.id).collect::<Vec<_>>(), [at]);
     assert_eq!(tracks.by_id(mt).unwrap().unwrap().kind, Kind::Manga);
-    let legacy = AnimeTrackRepo::new(db);
-    assert!(legacy.by_id(mt).unwrap().is_none());
-    assert_eq!(legacy.by_id(at).unwrap().unwrap().total_episodes, 12);
+    assert_eq!(tracks.by_id(at).unwrap().unwrap().total_items, 12);
     let json = serde_json::to_string(&tracks.by_id(mt).unwrap().unwrap()).unwrap();
     assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), tracks.by_id(mt).unwrap().unwrap());
 }

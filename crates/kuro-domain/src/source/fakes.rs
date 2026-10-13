@@ -6,9 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use async_trait::async_trait;
-use kuro_data::anime::{Anime, SeasonAnime};
-use kuro_data::entry::EntryUpdate;
-use kuro_data::episode::Episode;
+use kuro_data::entry::{Entry, EntryUpdate, SeasonEntry};
+use kuro_data::item::Item;
 use kuro_db::subscribe::Subscription;
 use kuro_source::SourceError;
 use kuro_source::anime::{SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
@@ -21,8 +20,9 @@ use tokio::sync::watch;
 use crate::error::DomainError;
 use crate::source::model::{Id, Source};
 use crate::source::registry::InstalledSource;
-use crate::source::remote_update::{AnimeRemote, CacheFiles, ListSync, RemoteStore};
-use crate::source::repo::{ExtensionCatalog, StubSourceRepo};
+use crate::entries::update::CacheFiles;
+use crate::source::remote_update::{AnimeRemote, ListSync, RemoteStore};
+use crate::source::repo::{ExtensionCatalog, StubSourcePort};
 use crate::source::stub::StubSource;
 
 /// The calls a test saw, in order. Shared between fakes so one log shows the whole sequence.
@@ -74,7 +74,7 @@ impl MemStubStore {
     }
 }
 
-impl StubSourceRepo for MemStubStore {
+impl StubSourcePort for MemStubStore {
     fn get(&self, id: Id) -> Result<Option<StubSource>, DomainError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.failure()?;
@@ -312,8 +312,8 @@ pub type SyncCall = (usize, bool, (i64, i64));
 pub struct FakeListSync {
     pub log: Arc<CallLog>,
     pub calls: Mutex<Vec<SyncCall>>,
-    pub new_episodes: Vec<Episode>,
-    pub new_seasons: Vec<Anime>,
+    pub new_episodes: Vec<Item>,
+    pub new_seasons: Vec<Entry>,
 }
 
 impl FakeListSync {
@@ -326,10 +326,10 @@ impl ListSync for FakeListSync {
     fn sync_episodes(
         &self,
         raw: &[SEpisode],
-        _anime: &Anime,
+        _anime: &Entry,
         manual: bool,
         window: (i64, i64),
-    ) -> Result<Vec<Episode>, DomainError> {
+    ) -> Result<Vec<Item>, DomainError> {
         self.log.push("sync.episodes");
         self.calls.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((raw.len(), manual, window));
         Ok(self.new_episodes.clone())
@@ -338,10 +338,10 @@ impl ListSync for FakeListSync {
     fn sync_seasons(
         &self,
         raw: &[SAnime],
-        _anime: &Anime,
+        _anime: &Entry,
         manual: bool,
         window: (i64, i64),
-    ) -> Result<Vec<Anime>, DomainError> {
+    ) -> Result<Vec<Entry>, DomainError> {
         self.log.push("sync.seasons");
         self.calls.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((raw.len(), manual, window));
         Ok(self.new_seasons.clone())
@@ -352,15 +352,15 @@ impl ListSync for FakeListSync {
 /// accepts is kept in `updates`.
 pub struct MemRemoteStore {
     pub log: Arc<CallLog>,
-    pub anime: Mutex<Anime>,
-    pub episodes: Vec<Episode>,
-    pub seasons: Vec<SeasonAnime>,
+    pub anime: Mutex<Entry>,
+    pub episodes: Vec<Item>,
+    pub seasons: Vec<SeasonEntry>,
     pub fail_update: bool,
     pub updates: Mutex<Vec<EntryUpdate>>,
 }
 
 impl MemRemoteStore {
-    pub fn new(log: Arc<CallLog>, anime: Anime) -> Self {
+    pub fn new(log: Arc<CallLog>, anime: Entry) -> Self {
         Self {
             log,
             anime: Mutex::new(anime),
@@ -373,17 +373,17 @@ impl MemRemoteStore {
 }
 
 impl RemoteStore for MemRemoteStore {
-    fn anime(&self, _id: i64) -> Result<Anime, DomainError> {
+    fn anime(&self, _id: i64) -> Result<Entry, DomainError> {
         self.log.push("read.anime");
         Ok(self.anime.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone())
     }
 
-    fn episodes(&self, _anime_id: i64) -> Result<Vec<Episode>, DomainError> {
+    fn episodes(&self, _anime_id: i64) -> Result<Vec<Item>, DomainError> {
         self.log.push("read.episodes");
         Ok(self.episodes.clone())
     }
 
-    fn seasons(&self, _parent_id: i64) -> Result<Vec<SeasonAnime>, DomainError> {
+    fn seasons(&self, _parent_id: i64) -> Result<Vec<SeasonEntry>, DomainError> {
         self.log.push("read.seasons");
         Ok(self.seasons.clone())
     }
@@ -410,16 +410,16 @@ pub struct FakeCacheFiles {
 }
 
 impl CacheFiles for FakeCacheFiles {
-    fn has_custom_cover(&self, _anime: &Anime) -> bool {
+    fn has_custom_cover(&self, _anime: &Entry) -> bool {
         self.custom_cover
     }
-    fn has_custom_background(&self, _anime: &Anime) -> bool {
+    fn has_custom_background(&self, _anime: &Entry) -> bool {
         self.custom_background
     }
-    fn delete_cover(&self, _anime: &Anime) {
+    fn delete_cover(&self, _anime: &Entry) {
         self.log.push("files.delete_cover");
     }
-    fn delete_background(&self, _anime: &Anime) {
+    fn delete_background(&self, _anime: &Entry) {
         self.log.push("files.delete_background");
     }
 }

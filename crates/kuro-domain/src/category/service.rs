@@ -18,7 +18,7 @@ use super::repo::CategoryRepo;
 use crate::SYSTEM_CATEGORY_ID;
 use crate::error::DomainError;
 use crate::library::display_mode::LibraryDisplayMode;
-use crate::library::sort::LibrarySort;
+use kuro_platform::sort::LibrarySort;
 
 /// A validation outcome inside a write transaction. `Err` is a domain rule, `Ok` carries the value.
 type Checked<T> = Result<T, DomainError>;
@@ -277,7 +277,7 @@ impl CategoryService {
             None => None,
         };
         let flags = sort.apply_to(category.as_ref().map_or(0, |c| c.flags));
-        if sort.ty == crate::library::sort::SortType::Random {
+        if sort.ty == kuro_platform::sort::SortType::Random {
             set_random_sort_seed(self.kind(), draw_seed());
         }
         let serialized = sort.serialize(kind);

@@ -163,8 +163,8 @@ mod tests {
                 ..Entry::create(Kind::Manga)
             })
             .expect("insert");
-        let a = kuro_data::category::create_manga_category(&db, "a", 0).expect("category a");
-        let b = kuro_data::category::create_manga_category(&db, "b", 0).expect("category b");
+        let a = kuro_testkit::insert_category(&db, Kind::Manga, "a");
+        let b = kuro_testkit::insert_category(&db, Kind::Manga, "b");
         repo.set_categories(id, &[a, b]).expect("link");
         let snap = snapshot(&db, Kind::Manga).expect("snapshot");
         assert_eq!(snap.rows.len(), 2);

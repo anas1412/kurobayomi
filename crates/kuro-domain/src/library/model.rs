@@ -1,9 +1,7 @@
 //! The library row: one favourite entry in one category, with the counts the library shows. Both kinds map to
 //! this shape (`LibraryEntry`), so the page builder and the sorts never branch on kind.
 
-use kuro_data::anime::LibraryAnime;
-use kuro_data::entry::{Entry, LibraryEntry};
-use kuro_data::manga::LibraryManga;
+use kuro_data::entry::LibraryEntry;
 use kuro_db::codecs::UpdateStrategy;
 
 /// One `libraryView` row. `category` is 0 for an entry in no category.
@@ -80,38 +78,6 @@ impl LibraryRow {
             always_update: e.update_strategy == UpdateStrategy::AlwaysUpdate,
             next_update: e.next_update,
         }
-    }
-}
-
-impl LibraryRow {
-    /// [`Self::from_entry`] for a legacy `LibraryManga` (phase E deletes it).
-    pub fn from_manga(l: &LibraryManga) -> Self {
-        Self::from_entry(&LibraryEntry {
-            entry: Entry::from(&l.manga),
-            category: l.category,
-            total: l.total_chapters,
-            done: l.read_count,
-            bookmarks: l.bookmark_count,
-            fillermarks: 0,
-            latest_upload: l.latest_upload,
-            item_fetched_at: l.chapter_fetched_at,
-            last_activity: l.last_read,
-        })
-    }
-
-    /// [`Self::from_entry`] for a legacy `LibraryAnime` (phase E deletes it).
-    pub fn from_anime(l: &LibraryAnime) -> Self {
-        Self::from_entry(&LibraryEntry {
-            entry: Entry::from(&l.anime),
-            category: l.category,
-            total: l.total_count,
-            done: l.seen_count,
-            bookmarks: l.bookmark_count,
-            fillermarks: l.fillermark_count,
-            latest_upload: l.latest_upload,
-            item_fetched_at: l.episode_fetched_at,
-            last_activity: l.last_seen,
-        })
     }
 }
 

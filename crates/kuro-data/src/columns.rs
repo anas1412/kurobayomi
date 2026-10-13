@@ -4,7 +4,7 @@
 
 use kuro_db::codecs::GenreList;
 pub use kuro_db::codecs::UpdateStrategy;
-pub use kuro_db::schema_anime::{FetchType, Memo};
+pub use kuro_db::codec::{FetchType, Memo};
 use rusqlite::types::{FromSql, ValueRef};
 
 /// `StringListColumnAdapter.decode`: `""` is an empty list, otherwise the text splits on the two-character

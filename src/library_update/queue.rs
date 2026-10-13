@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 pub use kuro_db::codec::UpdateStrategy;
-pub use kuro_db::schema_anime::FetchType;
+pub use kuro_db::codec::FetchType;
 use kuro_platform::kind::Kind;
 
 /// `SManga.COMPLETED` / `SAnime.COMPLETED`.

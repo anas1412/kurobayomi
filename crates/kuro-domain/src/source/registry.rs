@@ -17,7 +17,7 @@ use kuro_source::SourceError;
 
 use crate::error::DomainError;
 use crate::source::model::{Id, Source};
-use crate::source::repo::{ExtensionCatalog, StubSourceRepo};
+use crate::source::repo::{ExtensionCatalog, StubSourcePort};
 use crate::source::stub::StubSource;
 
 /// What the registry needs from an installed source.
@@ -56,7 +56,7 @@ pub struct SourceRegistry<S: ?Sized> {
     kind: Kind,
     initialized: watch::Sender<bool>,
     installed: watch::Sender<Vec<Arc<S>>>,
-    stubs: Arc<dyn StubSourceRepo>,
+    stubs: Arc<dyn StubSourcePort>,
     catalog: Arc<dyn ExtensionCatalog>,
     /// The stub rows in table order, once [`SourceRegistry::load_stubs`] has run. `None` before that.
     stub_rows: RwLock<Option<Vec<StubSource>>>,
@@ -69,7 +69,7 @@ pub struct SourceRegistry<S: ?Sized> {
 impl<S: InstalledSource + ?Sized> SourceRegistry<S> {
     /// A registry for one kind of source. Manga hides only its HTTP sources from the stub list and anime hides every
     /// live source (behaviour 1.4). `catalog` answers the index branch of [`SourceRegistry::get_or_stub`].
-    pub fn new(kind: Kind, stubs: Arc<dyn StubSourceRepo>, catalog: Arc<dyn ExtensionCatalog>) -> Self {
+    pub fn new(kind: Kind, stubs: Arc<dyn StubSourcePort>, catalog: Arc<dyn ExtensionCatalog>) -> Self {
         Self {
             kind,
             initialized: watch::channel(false).0,
@@ -408,14 +408,14 @@ mod tests {
     /// A registry whose stub rows live in a migrated database, as in the app.
     fn registry_with(
         index: Arc<dyn ExtensionCatalog>,
-    ) -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<kuro_data::source::MangaStubSourceRepo>) {
+    ) -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<kuro_data::source::StubSourceRepo>) {
         let (dir, db) = test_db();
-        let stubs = Arc::new(kuro_data::source::MangaStubSourceRepo::new(db));
+        let stubs = Arc::new(kuro_data::source::StubSourceRepo::new(db, Kind::Manga));
         let reg = SourceRegistry::new(Kind::Manga, stubs.clone(), index);
         (dir, reg, stubs)
     }
 
-    fn registry() -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<kuro_data::source::MangaStubSourceRepo>) {
+    fn registry() -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<kuro_data::source::StubSourceRepo>) {
         registry_with(Arc::new(NoIndex))
     }
 
@@ -492,7 +492,7 @@ mod tests {
     /// The real stub store, with counters. Once armed, any read or write panics, so a test can prove a lookup
     /// does no I/O.
     struct Watched {
-        inner: Arc<kuro_data::source::MangaStubSourceRepo>,
+        inner: Arc<kuro_data::source::StubSourceRepo>,
         armed: std::sync::atomic::AtomicBool,
         upserts: std::sync::atomic::AtomicUsize,
         fail_id: Option<Id>,
@@ -503,7 +503,7 @@ mod tests {
     }
 
     impl Watched {
-        fn new(inner: Arc<kuro_data::source::MangaStubSourceRepo>) -> Self {
+        fn new(inner: Arc<kuro_data::source::StubSourceRepo>) -> Self {
             Self {
                 inner,
                 armed: std::sync::atomic::AtomicBool::new(false),
@@ -519,14 +519,14 @@ mod tests {
         }
     }
 
-    impl StubSourceRepo for Watched {
+    impl StubSourcePort for Watched {
         fn get(&self, id: Id) -> Result<Option<StubSource>, DomainError> {
             self.touch();
-            StubSourceRepo::get(self.inner.as_ref(), id)
+            StubSourcePort::get(self.inner.as_ref(), id)
         }
         fn all(&self) -> Result<Vec<StubSource>, DomainError> {
             self.touch();
-            StubSourceRepo::all(self.inner.as_ref())
+            StubSourcePort::all(self.inner.as_ref())
         }
         fn upsert(&self, id: Id, lang: &str, name: &str) -> Result<(), DomainError> {
             self.touch();
@@ -539,16 +539,16 @@ mod tests {
                 return Err(DomainError::Store("write failed"));
             }
             self.upserts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            StubSourceRepo::upsert(self.inner.as_ref(), id, lang, name)
+            StubSourcePort::upsert(self.inner.as_ref(), id, lang, name)
         }
         fn subscribe_all(&self) -> kuro_db::subscribe::Subscription<Vec<StubSource>> {
-            StubSourceRepo::subscribe_all(self.inner.as_ref())
+            StubSourcePort::subscribe_all(self.inner.as_ref())
         }
     }
 
     fn watched() -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<Watched>) {
         let (dir, db) = test_db();
-        let store = Arc::new(Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db))));
+        let store = Arc::new(Watched::new(Arc::new(kuro_data::source::StubSourceRepo::new(db, Kind::Manga))));
         let reg = SourceRegistry::new(Kind::Manga, store.clone(), Arc::new(NoIndex));
         (dir, reg, store)
     }
@@ -614,13 +614,13 @@ mod tests {
         let (_d, reg, store) = watched();
         reg.register_stub(&stub(4, "en", "First"), &|_, _| {}).unwrap();
         reg.register_stub(&stub(4, "de", "Second"), &|_, _| {}).unwrap();
-        assert_eq!(StubSourceRepo::get(store.inner.as_ref(), 4).unwrap(), Some(stub(4, "de", "Second")));
+        assert_eq!(StubSourcePort::get(store.inner.as_ref(), 4).unwrap(), Some(stub(4, "de", "Second")));
     }
 
     #[test]
     fn a_failing_write_is_logged_and_the_other_registrations_still_run() {
         let (_d, db) = test_db();
-        let mut store = Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)));
+        let mut store = Watched::new(Arc::new(kuro_data::source::StubSourceRepo::new(db, Kind::Manga)));
         store.fail_id = Some(13);
         let reg: SourceRegistry<Fake> = SourceRegistry::new(Kind::Manga, Arc::new(store), Arc::new(NoIndex));
         let failed = reg.register_stubs(&[stub(13, "en", "Bad"), stub(14, "en", "Good")], &|_, _| {});
@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn manga_stub_list_hides_only_http_sources_and_anime_hides_every_live_source() {
         let (_d, db) = test_db();
-        let store: Arc<dyn StubSourceRepo> = Arc::new(kuro_data::source::MangaStubSourceRepo::new(db));
+        let store: Arc<dyn StubSourcePort> = Arc::new(kuro_data::source::StubSourceRepo::new(db, Kind::Manga));
         store.upsert(1, "en", "Online").unwrap();
         store.upsert(2, "en", "Local").unwrap();
         store.upsert(3, "en", "Gone").unwrap();
@@ -708,12 +708,12 @@ mod tests {
             _ => panic!("expected the index data"),
         }
         for _ in 0..500 {
-            if StubSourceRepo::get(stubs.as_ref(), 6).unwrap().is_some() {
+            if StubSourcePort::get(stubs.as_ref(), 6).unwrap().is_some() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(StubSourceRepo::get(stubs.as_ref(), 6).unwrap(), Some(stub(6, "fr", "Six")), "persisted");
+        assert_eq!(StubSourcePort::get(stubs.as_ref(), 6).unwrap(), Some(stub(6, "fr", "Six")), "persisted");
     }
 
     #[test]
@@ -730,7 +730,7 @@ mod tests {
         };
         assert_eq!(second, first);
         assert_eq!(reg.fallbacks.lock().unwrap().len(), 1, "cached once");
-        assert_eq!(StubSourceRepo::get(stubs.as_ref(), 99).unwrap(), None, "a fallback is not persisted");
+        assert_eq!(StubSourcePort::get(stubs.as_ref(), 99).unwrap(), None, "a fallback is not persisted");
     }
 
     #[test]
@@ -744,7 +744,7 @@ mod tests {
             SourceHandle::Stub(s) => assert_eq!(s, stub(7, "en", "Seven")),
             _ => panic!("expected the upgraded stub"),
         }
-        assert_eq!(StubSourceRepo::get(stubs.as_ref(), 7).unwrap(), Some(stub(7, "en", "Seven")));
+        assert_eq!(StubSourcePort::get(stubs.as_ref(), 7).unwrap(), Some(stub(7, "en", "Seven")));
         assert!(reg.fallbacks.lock().unwrap().is_empty());
     }
 
@@ -753,7 +753,7 @@ mod tests {
         let (_d, db) = test_db();
         let store = Arc::new(Watched {
             delay: Duration::from_millis(200),
-            ..Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)))
+            ..Watched::new(Arc::new(kuro_data::source::StubSourceRepo::new(db, Kind::Manga)))
         });
         let reg = Arc::new(SourceRegistry::new(Kind::Manga, store.clone(), Arc::new(NoIndex)));
         let (tx, rx) = watch::channel(Vec::<Arc<Fake>>::new());
@@ -763,8 +763,8 @@ mod tests {
         tx.send(vec![Arc::new(Fake { id: 2, http: true, configurable: false, catalogue: false })]).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let both = StubSourceRepo::get(store.inner.as_ref(), 1).unwrap().is_some()
-                    && StubSourceRepo::get(store.inner.as_ref(), 2).unwrap().is_some();
+                let both = StubSourcePort::get(store.inner.as_ref(), 1).unwrap().is_some()
+                    && StubSourcePort::get(store.inner.as_ref(), 2).unwrap().is_some();
                 if both {
                     break;
                 }
@@ -784,7 +784,7 @@ mod tests {
         let (_d, db) = test_db();
         let store = Arc::new(Watched {
             gate: Some(Mutex::new(gate)),
-            ..Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)))
+            ..Watched::new(Arc::new(kuro_data::source::StubSourceRepo::new(db, Kind::Manga)))
         });
         let reg: SourceRegistry<Fake> =
             SourceRegistry::new(Kind::Manga, store.clone(), Index::with(&[(30, "de", "Indexed")]));
@@ -795,12 +795,12 @@ mod tests {
         assert_eq!(store.upserts.load(std::sync::atomic::Ordering::SeqCst), 0, "no store write at return");
         open.send(()).unwrap();
         for _ in 0..500 {
-            if StubSourceRepo::get(store.inner.as_ref(), 30).unwrap().is_some() {
+            if StubSourcePort::get(store.inner.as_ref(), 30).unwrap().is_some() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(StubSourceRepo::get(store.inner.as_ref(), 30).unwrap(), Some(stub(30, "de", "Indexed")), "written later");
+        assert_eq!(StubSourcePort::get(store.inner.as_ref(), 30).unwrap(), Some(stub(30, "de", "Indexed")), "written later");
     }
 }
 

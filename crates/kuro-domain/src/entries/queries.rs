@@ -100,7 +100,7 @@ mod tests {
     use kuro_data::DataError;
     use kuro_data::entry::EntryUpdate;
     use kuro_data::item::ItemUpdate;
-    use kuro_db::schema_anime::FetchType;
+    use kuro_db::codec::FetchType;
     use tokio::sync::watch;
 
     use super::*;

@@ -7,7 +7,7 @@ use rusqlite::{Result, Row};
 
 use super::kind_col;
 use crate::codec::{GenreList, UpdateStrategy};
-use crate::schema_anime::{FetchType, Memo};
+use crate::codec::{FetchType, Memo};
 
 /// Every `entries` column. The anime-only ones are `None` for manga (the table's two `CHECK`s).
 #[derive(Clone, Debug, PartialEq)]

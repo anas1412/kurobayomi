@@ -7,9 +7,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_db::subscribe::Subscription;
+use kuro_platform::kind::Kind;
 use tokio::sync::watch;
 
 use crate::error::DomainError;
@@ -155,15 +155,15 @@ pub struct MangaSourceDb<E: 'static, F: 'static> {
 impl<E: 'static, F: 'static> MangaSourceDb<E, F> {
     /// Starts the live lists. Must be called inside a tokio runtime.
     pub fn new<S: InstalledSource + ?Sized + 'static>(
-        repo: &MangaRepo,
+        repo: &EntryRepo,
         registry: Arc<SourceRegistry<S>>,
         listings: Arc<dyn RemoteListings<E, F>>,
     ) -> Self {
         let counts = Arc::clone(&registry);
-        let non_library = bridge(repo.subscribe_non_library_counts(), move |rows| {
+        let non_library = bridge(repo.subscribe_non_library_counts(Kind::Manga), move |rows| {
             manga_rows(&counts, rows)
         });
-        let (online, favorites) = shared(registry, repo.subscribe_favorite_counts());
+        let (online, favorites) = shared(registry, repo.subscribe_favorite_counts(Kind::Manga));
         Self {
             online,
             favorites,
@@ -209,13 +209,13 @@ pub struct AnimeSourceDb<E: 'static, F: 'static> {
 impl<E: 'static, F: 'static> AnimeSourceDb<E, F> {
     /// Starts the live lists. Must be called inside a tokio runtime.
     pub fn new<S: InstalledSource + ?Sized + 'static>(
-        repo: &AnimeRepo,
+        repo: &EntryRepo,
         registry: Arc<SourceRegistry<S>>,
         listings: Arc<dyn RemoteListings<E, F>>,
     ) -> Self {
         let tree = Arc::clone(&registry);
-        let non_library = bridge(repo.subscribe_non_library_tree(), move |rows| anime_rows(&tree, rows));
-        let (online, favorites) = shared(registry, repo.subscribe_favorite_counts());
+        let non_library = bridge(repo.subscribe_non_library_tree(Kind::Anime), move |rows| anime_rows(&tree, rows));
+        let (online, favorites) = shared(registry, repo.subscribe_favorite_counts(Kind::Anime));
         Self {
             online,
             favorites,
@@ -251,13 +251,11 @@ impl<E: 'static, F: 'static> AnimeSourceRepo<E, F> for AnimeSourceDb<E, F> {
 
 #[cfg(test)]
 mod tests {
-    use kuro_platform::kind::Kind;
     use std::time::Duration;
 
-    use kuro_data::anime::Anime;
-    use kuro_data::manga::Manga;
-    use kuro_data::source::{AnimeStubSourceRepo, MangaStubSourceRepo};
-    use kuro_db::schema_anime::FetchType;
+    use kuro_data::entry::Entry;
+    use kuro_data::source::StubSourceRepo;
+    use kuro_db::codec::FetchType;
 
     use super::*;
     use crate::source::repo::ExtensionCatalog;
@@ -320,25 +318,12 @@ mod tests {
         }
     }
 
-    fn manga(source: i64, url: &str, favorite: bool) -> Manga {
-        Manga {
-            source,
-            url: url.into(),
-            title: url.into(),
-            favorite,
-            ..Manga::create()
-        }
+    fn manga(source: i64, url: &str, favorite: bool) -> Entry {
+        Entry { source, url: url.into(), title: url.into(), favorite, ..Entry::create(Kind::Manga) }
     }
 
-    fn anime(source: i64, url: &str, parent_id: Option<i64>, favorite: bool) -> Anime {
-        Anime {
-            source,
-            url: url.into(),
-            title: url.into(),
-            parent_id,
-            favorite,
-            ..Anime::create()
-        }
+    fn anime(source: i64, url: &str, parent_id: Option<i64>, favorite: bool) -> Entry {
+        Entry { source, url: url.into(), title: url.into(), parent_id, favorite, ..Entry::create(Kind::Anime) }
     }
 
     /// Waits until the list holds exactly `want`. Fails after five seconds.
@@ -352,8 +337,8 @@ mod tests {
     #[tokio::test]
     async fn manga_lists_leave_out_favourite_only_sources_and_resolve_stubs() {
         let (_d, db) = test_db();
-        let repo = MangaRepo::new(db.clone());
-        let stubs = Arc::new(MangaStubSourceRepo::new(db));
+        let repo = EntryRepo::new(db.clone());
+        let stubs = Arc::new(StubSourceRepo::new(db, Kind::Manga));
         stubs.upsert(2, "en", "Two").unwrap();
         repo.insert(&manga(1, "/fav", true)).unwrap();
         repo.insert(&manga(2, "/a", false)).unwrap();
@@ -387,13 +372,13 @@ mod tests {
     #[tokio::test]
     async fn anime_lists_count_the_clear_tree_and_list_orphaned_children() {
         let (_d, db) = test_db();
-        let repo = AnimeRepo::new(db.clone());
-        let stubs = Arc::new(AnimeStubSourceRepo::new(db));
+        let repo = EntryRepo::new(db.clone());
+        let stubs = Arc::new(StubSourceRepo::new(db, Kind::Anime));
         stubs.upsert(3, "ja", "Three").unwrap();
         repo.insert(&anime(5, "/fav", None, true)).unwrap();
         let parent = repo
-            .insert(&Anime {
-                fetch_type: FetchType::Seasons,
+            .insert(&Entry {
+                fetch_type: Some(FetchType::Seasons),
                 ..anime(3, "/season", None, false)
             })
             .unwrap();
@@ -421,10 +406,10 @@ mod tests {
     #[tokio::test]
     async fn online_sources_are_the_installed_http_sources_and_follow_the_registry() {
         let (_d, db) = test_db();
-        let repo = MangaRepo::new(db.clone());
+        let repo = EntryRepo::new(db.clone());
         let registry = Arc::new(SourceRegistry::<Installed>::new(
             Kind::Manga,
-            Arc::new(MangaStubSourceRepo::new(db)),
+            Arc::new(StubSourceRepo::new(db, Kind::Manga)),
             Arc::new(NoIndex),
         ));
         registry.finish_loading(vec![

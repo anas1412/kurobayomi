@@ -2,7 +2,7 @@
 
 use kuro_platform::kind::Kind;
 use kuro_domain::library::flags::{contains, merge};
-use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SortType};
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs, MANGA_SORT_TOKENS};
 use kuro_prefs::store::PrefStore;
 use kuro_prefs::tristate::TriState;

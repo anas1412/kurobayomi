@@ -4,7 +4,7 @@
 
 use kuro_data::entry::{Entry, SeasonEntry};
 use kuro_data::item::Item;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_i18n::{Arg, MsgKey, trf};

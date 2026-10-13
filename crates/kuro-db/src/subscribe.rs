@@ -212,7 +212,8 @@ mod tests {
     use super::*;
     use crate::open::DbError;
     use crate::schema_unified;
-    use crate::statements_manga::{CategoryPatch, categories};
+    use crate::tables::{CategoryPatch, categories};
+    use kuro_platform::kind::Kind;
 
     const CATEGORIES: &[&str] = &["categories"];
     const HISTORY: &[&str] = &["history"];
@@ -227,7 +228,7 @@ mod tests {
     }
 
     fn names(c: &Connection) -> DbResult<Vec<String>> {
-        Ok(categories::get_categories(c)?.into_iter().map(|r| r.name).collect())
+        Ok(categories::all(c, Kind::Manga)?.into_iter().map(|r| r.name).collect())
     }
 
     /// The next published outcome, or `None` when nothing is published within [`QUIET`].
@@ -283,12 +284,12 @@ mod tests {
         let mut sub = db.subscribe(CATEGORIES, Duration::ZERO, names);
         next(&mut sub).await.expect("first publication");
         let failed: DbResult<()> = db.write(|tx| {
-            categories::insert(tx, "Ghost", 1, 0)?;
+            categories::insert(tx, Kind::Manga, "Ghost", 1, 0)?;
             Err(DbError::NotFound)
         });
         assert!(failed.is_err());
         assert!(next(&mut sub).await.is_none(), "a rolled-back write publishes nothing");
-        db.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Reading", 1, 0)?)).unwrap();
         let after = next(&mut sub).await.expect("the commit publishes");
         assert!(after.contains(&"Reading".to_owned()));
         assert!(!after.contains(&"Ghost".to_owned()));
@@ -310,7 +311,7 @@ mod tests {
         assert!(first.unwrap_err().contains("broken"));
         assert!(next_published(&mut sub).await.is_none(), "the same error is not published twice");
         healthy.store(true, std::sync::atomic::Ordering::SeqCst);
-        db.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Reading", 1, 0)?)).unwrap();
         let recovered = next(&mut sub).await.expect("the next change runs the query again");
         assert!(recovered.contains(&"Reading".to_owned()));
     }
@@ -322,7 +323,7 @@ mod tests {
             Ok(c.query_row("SELECT count(*) FROM history", [], |r| r.get::<_, i64>(0))?)
         });
         next(&mut sub).await.expect("first publication");
-        db.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Reading", 1, 0)?)).unwrap();
         assert!(next(&mut sub).await.is_none());
     }
 
@@ -332,7 +333,7 @@ mod tests {
         let mut sub = db.subscribe(CATEGORIES, Duration::from_millis(200), names);
         let before = next(&mut sub).await.expect("first publication").len();
         for i in 0..5 {
-            db.write(|tx| Ok(categories::insert(tx, &format!("C{i}"), i, 0)?)).unwrap();
+            db.write(|tx| Ok(categories::insert(tx, Kind::Manga, &format!("C{i}"), i, 0)?)).unwrap();
         }
         let burst = next(&mut sub).await.expect("one publication after the burst");
         assert_eq!(burst.len(), before + 5);
@@ -342,10 +343,10 @@ mod tests {
     #[tokio::test]
     async fn an_unchanged_result_is_not_published_again() {
         let (_d, db) = fixture();
-        let id = db.write(|tx| Ok(categories::insert(tx, "Same", 1, 0)?)).unwrap();
+        let id = db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Same", 1, 0)?)).unwrap();
         let mut sub = db.subscribe(CATEGORIES, Duration::ZERO, names);
         next(&mut sub).await.expect("first publication");
-        db.write(|tx| Ok(categories::update(tx, &CategoryPatch { id, flags: Some(4), ..Default::default() })?)).unwrap();
+        db.write(|tx| Ok(categories::update(tx, Kind::Manga, &CategoryPatch { id, flags: Some(4), ..Default::default() })?)).unwrap();
         assert!(next(&mut sub).await.is_none(), "a write that leaves the result equal publishes nothing");
     }
 
@@ -386,7 +387,7 @@ mod tests {
         next(&mut sub).await.expect("first publication");
         sub.pause();
         assert!(sub.is_paused());
-        db.write(|tx| Ok(categories::insert(tx, "Paused", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Paused", 1, 0)?)).unwrap();
         assert!(next_published(&mut sub).await.is_none(), "nothing is published while paused");
         assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1, "no query ran while paused");
         sub.resume();
@@ -410,7 +411,7 @@ mod tests {
             Ok(before)
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
-        db.write(|tx| Ok(categories::insert(tx, "Late", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Late", 1, 0)?)).unwrap();
         let first = next(&mut sub).await.expect("first, stale result");
         assert_eq!(*first, 1, "the seed row only");
         let second = next(&mut sub).await.expect("the commit makes a second run");
@@ -422,10 +423,17 @@ mod tests {
         let (_d, db) = fixture();
         let mut sub = db.subscribe_tables(crate::notify::CATEGORIES_DEPS, Duration::ZERO, names);
         next(&mut sub).await.expect("first publication");
-        db.write(|tx| Ok(crate::statements_manga::mangas::insert(tx, &crate::statements_manga::fixtures::manga("/a"))?))
-            .unwrap();
+        db.write(|tx| {
+            tx.execute(
+                "INSERT INTO entries(kind, source, url, title, status, favorite, initialized, viewer, item_flags, cover_last_modified, date_added) \
+                 VALUES ('manga', 1, '/a', '/a', 0, 1, 0, 0, 0, 0, 0)",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
         assert!(next_published(&mut sub).await.is_none(), "a manga write is not a category change");
-        db.write(|tx| Ok(categories::insert(tx, "Yes", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Yes", 1, 0)?)).unwrap();
         assert!(next(&mut sub).await.expect("category change").contains(&"Yes".to_owned()));
     }
 }

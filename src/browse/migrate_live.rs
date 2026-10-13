@@ -219,7 +219,7 @@ impl MigrateSteps for LiveSteps {
 
 #[cfg(test)]
 mod tests {
-    use kuro_data::category::{Category, CategoryRepo};
+    use kuro_data::category::CategoryRepo;
     use kuro_data::entry::Entry as Stored;
     use kuro_data::item::ItemRepo;
     use kuro_data::track::{Track, TrackRepo};
@@ -278,7 +278,7 @@ mod tests {
         items.add_all(&[Item { entry_id: old_id, url: "/old1".into(), name: "Chapter 1".into(), number: 1.0, done: true, bookmark: true, date_fetch: 9, ..Item::create(Kind::Manga) }]).expect("old chapters");
         TrackRepo::new(Arc::clone(&db)).insert(&Track { entry_id: old_id, remote_id: 77, title: "Tracked".into(), ..Track::new(Kind::Manga, 1) }).expect("track");
         let categories = CategoryRepo::new(Arc::clone(&db), Kind::Manga);
-        let category = categories.insert(&Category { id: 0, name: "Reading".into(), order: 1, flags: 0, hidden: false }).expect("category");
+        let category = kuro_testkit::insert_category(&db, Kind::Manga, "Reading");
         repo.set_categories(old_id, &[category]).expect("categories");
 
         let steps = LiveSteps::new(Kind::Manga, Arc::clone(&db), directory(vec![Catalogue::Manga(FakeCatalogue::new(1)), Catalogue::Manga(FakeCatalogue::new(2))]), None, PrefStore::in_memory());
@@ -334,7 +334,7 @@ mod tests {
         for kind in KINDS {
             let (_dir, db) = db();
             let (repo, categories, tracks, items) = (EntryRepo::new(Arc::clone(&db)), CategoryRepo::new(Arc::clone(&db), kind), TrackRepo::new(Arc::clone(&db)), ItemRepo::new(Arc::clone(&db)));
-            let category = categories.insert(&Category { id: 0, name: "Watching".into(), order: 1, flags: 0, hidden: false }).expect("category");
+            let category = kuro_testkit::insert_category(&db, kind, "Watching");
             let (old_id, new_id) = pair(&db, kind);
             repo.set_categories(old_id, &[category]).expect("link");
             tracks.insert(&Track { entry_id: old_id, remote_id: 99, title: "t".into(), ..Track::new(kind, 7) }).expect("track");

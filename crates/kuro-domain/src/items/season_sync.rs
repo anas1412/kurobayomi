@@ -1,4 +1,4 @@
-//! `SyncSeasonsWithSource` (T-10a-010): the season twin of [`crate::items::episode_sync`]. A season is an anime row whose
+//! `SyncSeasonsWithSource` (T-10a-010): the season twin of [`crate::items::sync`]. A season is an anime entry whose
 //! `parent_id` points at the parent. The order follows the Kotlin `await` (p1-behavior.md 6.3): every source season goes
 //! through `network_to_local` first (which inserts the unseen ones), then the stored children are diffed, then the
 //! removed seasons are detached and the changed fields are written. Nothing is deleted.
@@ -7,27 +7,28 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use chrono::{DateTime, Local};
-use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate};
-use kuro_data::episode::EpisodeRepo;
+use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
+use kuro_data::item::ItemRepo;
 use kuro_db::Db;
+use kuro_platform::kind::Kind;
 use kuro_source::anime::SAnime;
 
 use crate::app::source::LOCAL_SOURCE_ID;
-use crate::entries::fetch_interval::to_anime_update;
-use crate::entries::network_to_local::network_to_local_anime;
+use crate::entries::fetch_interval::to_entry_update;
+use crate::entries::network_to_local::network_to_local;
 use crate::error::DomainError;
 use crate::items::recognition::parse_season_number;
 
 /// The season sync of one parent anime. Clones share the database handle.
 #[derive(Clone)]
 pub struct SyncSeasons {
-    animes: AnimeRepo,
-    episodes: EpisodeRepo,
+    entries: EntryRepo,
+    items: ItemRepo,
 }
 
 impl SyncSeasons {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { animes: AnimeRepo::new(db.clone()), episodes: EpisodeRepo::new(db) }
+        Self { entries: EntryRepo::new(db.clone()), items: ItemRepo::new(db) }
     }
 
     /// Returns ALL source seasons as local rows (not only the new ones), each with `parent_id` set to the parent and
@@ -35,11 +36,11 @@ impl SyncSeasons {
     pub fn run(
         &self,
         raw: &[SAnime],
-        parent: &Anime,
+        parent: &Entry,
         manual: bool,
         window: (i64, i64),
         now_ms: i64,
-    ) -> Result<Vec<Anime>, DomainError> {
+    ) -> Result<Vec<Entry>, DomainError> {
         if raw.is_empty() && parent.source != LOCAL_SOURCE_ID {
             return Err(DomainError::NoSeasons);
         }
@@ -59,24 +60,24 @@ impl SyncSeasons {
             .collect();
 
         // Read the stored children before any insert, so a season inserted below is "new" (not a stored child).
-        let stored: Vec<Anime> = self.animes.seasons_by_parent(parent.id)?.into_iter().map(|season| season.anime).collect();
+        let stored: Vec<Entry> = self.entries.seasons_by_parent(parent.id)?.into_iter().map(|season| season.entry).collect();
 
-        let mut updates: Vec<AnimeUpdate> = Vec::new();
-        let mut out: Vec<Anime> = Vec::with_capacity(seasons.len());
+        let mut updates: Vec<EntryUpdate> = Vec::new();
+        let mut out: Vec<Entry> = Vec::with_capacity(seasons.len());
         for (order, season) in seasons.iter().enumerate() {
             let order = order as i64;
             let season_number = parse_season_number(&parent.title, &season.title, Some(season.season_number));
-            let wanted = Anime {
+            let wanted = Entry {
                 url: season.url.clone(),
                 title: season.title.clone(),
                 source: parent.source,
-                ..Anime::create()
+                ..Entry::create(Kind::Anime)
             };
-            let row = network_to_local_anime(&self.animes, &wanted)?;
-            let local = Anime { parent_id: Some(parent.id), season_source_order: order, ..row };
+            let row = network_to_local(&self.entries, &wanted)?;
+            let local = Entry { parent_id: Some(parent.id), season_source_order: Some(order), ..row };
             let changed = match stored.iter().find(|db| db.url == local.url) {
                 Some(db) => {
-                    db.title != local.title || db.season_number != season_number || db.season_source_order != order
+                    db.title != local.title || db.season_number() != season_number || db.season_source_order() != order
                 }
                 None => true,
             };
@@ -95,33 +96,33 @@ impl SyncSeasons {
         if updates.is_empty() && removed.is_empty() {
             if manual || parent.fetch_interval == 0 || parent.next_update < window.0 {
                 let now = DateTime::from_timestamp_millis(now_ms).map(|utc| utc.with_timezone(&Local)).unwrap_or_else(Local::now);
-                let update = to_anime_update(&self.episodes, parent, &now, window, now_ms);
-                self.animes.update(&update)?;
+                let update = to_entry_update(&self.items, parent, &now, window, now_ms);
+                self.entries.update(&update)?;
             }
             return Ok(out);
         }
 
         // EC-14: a removed season keeps its row and its library state; only its parent link is cleared.
         if !removed.is_empty() {
-            self.animes.remove_parent_ids(&removed)?;
+            self.entries.remove_parent_ids(&removed)?;
         }
         if !updates.is_empty() {
-            self.animes.update_all(&updates)?;
+            self.entries.update_all(&updates)?;
         }
-        self.animes.update(&AnimeUpdate { last_update: Some(now_ms), ..AnimeUpdate::new(parent.id) })?;
+        self.entries.update(&EntryUpdate { last_update: Some(now_ms), ..EntryUpdate::new(parent.id) })?;
         Ok(out)
     }
 }
 
 /// The full field set of a season the sync writes (`toAnimeUpdate` of the in-memory season).
-fn season_update(local: &Anime, season_number: f64, memo: serde_json::Map<String, serde_json::Value>) -> AnimeUpdate {
-    AnimeUpdate {
+fn season_update(local: &Entry, season_number: f64, memo: serde_json::Map<String, serde_json::Value>) -> EntryUpdate {
+    EntryUpdate {
         title: Some(local.title.clone()),
         parent_id: local.parent_id,
         season_number: Some(season_number),
-        season_source_order: Some(local.season_source_order),
-        memo: Some(memo),
-        ..AnimeUpdate::new(local.id)
+        season_source_order: Some(local.season_source_order()),
+        memo: Some(kuro_db::codec::Memo(memo)),
+        ..EntryUpdate::new(local.id)
     }
 }
 
@@ -133,24 +134,24 @@ mod sync_seasons {
     const NOW: i64 = 1_700_000_000_000;
     const SOURCE: i64 = 7;
 
-    fn setup() -> (tempfile::TempDir, SyncSeasons, AnimeRepo, Anime) {
+    fn setup() -> (tempfile::TempDir, SyncSeasons, EntryRepo, Entry) {
         let (dir, db) = test_db();
         let sync = SyncSeasons::new(db.clone());
-        let repo = AnimeRepo::new(db);
-        let mut parent = Anime { url: "/show".into(), title: "Show".into(), source: SOURCE, ..Anime::create() };
+        let repo = EntryRepo::new(db);
+        let mut parent = Entry { url: "/show".into(), title: "Show".into(), source: SOURCE, ..Entry::create(Kind::Anime) };
         parent.id = repo.insert(&parent).expect("insert parent");
         (dir, sync, repo, parent)
     }
 
-    fn stored_child(repo: &AnimeRepo, parent: &Anime, url: &str, title: &str, favorite: bool) -> i64 {
-        let child = Anime {
+    fn stored_child(repo: &EntryRepo, parent: &Entry, url: &str, title: &str, favorite: bool) -> i64 {
+        let child = Entry {
             url: url.into(),
             title: title.into(),
             source: SOURCE,
             parent_id: Some(parent.id),
             favorite,
-            season_number: -1.0,
-            ..Anime::create()
+            season_number: Some(-1.0),
+            ..Entry::create(Kind::Anime)
         };
         repo.insert(&child).expect("insert child")
     }
@@ -169,18 +170,18 @@ mod sync_seasons {
         let out = sync.run(&raw, &parent, false, (0, 0), NOW).expect("sync");
 
         assert_eq!(out.iter().map(|a| a.url.as_str()).collect::<Vec<_>>(), ["/s1", "/s2"], "all source seasons, in order");
-        assert_eq!(out.iter().map(|a| a.season_source_order).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(out.iter().map(|a| a.season_source_order()).collect::<Vec<_>>(), [0, 1]);
         assert!(out.iter().all(|a| a.parent_id == Some(parent.id)));
 
-        let updated = repo.by_url_and_source("/s1", SOURCE).unwrap().expect("updated season");
+        let updated = repo.by_url_and_source(Kind::Anime, "/s1", SOURCE).unwrap().expect("updated season");
         assert_eq!(updated.title, "Show Season 2", "title is written");
-        assert_eq!(updated.season_number, 2.0, "season number is parsed from the title");
-        assert_eq!(updated.season_source_order, 0);
+        assert_eq!(updated.season_number(), 2.0, "season number is parsed from the title");
+        assert_eq!(updated.season_source_order(), 0);
 
-        let new = repo.by_url_and_source("/s2", SOURCE).unwrap().expect("inserted season");
+        let new = repo.by_url_and_source(Kind::Anime, "/s2", SOURCE).unwrap().expect("inserted season");
         assert_eq!(new.parent_id, Some(parent.id));
-        assert_eq!(new.season_number, 3.0);
-        assert_eq!(new.season_source_order, 1);
+        assert_eq!(new.season_number(), 3.0);
+        assert_eq!(new.season_source_order(), 1);
 
         let removed = repo.by_id(gone).expect("the removed row survives");
         assert_eq!(removed.parent_id, None, "EC-14: only the parent link is cleared");
@@ -212,7 +213,7 @@ mod sync_seasons {
         let raw = [season("/show", "Show"), season("/s1", "Show Season 2")];
         let out = sync.run(&raw, &parent, false, (0, 0), NOW).expect("sync");
         assert_eq!(out.iter().map(|a| a.url.as_str()).collect::<Vec<_>>(), ["/s1"], "EC-13");
-        assert_eq!(repo.by_url_and_source("/show", SOURCE).unwrap().unwrap().parent_id, None, "the parent is not its own child");
+        assert_eq!(repo.by_url_and_source(Kind::Anime, "/show", SOURCE).unwrap().unwrap().parent_id, None, "the parent is not its own child");
     }
 
     #[test]
@@ -229,10 +230,10 @@ mod sync_seasons {
         let (_dir, sync, repo, mut parent) = setup();
         parent.fetch_interval = 3;
         parent.next_update = 4_102_444_800_000;
-        repo.update(&AnimeUpdate { fetch_interval: Some(3), next_update: Some(parent.next_update), ..AnimeUpdate::new(parent.id) })
+        repo.update(&EntryUpdate { fetch_interval: Some(3), next_update: Some(parent.next_update), ..EntryUpdate::new(parent.id) })
             .expect("set interval");
-        let mut child = Anime { url: "/s1".into(), title: "Show Season 2".into(), source: SOURCE, parent_id: Some(parent.id), ..Anime::create() };
-        child.season_number = 2.0;
+        let mut child = Entry { url: "/s1".into(), title: "Show Season 2".into(), source: SOURCE, parent_id: Some(parent.id), ..Entry::create(Kind::Anime) };
+        child.season_number = Some(2.0);
         child.id = repo.insert(&child).expect("insert child");
         let raw = [season("/s1", "Show Season 2")];
         sync.run(&raw, &parent, false, (0, 0), NOW).expect("sync");

@@ -230,7 +230,8 @@ mod tests {
 
     use super::*;
     use crate::open::DbError;
-    use crate::statements_manga::{CategoryPatch, categories};
+    use crate::tables::{CategoryPatch, categories};
+    use kuro_platform::kind::Kind;
 
     /// A unified file in a fresh directory, with a handle on it.
     fn fixture() -> (tempfile::TempDir, Db) {
@@ -242,7 +243,7 @@ mod tests {
     }
 
     fn names(db: &Db) -> Vec<String> {
-        db.read(|c| Ok(categories::get_categories(c)?.into_iter().map(|r| r.name).collect()))
+        db.read(|c| Ok(categories::all(c, Kind::Manga)?.into_iter().map(|r| r.name).collect()))
             .unwrap()
     }
 
@@ -263,7 +264,7 @@ mod tests {
     #[test]
     fn a_committed_write_is_seen_by_every_reader() {
         let (_dir, db) = fixture();
-        db.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Reading", 1, 0)?)).unwrap();
         for _ in 0..=READERS {
             assert!(names(&db).contains(&"Reading".to_owned()));
         }
@@ -273,24 +274,25 @@ mod tests {
     fn one_error_rolls_back_insert_update_and_delete_from_three_helpers() {
         let (_dir, db) = fixture();
         db.write(|tx| {
-            categories::insert(tx, "Keep", 1, 0)?;
-            categories::insert(tx, "Drop", 2, 0)?;
+            categories::insert(tx, Kind::Manga, "Keep", 1, 0)?;
+            categories::insert(tx, Kind::Manga, "Drop", 2, 0)?;
             Ok(())
         })
         .unwrap();
         let before = names(&db);
         let result: DbResult<()> = db.write(|tx| {
-            categories::insert(tx, "New", 3, 0)?;
+            categories::insert(tx, Kind::Manga, "New", 3, 0)?;
             let keep = id_of(tx, "Keep")?;
             categories::update(
                 tx,
+                Kind::Manga,
                 &CategoryPatch {
                     id: keep,
                     name: Some("Renamed".into()),
                     ..Default::default()
                 },
             )?;
-            categories::delete(tx, id_of(tx, "Drop")?)?;
+            categories::delete(tx, Kind::Manga, id_of(tx, "Drop")?)?;
             Err(DbError::NotFound)
         });
         assert!(matches!(result, Err(DbError::NotFound)));
@@ -303,20 +305,20 @@ mod tests {
         let before = names(&db);
         let panicked = catch_unwind(AssertUnwindSafe(|| {
             db.write(|tx| -> DbResult<()> {
-                categories::insert(tx, "Panicky", 1, 0)?;
+                categories::insert(tx, Kind::Manga, "Panicky", 1, 0)?;
                 panic!("boom");
             })
         }));
         assert!(panicked.is_err());
         assert_eq!(names(&db), before);
-        db.write(|tx| Ok(categories::insert(tx, "After", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "After", 1, 0)?)).unwrap();
         assert!(names(&db).contains(&"After".to_owned()));
     }
 
     #[test]
     fn readers_refuse_writes() {
         let (_dir, db) = fixture();
-        let result = db.read(|c| Ok(categories::insert(c, "Sneaky", 1, 0)?));
+        let result = db.read(|c| Ok(categories::insert(c, Kind::Manga, "Sneaky", 1, 0)?));
         assert!(result.is_err());
         assert!(!names(&db).contains(&"Sneaky".to_owned()));
     }
@@ -329,9 +331,31 @@ mod publication_tests {
 
     use super::*;
     use crate::notify::{LIBRARY_DEPS, Tables};
-    use crate::statements_manga::fixtures::{chapter, manga};
-    use crate::statements_manga::{ChapterPatch, categories, chapters, mangas};
+    use crate::tables::{categories, entries};
+    use kuro_platform::kind::Kind;
     use kuro_testkit::TempPaths;
+
+    /// One favourite manga entry; returns its id.
+    fn manga(tx: &Connection, url: &str) -> i64 {
+        tx.execute(
+            "INSERT INTO entries(kind, source, url, title, status, favorite, initialized, viewer, item_flags, cover_last_modified, date_added) \
+             VALUES ('manga', 1, ?1, ?1, 0, 1, 0, 0, 0, 0, 0)",
+            [url],
+        )
+        .unwrap();
+        tx.last_insert_rowid()
+    }
+
+    /// One chapter of `manga_id`; returns its id.
+    fn chapter(tx: &Connection, manga_id: i64, url: &str) -> i64 {
+        tx.execute(
+            "INSERT INTO items(entry_id, url, name, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
+             VALUES (?1, ?2, ?2, 0, 0, 0, 1, 0, 0, 0)",
+            (manga_id, url),
+        )
+        .unwrap();
+        tx.last_insert_rowid()
+    }
 
     fn fixture() -> (tempfile::TempDir, Db) {
         let dir = tempfile::tempdir().unwrap();
@@ -353,7 +377,7 @@ mod publication_tests {
     fn a_single_insert_publishes_the_entries_bit() {
         let (_d, db) = fixture();
         let mut rx = db.changes.subscribe();
-        db.write(|tx| Ok(mangas::insert(tx, &manga("/a"))?)).unwrap();
+        db.write(|tx| Ok(manga(tx, "/a"))).unwrap();
         assert_eq!(published(&mut rx), [Tables::ENTRIES], "TC-N01");
     }
 
@@ -362,8 +386,8 @@ mod publication_tests {
         let (_d, db) = fixture();
         let mut rx = db.changes.subscribe();
         let result: DbResult<()> = db.write(|tx| {
-            let id = mangas::insert(tx, &manga("/a"))?;
-            chapters::insert(tx, &chapter(id, "/a/1"))?;
+            let id = manga(tx, "/a");
+            chapter(tx, id, "/a/1");
             Err(DbError::NotFound)
         });
         assert!(result.is_err());
@@ -375,15 +399,12 @@ mod publication_tests {
         let (_d, db) = fixture();
         let chapter_id = db
             .write(|tx| {
-                let m = mangas::insert(tx, &manga("/a"))?;
-                Ok(chapters::insert(tx, &chapter(m, "/a/1"))?)
+                let m = manga(tx, "/a");
+                Ok(chapter(tx, m, "/a/1"))
             })
             .unwrap();
         let mut rx = db.changes.subscribe();
-        db.write(|tx| {
-            Ok(chapters::update(tx, &ChapterPatch { id: chapter_id, read: Some(true), ..Default::default() })?)
-        })
-        .unwrap();
+        db.write(|tx| Ok(tx.execute("UPDATE items SET done = 1 WHERE _id = ?1", [chapter_id]).map(drop)?)).unwrap();
         assert_eq!(published(&mut rx), [Tables::ITEMS | Tables::ENTRIES], "TC-N03");
     }
 
@@ -392,8 +413,8 @@ mod publication_tests {
         let (_d, db) = fixture();
         let manga_id = db
             .write(|tx| {
-                let m = mangas::insert(tx, &manga("/a"))?;
-                let c = chapters::insert(tx, &chapter(m, "/a/1"))?;
+                let m = manga(tx, "/a");
+                let c = chapter(tx, m, "/a/1");
                 tx.execute("INSERT INTO history(item_id, last_at, duration_ms) VALUES (?1, 1, 0)", [c])?;
                 Ok(m)
             })
@@ -407,7 +428,7 @@ mod publication_tests {
     fn category_writes_publish_only_the_categories_bit() {
         let (_d, db) = fixture();
         let mut rx = db.changes.subscribe();
-        db.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();
+        db.write(|tx| Ok(categories::insert(tx, Kind::Manga, "Reading", 1, 0)?)).unwrap();
         assert_eq!(published(&mut rx), [Tables::CATEGORIES]);
     }
 
@@ -419,15 +440,15 @@ mod publication_tests {
         let counter = Arc::clone(&runs);
         let mut sub = db.subscribe_tables(LIBRARY_DEPS, Duration::ZERO, move |c| {
             counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(mangas::get_favorites(c)?.len())
+            Ok(entries::favorites(c, Kind::Manga)?.len())
         });
         assert_eq!(sub.changed().await.map(|r| r.map(|v| *v)), Some(Ok(0)), "emits once immediately");
-        db.write_async(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).await.unwrap();
+        db.write_async(|tx| Ok(categories::insert(tx, Kind::Manga, "Reading", 1, 0)?)).await.unwrap();
         assert!(tokio::time::timeout(Duration::from_millis(300), sub.changed()).await.is_err());
         assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1, "a category write does not run the library query");
         db.write_async(|tx| {
-            let m = mangas::insert(tx, &manga("/a"))?;
-            Ok(chapters::insert(tx, &chapter(m, "/a/1"))?)
+            let m = manga(tx, "/a");
+            Ok(chapter(tx, m, "/a/1"))
         })
         .await
         .unwrap();
@@ -461,15 +482,15 @@ mod publication_tests {
     async fn read_async_and_write_async_run_the_same_closures() {
         let (_d, db) = fixture();
         let db = Arc::new(db);
-        db.write_async(|tx| Ok(categories::insert(tx, "Async", 1, 0)?)).await.unwrap();
+        db.write_async(|tx| Ok(categories::insert(tx, Kind::Manga, "Async", 1, 0)?)).await.unwrap();
         let count = |db: &Arc<Db>| {
             let db = Arc::clone(db);
-            async move { db.read_async(|c| Ok(categories::get_categories(c)?.len())).await.unwrap() }
+            async move { db.read_async(|c| Ok(categories::all(c, Kind::Manga)?.len())).await.unwrap() }
         };
         assert_eq!(count(&db).await, 2, "the system row and the new category");
         let rolled_back: DbResult<()> = db
             .write_async(|tx| {
-                categories::insert(tx, "Gone", 2, 0)?;
+                categories::insert(tx, Kind::Manga, "Gone", 2, 0)?;
                 Err(DbError::NotFound)
             })
             .await;

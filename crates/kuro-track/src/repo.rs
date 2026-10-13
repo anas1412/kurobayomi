@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use kuro_data::entry_history::HistoryRepo;
+use kuro_data::history::HistoryRepo;
 use kuro_data::item::{ItemRepo, ItemUpdate};
 use kuro_data::track::{Track, TrackRepo};
 use kuro_db::handle::Db;
@@ -319,204 +319,14 @@ impl MangaHistoryRepo for SharedHistory {
     }
 }
 
-// The impls below serve the per-kind `kuro-data` repos that `src/settings_ui/tracker_host.rs` still hands to the
-// context. Phase E: switch that file to `SharedTracks`, `SharedItems` and `SharedHistory`, then delete this section.
-
-use kuro_data::track::{LegacyTrack, LegacyTrackRepo};
-
-use crate::model::{AnimeTrack as AnimeModel, MangaTrack as MangaModel};
-
-/// `upsert`, `upsert_all`, `get_by_id`, `list_all`, `list_for_entry` and `delete` of a legacy track repo, in terms of
-/// the shared [`Track`].
-struct Legacy<'a, T: LegacyTrack>(&'a LegacyTrackRepo<T>);
-
-impl<T: LegacyTrack> Legacy<'_, T> {
-    async fn upsert(&self, row: Track) -> Result<i64, TrackError> {
-        let repo = self.0.clone();
-        blocking(move || repo.insert(&T::from_track(row))).await
-    }
-
-    async fn upsert_all(&self, rows: Vec<Track>) -> Result<(), TrackError> {
-        let repo = self.0.clone();
-        blocking(move || repo.insert_all(&rows.into_iter().map(T::from_track).collect::<Vec<_>>())).await
-    }
-
-    async fn by_id(&self, id: i64) -> Result<Option<Track>, TrackError> {
-        let repo = self.0.clone();
-        Ok(blocking(move || repo.by_id(id)).await?.map(|t| t.to_track()))
-    }
-
-    async fn all(&self) -> Result<Vec<Track>, TrackError> {
-        let repo = self.0.clone();
-        Ok(blocking(move || repo.all()).await?.iter().map(T::to_track).collect())
-    }
-
-    async fn by_entry(&self, entry_id: i64) -> Result<Vec<Track>, TrackError> {
-        let repo = self.0.clone();
-        Ok(blocking(move || repo.by_entry(entry_id)).await?.iter().map(T::to_track).collect())
-    }
-
-    async fn delete(&self, entry_id: i64, tracker_id: TrackerId) -> Result<(), TrackError> {
-        let repo = self.0.clone();
-        blocking(move || repo.delete(entry_id, tracker_id.0)).await
-    }
-}
-
-#[async_trait]
-impl AnimeTrackRepo for kuro_data::track::AnimeTrackRepo {
-    async fn upsert(&self, t: &AnimeModel) -> Result<i64, TrackError> {
-        Legacy(self).upsert(t.to_db(false)?).await
-    }
-
-    async fn upsert_all(&self, ts: &[AnimeModel]) -> Result<(), TrackError> {
-        Legacy(self).upsert_all(ts.iter().map(|t| t.to_db(false)).collect::<Result<_, _>>()?).await
-    }
-
-    async fn get_by_id(&self, id: i64) -> Result<Option<AnimeModel>, TrackError> {
-        Ok(Legacy(self).by_id(id).await?.as_ref().map(AnimeModel::from_db))
-    }
-
-    async fn list_all(&self) -> Result<Vec<AnimeModel>, TrackError> {
-        Ok(Legacy(self).all().await?.iter().map(AnimeModel::from_db).collect())
-    }
-
-    async fn list_for_entry(&self, anime_id: i64) -> Result<Vec<AnimeModel>, TrackError> {
-        Ok(Legacy(self).by_entry(anime_id).await?.iter().map(AnimeModel::from_db).collect())
-    }
-
-    fn watch_for_entry(&self, anime_id: i64) -> RowsWatch<AnimeModel> {
-        bridge(self.watch_by_entry(anime_id), |rows| rows.iter().map(|t| AnimeModel::from_db(&t.to_track())).collect())
-    }
-
-    async fn delete(&self, anime_id: i64, tracker_id: TrackerId) -> Result<(), TrackError> {
-        Legacy(self).delete(anime_id, tracker_id).await
-    }
-}
-
-#[async_trait]
-impl MangaTrackRepo for kuro_data::track::MangaTrackRepo {
-    async fn upsert(&self, t: &MangaModel) -> Result<i64, TrackError> {
-        Legacy(self).upsert(t.to_db(false)?).await
-    }
-
-    async fn upsert_all(&self, ts: &[MangaModel]) -> Result<(), TrackError> {
-        Legacy(self).upsert_all(ts.iter().map(|t| t.to_db(false)).collect::<Result<_, _>>()?).await
-    }
-
-    async fn get_by_id(&self, id: i64) -> Result<Option<MangaModel>, TrackError> {
-        Ok(Legacy(self).by_id(id).await?.as_ref().map(MangaModel::from_db))
-    }
-
-    async fn list_all(&self) -> Result<Vec<MangaModel>, TrackError> {
-        Ok(Legacy(self).all().await?.iter().map(MangaModel::from_db).collect())
-    }
-
-    async fn list_for_entry(&self, manga_id: i64) -> Result<Vec<MangaModel>, TrackError> {
-        Ok(Legacy(self).by_entry(manga_id).await?.iter().map(MangaModel::from_db).collect())
-    }
-
-    fn watch_for_entry(&self, manga_id: i64) -> RowsWatch<MangaModel> {
-        bridge(self.watch_by_entry(manga_id), |rows| rows.iter().map(|t| MangaModel::from_db(&t.to_track())).collect())
-    }
-
-    async fn delete(&self, manga_id: i64, tracker_id: TrackerId) -> Result<(), TrackError> {
-        Legacy(self).delete(manga_id, tracker_id).await
-    }
-}
-
-#[async_trait]
-impl AnimeEpisodeRepo for kuro_data::episode::EpisodeRepo {
-    async fn list(&self, anime_id: i64) -> Result<Vec<UnitRef>, TrackError> {
-        let repo = self.clone();
-        let rows =
-            blocking(move || kuro_data::episode::EpisodeRepo::by_anime_id(&repo, anime_id)).await?;
-        Ok(rows
-            .into_iter()
-            .map(|e| UnitRef {
-                id: e.id,
-                number: e.episode_number,
-                seen: e.seen,
-            })
-            .collect())
-    }
-
-    async fn mark_seen(&self, ids: &[i64]) -> Result<(), TrackError> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let updates: Vec<_> = ids
-            .iter()
-            .map(|&id| kuro_data::episode::EpisodeUpdate {
-                seen: Some(true),
-                ..kuro_data::episode::EpisodeUpdate::new(id)
-            })
-            .collect();
-        let repo = self.clone();
-        blocking(move || kuro_data::episode::EpisodeRepo::update_all(&repo, &updates)).await
-    }
-}
-
-#[async_trait]
-impl MangaChapterRepo for kuro_data::chapter::ChapterRepo {
-    async fn list(&self, manga_id: i64) -> Result<Vec<UnitRef>, TrackError> {
-        let repo = self.clone();
-        let rows =
-            blocking(move || kuro_data::chapter::ChapterRepo::by_manga_id(&repo, manga_id, false))
-                .await?;
-        Ok(rows
-            .into_iter()
-            .map(|c| UnitRef {
-                id: c.id,
-                number: c.chapter_number,
-                seen: c.read,
-            })
-            .collect())
-    }
-
-    async fn mark_read(&self, ids: &[i64]) -> Result<(), TrackError> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let updates: Vec<_> = ids
-            .iter()
-            .map(|&id| kuro_data::chapter::ChapterUpdate {
-                read: Some(true),
-                ..kuro_data::chapter::ChapterUpdate::new(id)
-            })
-            .collect();
-        let repo = self.clone();
-        blocking(move || kuro_data::chapter::ChapterRepo::update_all(&repo, &updates)).await
-    }
-}
-
-#[async_trait]
-impl AnimeHistoryRepo for kuro_data::history::AnimeHistoryRepo {
-    async fn seen_times(&self, anime_id: i64) -> Result<Vec<Option<i64>>, TrackError> {
-        let repo = self.clone();
-        let rows =
-            blocking(move || kuro_data::history::AnimeHistoryRepo::by_anime_id(&repo, anime_id))
-                .await?;
-        Ok(rows.iter().map(|h| h.last_seen).collect())
-    }
-}
-
-#[async_trait]
-impl MangaHistoryRepo for kuro_data::history::MangaHistoryRepo {
-    async fn read_times(&self, manga_id: i64) -> Result<Vec<Option<i64>>, TrackError> {
-        let repo = self.clone();
-        let rows =
-            blocking(move || kuro_data::history::MangaHistoryRepo::by_manga_id(&repo, manga_id))
-                .await?;
-        Ok(rows.iter().map(|h| Some(h.last_read)).collect())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use kuro_db::handle::Db;
-    use kuro_testkit::{AnimeBuilder, EpisodeBuilder, TempDir, TestDb};
+    use kuro_data::entry::{Entry, EntryRepo};
+    use kuro_data::item::{Item, ItemRepo};
+    use kuro_testkit::{TempDir, TestDb};
 
     use super::*;
     use crate::model::{AnimeTrack, TrackerId};
@@ -544,7 +354,7 @@ mod tests {
     async fn tr_27_d01_upsert_keeps_the_row_id_and_returns_it() {
         let dir = TempDir::new().unwrap();
         let db: Arc<Db> = TestDb::handle(&dir);
-        let anime_id = db.write(|tx| Ok(AnimeBuilder::new().insert(tx))).unwrap();
+        let anime_id = EntryRepo::new(db.clone()).insert(&Entry::create(Kind::Anime)).unwrap();
         let repo = SharedTracks::new(db.clone());
 
         let first = AnimeTrackRepo::upsert(&repo, &track(anime_id, 1.0))
@@ -565,7 +375,7 @@ mod tests {
     async fn tr_27_015_a_second_tracker_gets_its_own_row() {
         let dir = TempDir::new().unwrap();
         let db: Arc<Db> = TestDb::handle(&dir);
-        let anime_id = db.write(|tx| Ok(AnimeBuilder::new().insert(tx))).unwrap();
+        let anime_id = EntryRepo::new(db.clone()).insert(&Entry::create(Kind::Anime)).unwrap();
         let repo = SharedTracks::new(db.clone());
         let a = AnimeTrackRepo::upsert(&repo, &track(anime_id, 1.0))
             .await
@@ -588,13 +398,9 @@ mod tests {
     async fn tr_27_027_episode_repo_reads_numbers_and_marks_seen() {
         let dir = TempDir::new().unwrap();
         let db: Arc<Db> = TestDb::handle(&dir);
-        let anime_id = db.write(|tx| Ok(AnimeBuilder::new().insert(tx))).unwrap();
-        db.write(|tx| {
-            EpisodeBuilder::new(anime_id).episode_number(1.0).insert(tx);
-            EpisodeBuilder::new(anime_id).episode_number(2.5).insert(tx);
-            Ok(())
-        })
-        .unwrap();
+        let anime_id = EntryRepo::new(db.clone()).insert(&Entry::create(Kind::Anime)).unwrap();
+        let episode = |number| Item { entry_id: anime_id, number, ..Item::create(Kind::Anime) };
+        ItemRepo::new(db.clone()).add_all(&[episode(1.0), episode(2.5)]).unwrap();
         let repo = SharedItems::new(db.clone());
         let rows = AnimeEpisodeRepo::list(&repo, anime_id).await.unwrap();
         assert_eq!(rows.len(), 2);

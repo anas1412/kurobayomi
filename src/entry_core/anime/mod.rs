@@ -6,7 +6,7 @@
 //! the shared `entry_core::list_view` and `entry_core::list_model::row_menu`.
 //!
 //! Reused from the domain layer, not copied here: episode and season flag masks and codecs
-//! (`kuro_domain::entries::anime`), the flag setters (`kuro_domain::entries::flag_setters`), the episode sorter
+//! (`kuro_domain::entries::flags`), the flag setters (`kuro_domain::entries::flag_setters`), the episode sorter
 //! (`kuro_domain::items::sorter`), the filter engine (`kuro_domain::app::items`), the missing-episode gaps
 //! (`kuro_domain::items::missing`), the anime preference keys (`kuro_prefs`), and the shared manga text rules
 //! (`entry_core::text`) for title, author, artist and description.

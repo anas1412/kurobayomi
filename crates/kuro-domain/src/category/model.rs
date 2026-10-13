@@ -2,7 +2,7 @@
 
 use kuro_platform::kind::Kind;
 use crate::SYSTEM_CATEGORY_ID;
-use crate::library::sort::LibrarySort;
+use kuro_platform::sort::LibrarySort;
 
 /// One row of `categories`. `order` is the `sort` column.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,9 +69,9 @@ mod tests {
     #[test]
     fn sort_of_handles_the_null_case() {
         let asc_date = cat(2, 0x5C);
-        assert_eq!(sort_of(Some(&asc_date), Kind::Manga).ty, crate::library::sort::SortType::DateAdded);
+        assert_eq!(sort_of(Some(&asc_date), Kind::Manga).ty, kuro_platform::sort::SortType::DateAdded);
         assert_eq!(sort_of(None, Kind::Manga), LibrarySort::DEFAULT);
-        assert_eq!(cat(2, 0).sort(Kind::Manga).dir, crate::library::sort::Direction::Descending);
+        assert_eq!(cat(2, 0).sort(Kind::Manga).dir, kuro_platform::sort::Direction::Descending);
     }
 
     #[test]

@@ -28,6 +28,7 @@ use kuro_track::mal::store::{SecretTokenStore, TokenStore};
 use kuro_track::mal::tracker::MalTracker;
 use kuro_track::manager::TrackerManager;
 use kuro_track::mangaupdates::MangaUpdatesTracker;
+use kuro_track::repo::{SharedHistory, SharedItems, SharedTracks};
 use kuro_track::messages::{english, MsgKey};
 use kuro_track::model::TrackerId;
 use kuro_track::oauth::{handle_redirect, Handled, PendingLogins, PENDING_TTL_MS};
@@ -209,12 +210,12 @@ fn build(secrets: Arc<kuro_platform::secrets::FallbackSecrets>, config_dir: &std
     let scheduler = Arc::new(RetryScheduler::new(Arc::clone(&queue), Arc::clone(&net)));
     let ctx = Arc::new(TrackCtx {
         trackers: Arc::clone(&manager),
-        anime_tracks: Arc::new(kuro_data::track::AnimeTrackRepo::new(Arc::clone(&app.db))),
-        manga_tracks: Arc::new(kuro_data::track::MangaTrackRepo::new(Arc::clone(&app.db))),
-        anime_episodes: Arc::new(kuro_data::episode::EpisodeRepo::new(Arc::clone(&app.db))),
-        manga_chapters: Arc::new(kuro_data::chapter::ChapterRepo::new(Arc::clone(&app.db))),
-        anime_history: Arc::new(kuro_data::history::AnimeHistoryRepo::new(Arc::clone(&app.db))),
-        manga_history: Arc::new(kuro_data::history::MangaHistoryRepo::new(Arc::clone(&app.db))),
+        anime_tracks: Arc::new(SharedTracks::new(Arc::clone(&app.db))),
+        manga_tracks: Arc::new(SharedTracks::new(Arc::clone(&app.db))),
+        anime_episodes: Arc::new(SharedItems::new(Arc::clone(&app.db))),
+        manga_chapters: Arc::new(SharedItems::new(Arc::clone(&app.db))),
+        anime_history: Arc::new(SharedHistory::new(Arc::clone(&app.db))),
+        manga_history: Arc::new(SharedHistory::new(Arc::clone(&app.db))),
         queue,
         scheduler,
         net,

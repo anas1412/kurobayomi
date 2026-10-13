@@ -4,74 +4,56 @@
 use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex};
 
-use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::manga::{Manga, MangaRepo};
-use kuro_db::Db;
-use kuro_db::sql::{chapters, excluded_scanlators};
 use kuro_data::entry::{Entry, EntryRepo};
 use kuro_data::item::{Item, ItemRepo};
-use kuro_domain::items::status::{ItemDownloads, SetDoneResult, SetDoneStatus};
+use kuro_db::Db;
 use kuro_domain::entries::update::{CacheFiles, UpdateEntry, remote_from_manga};
-use kuro_domain::items::chapter_sync::{ChapterSyncOptions, NoRenames, SyncChapters};
-use kuro_domain::items::source_sync::MangaSyncLocks;
+use kuro_domain::items::source_sync::EntrySyncLocks;
+use kuro_domain::items::status::{ItemDownloads, SetDoneResult, SetDoneStatus};
+use kuro_domain::items::sync::{NoRenames, SourceItem, SyncItems, SyncOptions, source_item_from_chapter};
 use kuro_domain::track::delayed::{DelayedTrackingStore, DelayedTrackingWorker, QUEUE_FILE, ReplayOutcome, TrackReplay};
 use kuro_source::model::SChapter;
 use kuro_testkit::{TempDir, TestDb};
 
 const NOW_MS: i64 = 1_000_000;
 
-/// A migrated manga database and a manga row titled `title`.
+/// A migrated database and a manga entry titled `title`.
 fn manga_fixture(title: &str) -> (TempDir, Arc<Db>, i64) {
     let dir = TempDir::new().expect("temp dir");
     let db = TestDb::handle(&dir);
-    let id = MangaRepo::new(db.clone()).insert(&Manga { title: title.into(), ..Manga::create() }).expect("insert manga");
+    let id = EntryRepo::new(db.clone()).insert(&Entry { title: title.into(), ..Entry::create(Kind::Manga) }).expect("insert manga");
     (dir, db, id)
 }
 
-fn chapter_row(manga_id: i64, url: &str, name: &str, number: f64) -> kuro_db::statements_manga::ChapterRow {
-    let c = Chapter { manga_id, url: url.into(), name: name.into(), chapter_number: number, ..Chapter::create() };
-    kuro_db::statements_manga::ChapterRow {
-        id: 0,
-        manga_id,
-        url: c.url,
-        name: c.name,
-        scanlator: c.scanlator,
-        read: c.read,
-        bookmark: c.bookmark,
-        last_page_read: c.last_page_read,
-        chapter_number: c.chapter_number,
-        source_order: c.source_order,
-        date_fetch: c.date_fetch,
-        date_upload: c.date_upload,
-        last_modified_at: 0,
-        version: 1,
-        is_syncing: false,
-    }
+fn chapter_row(manga_id: i64, url: &str, name: &str, number: f64) -> Item {
+    Item { entry_id: manga_id, url: url.into(), name: name.into(), number, ..Item::create(Kind::Manga) }
 }
 
-fn stored_chapters(db: &Arc<Db>, manga_id: i64) -> Vec<Chapter> {
-    ChapterRepo::new(db.clone()).by_manga_id(manga_id, false).expect("read chapters")
+fn stored_chapters(db: &Arc<Db>, manga_id: i64) -> Vec<Item> {
+    ItemRepo::new(db.clone()).by_entry_id(manga_id, false).expect("read chapters")
 }
 
-fn sync(db: &Arc<Db>, locks: &Arc<MangaSyncLocks>) -> SyncChapters {
-    SyncChapters::new(db.clone(), locks.clone(), Arc::new(NoRenames))
+fn sync(db: &Arc<Db>, locks: &Arc<EntrySyncLocks>) -> SyncItems {
+    SyncItems::new(db.clone(), locks.clone(), Arc::new(NoRenames))
 }
 
-fn options(now_ms: i64) -> ChapterSyncOptions {
-    ChapterSyncOptions { now_ms, manual: false, window: (0, 0), mark_duplicate_as_read: true, is_local: false }
+fn options(now_ms: i64) -> SyncOptions {
+    SyncOptions { now_ms, manual: false, window: (0, 0), mark_duplicate_done: true, is_local: false }
 }
 
 fn source_chapter(url: &str, name: &str, date_upload: i64) -> SChapter {
     SChapter { url: url.into(), name: name.into(), date_upload, chapter_number: -1.0, scanlator: None }
 }
 
-fn no_hook(_: &mut SChapter) {}
-
-fn manga_row(db: &Arc<Db>, id: i64) -> Manga {
-    MangaRepo::new(db.clone()).by_id(id).expect("read manga")
+fn items_of(raw: &[SChapter]) -> Vec<SourceItem> {
+    raw.iter().map(source_item_from_chapter).collect()
 }
 
-mod sync_chapters {
+fn manga_row(db: &Arc<Db>, id: i64) -> Entry {
+    EntryRepo::new(db.clone()).by_id(id).expect("read manga")
+}
+
+mod sync_items {
     use super::*;
 
     #[tokio::test]
@@ -80,11 +62,11 @@ mod sync_chapters {
         let (_dir, db, id) = manga_fixture(fixture["manga_title"].as_str().expect("title"));
         for row in fixture["stored"].as_array().expect("stored") {
             let mut r = chapter_row(id, row["url"].as_str().expect("url"), row["name"].as_str().expect("name"), row["number"].as_f64().expect("number"));
-            r.read = row["read"].as_bool().expect("read");
+            r.done = row["read"].as_bool().expect("read");
             r.bookmark = row["bookmark"].as_bool().expect("bookmark");
             r.date_fetch = row["date_fetch"].as_i64().expect("date_fetch");
             r.source_order = row["source_order"].as_i64().expect("source_order");
-            db.write(|tx| Ok(chapters::insert(tx, &r)?)).expect("insert");
+            ItemRepo::new(db.clone()).add_all(&[r]).expect("insert");
         }
         let raw: Vec<SChapter> = fixture["source"]
             .as_array()
@@ -92,9 +74,9 @@ mod sync_chapters {
             .iter()
             .map(|c| source_chapter(c["url"].as_str().expect("url"), c["name"].as_str().expect("name"), c["date_upload"].as_i64().expect("date")))
             .collect();
-        let locks = Arc::new(MangaSyncLocks::default());
+        let locks = Arc::new(EntrySyncLocks::default());
         let manga = manga_row(&db, id);
-        let returned = sync(&db, &locks).run(raw, &manga, options(fixture["now_ms"].as_i64().expect("now")), &no_hook).await.expect("sync");
+        let returned = sync(&db, &locks).run(items_of(&raw), &manga, options(fixture["now_ms"].as_i64().expect("now")), None).await.expect("sync");
         let urls: Vec<&str> = returned.iter().map(|c| c.url.as_str()).collect();
         let expected: Vec<&str> = fixture["expected_returned_urls"].as_array().expect("urls").iter().map(|u| u.as_str().expect("url")).collect();
         assert_eq!(urls, expected, "only /c5 and /c4 are reported as new");
@@ -106,14 +88,14 @@ mod sync_chapters {
         }
         assert!(rows.iter().all(|r| r.url != "/c3"), "the removed chapter is deleted");
         let c3b = rows.iter().find(|r| r.url == "/c3b").expect("c3b");
-        assert!(c3b.read && c3b.bookmark, "c3b inherits read and bookmark from the removed twin");
+        assert!(c3b.done && c3b.bookmark, "c3b inherits read and bookmark from the removed twin");
     }
 
     #[tokio::test]
     async fn empty_source_errors() {
         let (_dir, db, id) = manga_fixture("Foo");
         let manga = manga_row(&db, id);
-        let err = sync(&db, &Arc::new(MangaSyncLocks::default())).run(Vec::new(), &manga, options(NOW_MS), &no_hook).await;
+        let err = sync(&db, &Arc::new(EntrySyncLocks::default())).run(Vec::new(), &manga, options(NOW_MS), None).await;
         assert!(err.is_err(), "EC-01");
         assert!(stored_chapters(&db, id).is_empty(), "nothing written");
     }
@@ -122,20 +104,20 @@ mod sync_chapters {
     async fn local_empty_ok() {
         let (_dir, db, id) = manga_fixture("Foo");
         let manga = manga_row(&db, id);
-        let local = ChapterSyncOptions { is_local: true, ..options(NOW_MS) };
-        let out = sync(&db, &Arc::new(MangaSyncLocks::default())).run(Vec::new(), &manga, local, &no_hook).await.expect("ok");
+        let local = SyncOptions { is_local: true, ..options(NOW_MS) };
+        let out = sync(&db, &Arc::new(EntrySyncLocks::default())).run(Vec::new(), &manga, local, None).await.expect("ok");
         assert!(out.is_empty());
     }
 
     #[tokio::test]
     async fn no_change_no_write() {
         let (_dir, db, id) = manga_fixture("Foo");
-        let locks = Arc::new(MangaSyncLocks::default());
+        let locks = Arc::new(EntrySyncLocks::default());
         let raw = vec![source_chapter("/a", "Ch 1", 10), source_chapter("/b", "Ch 2", 20)];
         let first = manga_row(&db, id);
-        sync(&db, &locks).run(raw.clone(), &first, options(NOW_MS), &no_hook).await.expect("first");
+        sync(&db, &locks).run(items_of(&raw), &first, options(NOW_MS), None).await.expect("first");
         let after_first = manga_row(&db, id);
-        let second = sync(&db, &locks).run(raw, &after_first, options(NOW_MS + 60_000), &no_hook).await.expect("second");
+        let second = sync(&db, &locks).run(items_of(&raw), &after_first, options(NOW_MS + 60_000), None).await.expect("second");
         assert!(second.is_empty(), "EC-09");
         assert_eq!(manga_row(&db, id).last_update, after_first.last_update, "no last_update bump on a no-change refresh");
     }
@@ -145,7 +127,7 @@ mod sync_chapters {
         let (_dir, db, id) = manga_fixture("Foo");
         let manga = manga_row(&db, id);
         let raw = vec![source_chapter("/x", "Ch 1", 0), source_chapter("/x", "Ch 1 again", 0), source_chapter("/y", "Ch 2", 0)];
-        let out = sync(&db, &Arc::new(MangaSyncLocks::default())).run(raw, &manga, options(NOW_MS), &no_hook).await.expect("sync");
+        let out = sync(&db, &Arc::new(EntrySyncLocks::default())).run(items_of(&raw), &manga, options(NOW_MS), None).await.expect("sync");
         assert_eq!(out.len(), 2, "EC-03");
         assert_eq!(out[0].name, "Ch 1", "the first occurrence wins");
     }
@@ -153,13 +135,13 @@ mod sync_chapters {
     #[tokio::test]
     async fn excluded_scanlators_filter() {
         let (_dir, db, id) = manga_fixture("Foo");
-        db.write(|tx| Ok(excluded_scanlators::insert(tx, id, "Bad")?)).expect("exclude");
+        EntryRepo::new(db.clone()).set_excluded_scanlators(id, &["Bad".to_owned()].into()).expect("exclude");
         let manga = manga_row(&db, id);
         let raw = vec![
             SChapter { scanlator: Some("Bad".into()), ..source_chapter("/a", "Ch 1", 0) },
             SChapter { scanlator: Some("Good".into()), ..source_chapter("/b", "Ch 2", 0) },
         ];
-        let out = sync(&db, &Arc::new(MangaSyncLocks::default())).run(raw, &manga, options(NOW_MS), &no_hook).await.expect("sync");
+        let out = sync(&db, &Arc::new(EntrySyncLocks::default())).run(items_of(&raw), &manga, options(NOW_MS), None).await.expect("sync");
         assert_eq!(out.iter().map(|c| c.url.as_str()).collect::<Vec<_>>(), ["/b"], "EC-12: not reported as new");
         assert_eq!(stored_chapters(&db, id).len(), 2, "but both rows are inserted");
     }
@@ -167,13 +149,13 @@ mod sync_chapters {
     #[tokio::test]
     async fn f32_number_not_requeued() {
         let (_dir, db, id) = manga_fixture("Foo");
-        let locks = Arc::new(MangaSyncLocks::default());
+        let locks = Arc::new(EntrySyncLocks::default());
         let raw = vec![SChapter { chapter_number: 12.1_f32, ..source_chapter("/c12", "Ch 12.1", 0) }];
         let manga = manga_row(&db, id);
-        sync(&db, &locks).run(raw.clone(), &manga, options(NOW_MS), &no_hook).await.expect("first");
-        assert_eq!(stored_chapters(&db, id)[0].chapter_number, 12.1_f64, "EC-CH-07: the decimal form, not 12.100000762939453");
+        sync(&db, &locks).run(items_of(&raw), &manga, options(NOW_MS), None).await.expect("first");
+        assert_eq!(stored_chapters(&db, id)[0].number, 12.1_f64, "EC-CH-07: the decimal form, not 12.100000762939453");
         let after = manga_row(&db, id);
-        let second = sync(&db, &locks).run(raw, &after, options(NOW_MS), &no_hook).await.expect("second");
+        let second = sync(&db, &locks).run(items_of(&raw), &after, options(NOW_MS), None).await.expect("second");
         assert!(second.is_empty(), "an identical second sync reports nothing");
         assert_eq!(manga_row(&db, id).last_update, after.last_update, "and writes nothing");
     }
@@ -181,77 +163,17 @@ mod sync_chapters {
     #[tokio::test]
     async fn scanlator_never_cleared() {
         let (_dir, db, id) = manga_fixture("Foo");
-        let locks = Arc::new(MangaSyncLocks::default());
+        let locks = Arc::new(EntrySyncLocks::default());
         let first = vec![SChapter { scanlator: Some("Team".into()), ..source_chapter("/c", "Ch 1", 0) }];
         let manga = manga_row(&db, id);
-        sync(&db, &locks).run(first, &manga, options(NOW_MS), &no_hook).await.expect("first");
+        sync(&db, &locks).run(items_of(&first), &manga, options(NOW_MS), None).await.expect("first");
         let manga = manga_row(&db, id);
-        sync(&db, &locks).run(vec![source_chapter("/c", "Ch 1", 0)], &manga, options(NOW_MS), &no_hook).await.expect("second");
+        sync(&db, &locks).run(items_of(&[source_chapter("/c", "Ch 1", 0)]), &manga, options(NOW_MS), None).await.expect("second");
         assert_eq!(stored_chapters(&db, id)[0].scanlator.as_deref(), Some("Team"), "EC-08");
     }
 }
 
-mod sync_episodes {
-    use super::*;
-    use kuro_domain::items::episode_sync::{EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
-    use kuro_data::anime::{Anime, AnimeRepo};
-    use kuro_data::episode::EpisodeRepo;
-    use kuro_db::statements_anime::{EpisodeRow, insert_episode};
-    use kuro_source::anime::SEpisode;
-
-    #[tokio::test]
-    async fn fillermark_sticky_and_preview_fill() {
-        let dir = TempDir::new().expect("temp dir");
-        let db = TestDb::handle(&dir);
-        let anime_id = AnimeRepo::new(db.clone()).insert(&Anime::create()).expect("anime");
-        let anime = AnimeRepo::new(db.clone()).by_id(anime_id).expect("read");
-        db.write(|tx| {
-            let row = EpisodeRow {
-                id: 0,
-                anime_id,
-                url: "/e1".into(),
-                name: "Ep 1".into(),
-                scanlator: None,
-                seen: false,
-                bookmark: false,
-                last_second_seen: 0,
-                total_seconds: 0,
-                episode_number: 1.0,
-                source_order: 0,
-                date_fetch: 0,
-                date_upload: 0,
-                last_modified_at: 0,
-                version: 1,
-                is_syncing: 0,
-                summary: None,
-                preview_url: None,
-                fillermark: true,
-                memo: kuro_db::schema_anime::Memo(serde_json::Map::new()),
-            };
-            Ok(insert_episode(tx, &row)?)
-        })
-        .expect("insert");
-        let sync = SyncEpisodes::new(db.clone(), Arc::new(MangaSyncLocks::default()), Arc::new(NoEpisodeRenames));
-        let raw = vec![SEpisode {
-            url: "/e1".into(),
-            name: "Ep 1".into(),
-            episode_number: 1.0,
-            fillermark: false,
-            scanlator: None,
-            date_upload: 0,
-            summary: None,
-            preview_url: Some("preview".into()),
-            memo: serde_json::Map::new(),
-        }];
-        let opts = EpisodeSyncOptions { now_ms: NOW_MS, manual: false, window: (0, 0), mark_duplicate_as_seen: false, is_local: false };
-        sync.run(raw, &anime, opts).await.expect("sync");
-        let row = EpisodeRepo::new(db.clone()).by_anime_id(anime_id).expect("read").remove(0);
-        assert!(row.fillermark, "a stored fillermark is never cleared by the source");
-        assert_eq!(row.preview_url.as_deref(), Some("preview"), "a blank preview is filled");
-    }
-}
-
-mod update_manga {
+mod update_entry {
     use super::*;
     use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
     use kuro_data::item::ItemRepo;
@@ -318,13 +240,13 @@ mod set_read_status {
     #[tokio::test]
     async fn results() {
         let (_dir, db, id) = manga_fixture("Foo");
-        db.write(|tx| Ok(chapters::insert(tx, &chapter_row(id, "/a", "Ch 1", 1.0))?)).expect("insert");
+        ItemRepo::new(db.clone()).add_all(&[chapter_row(id, "/a", "Ch 1", 1.0)]).expect("insert");
         let downloads = Arc::new(Downloads::default());
         let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), downloads.clone());
-        let rows: Vec<Item> = stored_chapters(&db, id).iter().map(Item::from).collect();
+        let rows = stored_chapters(&db, id);
         assert_eq!(set.run(true, rows, true).await, SetDoneResult::Success);
         assert_eq!(*downloads.calls.lock().expect("lock"), 1, "downloads deleted once for the manga");
-        let read_rows: Vec<Item> = stored_chapters(&db, id).iter().map(Item::from).collect();
+        let read_rows = stored_chapters(&db, id);
         assert_eq!(set.run(true, read_rows, true).await, SetDoneResult::NoItems, "already read: nothing to do");
     }
 }
@@ -343,47 +265,29 @@ mod set_seen_status {
     async fn last_second_reset() {
         let dir = TempDir::new().expect("temp dir");
         let db = TestDb::handle(&dir);
-        let animes = kuro_data::anime::AnimeRepo::new(db.clone());
-        let episodes = kuro_data::episode::EpisodeRepo::new(db.clone());
-        let anime_id = animes.insert(&kuro_data::anime::Anime::create()).expect("anime");
-        db.write(|tx| {
-            Ok(kuro_db::statements_anime::insert_episode(
-                tx,
-                &kuro_db::statements_anime::EpisodeRow {
-                    id: 0,
-                    anime_id,
-                    url: "/e".into(),
-                    name: "Ep".into(),
-                    scanlator: None,
-                    seen: true,
-                    bookmark: false,
-                    last_second_seen: 0,
-                    total_seconds: 500,
-                    episode_number: 1.0,
-                    source_order: 0,
-                    date_fetch: 0,
-                    date_upload: 0,
-                    last_modified_at: 0,
-                    version: 1,
-                    is_syncing: 0,
-                    summary: None,
-                    preview_url: None,
-                    fillermark: false,
-                    memo: kuro_db::schema_anime::Memo(serde_json::Map::new()),
-                },
-            )?)
-        })
-        .expect("insert");
-        let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), Arc::new(EpisodeDl));
-        db.write(|tx| Ok(tx.execute("UPDATE items SET progress = 40 WHERE entry_id = ?1", [anime_id])?)).expect("progress");
-        let rows: Vec<Item> = episodes.by_anime_id(anime_id).expect("read").iter().map(Item::from).collect();
+        let anime_id = EntryRepo::new(db.clone()).insert(&Entry::create(Kind::Anime)).expect("anime");
+        let items = ItemRepo::new(db.clone());
+        items
+            .add_all(&[Item {
+                entry_id: anime_id,
+                url: "/e".into(),
+                name: "Ep".into(),
+                done: true,
+                progress: 40,
+                total_seconds: Some(500),
+                number: 1.0,
+                version: 1,
+                ..Item::create(Kind::Anime)
+            }])
+            .expect("insert");
+        let set = SetDoneStatus::new(items.clone(), EntryRepo::new(db.clone()), Arc::new(EpisodeDl));
+        let rows = items.by_entry_id(anime_id, false).expect("read");
         assert_eq!(set.run(false, rows, false).await, SetDoneResult::Success);
-        let row = episodes.by_anime_id(anime_id).expect("read").remove(0);
-        assert!(!row.seen);
-        assert_eq!(row.last_second_seen, 0, "marking unseen resets the position");
-        assert_eq!(row.total_seconds, 500, "total_seconds is untouched");
+        let row = items.by_entry_id(anime_id, false).expect("read").remove(0);
+        assert!(!row.done);
+        assert_eq!(row.progress, 0, "marking unseen resets the position");
+        assert_eq!(row.total_seconds, Some(500), "total_seconds is untouched");
     }
-
 }
 
 mod domain_end_to_end {
@@ -394,21 +298,21 @@ mod domain_end_to_end {
     #[tokio::test]
     async fn sync_then_mark_read_then_refresh() {
         let (_dir, db, id) = manga_fixture("Foo");
-        let locks = Arc::new(MangaSyncLocks::default());
+        let locks = Arc::new(EntrySyncLocks::default());
         let raw = vec![source_chapter("/c2", "Ch 2", 0), source_chapter("/c1", "Ch 1", 0)];
         let manga = manga_row(&db, id);
-        let added = sync(&db, &locks).run(raw.clone(), &manga, options(NOW_MS), &no_hook).await.expect("first sync");
+        let added = sync(&db, &locks).run(items_of(&raw), &manga, options(NOW_MS), None).await.expect("first sync");
         assert_eq!(added.len(), 2);
 
-        let read: Vec<Item> = stored_chapters(&db, id).iter().filter(|c| c.chapter_number == 1.0).map(Item::from).collect();
+        let read: Vec<Item> = stored_chapters(&db, id).into_iter().filter(|c| c.number == 1.0).collect();
         let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), Arc::new(NoDownloads));
         assert_eq!(set.run(true, read, false).await, SetDoneResult::Success);
 
         let after = manga_row(&db, id);
-        let again = sync(&db, &locks).run(raw, &after, options(NOW_MS + 1), &no_hook).await.expect("second sync");
+        let again = sync(&db, &locks).run(items_of(&raw), &after, options(NOW_MS + 1), None).await.expect("second sync");
         assert!(again.is_empty(), "nothing new on the second refresh");
         let c1 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c1").expect("c1");
-        assert!(c1.read, "the read state survives the refresh");
+        assert!(c1.done, "the read state survives the refresh");
     }
 
     /// A tracker the test switches online: `replay` pushes the progress and records it.
@@ -435,12 +339,12 @@ mod domain_end_to_end {
     #[tokio::test]
     async fn sync_mark_read_track_offline_then_replay() {
         let (dir, db, id) = manga_fixture("Foo");
-        let locks = Arc::new(MangaSyncLocks::default());
+        let locks = Arc::new(EntrySyncLocks::default());
         let raw = vec![source_chapter("/c2", "Ch 2", 0), source_chapter("/c1", "Ch 1", 0)];
         let manga = manga_row(&db, id);
-        sync(&db, &locks).run(raw, &manga, options(NOW_MS), &no_hook).await.expect("sync");
+        sync(&db, &locks).run(items_of(&raw), &manga, options(NOW_MS), None).await.expect("sync");
 
-        let read: Vec<Item> = stored_chapters(&db, id).iter().filter(|c| c.chapter_number == 1.0).map(Item::from).collect();
+        let read: Vec<Item> = stored_chapters(&db, id).into_iter().filter(|c| c.number == 1.0).collect();
         let progress = read.iter().map(|c| c.number).fold(0.0, f64::max);
         let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), Arc::new(NoDownloads));
         assert_eq!(set.run(true, read, false).await, SetDoneResult::Success);
@@ -472,7 +376,7 @@ mod domain_end_to_end {
         assert!(DelayedTrackingStore::new(queue_path).is_empty(), "the queue file is empty too");
         let c1 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c1").expect("c1");
         let c2 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c2").expect("c2");
-        assert!(c1.read && !c2.read, "database state");
+        assert!(c1.done && !c2.done, "database state");
     }
 
     struct NoDownloads;

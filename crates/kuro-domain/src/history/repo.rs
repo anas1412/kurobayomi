@@ -1,5 +1,5 @@
 //! History repository for both kinds: the list, the latest row, resets, clear-all and the upsert, over the shared
-//! `kuro_data::entry_history::HistoryRepo`. This layer adds the domain row shapes, the error type and the detached
+//! `kuro_data::history::HistoryRepo`. This layer adds the domain row shapes, the error type and the detached
 //! writer; the SQL (`kuro_db::tables::history`) and the rules of the rows are the shared ones. The 12 h session clamp
 //! and the incognito rules are in [`super::recorder`].
 
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use kuro_data::entry_history::{History, HistoryItem, HistoryRepo as SharedHistory};
+use kuro_data::history::{History, HistoryItem, HistoryRepo as SharedHistory};
 use kuro_db::handle::Db;
 use kuro_db::tables::history as table;
 
@@ -157,28 +157,23 @@ impl HistoryRepo {
     pub fn total_duration_of(&self, kind: Kind) -> Result<i64, DomainError> {
         Ok(self.shared.total_duration(kind)?)
     }
-
-    /// [`Self::total_duration_of`] for manga, the old name.
-    pub fn total_duration(&self) -> Result<i64, DomainError> {
-        self.total_duration_of(Kind::Manga)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testdb::test_db;
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
 
     /// A favourite manga with `n` chapters, `source_order` descending so the reading order is the insert order.
     fn manga_with_chapters(db: &Arc<Db>, title: &str, n: i64) -> (i64, Vec<i64>) {
-        let manga = MangaRepo::new(db.clone())
-            .insert(&Manga {
+        let manga = EntryRepo::new(db.clone())
+            .insert(&Entry {
                 favorite: true,
                 source: 7,
                 url: format!("u/{title}"),
                 title: title.into(),
-                ..Manga::create()
+                ..Entry::create(Kind::Manga)
             })
             .unwrap();
         let ids = (0..n)
@@ -257,9 +252,9 @@ mod tests {
         repo.upsert(Kind::Manga, c[3], 4, 3000).unwrap();
         let reset = repo.by_entry(Kind::Manga, _m).unwrap().into_iter().find(|r| r.item_id == c[3]).unwrap();
         repo.reset_one(Kind::Manga, reset.id).unwrap();
-        assert_eq!(repo.total_duration().unwrap(), 15000);
+        assert_eq!(repo.total_duration_of(Kind::Manga).unwrap(), 15000);
         assert!(repo.clear_all(Kind::Manga));
-        assert_eq!(repo.total_duration().unwrap(), 0);
+        assert_eq!(repo.total_duration_of(Kind::Manga).unwrap(), 0);
         assert!(list_ids(&repo).is_empty());
     }
 
@@ -270,7 +265,7 @@ mod tests {
         let repo = HistoryRepo::new(db.clone());
         repo.record_detached(HistoryUpdate { kind: Kind::Manga, item_id: c[0], at: 1000, session_ms: 4000 });
         assert_eq!(join_pending_flushes(Duration::from_secs(2)), 0, "the flush finished inside the deadline");
-        assert_eq!(repo.total_duration().unwrap(), 4000);
+        assert_eq!(repo.total_duration_of(Kind::Manga).unwrap(), 4000);
     }
 
     #[test]
@@ -306,10 +301,10 @@ mod tests {
     #[test]
     fn anime_history_keeps_one_row_per_episode_and_lists_the_newest_per_anime() {
         use crate::testdb::test_db;
-        use kuro_data::anime::{Anime, AnimeRepo};
+        use kuro_data::entry::{Entry, EntryRepo};
         let (_d, db) = test_db();
-        let anime = AnimeRepo::new(db.clone())
-            .insert(&Anime { favorite: true, source: 3, url: "a".into(), title: "Show".into(), ..Anime::create() })
+        let anime = EntryRepo::new(db.clone())
+            .insert(&Entry { favorite: true, source: 3, url: "a".into(), title: "Show".into(), ..Entry::create(Kind::Anime) })
             .unwrap();
         let eps: Vec<i64> = (0..2)
             .map(|i| {

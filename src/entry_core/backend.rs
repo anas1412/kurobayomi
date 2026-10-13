@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use kuro_data::entry::{Entry, EntryRepo};
 use kuro_data::item::ItemRepo;
-use kuro_data::manga::Manga;
 use kuro_data::source::{StubSource, StubSourceRepo};
 use kuro_db::handle::Db;
 use kuro_domain::entries::source_convert::to_s_manga;
@@ -243,7 +242,7 @@ impl Backend for SourceBackend {
         let (db, lookup) = (Arc::clone(&self.db), Arc::clone(&self.lookup));
         Box::pin(async move {
             let (manga, source) = target(Arc::clone(&db), lookup, manga_id).await?;
-            let remote = limited(source.get_manga_details(&to_s_manga(&Manga::from(manga.clone())))).await.map_err(|error| DetailError::from_source(source.name(), error))?;
+            let remote = limited(source.get_manga_details(&to_s_manga(&manga))).await.map_err(|error| DetailError::from_source(source.name(), error))?;
             let remote = remote_from_manga(&remote);
             let update = UpdateEntry::new(EntryRepo::new(Arc::clone(&db)), ItemRepo::new(db));
             tokio::task::spawn_blocking(move || update.update_from_source(&manga, &remote, false, &NoCoverFiles, &chrono::Local::now()))
@@ -257,7 +256,7 @@ impl Backend for SourceBackend {
         let (db, lookup, sync, mark_duplicate_done) = (Arc::clone(&self.db), Arc::clone(&self.lookup), self.chapters.clone(), self.mark_duplicate_read);
         Box::pin(async move {
             let (manga, source) = target(db, lookup, manga_id).await?;
-            let listed = to_s_manga(&Manga::from(manga.clone()));
+            let listed = to_s_manga(&manga);
             let raw = limited(source.get_chapter_list(&listed)).await.map_err(|error| DetailError::from_source(source.name(), error))?;
             let options = SyncOptions { now_ms: chrono::Utc::now().timestamp_millis(), manual: true, window: (0, 0), mark_duplicate_done, is_local: false };
             let items: Vec<SourceItem> = raw.iter().map(source_item_from_chapter).collect();

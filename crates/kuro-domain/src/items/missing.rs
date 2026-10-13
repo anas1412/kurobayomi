@@ -4,8 +4,7 @@
 //! Only exactly `-1.0` is ignored by `missing_items_count`; `-2.0` is counted as the integer `-2`, as in
 //! the Kotlin source. Consequence: `[-2.0, 3.0]` gives 4 (the jump from -2 to 3), not 2.
 
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 
 /// `missingChaptersCount` / `missingEntriesCount`: the number of integer slots missing between the
 /// distinct truncated numbers, counting from 0.
@@ -38,27 +37,18 @@ pub fn gap(higher: f64, lower: f64) -> i32 {
     higher.floor() as i32 - lower.floor() as i32 - 1
 }
 
-/// The fields the gap and separator code reads from a chapter or an episode.
+/// The fields the gap and separator code reads from an item.
 pub trait Numbered {
     fn item_id(&self) -> i64;
     fn number(&self) -> f64;
 }
 
-impl Numbered for Chapter {
+impl Numbered for Item {
     fn item_id(&self) -> i64 {
         self.id
     }
     fn number(&self) -> f64 {
-        self.chapter_number
-    }
-}
-
-impl Numbered for Episode {
-    fn item_id(&self) -> i64 {
-        self.id
-    }
-    fn number(&self) -> f64 {
-        self.episode_number
+        self.number
     }
 }
 
@@ -137,22 +127,16 @@ pub fn insert_missing_separators<T: Numbered>(list: Vec<T>, descending: bool) ->
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
+
     use super::*;
 
-    fn chapter(id: i64, number: f64) -> Chapter {
-        Chapter {
-            id,
-            chapter_number: number,
-            ..Chapter::create()
-        }
+    fn chapter(id: i64, number: f64) -> Item {
+        Item { id, number, ..Item::create(Kind::Manga) }
     }
 
-    fn episode(id: i64, number: f64) -> Episode {
-        Episode {
-            id,
-            episode_number: number,
-            ..Episode::create()
-        }
+    fn episode(id: i64, number: f64) -> Item {
+        Item { id, number, ..Item::create(Kind::Anime) }
     }
 
     #[test]
@@ -188,7 +172,7 @@ mod tests {
             item_gap(Some(&chapter(1, -1.0)), Some(&chapter(2, 10.0))),
             0
         );
-        assert_eq!(item_gap(None::<&Episode>, Some(&episode(2, 3.0))), 0);
+        assert_eq!(item_gap(None::<&Item>, Some(&episode(2, 3.0))), 0);
         assert_eq!(
             item_gap(Some(&episode(1, 99.0)), Some(&episode(2, -1.0))),
             0
@@ -252,7 +236,7 @@ mod tests {
 
     #[test]
     fn no_separator_for_unrecognised_or_empty_lists() {
-        assert!(insert_missing_separators(Vec::<Chapter>::new(), true).is_empty());
+        assert!(insert_missing_separators(Vec::<Item>::new(), true).is_empty());
         let rows = insert_missing_separators(vec![chapter(1, -1.0), chapter(2, -1.0)], true);
         assert_eq!(
             rows,

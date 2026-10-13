@@ -3,8 +3,7 @@
 
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
 use tempfile::TempDir;
 
@@ -16,14 +15,8 @@ pub fn test_db() -> (TempDir, Arc<Db>) {
     (dir, Arc::new(Db::new(&path, writer).expect("handle")))
 }
 
-/// The database behind a manga repository.
-pub fn manga_repo() -> (TempDir, MangaRepo) {
+/// The database behind an entry repository.
+pub fn entry_repo() -> (TempDir, EntryRepo) {
     let (dir, db) = test_db();
-    (dir, MangaRepo::new(db))
-}
-
-/// The database behind an anime repository.
-pub fn anime_repo() -> (TempDir, AnimeRepo) {
-    let (dir, db) = test_db();
-    (dir, AnimeRepo::new(db))
+    (dir, EntryRepo::new(db))
 }

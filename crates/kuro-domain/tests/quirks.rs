@@ -2,20 +2,19 @@
 //! test asserts the policy the table chose: a preserved quirk keeps the upstream result, a fixed one gives the corrected
 //! result.
 
-use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate, SeasonAnime};
-use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::episode::Episode;
-use kuro_data::manga::Manga;
+use kuro_data::entry::{Entry, EntryRepo, EntryUpdate, SeasonEntry};
+use kuro_data::item::{Item, ItemRepo};
+use kuro_db::flags::item::SORT_DIR_MASK;
 use kuro_db::handle::Db;
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
-use kuro_domain::entries::anime::{AnimeExt, viewer_flags};
+use kuro_domain::entries::flags::{EntryFlags, INTRO_MASK};
 use kuro_domain::entries::fetch_interval::{Stored, calculate_next_update, get_window, increase_interval, stored_for_wheel};
 use kuro_domain::entries::flag_setters::clamp_grid_size;
-use kuro_domain::entries::manga::MangaExt;
-use kuro_domain::items::facades::get_chapter_by_url_and_manga_id;
+use kuro_domain::items::facades::get_item_by_url_and_entry_id;
 use kuro_domain::items::missing::missing_items_count;
 use kuro_domain::items::recognition::{parse_episode_number, parse_season_number};
-use kuro_domain::items::should_update::{should_update_db_chapter, should_update_db_episode, should_update_db_season};
+use kuro_domain::items::should_update::{should_update_db_item, should_update_db_season};
 use kuro_domain::items::sorter::sort_seasons;
 use kuro_domain::release::version::is_newer;
 use kuro_prefs::store::PrefStore;
@@ -28,21 +27,20 @@ fn test_db() -> (tempfile::TempDir, Arc<Db>) {
     (dir, Arc::new(Db::new(&path, writer).expect("manga handle")))
 }
 
-fn anime_with(viewer: i64) -> Anime {
-    Anime { viewer_flags: viewer, ..Anime::create() }
+fn anime_with(viewer: i64) -> Entry {
+    Entry { viewer_flags: viewer, ..Entry::create(Kind::Anime) }
 }
 
 /// Q1: a source that reports `dateUpload = 0` does not make a stored row look stale on every refresh.
 #[test]
 fn q01_zero_source_upload_date_does_not_force_a_rewrite() {
-    let db = Chapter { date_upload: 1_700_000_000_000, ..Chapter::create() };
-    let src = Chapter { date_upload: 0, ..db.clone() };
-    assert!(!should_update_db_chapter(&db, &src));
-    let db_ep = Episode { date_upload: 1_700_000_000_000, ..Episode::create() };
-    let src_ep = Episode { date_upload: 0, ..db_ep.clone() };
-    assert!(!should_update_db_episode(&db_ep, &src_ep));
-    let real = Chapter { date_upload: 1_700_000_000_001, ..db.clone() };
-    assert!(should_update_db_chapter(&db, &real), "a real new upload date still counts");
+    for kind in Kind::ALL {
+        let db = Item { date_upload: 1_700_000_000_000, ..Item::create(kind) };
+        let src = Item { date_upload: 0, ..db.clone() };
+        assert!(!should_update_db_item(&db, &src), "{kind}");
+        let real = Item { date_upload: 1_700_000_000_001, ..db.clone() };
+        assert!(should_update_db_item(&db, &real), "a real new upload date still counts");
+    }
 }
 
 /// Q2: "set as default" writes the downloaded filter from the downloaded bits, not the unseen bits.
@@ -60,23 +58,23 @@ fn q02_season_defaults_write_the_downloaded_filter_from_its_own_bits() {
 /// Q3: the anime and manga defaults share their keys on purpose (backup interop).
 #[test]
 fn q03_chapter_and_episode_defaults_share_their_keys() {
-    use kuro_domain::entries::defaults::{set_chapter_settings_default, set_episode_settings_default};
+    use kuro_domain::entries::defaults::set_item_settings_default;
     let store = PrefStore::in_memory();
     let direction = store.pref::<i64>("default_chapter_sort_by_ascending_or_descending", 0);
-    set_chapter_settings_default(&store, 0);
+    set_item_settings_default(&store, Kind::Manga, 0);
     assert_eq!(direction.get(), 0);
-    set_episode_settings_default(&store, kuro_domain::entries::anime::episode_flags::SORT_DIR_MASK);
-    assert_eq!(direction.get(), kuro_domain::entries::anime::episode_flags::SORT_DIR_MASK, "the episode default writes the chapter key");
+    set_item_settings_default(&store, Kind::Anime, SORT_DIR_MASK);
+    assert_eq!(direction.get(), SORT_DIR_MASK, "the episode default writes the chapter key");
 }
 
 /// Q4: the dead source-manager dependency is gone, and a non-favourite keeps its in-memory title overlay only.
 #[test]
 fn q04_network_to_local_has_no_source_manager_and_overlays_only_in_memory() {
-    use kuro_domain::entries::network_to_local::network_to_local_anime;
+    use kuro_domain::entries::network_to_local::network_to_local;
     let (_d, db) = test_db();
-    let repo = AnimeRepo::new(db);
-    let stored = repo.insert(&Anime { url: "u".into(), title: "Stored".into(), source: 1, ..Anime::create() }).unwrap();
-    let got = network_to_local_anime(&repo, &Anime { url: "u".into(), title: "Fresh".into(), source: 1, ..Anime::create() })
+    let repo = EntryRepo::new(db);
+    let stored = repo.insert(&Entry { url: "u".into(), title: "Stored".into(), source: 1, ..Entry::create(Kind::Anime) }).unwrap();
+    let got = network_to_local(&repo, &Entry { url: "u".into(), title: "Fresh".into(), source: 1, ..Entry::create(Kind::Anime) })
         .unwrap();
     assert_eq!((got.id, got.title.as_str()), (stored, "Fresh"));
     assert_eq!(repo.by_id(stored).unwrap().title, "Stored", "the database keeps its title");
@@ -105,21 +103,21 @@ fn q07_resolution_only_name_reads_as_the_episode_number() {
 /// Q8: an unknown season sort code (`0xE000`) falls back to source order instead of panicking.
 #[test]
 fn q08_unknown_season_sort_code_falls_back_to_source_order() {
-    let parent = Anime { season_flags: 0xE000, ..Anime::create() };
-    let season = |id: i64, number: f64| SeasonAnime {
-        anime: Anime { id, season_number: number, season_source_order: id, ..Anime::create() },
-        total_count: 0,
-        seen_count: 0,
-        bookmark_count: 0,
-        fillermark_count: 0,
+    let parent = Entry { season_flags: Some(0xE000), ..Entry::create(Kind::Anime) };
+    let season = |id: i64, number: f64| SeasonEntry {
+        entry: Entry { id, season_number: Some(number), season_source_order: Some(id), ..Entry::create(Kind::Anime) },
+        total: 0,
+        done: 0,
+        bookmarks: 0,
+        fillermarks: 0,
         latest_upload: 0,
         fetched_at: 0,
-        last_seen: 0,
+        last_activity: 0,
     };
     let mut list = vec![season(1, 3.0), season(2, 1.0), season(3, 2.0)];
     sort_seasons(&mut list, &parent);
     // Source order, read with the direction bit: 0xE000 has bit 0 clear, which is descending.
-    assert_eq!(list.iter().map(|s| s.anime.id).collect::<Vec<_>>(), vec![3, 2, 1]);
+    assert_eq!(list.iter().map(|s| s.entry.id).collect::<Vec<_>>(), vec![3, 2, 1]);
 }
 
 /// Q9: the doubling cycle uses the doubled step, so a long-silent series gets a short interval (16 days after 105).
@@ -172,19 +170,19 @@ fn q13_release_version_compare_is_tuple_wise_and_never_panics() {
 #[test]
 fn q14_only_a_completed_manga_hides_the_predicted_next_release() {
     for status in [4, 5] {
-        let m = Manga { status, next_update: 42, ..Manga::create() };
+        let m = Entry { status, next_update: 42, ..Entry::create(Kind::Manga) };
         assert_eq!(m.expected_next_update(), Some(42), "status {status}");
     }
-    let done = Manga { status: 2, next_update: 42, ..Manga::create() };
+    let done = Entry { status: 2, next_update: 42, ..Entry::create(Kind::Manga) };
     assert_eq!(done.expected_next_update(), None);
 }
 
 /// Q15: a changed season memo alone does not count as a change.
 #[test]
 fn q15_a_season_memo_change_alone_is_not_an_update() {
-    let db = Anime::create();
+    let db = Entry::create(Kind::Anime);
     let mut src = db.clone();
-    src.memo.insert("note".into(), serde_json::json!("changed"));
+    src.memo = Some(kuro_db::codec::Memo(serde_json::json!({"note": "changed"}).as_object().cloned().unwrap()));
     assert!(!should_update_db_season(&db, &src));
 }
 
@@ -199,34 +197,34 @@ fn q16_library_retries_are_bounded() {
 fn q17_airing_episode_and_time_are_written_together() {
     let mut a = anime_with(0x2A);
     a.set_next_episode_airing(7, 1_700_000_000);
-    assert_eq!((a.next_episode_to_air(), a.next_episode_airing_at()), (7, 1_700_000_000));
-    assert_eq!(a.viewer_flags & viewer_flags::INTRO_MASK, 0x2A, "the intro length is kept");
+    assert_eq!((a.viewer().next_episode_to_air(), a.viewer().next_episode_airing_at()), (7, 1_700_000_000));
+    assert_eq!(a.viewer_flags & INTRO_MASK, 0x2A, "the intro length is kept");
 }
 
 /// Q18: an update cannot clear a text field, because `None` means untouched.
 #[test]
 fn q18_an_absent_text_field_in_an_update_keeps_the_stored_text() {
     let (_d, db) = test_db();
-    let repo = AnimeRepo::new(db);
-    let id = repo.insert(&Anime { url: "u".into(), title: "T".into(), description: Some("old".into()), source: 1, ..Anime::create() }).unwrap();
-    repo.update(&AnimeUpdate { description: None, ..AnimeUpdate::new(id) }).unwrap();
+    let repo = EntryRepo::new(db);
+    let id = repo.insert(&Entry { url: "u".into(), title: "T".into(), description: Some("old".into()), source: 1, ..Entry::create(Kind::Anime) }).unwrap();
+    repo.update(&EntryUpdate { description: None, ..EntryUpdate::new(id) }).unwrap();
     assert_eq!(repo.by_id(id).unwrap().description.as_deref(), Some("old"));
 }
 
 /// Q19: the lookup's second parameter is the entry id, named for what it is.
 #[test]
-fn q19_the_second_parameter_of_the_chapter_lookup_is_the_manga_id() {
+fn q19_the_second_parameter_of_the_item_lookup_is_the_entry_id() {
     let (_d, db) = test_db();
-    let manga = kuro_data::manga::MangaRepo::new(db.clone())
-        .insert(&Manga { url: "m".into(), title: "M".into(), source: 1, ..Manga::create() })
+    let manga = EntryRepo::new(db.clone())
+        .insert(&Entry { url: "m".into(), title: "M".into(), source: 1, ..Entry::create(Kind::Manga) })
         .unwrap();
-    let repo = ChapterRepo::new(db);
+    let repo = ItemRepo::new(db);
     let chapter = repo
-        .add_all(&[Chapter { manga_id: manga, url: "c".into(), name: "C".into(), ..Chapter::create() }])
+        .add_all(&[Item { entry_id: manga, url: "c".into(), name: "C".into(), ..Item::create(Kind::Manga) }])
         .unwrap()
         .remove(0)
         .id;
-    let found = get_chapter_by_url_and_manga_id(&repo, "c", manga).expect("found by manga id");
+    let found = get_item_by_url_and_entry_id(&repo, "c", manga).expect("found by manga id");
     assert_eq!(found.id, chapter);
 }
 

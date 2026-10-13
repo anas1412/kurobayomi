@@ -299,8 +299,7 @@ fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::index:
         }
         let Some(item) = ItemRepo::new(db.clone()).by_id(id).ok().flatten() else { return false };
         let Ok(entry) = EntryRepo::new(db.clone()).by_id(item.entry_id) else { return false };
-        // the reader's lookup still takes the legacy shapes (phase E); the seam is `From`
-        crate::reader::launch::downloaded_lookup(index.clone(), &kuro_data::manga::Manga::from(entry))(&kuro_data::chapter::Chapter::from(item))
+        crate::reader::launch::downloaded_items(index.clone(), &entry)(&item)
     })
 }
 

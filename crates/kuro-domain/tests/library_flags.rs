@@ -2,7 +2,7 @@
 
 use kuro_platform::kind::Kind;
 use kuro_domain::library::flags::{add_unmasked, contains, merge};
-use kuro_domain::library::sort::{Direction, LibrarySort, SORT_MASK, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SORT_MASK, SortType};
 
 fn sort(ty: SortType, dir: Direction) -> LibrarySort {
     LibrarySort { ty, dir }

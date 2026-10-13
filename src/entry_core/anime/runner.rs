@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
 use kuro_data::DataResult;
-use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::anime_relation::AnimeRelationGroup;
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_data::source::StubSourceRepo;
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::FetchType;
+use kuro_db::codec::FetchType;
 use kuro_domain::download::filter::{CategoryDecision, should_download_new};
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_platform::kind::Kind;
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn set_as_default_with_the_checkbox_reports_how_many_favorites_took_that_scope_only() {
-        use kuro_domain::entries::anime::season_flags as sf;
+        use kuro_db::flags::season as sf;
         let rt = rt();
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         store.set_season_flag_bits(id, sf::SHOW_STARTED, sf::STARTED_MASK).unwrap();
@@ -992,7 +992,6 @@ mod tests {
 
     #[test]
     fn related_groups_are_published_after_the_load_and_again_when_they_change() {
-        use kuro_data::anime::Anime;
         use kuro_data::anime_relation::AnimeRelationRepo;
         use kuro_data::entry::EntryRepo;
         let rt = rt();
@@ -1003,7 +1002,7 @@ mod tests {
             let rx = runner.events();
             runner.send(AnimeCmd::Load { anime_id: id });
             until(&rx, |e| matches!(e, AnimeEvent::Related(groups) if groups.is_empty())).await;
-            let group = AnimeRelationGroup { name: "Sequel".into(), anime: vec![Anime { id: other, ..Anime::create() }] };
+            let group = AnimeRelationGroup { name: "Sequel".into(), anime: vec![Entry { id: other, ..Entry::create(Kind::Anime) }] };
             AnimeRelationRepo::new(store.db()).replace_relations(id, &[group], 1).unwrap();
             let AnimeEvent::Related(groups) = until(&rx, |e| matches!(e, AnimeEvent::Related(g) if !g.is_empty())).await else { unreachable!() };
             assert_eq!((groups[0].name.as_str(), groups[0].anime[0].id), ("Sequel", other));

@@ -182,7 +182,7 @@ mod data {
         let history_id = repo.by_entry(Kind::Manga, m).expect("rows")[0].id;
         repo.reset_one(Kind::Manga, history_id).expect("reset");
         assert!(titles(&repo).is_empty());
-        assert_eq!(repo.total_duration().expect("total"), 5_000);
+        assert_eq!(repo.total_duration_of(Kind::Manga).expect("total"), 5_000);
     }
 
     #[test]
@@ -206,9 +206,9 @@ mod data {
         let m = entry(&f.db, Kind::Manga, "M", true);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, items(&f.db, Kind::Manga, m, 1)[0], 100, 9_000).expect("record");
-        assert_eq!(repo.total_duration().expect("total"), 9_000);
+        assert_eq!(repo.total_duration_of(Kind::Manga).expect("total"), 9_000);
         assert!(repo.clear_all(Kind::Manga));
-        assert_eq!(repo.total_duration().expect("total"), 0);
+        assert_eq!(repo.total_duration_of(Kind::Manga).expect("total"), 0);
     }
 
     #[test]
@@ -284,12 +284,9 @@ mod data {
     #[test]
     fn library_rows_dedupe_across_categories() {
         // an entry in two categories is one storage row
-        use kuro_data::category::{Category, CategoryRepo};
         let f = test_db();
         let m = entry(&f.db, Kind::Manga, "M", true);
-        let categories = CategoryRepo::new(f.db.clone(), Kind::Manga);
-        let make = |name: &str, order: i64| categories.insert(&Category { id: 0, name: name.into(), order, flags: 0, hidden: false }).expect("category");
-        let (a, b) = (make("a", 1), make("b", 2));
+        let (a, b) = (kuro_testkit::insert_category(&f.db, Kind::Manga, "a"), kuro_testkit::insert_category(&f.db, Kind::Manga, "b"));
         kuro_data::entry::EntryRepo::new(f.db.clone()).set_categories(m, &[a, b]).expect("links");
         let entries = library_entries(&f.db, Kind::Manga).expect("entries");
         assert_eq!(entries.len(), 1);

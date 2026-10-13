@@ -18,7 +18,6 @@ mod dropped;
 pub mod flags;
 pub mod history;
 pub mod items;
-pub mod kind;
 pub mod library;
 pub mod release;
 pub mod source;

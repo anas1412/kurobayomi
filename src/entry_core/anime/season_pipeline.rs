@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use kuro_data::entry::{Entry, SeasonEntry};
 use kuro_domain::app::items::downloaded_filter;
-use kuro_domain::entries::anime::season_flags;
+use kuro_db::flags::season as season_flags;
 use kuro_domain::entries::flags::{EntryFlags, STATUS_COMPLETED};
 use kuro_domain::items::sorter::sort_seasons;
 use kuro_prefs::tristate::TriState;

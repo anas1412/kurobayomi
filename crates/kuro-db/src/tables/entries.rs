@@ -7,7 +7,7 @@ use super::{entry_cols, exec, query_all, query_opt, rows::*, Params};
 use crate::codec::ids_json;
 use crate::error::{DbError, DbResult};
 use crate::flags::item::MANGA_MASK;
-use crate::schema_anime::FetchType;
+use crate::codec::FetchType;
 
 /// Which flag word of an entry a flag statement touches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -83,17 +83,17 @@ impl UpdatesRepo {
 mod tests {
     use super::*;
     use crate::testdb::test_db;
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
 
     fn manga(db: &Arc<Db>, title: &str, favorite: bool, date_added: i64) -> i64 {
-        MangaRepo::new(db.clone())
-            .insert(&Manga {
+        EntryRepo::new(db.clone())
+            .insert(&Entry {
                 favorite,
                 source: 7,
                 url: format!("u/{title}"),
                 title: title.into(),
                 date_added,
-                ..Manga::create()
+                ..Entry::create(Kind::Manga)
             })
             .unwrap()
     }
@@ -134,14 +134,14 @@ mod tests {
     #[test]
     fn the_anime_twin_filters_by_seen_inside_the_window() {
         let (_d, db) = crate::testdb::test_db();
-        let anime = kuro_data::anime::AnimeRepo::new(db.clone())
-            .insert(&kuro_data::anime::Anime {
+        let anime = kuro_data::entry::EntryRepo::new(db.clone())
+            .insert(&kuro_data::entry::Entry {
                 favorite: true,
                 source: 7,
                 url: "a".into(),
                 title: "A".into(),
                 date_added: 1000,
-                ..kuro_data::anime::Anime::create()
+                ..kuro_data::entry::Entry::create(Kind::Anime)
             })
             .unwrap();
         db.write(|tx| {

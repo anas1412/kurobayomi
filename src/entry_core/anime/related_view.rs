@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{Align as GAlign, Box as GBox, Button, Grid, Label, Orientation as O, ScrolledWindow};
-use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::anime_relation::AnimeRelationGroup;
 use kuro_prefs::library::LibraryDisplayMode;
 
 use super::related_pack::{self as pack, Align, MAX_ITEMS_PER_ROW, RELATED_ITEM_WIDTH};

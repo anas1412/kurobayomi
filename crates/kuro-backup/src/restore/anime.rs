@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_data::track::Track;
-use kuro_db::schema_anime::Memo;
+use kuro_db::codec::Memo;
 use kuro_db::{DbResult, Transaction};
 use kuro_platform::kind::Kind;
 

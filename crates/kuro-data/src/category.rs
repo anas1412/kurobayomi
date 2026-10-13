@@ -1,6 +1,5 @@
 //! Category reads over `kuro_db::tables::categories`: one read-only [`CategoryRepo`] per kind. The writes are the
-//! `CategoryService` of `kuro-domain`; the two `create_*_category` helpers below stay for the callers that still
-//! build fixtures with them (phase E deletes them). The preference half (exclude sets, default category, sort string,
+//! `CategoryService` of `kuro-domain`. The preference half (exclude sets, default category, sort string,
 //! seed) is `kuro-prefs::category`.
 
 use std::sync::Arc;
@@ -19,31 +18,6 @@ use crate::DataResult;
 /// Quiet time before a category subscription re-queries (the category service's value).
 const CATEGORY_DEBOUNCE: Duration = Duration::from_millis(20);
 
-/// `max(order) + 1` over every category, system row included. The system row has order -1, so the
-/// first user category gets 0. An empty table also gives 0.
-fn next_order(orders: impl Iterator<Item = i64>) -> i64 {
-    orders.max().map_or(0, |max| max + 1)
-}
-
-/// Creates a category of `kind` at the end of the order and returns its id. `flags` are the sort flags of the global
-/// preference, composed by the caller.
-fn create_category(db: &Db, kind: Kind, name: &str, flags: i64) -> DataResult<i64> {
-    db.write(|tx| {
-        let order = next_order(t::all(tx, kind)?.iter().map(|c| c.order));
-        Ok(t::insert(tx, kind, name, order, flags)?)
-    })
-}
-
-/// Creates a manga category at the end of the order and returns its id.
-pub fn create_manga_category(db: &Db, name: &str, flags: i64) -> DataResult<i64> {
-    create_category(db, Kind::Manga, name, flags)
-}
-
-/// Creates an anime category at the end of the order and returns its id.
-pub fn create_anime_category(db: &Db, name: &str, flags: i64) -> DataResult<i64> {
-    create_category(db, Kind::Anime, name, flags)
-}
-
 /// One `categories` row. `order` is the `sort` column.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Category {
@@ -58,16 +32,6 @@ impl From<CategoryRow> for Category {
     fn from(r: CategoryRow) -> Self {
         Self { id: r.id, name: r.name, order: r.order, flags: r.flags, hidden: r.hidden }
     }
-}
-
-/// Partial category update. `None` keeps the stored value.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CategoryUpdate {
-    pub id: i64,
-    pub name: Option<String>,
-    pub order: Option<i64>,
-    pub flags: Option<i64>,
-    pub hidden: Option<bool>,
 }
 
 /// Which rows a category read selects.
@@ -149,13 +113,6 @@ impl CategoryRepo {
         self.subscribe(Scope::VisibleByEntry(entry_id))
     }
 
-    /// Creates a category and returns its id. The passed `id` and `hidden` are ignored. The writes are the
-    /// `CategoryService`'s; this stays only for the callers that build fixtures with it (phase E deletes it).
-    pub fn insert(&self, cat: &Category) -> DataResult<i64> {
-        let kind = self.kind;
-        self.db.write(|tx| Ok(t::insert(tx, kind, &cat.name, cat.order, cat.flags)?))
-    }
-
     fn read(&self, scope: Scope) -> DataResult<Vec<Category>> {
         let kind = self.kind;
         self.db.read(|c| list(c, kind, scope))
@@ -169,40 +126,6 @@ impl CategoryRepo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tests::test_db;
-    use kuro_db::flags::library_sort;
-
-    fn manga_orders(db: &Db) -> Vec<(i64, String, i64)> {
-        db.read(|c| Ok(t::all(c, Kind::Manga)?.into_iter().map(|c| (c.id, c.name, c.order)).collect()))
-            .unwrap()
-    }
-
-    #[test]
-    fn create_gives_the_next_order_and_the_first_user_category_zero() {
-        let (_d, db) = test_db();
-        let a = create_manga_category(&db, "A", 0).unwrap();
-        let b = create_manga_category(&db, "B", 0).unwrap();
-        let orders: Vec<(i64, i64)> = manga_orders(&db).into_iter().map(|(id, _, o)| (id, o)).collect();
-        assert_eq!(orders, vec![(0, -1), (a, 0), (b, 1)]);
-    }
-
-    #[test]
-    fn created_categories_take_the_sort_flags_of_the_global_preference() {
-        let (_d, db) = test_db();
-        let flags = library_sort::from_serialized("LAST_MANGA_UPDATE,DESCENDING");
-        let id = create_manga_category(&db, "A", flags).unwrap();
-        let stored = manga_flags(&db, id);
-        assert_eq!(stored, library_sort::encode(library_sort::LAST_UPDATE, false));
-    }
-
-    fn manga_flags(db: &Db, id: i64) -> i64 {
-        db.read(|c| Ok(t::all(c, Kind::Manga)?.into_iter().find(|r| r.id == id).unwrap().flags)).unwrap()
-    }
-}
-
-#[cfg(test)]
-mod repo_tests {
     use super::*;
     use crate::support::{test_db, insert_anime, insert_category, insert_manga};
 

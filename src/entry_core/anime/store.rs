@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use kuro_data::DataResult;
-use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::anime_relation::AnimeRelationGroup;
 use kuro_data::anime_relation::AnimeRelationRepo;
 use kuro_data::category::{Category, CategoryRepo};
 use kuro_data::entry::{Entry, EntryRepo, SeasonEntry};
@@ -204,7 +204,7 @@ impl AnimeStore {
 
 #[cfg(test)]
 pub(crate) mod fixture {
-    use kuro_db::schema_anime::FetchType;
+    use kuro_db::codec::FetchType;
 
     use super::*;
 
@@ -286,8 +286,7 @@ mod tests {
     fn the_add_route_takes_the_default_category_and_asks_when_it_is_unset_or_deleted() {
         // T-39b-026: default category exists, default is Uncategorized, default unset or deleted
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
-        let repo = CategoryRepo::new(store.db(), Kind::Anime);
-        let cat = repo.insert(&kuro_data::category::Category { id: 0, name: "Airing".into(), order: 1, flags: 0, hidden: false }).unwrap();
+        let cat = kuro_testkit::insert_category(&store.db(), Kind::Anime, "Airing");
         let prefs = PrefStore::in_memory();
         kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(cat as i32).unwrap();
         assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::AddDefaultCategory(Some(cat)));
@@ -336,9 +335,8 @@ mod tests {
     #[test]
     fn categories_list_every_row_with_the_links_of_the_entry_and_set_replaces_them() {
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
-        let repo = CategoryRepo::new(store.db(), Kind::Anime);
-        let a = repo.insert(&kuro_data::category::Category { id: 0, name: "Airing".into(), order: 1, flags: 0, hidden: false }).unwrap();
-        let b = repo.insert(&kuro_data::category::Category { id: 0, name: "Later".into(), order: 2, flags: 0, hidden: false }).unwrap();
+        let a = kuro_testkit::insert_category(&store.db(), Kind::Anime, "Airing");
+        let b = kuro_testkit::insert_category(&store.db(), Kind::Anime, "Later");
         store.set_categories(id, &[a]).unwrap();
         let (all, linked) = store.categories(id).unwrap();
         assert!(all.iter().any(|(i, n)| *i == a && n == "Airing") && all.iter().any(|(i, _)| *i == b));
@@ -380,7 +378,7 @@ mod tests {
 
     #[test]
     fn the_episode_defaults_reach_every_favorite_and_leave_their_season_flags_alone() {
-        use kuro_domain::entries::anime::season_flags as sf;
+        use kuro_db::flags::season as sf;
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         store.set_season_flag_bits(id, sf::SHOW_UNSEEN, sf::UNSEEN_MASK).unwrap();
         let prefs = PrefStore::in_memory();
@@ -393,7 +391,7 @@ mod tests {
 
     #[test]
     fn the_season_defaults_reach_every_favorite_and_leave_their_episode_flags_alone() {
-        use kuro_domain::entries::anime::season_flags as sf;
+        use kuro_db::flags::season as sf;
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         store.set_flag_bits(id, ep::SHOW_UNDONE, ep::UNDONE_MASK).unwrap();
         let prefs = PrefStore::in_memory();
@@ -406,7 +404,7 @@ mod tests {
 
     #[test]
     fn season_writes_are_masked() {
-        use kuro_domain::entries::anime::season_flags as sf;
+        use kuro_db::flags::season as sf;
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
         store.set_season_flag_bits(id, sf::SHOW_STARTED, sf::STARTED_MASK).unwrap();
         store.set_season_flag_bits(id, sf::SHOW_BOOKMARKED, sf::BOOKMARKED_MASK).unwrap();

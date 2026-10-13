@@ -4,7 +4,7 @@
 use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
 use kuro_domain::category::repo::CategoryRepo;
 use kuro_domain::history::model::HistoryWithRelations;
@@ -31,7 +31,7 @@ fn fixture(sql: &str) -> (TempDir, Arc<Db>) {
 #[test]
 fn library_small_has_three_favourites_and_hides_the_hidden_category() {
     let (_d, db) = fixture(LIBRARY_SMALL);
-    let favourites = MangaRepo::new(db.clone()).favorites().expect("favourites");
+    let favourites = EntryRepo::new(db.clone()).favorites(Kind::Manga).expect("favourites");
     assert_eq!(favourites.len(), 3, "entry 4 is not a favourite");
 
     let library = LibraryRepo::new(db.clone()).all(Kind::Manga).expect("library rows");

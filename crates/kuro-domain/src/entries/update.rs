@@ -12,7 +12,7 @@ use kuro_data::DataResult;
 use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
 use kuro_data::item::ItemRepo;
 use kuro_db::codecs::UpdateStrategy;
-use kuro_db::schema_anime::Memo;
+use kuro_db::codec::Memo;
 use kuro_source::anime::SAnime;
 use kuro_source::model::SManga;
 use serde_json::{Map, Value};

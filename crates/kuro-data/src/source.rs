@@ -89,45 +89,12 @@ impl From<StubSourceRow> for StubSource {
     }
 }
 
-/// A legacy per-kind name for [`StubSourceRepo`] (`new(db)` fixes the kind); phase E deletes them.
-macro_rules! legacy_stub_repo {
-    ($name:ident, $kind:expr) => {
-        #[derive(Clone)]
-        pub struct $name(StubSourceRepo);
-
-        impl $name {
-            pub fn new(db: Arc<Db>) -> Self {
-                Self(StubSourceRepo::new(db, $kind))
-            }
-
-            pub fn upsert(&self, id: i64, lang: &str, name: &str) -> DataResult<()> {
-                self.0.upsert(id, lang, name)
-            }
-
-            pub fn get(&self, id: i64) -> DataResult<Option<StubSource>> {
-                self.0.get(id)
-            }
-
-            pub fn all(&self) -> DataResult<Vec<StubSource>> {
-                self.0.all()
-            }
-
-            pub fn watch_all(&self) -> Subscription<Vec<StubSource>> {
-                self.0.watch_all()
-            }
-        }
-    };
-}
-
-legacy_stub_repo!(MangaStubSourceRepo, Kind::Manga);
-legacy_stub_repo!(AnimeStubSourceRepo, Kind::Anime);
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::tests::test_db;
+    use crate::support::test_db;
 
     #[test]
     fn a_blank_stub_is_representable_and_prints_its_id() {
@@ -147,23 +114,16 @@ mod tests {
     }
 
     #[test]
-    fn manga_stub_upsert_reads_back_and_unknown_ids_are_none() {
+    fn a_stub_upsert_reads_back_per_kind_and_unknown_ids_are_none() {
         let (_d, db) = test_db();
-        let repo = MangaStubSourceRepo::new(db);
-        assert_eq!(repo.get(5).expect("get"), None);
-        repo.upsert(5, "en", "Old").expect("upsert");
-        repo.upsert(5, "fr", "New").expect("upsert again");
-        assert_eq!(repo.get(5).expect("get"), Some(StubSource { id: 5, lang: "fr".into(), name: "New".into() }));
-    }
-
-    #[test]
-    fn anime_stub_upsert_reads_back_and_unknown_ids_are_none() {
-        let (_d, db) = test_db();
-        let repo = AnimeStubSourceRepo::new(db);
-        assert_eq!(repo.get(9).expect("get"), None);
-        repo.upsert(9, "ja", "Alpha").expect("upsert");
-        repo.upsert(9, "ja", "Beta").expect("upsert again");
-        assert_eq!(repo.get(9).expect("get"), Some(StubSource { id: 9, lang: "ja".into(), name: "Beta".into() }));
+        for (kind, id, lang, old, new) in [(Kind::Manga, 5, "fr", "Old", "New"), (Kind::Anime, 9, "ja", "Alpha", "Beta")] {
+            let repo = StubSourceRepo::new(db.clone(), kind);
+            assert_eq!(repo.get(id).expect("get"), None);
+            repo.upsert(id, "en", old).expect("upsert");
+            repo.upsert(id, lang, new).expect("upsert again");
+            assert_eq!(repo.get(id).expect("get"), Some(StubSource { id, lang: lang.into(), name: new.into() }));
+        }
+        assert_eq!(StubSourceRepo::new(db, Kind::Manga).get(9).expect("get"), None, "the other kind's row is not visible");
     }
 
     #[test]
@@ -173,11 +133,11 @@ mod tests {
         {
             let writer = kuro_db::schema_unified::open_file(&path).expect("schema");
             let db = Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle"));
-            MangaStubSourceRepo::new(db).upsert(3, "en", "Kept").expect("upsert");
+            StubSourceRepo::new(db, Kind::Manga).upsert(3, "en", "Kept").expect("upsert");
         }
         let writer = kuro_db::schema_unified::open_file(&path).expect("reopen");
         let db = Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle"));
-        let got = MangaStubSourceRepo::new(db).get(3).expect("get");
+        let got = StubSourceRepo::new(db, Kind::Manga).get(3).expect("get");
         assert_eq!(got, Some(StubSource { id: 3, lang: "en".into(), name: "Kept".into() }));
     }
 
@@ -197,17 +157,7 @@ mod tests {
     #[tokio::test]
     async fn watch_all_emits_after_each_upsert() {
         let (_d, db) = test_db();
-        let repo = MangaStubSourceRepo::new(db);
-        let mut sub = repo.watch_all();
-        wait_until(&mut sub, &[]).await;
-        repo.upsert(1, "en", "One").expect("upsert");
-        wait_until(&mut sub, &[StubSource { id: 1, lang: "en".into(), name: "One".into() }]).await;
-    }
-
-    #[tokio::test]
-    async fn anime_watch_all_emits_after_each_upsert() {
-        let (_d, db) = test_db();
-        let repo = AnimeStubSourceRepo::new(db);
+        let repo = StubSourceRepo::new(db, Kind::Anime);
         let mut sub = repo.watch_all();
         wait_until(&mut sub, &[]).await;
         repo.upsert(2, "en", "Two").expect("upsert");

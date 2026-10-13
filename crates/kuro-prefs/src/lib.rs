@@ -31,7 +31,6 @@ pub mod prefs;
 pub mod reader;
 pub mod registry;
 pub mod settings_load;
-pub mod sort;
 pub mod source;
 pub mod source_file;
 pub mod store;

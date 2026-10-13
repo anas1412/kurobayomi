@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::Memo;
+use kuro_db::codec::Memo;
 use kuro_db::subscribe::Subscription;
 use kuro_db::tables::items as t;
 use kuro_db::tables::{ItemPatch, ItemRow};
@@ -275,17 +275,8 @@ impl ItemRepo {
 
     /// The item list of an entry, published again after a change to the items or to the exclusions.
     pub fn subscribe_by_entry_id(&self, entry_id: i64, apply_scanlator_filter: bool) -> Subscription<Vec<Item>> {
-        self.subscribe_by_entry_id_as(entry_id, apply_scanlator_filter)
-    }
-
-    /// [`Self::subscribe_by_entry_id`] with each row turned into `T` inside the query (the legacy shapes publish too).
-    pub(crate) fn subscribe_by_entry_id_as<T: From<Item> + PartialEq + Send + Sync + 'static>(
-        &self,
-        entry_id: i64,
-        apply_scanlator_filter: bool,
-    ) -> Subscription<Vec<T>> {
         self.db.subscribe(ITEM_TABLES, ENTRY_DEBOUNCE, move |c| {
-            Ok(t::by_entry(c, entry_id, apply_scanlator_filter)?.into_iter().map(|r| Item::from(r).into()).collect::<Vec<_>>())
+            Ok(t::by_entry(c, entry_id, apply_scanlator_filter)?.into_iter().map(Item::from).collect::<Vec<_>>())
         })
     }
 

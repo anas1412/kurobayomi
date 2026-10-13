@@ -37,18 +37,12 @@ mod tests {
         }
     }
 
-    /// T-05a-016: the episode wrapper is the chapter function, so the vectors and every trim character agree.
+    /// T-05a-016: every trim character is trimmed, whatever the kind of the entry.
     #[test]
-    fn the_episode_wrapper_gives_the_same_results_as_the_item_function() {
-        use crate::episode::sanitize_episode_name;
-        let cases = [("One Piece - 12", "One Piece"), ("\u{001F}One Piece 1", "One Piece"), ("_-:Special,", ""), ("One Piece", "One Piece")];
-        for (name, title) in cases {
-            assert_eq!(sanitize_episode_name(name, title), sanitize_item_name(name, title), "{name:?}");
-        }
+    fn every_trim_character_is_trimmed() {
         for c in TRIM_CHARS {
             let padded = format!("{c}x{c}");
             assert_eq!(sanitize_item_name(&padded, ""), "x", "U+{:04X}", c as u32);
-            assert_eq!(sanitize_episode_name(&padded, ""), "x", "U+{:04X}", c as u32);
         }
     }
 

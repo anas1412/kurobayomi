@@ -1,6 +1,6 @@
 //! Preference side of the category rules (T-05a-025). Deleting a category clears its id from the category
 //! sets and resets the default category. A sort-mode change writes the sort string. The Random sort seed is
-//! app memory (the settings diet cut its keys), one per kind. The category rows are in `kuro-data::category`, and the sort codec is `kuro_db::flags::library_sort`.
+//! app memory (the settings diet cut its keys), one per kind. The category rows are in `kuro-data::category`, and the sort codec is `kuro_platform::sort`.
 
 use kuro_platform::kind::Kind;
 use std::collections::BTreeSet;

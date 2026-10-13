@@ -19,7 +19,7 @@ use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_data::sanitize::sanitize_item_name;
 use kuro_db::Db;
-use kuro_db::schema_anime::Memo;
+use kuro_db::codec::Memo;
 use kuro_db::tables::items as item_table;
 use kuro_db::tables::{EntryPatch, ItemPatch, ItemRow, entries as entry_table};
 use kuro_platform::kind::Kind;
@@ -362,7 +362,7 @@ impl SyncItems {
                 entry_table::update(tx, &patch)?;
             }
             let excluded: HashSet<String> = if changed && e.kind == Kind::Manga {
-                kuro_db::statements_manga::excluded_scanlators::get_by_manga_id(tx, e.id)?.into_iter().collect()
+                kuro_db::tables::excluded::by_entry_id(tx, e.id)?.into_iter().collect()
             } else {
                 HashSet::new()
             };
@@ -702,6 +702,19 @@ mod tests {
             let after = f.entry();
             assert_eq!(after.last_update, NOW_MS);
             assert_ne!(after.next_update, SENTINEL_NEXT, "recomputed");
+        }
+    }
+
+    /// A duplicate of a done item is marked done when the rule is on, so it is not reported as new.
+    #[tokio::test]
+    async fn a_duplicate_is_marked_done_when_the_rule_is_on() {
+        for kind in [Kind::Manga, Kind::Anime] {
+            let f = plain(kind);
+            f.insert(Item { done: true, ..f.item("/old", 1.0) });
+            let raw = vec![SourceItem { number: 1.0, ..f.src("/old", "Item 1", 0) }, SourceItem { number: 1.0, ..f.src("/alt", "Item 1", 0) }];
+            let on = f.sync.run(raw, &f.entry(), SyncOptions { mark_duplicate_done: true, ..opts(true) }, None).await.unwrap();
+            assert!(on.is_empty(), "{kind}: the duplicate is marked done, so it is not reported as new");
+            assert!(f.stored().iter().any(|r| r.url == "/alt" && r.done));
         }
     }
 

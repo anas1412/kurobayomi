@@ -1,7 +1,7 @@
 //! Viewer flags of the anime entry (T-39b-009). Upstream: `SetAnimeViewerFlags.kt`. The skip-intro length (bits 0-7),
 //! the disable bit (bit 56) and the next-airing groups (bits 8-23 and 24-55) live in one `viewer_flags` word. Each
 //! write is one masked update of its own bits (E-AIR-1), so writing one group never reads or clears another. The
-//! codec and masks come from `kuro_domain::entries::anime`; this module only builds `(value, mask)` pairs for the
+//! codec and masks come from `kuro_domain::entries::flags`; this module only builds `(value, mask)` pairs for the
 //! store. No GTK here.
 
 /// The length the skip-intro dialog starts at (`AnimeScreen.kt`, `ChangeAnimeSkipIntro`): the stored length, or the
@@ -11,7 +11,7 @@ pub fn dialog_start(stored: i32, disabled: bool, default: i32) -> i32 {
 }
 
 #[cfg(test)]
-use kuro_domain::entries::anime::viewer_flags;
+use kuro_domain::entries::flags as viewer_flags;
 
 #[cfg(test)]
 mod tests {

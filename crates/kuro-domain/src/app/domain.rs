@@ -1,7 +1,7 @@
 //! The domain container (`DomainModule.kt`, `SYDomainModule.kt`; T-10a-001, PARTIAL). It owns the handles the interactors
 //! share and gives each one out by a cheap clone, so nothing is a global.
 //!
-//! Built: the source, backup and download preferences, the storage manager, the source toggles, the manga and anime
+//! Built: the source, backup and download preferences, the storage manager, the source toggles, the entry and item
 //! repositories (accessors above). The construction test uses `kuro-testkit` fakes.
 //!
 //! Deferred, with the exact gap:
@@ -15,10 +15,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use kuro_data::anime::AnimeRepo;
 use kuro_data::entry::EntryRepo;
 use kuro_data::item::ItemRepo;
-use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
@@ -46,8 +44,6 @@ pub struct Domain {
     download_prefs: DownloadPrefs,
     storage: Arc<StorageManager>,
     toggles: Arc<SourceToggles>,
-    manga: MangaRepo,
-    anime: AnimeRepo,
     entries: EntryRepo,
     items: ItemRepo,
     db: Arc<Db>,
@@ -66,8 +62,6 @@ impl Domain {
             download_prefs: DownloadPrefs::new(&prefs),
             storage: Arc::new(StorageManager::open(&prefs, default_storage.clone())),
             toggles: Arc::new(SourceToggles::default()),
-            manga: MangaRepo::new(Arc::clone(&db)),
-            anime: AnimeRepo::new(Arc::clone(&db)),
             entries: EntryRepo::new(Arc::clone(&db)),
             items: ItemRepo::new(Arc::clone(&db)),
             db,
@@ -96,15 +90,7 @@ impl Domain {
         Arc::clone(&self.toggles)
     }
 
-    pub fn manga(&self) -> &MangaRepo {
-        &self.manga
-    }
-
-    pub fn anime(&self) -> &AnimeRepo {
-        &self.anime
-    }
-
-    /// The shared entry repository, both kinds (the per-kind `manga()` and `anime()` stay until phase E).
+    /// The shared entry repository, both kinds.
     pub fn entries(&self) -> &EntryRepo {
         &self.entries
     }
@@ -169,7 +155,6 @@ mod tests {
         assert!(Arc::ptr_eq(&domain.storage(), &clone.storage()), "clones share the storage manager");
         assert!(Arc::ptr_eq(&domain.source_toggles(), &clone.source_toggles()));
         assert!(Arc::ptr_eq(domain.db(), clone.db()), "clones share the database");
-        assert!(domain.manga().by_id(1).is_err(), "an empty database has no entry 1");
         assert!(domain.entries().by_id(1).is_err() && domain.items().by_id(1).unwrap().is_none());
     }
 

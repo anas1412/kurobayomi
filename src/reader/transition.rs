@@ -14,7 +14,6 @@ use gtk::subclass::prelude::*;
 use kuro_data::item::Item;
 use kuro_domain::items::missing::item_gap;
 
-use crate::entry_core::numbered::NumberedItem;
 
 use super::model::{ChapterState, ChapterTransition};
 use super::strings;
@@ -74,7 +73,7 @@ pub fn content(transition: &ChapterTransition, from_downloaded: bool, to_downloa
             },
             bottom: Slot::Chapter(line(strings::TRANSITION_CURRENT, from, from_downloaded)),
             // calculateChapterGap(currChapter, goingToChapter)
-            gap: item_gap(Some(&NumberedItem(from)), to.map(NumberedItem).as_ref()),
+            gap: item_gap(Some(from), to),
         },
         ChapterTransition::Next { .. } => Content {
             top: Slot::Chapter(line(strings::TRANSITION_FINISHED, from, from_downloaded)),
@@ -83,7 +82,7 @@ pub fn content(transition: &ChapterTransition, from_downloaded: bool, to_downloa
                 None => Slot::NoChapter(strings::TRANSITION_NO_NEXT),
             },
             // calculateChapterGap(goingToChapter, currChapter)
-            gap: item_gap(to.map(NumberedItem).as_ref(), Some(&NumberedItem(from))),
+            gap: item_gap(to, Some(from)),
         },
     }
 }

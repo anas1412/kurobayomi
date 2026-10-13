@@ -11,7 +11,7 @@ pub trait Clock: Send + Sync {
     fn now_millis(&self) -> i64;
 }
 
-/// A closure that reads the instant is a clock too (the legacy repos still take one).
+/// A closure that reads the instant is a clock too.
 impl<F: Fn() -> i64 + Send + Sync> Clock for F {
     fn now_millis(&self) -> i64 {
         self()
