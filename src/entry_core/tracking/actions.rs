@@ -11,8 +11,6 @@ use std::sync::Arc;
 use kuro_track::ctx::TrackCtx;
 use kuro_track::error::TrackError;
 use kuro_track::messages::MsgKey;
-#[cfg(test)]
-use kuro_track::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use kuro_track::model::{AnimeTrack, MangaTrack, TrackerId};
 use kuro_track::progress::{TrackOutcome, spawn_track_chapter, spawn_track_episode};
 use kuro_track::remove::{spawn_remove_anime, spawn_remove_manga};
@@ -63,59 +61,4 @@ pub fn remove_anime(track: AnimeTrack, also_remote: bool) -> Option<JoinHandle<R
 /// Removes a manga binding, and the remote entry too when `also_remote` is set.
 pub fn remove_manga(track: MangaTrack, also_remote: bool) -> Option<JoinHandle<Result<(), MsgKey>>> {
     start(|ctx| spawn_remove_manga(ctx, track, also_remote))
-}
-
-#[cfg(test)]
-/// Searches AniList for anime titles (the tracker search screen).
-pub fn search_anime(query: String) -> Option<JoinHandle<Result<Vec<AnimeTrackSearch>, TrackError>>> {
-    start(|ctx| tokio::spawn(anilist_search_anime(ctx, query)))
-}
-
-#[cfg(test)]
-/// Searches AniList for manga titles (the tracker search screen).
-pub fn search_manga(query: String) -> Option<JoinHandle<Result<Vec<MangaTrackSearch>, TrackError>>> {
-    start(|ctx| tokio::spawn(anilist_search_manga(ctx, query)))
-}
-
-#[cfg(test)]
-/// Refreshes every logged-in anime binding of the entry from its service (the sheet's refresh). The handle resolves to the
-/// failures, which the caller shows; a failed refresh keeps the local row as it was.
-pub fn refresh_anime(entry_id: i64) -> Option<JoinHandle<Result<Vec<(TrackerId, TrackError)>, TrackError>>> {
-    start(|ctx| tokio::spawn(async move { kuro_track::sync::refresh_anime(&ctx, entry_id).await }))
-}
-
-#[cfg(test)]
-/// Manga form of [`refresh_anime`].
-pub fn refresh_manga(manga_id: i64) -> Option<JoinHandle<Result<Vec<(TrackerId, TrackError)>, TrackError>>> {
-    start(|ctx| tokio::spawn(async move { kuro_track::sync::refresh_manga(&ctx, manga_id).await }))
-}
-
-#[cfg(test)]
-async fn anilist_search_anime(ctx: Arc<TrackCtx>, query: String) -> Result<Vec<AnimeTrackSearch>, TrackError> {
-    let tracker = ctx.trackers.get(TrackerId::ANILIST).ok_or(TrackError::UnknownTracker(TrackerId::ANILIST.0))?;
-    let anime = tracker.as_anime().ok_or_else(|| TrackError::Message("AniList has no anime list".into()))?;
-    anime.search(&query).await
-}
-
-#[cfg(test)]
-async fn anilist_search_manga(ctx: Arc<TrackCtx>, query: String) -> Result<Vec<MangaTrackSearch>, TrackError> {
-    let tracker = ctx.trackers.get(TrackerId::ANILIST).ok_or(TrackError::UnknownTracker(TrackerId::ANILIST.0))?;
-    let manga = tracker.as_manga().ok_or_else(|| TrackError::Message("AniList has no manga list".into()))?;
-    manga.search(&query).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn without_the_services_every_call_is_a_no_op() {
-        // the services are built on the GTK thread at run time: a unit test has none, so nothing starts
-        assert!(tracker_host::ctx().is_none());
-        chapter_read(1, 2.0);
-        episode_seen(1, 2.0);
-        assert!(search_anime("x".into()).is_none());
-        assert!(search_manga("x".into()).is_none());
-        assert!(refresh_anime(1).is_none() && refresh_manga(1).is_none());
-    }
 }

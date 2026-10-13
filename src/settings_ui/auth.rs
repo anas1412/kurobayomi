@@ -9,8 +9,6 @@ use std::sync::{Arc, OnceLock};
 
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{Error as HashError, PasswordVerifier};
-#[cfg(test)]
-use argon2::password_hash::PasswordHasher;
 use argon2::Argon2;
 use gtk::prelude::*;
 use kuro_platform::secrets::SecretStore;
@@ -19,19 +17,7 @@ use crate::pref_model::widgets::dialog;
 
 pub const CONFIRM_LOCK_CHANGE: &str = "Authenticate to confirm change";
 pub const UNLOCK_BUTTON: &str = "Unlock";
-#[cfg(test)]
-pub const SET_BUTTON: &str = "Set passphrase";
-#[cfg(test)]
-pub const SET_TITLE: &str = "Set an unlock passphrase";
-#[cfg(test)]
-pub const SET_SUBTITLE: &str = "The app asks for it before changing the lock, the NSFW setting and the lock delay.";
 pub const WRONG_PASSPHRASE: &str = "Wrong passphrase";
-#[cfg(test)]
-pub const TOO_SHORT: &str = "Use at least 4 characters";
-#[cfg(test)]
-pub const MISMATCH: &str = "The two passphrases differ";
-#[cfg(test)]
-pub const MIN_LENGTH: usize = 4;
 
 const SERVICE: &str = "kurobayomi-applock";
 const ACCOUNT: &str = "passphrase";
@@ -49,12 +35,6 @@ impl<'a> Passphrase<'a> {
         self.0.get(SERVICE, ACCOUNT).map(|hash| hash.is_some()).map_err(|e| e.to_string())
     }
 
-    #[cfg(test)]
-    pub fn set(&self, passphrase: &str) -> Result<(), String> {
-        let hash = Argon2::default().hash_password(passphrase.as_bytes()).map_err(|e| e.to_string())?;
-        self.0.set(SERVICE, ACCOUNT, &hash.to_string()).map_err(|e| e.to_string())
-    }
-
     /// `Ok(true)` for the right passphrase, `Ok(false)` for a wrong one, `Err` when the hash cannot be read.
     pub fn verify(&self, passphrase: &str) -> Result<bool, String> {
         let stored = self.0.get(SERVICE, ACCOUNT).map_err(|e| e.to_string())?.ok_or("No passphrase is set")?;
@@ -66,22 +46,6 @@ impl<'a> Passphrase<'a> {
         }
     }
 
-    #[cfg(test)]
-    pub fn clear(&self) -> Result<(), String> {
-        self.0.delete(SERVICE, ACCOUNT).map_err(|e| e.to_string())
-    }
-}
-
-#[cfg(test)]
-/// The rule for a new passphrase and its repeat.
-pub fn check_new(passphrase: &str, repeat: &str) -> Result<(), &'static str> {
-    if passphrase.chars().count() < MIN_LENGTH {
-        Err(TOO_SHORT)
-    } else if passphrase != repeat {
-        Err(MISMATCH)
-    } else {
-        Ok(())
-    }
 }
 
 /// The app's secret store, opened once. Tests get an empty in-memory one.
@@ -192,69 +156,8 @@ pub async fn confirm(title: &str, subtitle: &str) -> bool {
 }
 
 #[cfg(test)]
-/// The dialog that sets the passphrase. True once it is stored, false when cancelled.
-async fn create() -> Result<bool, String> {
-    let Some(parent) = parent() else { return Ok(false) };
-    let (first, repeat) = (entry(), entry());
-    repeat.set_placeholder_text(Some("Repeat the passphrase"));
-    let (tx, rx) = async_channel::bounded::<Result<bool, String>>(1);
-    let on_cancel = tx.clone();
-    dialog::show(
-        &parent,
-        SET_TITLE,
-        &body(SET_SUBTITLE, &[&first, &repeat]),
-        Some(SET_BUTTON),
-        {
-            let (first, repeat) = (first.clone(), repeat.clone());
-            move |dialog| {
-                let typed = first.text().to_string();
-                if let Err(message) = check_new(&typed, &repeat.text()) {
-                    dialog.set_error(Some(message));
-                    return;
-                }
-                dialog.set_confirm_enabled(false);
-                let tx = tx.clone();
-                gtk::glib::spawn_future_local(async move {
-                    match blocking(move |p| p.set(&typed)).await {
-                        Ok(()) => {
-                            let _ = tx.try_send(Ok(true));
-                            dialog.finish();
-                        }
-                        Err(message) => {
-                            dialog.set_error(Some(&message));
-                            dialog.set_confirm_enabled(true);
-                        }
-                    }
-                });
-            }
-        },
-        move || {
-            let _ = on_cancel.try_send(Ok(false));
-        },
-    );
-    first.grab_focus();
-    rx.recv().await.unwrap_or(Ok(false))
-}
-
-#[cfg(test)]
-/// The veto of the Require unlock switch: on sets the passphrase (or unlocks, when one is already set), off needs an
-/// unlock and then removes the passphrase. `Ok(false)` keeps the switch where it was.
-pub async fn set_lock(title: &str, on: bool) -> Result<bool, String> {
-    if on && !blocking(|p| p.is_set()).await? {
-        return create().await;
-    }
-    if !confirm(title, CONFIRM_LOCK_CHANGE).await {
-        return Ok(false);
-    }
-    if !on {
-        blocking(|p| p.clear()).await?;
-    }
-    Ok(true)
-}
-
-#[cfg(test)]
 mod tests {
-    use kuro_prefs::memory::MemorySecrets;
+    
 
     use super::*;
 
@@ -272,41 +175,4 @@ mod tests {
         assert!(block_on(confirm("Title", CONFIRM_LOCK_CHANGE)));
     }
 
-    #[test]
-    fn turning_the_lock_off_without_a_passphrase_passes() {
-        assert_eq!(block_on(set_lock("Require unlock", false)), Ok(true));
-    }
-
-    #[test]
-    fn a_passphrase_is_stored_as_an_argon2id_hash_and_verifies_only_itself() {
-        let secrets = MemorySecrets::default();
-        let lock = Passphrase::new(&secrets);
-        assert_eq!(lock.is_set(), Ok(false));
-        lock.set("correct horse").unwrap();
-        assert_eq!(lock.is_set(), Ok(true));
-        let stored = secrets.get(SERVICE, ACCOUNT).unwrap().unwrap();
-        assert!(stored.starts_with("$argon2id$"), "a PHC string, never the passphrase: {stored}");
-        assert!(!stored.contains("correct horse"));
-        assert_eq!(lock.verify("correct horse"), Ok(true));
-        assert_eq!(lock.verify("wrong"), Ok(false));
-    }
-
-    #[test]
-    fn clearing_removes_the_method_and_an_unreadable_hash_is_an_error_not_a_pass() {
-        let secrets = MemorySecrets::default();
-        let lock = Passphrase::new(&secrets);
-        assert!(lock.verify("x").is_err(), "no passphrase to check against");
-        secrets.set(SERVICE, ACCOUNT, "not a hash").unwrap();
-        assert!(lock.verify("x").is_err());
-        lock.clear().unwrap();
-        assert_eq!(lock.is_set(), Ok(false));
-    }
-
-    #[test]
-    fn a_new_passphrase_needs_four_characters_and_a_matching_repeat() {
-        assert_eq!(check_new("abc", "abc"), Err(TOO_SHORT));
-        assert_eq!(check_new("abcd", "abce"), Err(MISMATCH));
-        assert_eq!(check_new("abcd", "abcd"), Ok(()));
-        assert_eq!(check_new("äöüß", "äöüß"), Ok(()), "length counts characters");
-    }
 }

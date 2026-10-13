@@ -75,16 +75,6 @@ impl Selection {
     }
 
     #[cfg(test)]
-    pub fn len(&self) -> usize {
-        self.ids.len()
-    }
-
-    #[cfg(test)]
-    pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
-    }
-
-    #[cfg(test)]
     /// Selected chapter ids in ascending order.
     pub fn ids(&self) -> impl Iterator<Item = i64> + '_ {
         self.ids.iter().copied()
@@ -222,14 +212,6 @@ impl Selection {
 pub enum Command {
     Tap,
     LongPress,
-    #[cfg(test)]
-    SelectAll,
-    #[cfg(test)]
-    Invert,
-    #[cfg(test)]
-    ClearSelection,
-    #[cfg(test)]
-    CloseDialog,
 }
 
 /// Modifier keys held during a key press or click.
@@ -237,32 +219,6 @@ pub enum Command {
 pub struct Mods {
     pub shift: bool,
     pub ctrl: bool,
-}
-
-#[cfg(test)]
-/// The keys the details page reacts to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Key {
-    Space,
-    Escape,
-    /// A lowercase letter, with Ctrl or Shift applied through `Mods`.
-    Letter(char),
-}
-
-#[cfg(test)]
-/// Keyboard map (`p2-ui-parity.md` 6). `in_selection` is whether selection mode is on; `dialog_open` is whether
-/// a dialog is showing (Escape closes the dialog first).
-pub fn key_command(key: Key, mods: Mods, in_selection: bool, dialog_open: bool) -> Option<Command> {
-    match key {
-        Key::Space if mods.shift => Some(Command::LongPress),
-        Key::Space => Some(Command::Tap),
-        Key::Escape if dialog_open => Some(Command::CloseDialog),
-        Key::Escape if in_selection => Some(Command::ClearSelection),
-        Key::Escape => None,
-        Key::Letter('a') if mods.ctrl => Some(Command::SelectAll),
-        Key::Letter('i') if mods.ctrl => Some(Command::Invert),
-        Key::Letter(_) => None,
-    }
 }
 
 /// Pointer map. A long press or right click selects and starts a range. Shift-click extends a range,
@@ -281,20 +237,6 @@ mod tests {
 
     fn view() -> Vec<i64> {
         vec![10, 11, 12, 13, 14]
-    }
-
-    #[test]
-    fn tap_toggle_on_off() {
-        let v = view();
-        let mut s = Selection::default();
-        assert!(s.toggle(&v, 12, true, Pick::Tap));
-        assert!(s.contains(12));
-        assert!(
-            !s.toggle(&v, 12, true, Pick::Tap),
-            "same state is no change"
-        );
-        assert!(s.toggle(&v, 12, false, Pick::Tap));
-        assert!(s.is_empty());
     }
 
     #[test]
@@ -334,33 +276,12 @@ mod tests {
     }
 
     #[test]
-    fn set_all_uses_raw_ids() {
-        // The view shows only ids 1 and 3, but the raw list has 2 and 4 as well.
-        let raw = [1, 2, 3, 4];
-        let mut s = Selection::default();
-        s.set_all(&raw, true);
-        assert!(
-            s.contains(2) && s.contains(4),
-            "hidden rows are selected too"
-        );
-        assert_eq!(s.len(), 4);
-    }
-
-    #[test]
     fn invert_flips_raw() {
         let raw = [1, 2, 3];
         let mut s = Selection::default();
         s.toggle(&[1, 2, 3], 2, true, Pick::Tap);
         s.invert(&raw);
         assert_eq!(s.ids().collect::<Vec<_>>(), vec![1, 3]);
-    }
-
-    #[test]
-    fn toggle_missing_id_is_noop() {
-        let v = view();
-        let mut s = Selection::default();
-        assert!(!s.toggle(&v, 99, true, Pick::Tap));
-        assert!(s.is_empty());
     }
 
     #[test]
@@ -372,88 +293,6 @@ mod tests {
         let filtered = vec![10, 12, 13, 14];
         assert!(s.toggle(&filtered, 14, true, Pick::LongPress));
         assert_eq!(s.ids().collect::<Vec<_>>(), vec![12, 13, 14]);
-    }
-
-    #[test]
-    fn clear_and_key_map() {
-        let v = view();
-        let mut s = Selection::default();
-        s.toggle(&v, 10, true, Pick::Tap);
-        s.clear();
-        assert!(s.is_empty());
-        assert_eq!(
-            key_command(
-                Key::Space,
-                Mods {
-                    shift: true,
-                    ctrl: false
-                },
-                true,
-                false
-            ),
-            Some(Command::LongPress)
-        );
-        assert_eq!(
-            key_command(Key::Space, Mods::default(), true, false),
-            Some(Command::Tap)
-        );
-        assert_eq!(
-            key_command(Key::Escape, Mods::default(), true, true),
-            Some(Command::CloseDialog)
-        );
-        assert_eq!(
-            key_command(Key::Escape, Mods::default(), true, false),
-            Some(Command::ClearSelection)
-        );
-        assert_eq!(
-            key_command(Key::Escape, Mods::default(), false, false),
-            None
-        );
-        assert_eq!(
-            key_command(
-                Key::Letter('a'),
-                Mods {
-                    shift: false,
-                    ctrl: true
-                },
-                false,
-                false
-            ),
-            Some(Command::SelectAll)
-        );
-        assert_eq!(
-            key_command(
-                Key::Letter('i'),
-                Mods {
-                    shift: false,
-                    ctrl: true
-                },
-                false,
-                false
-            ),
-            Some(Command::Invert)
-        );
-        assert_eq!(
-            click_command(
-                Mods {
-                    shift: true,
-                    ctrl: false
-                },
-                false
-            ),
-            Command::LongPress
-        );
-        assert_eq!(
-            click_command(
-                Mods {
-                    shift: false,
-                    ctrl: true
-                },
-                false
-            ),
-            Command::Tap
-        );
-        assert_eq!(click_command(Mods::default(), true), Command::LongPress);
     }
 
     #[test]

@@ -10,16 +10,12 @@
 pub mod actions;
 pub mod auto_track;
 pub mod dates;
-pub mod enhanced;
 pub mod facts;
-#[cfg(test)]
-pub mod links;
 pub mod page;
 pub mod pickers;
 pub mod progress;
 pub mod remove;
 #[cfg(test)]
-pub mod search;
 pub mod session;
 pub mod summary;
 pub mod writes;

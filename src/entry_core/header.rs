@@ -139,10 +139,9 @@ pub fn cover_size(large: bool, column_width: i32) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry_core::text::{status_icon, status_text};
 
     fn model(title: &str, author: Option<&str>, artist: Option<&str>, stub: bool) -> HeaderModel {
-        HeaderModel::from_parts(title, author, artist, (status_icon(0), status_text(0)), "Source A (EN)", stub)
+        HeaderModel::from_parts(title, author, artist, ("action-unavailable-symbolic", "Unknown".to_owned()), "Source A (EN)", stub)
     }
 
     #[test]

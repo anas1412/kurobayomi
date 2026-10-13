@@ -88,59 +88,6 @@ pub fn summarize(facts: &[TrackerFacts], bound: &[i64]) -> Summary {
 }
 
 #[cfg(test)]
-/// What the record of a bound row shows, read off the tracker and the record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RecordShown {
-    /// The score list is not empty and the score is set.
-    pub score: bool,
-    pub start_date: bool,
-    pub finish_date: bool,
-}
-
-#[cfg(test)]
-/// Which actions a row offers (UI parity 4.1, E-TRK-1). An unbound row offers only "Add tracking"; a bound row never
-/// reads a missing record, so every action on it is gated by the record it has.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RowActions {
-    pub add_tracking: bool,
-    pub status: bool,
-    pub progress: bool,
-    pub score: bool,
-    pub start_date: bool,
-    pub finish_date: bool,
-    pub private_toggle: bool,
-    pub menu: bool,
-}
-
-#[cfg(test)]
-/// `record` is `None` for an unbound row. The private toggle needs both a record and a tracker that supports it
-/// (E-TRK-1).
-pub fn row_actions(record: Option<RecordShown>, supports_private: bool) -> RowActions {
-    match record {
-        None => RowActions {
-            add_tracking: true,
-            status: false,
-            progress: false,
-            score: false,
-            start_date: false,
-            finish_date: false,
-            private_toggle: false,
-            menu: false,
-        },
-        Some(shown) => RowActions {
-            add_tracking: false,
-            status: true,
-            progress: true,
-            score: shown.score,
-            start_date: shown.start_date,
-            finish_date: shown.finish_date,
-            private_toggle: supports_private,
-            menu: true,
-        },
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -174,18 +121,4 @@ mod tests {
         assert!(!summarize(&[f(2, false, true)], &[2]).has_logged_in, "no logged-in tracker");
     }
 
-    #[test]
-    fn no_track_hides_private_toggle() {
-        let unbound = row_actions(None, true);
-        assert!(unbound.add_tracking && !unbound.private_toggle && !unbound.menu);
-        let bound_no_private = row_actions(Some(RecordShown { score: true, start_date: false, finish_date: false }), false);
-        assert!(!bound_no_private.private_toggle, "a tracker without private tracking shows no toggle");
-        assert!(row_actions(Some(RecordShown { score: false, start_date: false, finish_date: false }), true).private_toggle);
-    }
-
-    #[test]
-    fn a_bound_row_gates_its_score_and_date_actions_on_the_record() {
-        let a = row_actions(Some(RecordShown { score: false, start_date: true, finish_date: false }), true);
-        assert!(!a.score && a.start_date && !a.finish_date && a.status && a.progress);
-    }
 }

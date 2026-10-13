@@ -36,34 +36,6 @@ pub fn artist_row(author: Option<&str>, artist: Option<&str>) -> Option<String> 
     }
 }
 
-#[cfg(test)]
-/// Status icon name for `SManga` status values 0..6. 0 and unknown values use the block icon.
-pub fn status_icon(status: i64) -> &'static str {
-    match status {
-        1 => "document-open-recent-symbolic",
-        2 => "emblem-ok-symbolic",
-        3 => "money-symbolic",
-        4 => "object-select-symbolic",
-        5 => "window-close-symbolic",
-        6 => "media-playback-pause-symbolic",
-        _ => "action-unavailable-symbolic",
-    }
-}
-
-#[cfg(test)]
-/// Status text for `SManga` status values 0..6 (`ongoing`, `completed`, ...). 0 and unknown values are "Unknown".
-pub fn status_text(status: i64) -> String {
-    tr(match status {
-        1 => MsgKey::ongoing,
-        2 => MsgKey::completed,
-        3 => MsgKey::licensed,
-        4 => MsgKey::publishing_finished,
-        5 => MsgKey::cancelled,
-        6 => MsgKey::on_hiatus,
-        _ => MsgKey::unknown,
-    })
-}
-
 /// The description in both forms. `expanded` is the raw text. `shrunk` is the collapsed text used when collapsed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Description {
@@ -177,19 +149,6 @@ mod tests {
         assert_eq!(artist_row(Some("Miura"), Some(" ")), None);
         assert_eq!(artist_row(None, Some("Miura")), Some("Miura".to_owned()));
         assert_eq!(artist_row(Some("A"), Some("B")), Some("B".to_owned()));
-    }
-
-    #[test]
-    fn status_mapping_and_unknown_fallback() {
-        assert_eq!(status_icon(1), "document-open-recent-symbolic");
-        assert_eq!(status_icon(0), "action-unavailable-symbolic");
-        assert_eq!(status_icon(99), "action-unavailable-symbolic");
-        assert_eq!(status_text(1), "Ongoing");
-        assert_eq!(status_text(2), "Completed");
-        assert_eq!(status_text(4), "Publishing finished");
-        assert_eq!(status_text(6), "On hiatus");
-        assert_eq!(status_text(0), "Unknown");
-        assert_eq!(status_text(42), "Unknown");
     }
 
     #[test]

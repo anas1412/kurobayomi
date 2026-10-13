@@ -15,45 +15,6 @@ pub enum Edit {
     FinishDate(i64),
 }
 
-#[cfg(test)]
-/// The banner of a write that failed: it names the service that was captured when the write started.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WriteFailure {
-    pub service: String,
-    pub reason: String,
-}
-
-#[cfg(test)]
-pub fn write_failure(service: &str, reason: &str) -> WriteFailure {
-    WriteFailure { service: service.to_owned(), reason: reason.to_owned() }
-}
-
-#[cfg(test)]
-/// The private toggle needs a bound row and a tracker that supports private tracking. It never runs without a track
-/// (E-TRK-1, `no_track_hides_private_toggle`).
-pub fn private_toggle_allowed(bound: bool, supports_private: bool) -> bool {
-    bound && supports_private
-}
-
-#[cfg(test)]
-/// Applies a write to a fresh copy of the row, read after the picker closed (`T-TRK-11`, D-1). The local row changes
-/// only when the remote write succeeded (E-TRK-15): on failure the caller gets the banner and the old row stays.
-pub fn commit<T: Clone>(
-    service: &str,
-    fresh: &T,
-    apply: impl FnOnce(&mut T),
-    remote: Result<(), String>,
-) -> Result<T, WriteFailure> {
-    match remote {
-        Ok(()) => {
-            let mut row = fresh.clone();
-            apply(&mut row);
-            Ok(row)
-        }
-        Err(reason) => Err(write_failure(service, &reason)),
-    }
-}
-
 /// The date a remove-date confirm stores: `0`, which clears the date (E-DATE-3, behaviour 8.6).
 pub const REMOVE_DATE: i64 = 0;
 
@@ -65,32 +26,6 @@ pub fn date_edit(is_start: bool, stored_ms: i64) -> Edit {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[derive(Clone, Debug, PartialEq)]
-    struct Row {
-        progress: i64,
-    }
-
-    #[test]
-    fn a_failed_write_keeps_the_local_row_and_names_the_service() {
-        let fresh = Row { progress: 3 };
-        let failed = commit("AniList", &fresh, |r| r.progress = 4, Err("timeout".into()));
-        assert_eq!(
-            failed,
-            Err(WriteFailure { service: "AniList".into(), reason: "timeout".into() }),
-            "the banner names the service"
-        );
-        let ok = commit("AniList", &fresh, |r| r.progress = 4, Ok(()));
-        assert_eq!(ok, Ok(Row { progress: 4 }), "a successful write changes the local row");
-        assert_eq!(fresh.progress, 3, "the fresh copy is only read");
-    }
-
-    #[test]
-    fn toggle_private_never_runs_without_a_track() {
-        assert!(!private_toggle_allowed(false, true), "no track, no toggle (E-TRK-1)");
-        assert!(!private_toggle_allowed(true, false), "a tracker without private tracking has no toggle");
-        assert!(private_toggle_allowed(true, true));
-    }
 
     #[test]
     fn the_remove_date_confirm_names_the_tracker_and_the_date() {

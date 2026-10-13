@@ -18,9 +18,6 @@ use super::ids;
 use super::notify::{Op, Post, Target};
 use super::router::AppAction;
 
-#[cfg(test)]
-/// The prompt title (`update_check_notification_update_available` in the English catalogue).
-pub const PROMPT_TITLE: &str = "New version available!";
 /// The title of a download with no known version.
 pub const DOWNLOAD_TITLE: &str = "Downloading update";
 /// The text of the failure notice title.
@@ -37,69 +34,7 @@ pub enum Phase {
     WaitingForNetwork,
 }
 
-#[cfg(test)]
-/// The prompt for `version`: default tap opens the release page, "Download" starts the download and "What's new" opens
-/// the release page too.
-pub fn prompt(version: &str, release_url: &str, download_url: &str, sha256: Option<&str>) -> Post {
-    Post {
-        id: ids::APP_UPDATE_PROGRESS.to_owned(),
-        title: PROMPT_TITLE.to_owned(),
-        body: Some(version.to_owned()),
-        low_priority: false,
-        timeout: None,
-        tap: Some(Target::Action(AppAction::OpenUrl { url: release_url.to_owned() })),
-        buttons: vec![
-            (
-                "Download".to_owned(),
-                Target::Action(AppAction::StartAppUpdate { url: download_url.to_owned(), version: Some(version.to_owned()), sha256: sha256.map(str::to_owned) }),
-            ),
-            ("What's new".to_owned(), Target::Action(AppAction::OpenUrl { url: release_url.to_owned() })),
-        ],
-    }
-}
 
-#[cfg(test)]
-/// One check at a time (E-U10, test U10): [`SingleFlight::begin`] hands out a guard to one caller at a time.
-#[derive(Default)]
-pub struct SingleFlight(std::sync::atomic::AtomicBool);
-
-#[cfg(test)]
-/// Held for the length of a check; dropping it lets the next check begin.
-pub struct CheckGuard<'a>(&'a SingleFlight);
-
-#[cfg(test)]
-impl SingleFlight {
-    pub const fn new() -> Self {
-        Self(std::sync::atomic::AtomicBool::new(false))
-    }
-
-    /// `None` while another check holds the guard.
-    pub fn begin(&self) -> Option<CheckGuard<'_>> {
-        use std::sync::atomic::Ordering::SeqCst;
-        self.0.compare_exchange(false, true, SeqCst, SeqCst).is_ok().then_some(CheckGuard(self))
-    }
-}
-
-#[cfg(test)]
-impl Drop for CheckGuard<'_> {
-    fn drop(&mut self) {
-        self.0.0.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-#[cfg(test)]
-/// Posts the prompt of a `NewUpdate` result, once per call. Needs the guard of the check that found the release, so a
-/// second check cannot post while the first is still running. `post` is the notifier (`notify::post` in the app).
-pub fn announce(
-    _held: &CheckGuard<'_>,
-    version: &str,
-    release_url: &str,
-    download_url: &str,
-    sha256: Option<&str>,
-    post: impl FnOnce(Post) -> bool,
-) -> bool {
-    post(prompt(version, release_url, download_url, sha256))
-}
 
 /// The progress notice: low priority, one "Cancel" button. The caller throttles the percents (`ProgressThrottle`).
 pub fn progress(version: Option<&str>, phase: Phase) -> Post {
@@ -177,7 +112,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    const RELEASE: &str = "https://github.com/owner/repo/releases/tag/v1.2.0";
     const ASSET: &str = "https://github.com/owner/repo/releases/download/v1.2.0/Kurobayomi.AppImage";
 
     /// The order of steps as a log: what a fake notifier would record.
@@ -188,40 +122,6 @@ mod tests {
                 Op::Show(post) => format!("show:{}", post.id),
             })
             .collect()
-    }
-
-    #[test]
-    fn a_second_check_waits_for_the_first_and_the_prompt_posts_once() {
-        // T-35a-047, test U10
-        let flight = SingleFlight::new();
-        let first = flight.begin().expect("the first check begins");
-        assert!(flight.begin().is_none(), "a second check does not begin while the first runs");
-        let mut posted = Vec::new();
-        assert!(announce(&first, "v1.2.0", RELEASE, ASSET, None, |post| {
-            posted.push(post);
-            true
-        }));
-        assert_eq!(posted.len(), 1);
-        assert_eq!(posted[0].id, ids::APP_UPDATE_PROGRESS);
-        drop(first);
-        assert!(flight.begin().is_some(), "the guard is released when the check ends");
-    }
-
-    #[test]
-    fn the_prompt_payload_is_exact() {
-        // N-prompt (T-35a-048): id, category body, default tap and both buttons
-        let post = prompt("1.2.0", RELEASE, ASSET, None);
-        assert_eq!(post.id, "app-update.progress");
-        assert_eq!(post.title, "New version available!");
-        assert_eq!(post.body.as_deref(), Some("1.2.0"));
-        assert_eq!(post.tap, Some(Target::Action(AppAction::OpenUrl { url: RELEASE.into() })));
-        assert_eq!(
-            post.buttons,
-            vec![
-                ("Download".to_owned(), Target::Action(AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()), sha256: None })),
-                ("What's new".to_owned(), Target::Action(AppAction::OpenUrl { url: RELEASE.into() })),
-            ]
-        );
     }
 
     #[test]
@@ -305,29 +205,4 @@ mod tests {
         assert_eq!(post.title, DOWNLOAD_TITLE);
     }
 
-    #[test]
-    fn every_notice_stays_within_the_three_button_rule() {
-        for post in [prompt("1", RELEASE, ASSET, None), progress(None, Phase::Downloading(None)), failure(None, ASSET, None, "x"), finished(Path::new("/a/b"), true)] {
-            assert!(post.buttons.len() <= crate::misc::rules::MAX_BUTTONS);
-        }
-    }
-
-    #[test]
-    fn the_release_digest_travels_from_the_prompt_through_the_start_action_and_the_retry() {
-        // T-35a-054: the sha256 of the release reaches the downloader; a retry keeps it
-        let digest = "ab".repeat(32);
-        let post = prompt("1.2.0", RELEASE, ASSET, Some(&digest));
-        let Target::Action(start) = &post.buttons[0].1 else { panic!("the Download button is an action") };
-        assert_eq!(
-            *start,
-            AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()), sha256: Some(digest.clone()) }
-        );
-        let json = start.to_target().unwrap();
-        assert_eq!(AppAction::from_target(&json).unwrap(), *start);
-        let retry = failure(Some("1.2.0"), ASSET, Some(&digest), "HTTP 404");
-        assert_eq!(retry.buttons[0].1, Target::Action(start.clone()));
-        // an action stored before the field existed still parses, with no digest
-        let old = r#"{"kind":"start_app_update","url":"https://github.com/o/r/a.AppImage","version":"v1"}"#;
-        assert!(matches!(AppAction::from_target(old), Ok(AppAction::StartAppUpdate { sha256: None, .. })));
-    }
 }

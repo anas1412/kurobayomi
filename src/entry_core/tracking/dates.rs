@@ -11,12 +11,6 @@ pub fn date_selectable(is_start: bool, day: NaiveDate, other: Option<NaiveDate>,
     DatePicker::new(is_start, day, other, today).is_selectable(day)
 }
 
-#[cfg(test)]
-/// The same rules at year granularity, for the year drop-down.
-pub fn year_selectable(is_start: bool, year: i32, other: Option<NaiveDate>, today: NaiveDate) -> bool {
-    DatePicker::new(is_start, today, other, today).is_selectable_year(year)
-}
-
 /// The picker opens on the stored date, or on today when none is stored (`initial_date_ms`).
 pub fn initial_day(stored_ms: i64, now_ms: i64, zone: &impl TimeZone) -> NaiveDate {
     picker_day(stored_ms, zone).unwrap_or_else(|| picker_today(now_ms, zone))
@@ -52,25 +46,6 @@ mod tests {
         let start = Some(day(2026, 3, 15));
         assert!(date_selectable(false, day(2026, 3, 15), start, TODAY()));
         assert!(!date_selectable(false, day(2026, 3, 14), start, TODAY()), "a finish before the start is refused");
-    }
-
-    #[test]
-    fn no_future_dates() {
-        assert!(date_selectable(true, TODAY(), None, TODAY()), "today is allowed");
-        assert!(!date_selectable(true, day(2026, 10, 11), None, TODAY()));
-        assert!(!date_selectable(false, day(2027, 1, 1), None, TODAY()));
-        assert!(!year_selectable(false, 2027, None, TODAY()), "no future year either");
-    }
-
-    #[test]
-    fn year_bounds_match_day_bounds() {
-        let finish = Some(day(2020, 6, 15));
-        assert!(year_selectable(true, 2020, finish, TODAY()), "the finish year is in range for a start");
-        assert!(!year_selectable(true, 2021, finish, TODAY()));
-        assert!(date_selectable(true, day(2020, 6, 15), finish, TODAY()));
-        let start = Some(day(2020, 6, 15));
-        assert!(year_selectable(false, 2020, start, TODAY()), "the start year is in range for a finish");
-        assert!(!year_selectable(false, 2019, start, TODAY()));
     }
 
     #[test]

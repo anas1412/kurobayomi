@@ -10,10 +10,6 @@
 //! - Mode A (the background portal, autostart) and mode B (this timer) are mutually exclusive: [`Selection`] turns one
 //!   off when the other is turned on, so a pass is never started twice for one interval.
 
-#[cfg(test)]
-use std::io;
-#[cfg(test)]
-use std::path::{Path, PathBuf};
 
 use crate::library_update::pass::Trigger;
 use crate::misc::runner;
@@ -73,115 +69,6 @@ fn forward_manual() -> u8 {
     runner::run_headless(Trigger::Manual)
 }
 
-#[cfg(test)]
-/// The two ways a library update runs while no window is open.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Background {
-    /// Mode A: the app stays running through the background portal.
-    Portal,
-    /// Mode B: a user timer starts `kurobayomi --library-update=auto`.
-    Timer,
-}
-
-#[cfg(test)]
-/// Which background mode is on. At most one is.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Selection {
-    active: Option<Background>,
-}
-
-#[cfg(test)]
-impl Selection {
-    pub fn active(&self) -> Option<Background> {
-        self.active
-    }
-
-    /// Turns `want` on. Returns the other mode that was on, which the caller must withdraw.
-    pub fn turn_on(&mut self, want: Background) -> Option<Background> {
-        self.active.replace(want).filter(|old| *old != want)
-    }
-
-    /// Turns `which` off; another active mode is left alone.
-    pub fn turn_off(&mut self, which: Background) {
-        if self.active == Some(which) {
-            self.active = None;
-        }
-    }
-}
-
-#[cfg(test)]
-pub const SERVICE_NAME: &str = "kurobayomi-library-update.service";
-#[cfg(test)]
-pub const TIMER_NAME: &str = "kurobayomi-library-update.timer";
-#[cfg(test)]
-/// The timer fires up to this long before the interval is over: with jitter, a pass starts in `[N h - 10 min, N h]`.
-const JITTER_MINUTES: u32 = 10;
-
-#[cfg(test)]
-/// The service the timer starts. `exe` is the absolute path of the app.
-pub fn service_unit(exe: &Path) -> String {
-    format!(
-        "[Unit]\nDescription=Kurobayomi library update\n\n[Service]\nType=oneshot\nExecStart=\"{}\" {OPTION}=auto\nNice=10\nIOSchedulingClass=idle\n",
-        exe.display()
-    )
-}
-
-#[cfg(test)]
-/// The timer for an interval of `hours` (at least 1).
-pub fn timer_unit(hours: u32) -> String {
-    let minutes = hours.max(1) * 60 - JITTER_MINUTES;
-    format!(
-        "[Unit]\nDescription=Run the Kurobayomi library update every {hours} hours\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec={minutes}min\nRandomizedDelaySec={JITTER_MINUTES}min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
-    )
-}
-
-#[cfg(test)]
-fn write_file(path: &Path, text: &str) -> io::Result<()> {
-    let part = path.with_extension("part");
-    std::fs::write(&part, text)?;
-    std::fs::rename(part, path)
-}
-
-#[cfg(test)]
-/// Writes the two units into `dir` (the user's unit folder). Call only from the settings action the user chose.
-pub fn write_units(dir: &Path, exe: &Path, hours: u32) -> io::Result<[PathBuf; 2]> {
-    if hours == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "an interval of 0 hours means automatic updates are off"));
-    }
-    std::fs::create_dir_all(dir)?;
-    let (service, timer) = (dir.join(SERVICE_NAME), dir.join(TIMER_NAME));
-    write_file(&service, &service_unit(exe))?;
-    write_file(&timer, &timer_unit(hours))?;
-    Ok([service, timer])
-}
-
-#[cfg(test)]
-/// Removes the units written by [`write_units`]. A missing file is fine.
-pub fn remove_units(dir: &Path) -> io::Result<()> {
-    for name in [SERVICE_NAME, TIMER_NAME] {
-        match std::fs::remove_file(dir.join(name)) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-/// The settings action "run updates with a timer": writes the units and makes mode B the active mode. Returns the mode
-/// that was on before and must now be withdrawn, if any.
-pub fn enable_timer(selection: &mut Selection, dir: &Path, exe: &Path, hours: u32) -> io::Result<Option<Background>> {
-    write_units(dir, exe, hours)?;
-    Ok(selection.turn_on(Background::Timer))
-}
-
-#[cfg(test)]
-/// Turning the timer off removes its units and clears the mode.
-pub fn disable_timer(selection: &mut Selection, dir: &Path) -> io::Result<()> {
-    remove_units(dir)?;
-    selection.turn_off(Background::Timer);
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -189,12 +76,6 @@ mod tests {
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("kuro-headless-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
     }
 
     #[test]
@@ -208,50 +89,4 @@ mod tests {
         assert!(parse_mode(&args(&["--library-update="])).is_err());
     }
 
-    #[test]
-    fn the_service_runs_the_auto_pass_and_the_timer_keeps_the_jitter_window() {
-        // T-26a-020: `N h - 10 min` plus up to 10 min of random delay stays inside `[N h - 10 min, N h]`
-        let service = service_unit(Path::new("/usr/bin/kurobayomi"));
-        assert!(service.contains("ExecStart=\"/usr/bin/kurobayomi\" --library-update=auto"));
-        assert!(service.contains("Type=oneshot"));
-        let timer = timer_unit(2);
-        assert!(timer.contains("OnUnitActiveSec=110min"));
-        assert!(timer.contains("RandomizedDelaySec=10min"));
-        assert!(timer.contains("WantedBy=timers.target"));
-    }
-
-    #[test]
-    fn units_are_written_only_by_the_explicit_call_and_never_for_interval_zero() {
-        // T-26a-020
-        let dir = scratch("units");
-        assert!(!dir.exists(), "nothing is written before the user acts");
-        assert!(write_units(&dir, Path::new("/usr/bin/kurobayomi"), 0).is_err());
-        assert!(!dir.exists());
-        let [service, timer] = write_units(&dir, Path::new("/usr/bin/kurobayomi"), 6).unwrap();
-        assert!(std::fs::read_to_string(service).unwrap().contains("--library-update=auto"));
-        assert!(std::fs::read_to_string(timer).unwrap().contains("OnUnitActiveSec=350min"));
-        remove_units(&dir).unwrap();
-        assert!(!dir.join(TIMER_NAME).exists());
-        remove_units(&dir).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_portal_and_the_timer_are_never_on_together() {
-        // T-26a-020: mode A and mode B are mutually exclusive
-        let dir = scratch("exclusive");
-        let mut selection = Selection::default();
-        assert_eq!(selection.turn_on(Background::Portal), None);
-        assert_eq!(selection.turn_on(Background::Portal), None, "turning the same mode on again withdraws nothing");
-        let withdrawn = enable_timer(&mut selection, &dir, Path::new("/usr/bin/kurobayomi"), 3).unwrap();
-        assert_eq!(withdrawn, Some(Background::Portal));
-        assert_eq!(selection.active(), Some(Background::Timer));
-        assert_eq!(selection.turn_on(Background::Portal), Some(Background::Timer));
-        selection.turn_off(Background::Timer);
-        assert_eq!(selection.active(), Some(Background::Portal), "turning off the other mode leaves this one on");
-        enable_timer(&mut selection, &dir, Path::new("/usr/bin/kurobayomi"), 3).unwrap();
-        disable_timer(&mut selection, &dir).unwrap();
-        assert_eq!(selection.active(), None);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
