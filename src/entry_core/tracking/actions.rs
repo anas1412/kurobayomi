@@ -14,7 +14,7 @@ use kuro_track::error::TrackError;
 use kuro_track::messages::MsgKey;
 use kuro_track::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use kuro_track::model::{AnimeTrack, MangaTrack, TrackerId};
-use kuro_track::progress::{spawn_track_chapter, spawn_track_episode};
+use kuro_track::progress::{TrackOutcome, spawn_track_chapter, spawn_track_episode};
 use kuro_track::remove::{spawn_remove_anime, spawn_remove_manga};
 use kuro_track::write::{AnimeEdit, MangaEdit, spawn_anime_edit, spawn_manga_edit};
 use tokio::task::JoinHandle;
@@ -30,15 +30,18 @@ fn start<T>(launch: impl FnOnce(Arc<TrackCtx>) -> T) -> Option<T> {
     Some(launch(ctx))
 }
 
-/// A chapter was read: its number goes to every logged-in manga tracker behind it. The flow checks the auto-update switch
-/// itself, and the reader checks incognito before it calls this.
-pub fn chapter_read(manga_id: i64, chapter: f64) {
-    start(|ctx| spawn_track_chapter(ctx, manga_id, chapter));
+/// What each tracker did with a progress update.
+pub type Outcomes = JoinHandle<Vec<(TrackerId, TrackOutcome)>>;
+
+/// A chapter was read: its number goes to every logged-in manga tracker behind it. The caller checks the auto-update
+/// switch and incognito before it calls this (`progress::item_finished`, `progress::marked`).
+pub fn chapter_read(manga_id: i64, chapter: f64) -> Option<Outcomes> {
+    start(|ctx| spawn_track_chapter(ctx, manga_id, chapter))
 }
 
 /// An episode was seen: its number goes to every logged-in anime tracker behind it, as [`chapter_read`] does for manga.
-pub fn episode_seen(anime_id: i64, episode: f64) {
-    start(|ctx| spawn_track_episode(ctx, anime_id, episode));
+pub fn episode_seen(anime_id: i64, episode: f64) -> Option<Outcomes> {
+    start(|ctx| spawn_track_episode(ctx, anime_id, episode))
 }
 
 /// Binds an anime entry to the search result `result` on `tracker`. The handle resolves to the stored row.

@@ -17,15 +17,30 @@ use super::auto_track::{self, Marking};
 /// "update progress after reading" switch off, and without the tracker services.
 pub fn item_finished(kind: Kind, entry_id: i64, item_number: f64, incognito: bool) {
     let Some(ctx) = crate::settings_ui::tracker_host::ctx() else { return };
-    send_if_allowed(&ctx.prefs, incognito, || send(kind, entry_id, item_number));
+    send_if_allowed(&ctx.prefs, incognito, || { send(kind, entry_id, item_number); });
 }
 
 /// The one call into the tracker flow, for a finished item and for a mark-as-read alike.
-fn send(kind: Kind, entry_id: i64, number: f64) {
+fn send(kind: Kind, entry_id: i64, number: f64) -> Option<actions::Outcomes> {
     match kind {
         Kind::Manga => actions::chapter_read(entry_id, number),
         Kind::Anime => actions::episode_seen(entry_id, number),
     }
+}
+
+/// [`send`] for a mark as read: when a tracker accepted the update, "Trackers updated to chapter N" shows (T-MRK-6).
+fn send_and_tell(kind: Kind, entry_id: i64, number: f64) {
+    let Some(outcomes) = send(kind, entry_id, number) else { return };
+    gtk::glib::spawn_future_local(async move {
+        let accepted = outcomes.await.map_or(0, |all| all.iter().filter(|(_, outcome)| *outcome == kuro_track::progress::TrackOutcome::Updated).count());
+        if auto_track::success_toast_shown(accepted) {
+            let key = match kind {
+                Kind::Anime => kuro_track::messages::MsgKey::TrackersUpdatedAnime(number as i32),
+                Kind::Manga => kuro_track::messages::MsgKey::TrackersUpdatedManga(number as i32),
+            };
+            crate::toast::notify(kuro_track::messages::english(&key));
+        }
+    });
 }
 
 /// What marking items read or seen does for the trackers (the title page's mark as read, Aniyomi's
@@ -44,12 +59,12 @@ pub fn marked(kind: Kind, entry_id: i64, read: bool, numbers: &[f64], incognito:
     let plan = mark_plan(kind, read, super::session::has_logged_in(), numbers, &progress, ctx.prefs.auto_update_on_mark_read.get());
     match plan {
         MarkReadPlan::Nothing => {}
-        MarkReadPlan::Apply { update_to, .. } => send(kind, entry_id, update_to),
+        MarkReadPlan::Apply { update_to, .. } => send_and_tell(kind, entry_id, update_to),
         MarkReadPlan::Prompt { update_to, banner } => {
             let body = crate::ui::message(&kuro_track::messages::english(&banner));
             let buttons = vec![
                 crate::ui::DialogButton::cancel("Cancel"),
-                crate::ui::DialogButton::new("Update", crate::ui::Role::Suggested, move || send(kind, entry_id, update_to)),
+                crate::ui::DialogButton::new("Update", crate::ui::Role::Suggested, move || send_and_tell(kind, entry_id, update_to)),
             ];
             crate::ui::dialog("Update tracker", &body, 360, buttons).present();
         }
