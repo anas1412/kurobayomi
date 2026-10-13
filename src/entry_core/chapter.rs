@@ -154,7 +154,7 @@ mod tests {
             row(3, "c", 3.0, 0, 20),
         ];
         assert_eq!(ids(&rows, 0x400), vec![2, 3, 1]);
-        assert_eq!(ids(&rows, 0x201), vec![1, 3, 2]);
+        assert_eq!(ids(&rows, 0x401), vec![1, 3, 2]);
     }
 
     #[test]

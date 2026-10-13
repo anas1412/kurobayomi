@@ -69,28 +69,40 @@ pub fn open<M: Pick + 'static>(
         let checks: Vec<gtk::CheckButton> = names
             .iter()
             .map(|name| {
-                // the row takes the click, so the whole row toggles and a mixed row cycles by the model's rules
-                let check = gtk::CheckButton::builder().label(name).can_target(false).margin_start(8).margin_end(8).margin_top(4).margin_bottom(4).build();
+                let check = gtk::CheckButton::builder().label(name).margin_start(8).margin_end(8).margin_top(4).margin_bottom(4).build();
                 list.append(&gtk::ListBoxRow::builder().child(&check).build());
                 check
             })
             .collect();
+        // the check drives the model (a click, the keyboard or a set_active), then shows the model's state, so a mixed
+        // row of a selection moves through its tri-state; `painting` keeps the repaint from counting as a click
+        let painting = Rc::new(std::cell::Cell::new(false));
         let paint = {
-            let model = Rc::clone(&model);
-            move || {
+            let (model, checks, painting) = (Rc::clone(&model), checks.clone(), Rc::clone(&painting));
+            Rc::new(move || {
+                painting.set(true);
                 for (i, check) in checks.iter().enumerate() {
                     let (active, mixed) = model.borrow().state(i);
                     check.set_inconsistent(mixed);
                     check.set_active(active);
                 }
-            }
+                painting.set(false);
+            })
         };
         paint();
-        let clicked = Rc::clone(&model);
+        for (i, check) in checks.iter().enumerate() {
+            let (model, paint, painting) = (Rc::clone(&model), Rc::clone(&paint), Rc::clone(&painting));
+            check.connect_toggled(move |_| {
+                if !painting.get() {
+                    model.borrow_mut().click(i);
+                    paint();
+                }
+            });
+        }
+        // a click beside the label toggles the row's check too
         list.connect_row_activated(move |_, row| {
-            if let Ok(index) = usize::try_from(row.index()) {
-                clicked.borrow_mut().click(index);
-                paint();
+            if let Some(check) = usize::try_from(row.index()).ok().and_then(|i| checks.get(i)) {
+                check.set_active(!check.is_active());
             }
         });
         list.upcast()

@@ -199,12 +199,13 @@ impl FavoriteFlow {
     fn choose_categories(self: &Rc<Self>, item: ListItem, categories: Vec<CategoryChoice>, linked: Vec<i64>) {
         let rows = chooser_rows(&categories, &linked).into_iter().map(|(c, on)| (c.id, c.name, on)).collect();
         let (this, edit) = (Rc::clone(self), Rc::clone(self));
-        crate::category_picker::open(
+        let window = crate::category_picker::open(
             crate::entry_core::dialog::CategoryDialog::from_rows(rows),
             move |d| this.add_to(item.clone(), d.checked_ids()),
             move || (edit.hooks.edit_categories)(),
             || {},
         );
+        self.dialogs.adopt(&window);
     }
 
     fn add_to(self: &Rc<Self>, item: ListItem, categories: Vec<i64>) {
@@ -393,10 +394,10 @@ pub(crate) mod tests {
         };
         assert_eq!(checks.len(), 2);
         assert_eq!(checks.iter().map(|c| c.is_active()).collect::<Vec<_>>(), [true, false], "the linked category 3 is preselected");
-        assert_eq!(buttons_of(&window).len(), 3, "OK, Cancel and Edit categories");
+        assert_eq!(buttons_of(&window).len(), 3, "Edit categories, Cancel and OK");
         checks[0].set_active(false);
         checks[1].set_active(true);
-        buttons_of(&window)[0].emit_clicked();
+        buttons_of(&window)[2].emit_clicked();
         assert!(pump(|| rig.store.calls().contains(&"favorite 7 true 5000".to_owned())));
         let calls = rig.store.calls();
         let categories = calls.iter().position(|c| c == "categories 7 [4]").expect("categories written");
@@ -410,8 +411,8 @@ pub(crate) mod tests {
         *rig.store.categories.lock().expect("lock") = vec![CategoryChoice { id: 3, name: "Reading".into() }];
         rig.flow.long_press(item(false));
         assert!(pump(|| rig.flow.dialog().is_some()), "the chooser opens");
-        buttons_of(&rig.flow.dialog().expect("dialog"))[2].emit_clicked();
-        assert_eq!(*rig.opened.borrow(), ["categories"], "the categories page was asked for");
+        buttons_of(&rig.flow.dialog().expect("dialog"))[0].emit_clicked();
+        assert!(pump(|| *rig.opened.borrow() == ["categories"]), "the categories page was asked for");
         assert!(rig.store.calls().iter().all(|c| !c.starts_with("favorite")), "nothing is added");
     }
 
