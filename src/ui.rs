@@ -535,14 +535,6 @@ pub fn status(icon: &str, text: &str) -> GBox {
     b
 }
 
-// ponytail: grey frame stands in for cover art until there is an image loader
-pub fn cover(w: i32, h: i32) -> gtk::Frame {
-    let f = gtk::Frame::new(None);
-    f.set_size_request(w, h);
-    f.set_child(Some(&gtk::Image::builder().icon_name("image-x-generic-symbolic").pixel_size(w / 3).css_classes(["dim-label"]).build()));
-    f
-}
-
 pub fn linked(labels: &[String], active: usize) -> GBox {
     let b = GBox::new(O::Horizontal, 0);
     b.add_css_class("linked");

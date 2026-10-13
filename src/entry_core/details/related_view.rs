@@ -12,10 +12,11 @@ use super::related_pack::{self as pack, Align, MAX_ITEMS_PER_ROW, RELATED_ITEM_W
 use crate::ui;
 
 /// One related item: its cover, and its title when the mode shows one.
-fn item(title: &str, favorite: bool, mode: LibraryDisplayMode, id: i64, on_open: &Rc<dyn Fn(i64)>) -> Button {
+fn item(entry: &kuro_data::entry::Entry, mode: LibraryDisplayMode, on_open: &Rc<dyn Fn(i64)>) -> Button {
+    let (title, favorite, id) = (entry.title.as_str(), entry.favorite, entry.id);
     let style = pack::item_style(mode, favorite);
     let content = GBox::new(O::Vertical, 4);
-    let cover = ui::cover(RELATED_ITEM_WIDTH, RELATED_ITEM_WIDTH * 3 / 2);
+    let cover = crate::browse::look::cover(title, Some(&crate::browse::look::entry_art(entry)), RELATED_ITEM_WIDTH, RELATED_ITEM_WIDTH * 3 / 2);
     cover.set_opacity(style.cover_alpha);
     content.append(&cover);
     if style.show_title {
@@ -56,7 +57,7 @@ pub fn section(groups: &[AnimeRelationGroup], mode: LibraryDisplayMode, on_open:
             column.append(&heading(&group.name));
             let items = GBox::new(O::Horizontal, 4);
             for entry in &group.anime {
-                items.append(&item(&entry.title, entry.favorite, mode, entry.id, &on_open));
+                items.append(&item(entry, mode, &on_open));
             }
             column.append(&items);
             column.set_halign(match pack::align(start, size) {
@@ -75,7 +76,7 @@ pub fn section(groups: &[AnimeRelationGroup], mode: LibraryDisplayMode, on_open:
         items.set_margin_start(8);
         items.set_margin_end(8);
         for entry in &group.anime {
-            items.append(&item(&entry.title, entry.favorite, mode, entry.id, &on_open));
+            items.append(&item(entry, mode, &on_open));
         }
         let scroller = ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).child(&items).build();
         root.append(&heading_with_margin(&group.name));

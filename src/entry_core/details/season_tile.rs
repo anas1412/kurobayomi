@@ -73,6 +73,8 @@ pub struct SeasonItem {
     pub is_local: bool,
     pub source_language: String,
     pub show_continue: bool,
+    /// The season's cover.
+    pub art: kuro_images::art::ArtRef,
 }
 
 /// The inputs of one season that are not part of the stored season row.
@@ -117,6 +119,7 @@ pub fn season_item(season: &SeasonEntry, overlays: Overlays, facts: &SeasonFacts
         is_local: overlays.local && facts.is_local,
         source_language: if overlays.language { facts.source_language.clone() } else { String::new() },
         show_continue: overlays.continue_watching && unseen_count > 0 && facts.fetches_episodes,
+        art: crate::browse::look::entry_art(&season.entry),
     }
 }
 

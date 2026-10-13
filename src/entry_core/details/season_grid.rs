@@ -78,7 +78,7 @@ impl SeasonGrid {
         let cover_width = if list { 96 } else { ((layout.width - 32 - 8 * (layout.columns as i32 - 1)) / layout.columns.max(1) as i32).clamp(48, 220) };
         for item in items {
             let tile = season_tile::tile(item, layout.mode, layout.number_mode, layout.has_continue);
-            let content = if list { self.list_row(&tile, row_px) } else { self.grid_tile(&tile, cover_width) };
+            let content = if list { self.list_row(&tile, &item.art, row_px) } else { self.grid_tile(&tile, &item.art, cover_width) };
             let button = gtk::Button::builder().child(&content).css_classes(["flat"]).build();
             let (on_open, id) = (Rc::clone(&self.on_open), item.id);
             button.connect_clicked(move |_| on_open(id));
@@ -96,11 +96,11 @@ impl SeasonGrid {
         }
     }
 
-    fn grid_tile(&self, tile: &Tile, cover_width: i32) -> GBox {
+    fn grid_tile(&self, tile: &Tile, art: &kuro_images::art::ArtRef, cover_width: i32) -> GBox {
         let content = GBox::new(O::Vertical, 4);
         // downloads and unseen sit on the start edge of the cover, the language on its end edge (T-39a-033)
         let cover = gtk::Overlay::new();
-        cover.set_child(Some(&ui::cover(cover_width, cover_width * 3 / 2)));
+        cover.set_child(Some(&crate::browse::look::cover(tile.title.as_deref().unwrap_or_default(), Some(art), cover_width, cover_width * 3 / 2)));
         let edges = edge_badges(&tile.badges);
         for (texts, align) in [(edges.start, Align::Start), (edges.end.into_iter().collect(), Align::End)] {
             if texts.is_empty() {
@@ -124,11 +124,11 @@ impl SeasonGrid {
         content
     }
 
-    fn list_row(&self, tile: &Tile, row_px: i32) -> GBox {
+    fn list_row(&self, tile: &Tile, art: &kuro_images::art::ArtRef, row_px: i32) -> GBox {
         let row = GBox::new(O::Horizontal, 12);
         row.set_height_request(row_px);
         let cover_height = (row_px - 2 * crate::entry_core::list_row::PAD_VERTICAL).max(1);
-        row.append(&ui::cover(cover_height * 2 / 3, cover_height));
+        row.append(&crate::browse::look::row_cover(tile.title.as_deref().unwrap_or_default(), Some(art), cover_height * 2 / 3, cover_height));
         let text = GBox::new(O::Vertical, 4);
         text.set_hexpand(true);
         if let Some(title) = &tile.title {
