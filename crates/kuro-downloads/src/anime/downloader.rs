@@ -20,11 +20,12 @@ use crate::anime::layout::{AnimeLayout, episode_folder_names, rename_dir};
 use crate::anime::manager::EpisodeRunner;
 use crate::anime::model::{AnimeDownload, Video};
 use crate::anime::progress::ProgressCell;
-use crate::anime::naming::{episode_dir_name, fat_safe, file_component, unique_episode_dir_name};
+use crate::anime::naming::{episode_dir_name, fat_safe, file_component};
 use crate::anime::resolve::{HosterResolver, resolve_video};
 use crate::anime::torrent::{TORRENT_SERVER_HOST, check_torrent};
 use crate::error::DownloadError;
 use crate::layout::TMP_DIR_SUFFIX;
+use crate::next::layout::Layout;
 use crate::redact::redacted_headers;
 use crate::retry::with_retry;
 
@@ -153,20 +154,36 @@ impl EpisodeEngine {
     }
 
     /// The staging folder's episode name. A staging folder left by an earlier attempt keeps its name, so the resume finds
-    /// it. Otherwise the plain name is used, or `<name> (<episode id>)` when another non-empty folder has the plain name
-    /// (T-24a-066, E-F03).
+    /// it. Otherwise the plain name is used: a finished folder of that name is replaced at the end (B12).
     fn target_name(&self, item: &AnimeDownload, anime_dir: &Path) -> String {
         for candidate in episode_folder_names(&item.episode) {
             if anime_dir.join(format!("{candidate}{TMP_DIR_SUFFIX}")).is_dir() {
                 return candidate;
             }
         }
-        let plain = episode_dir_name(&item.episode.name, item.episode.scanlator.as_deref());
-        if is_non_empty_dir(&anime_dir.join(&plain)) {
-            unique_episode_dir_name(&item.episode.name, item.episode.scanlator.as_deref(), item.episode.id)
-        } else {
-            plain
+        episode_dir_name(&item.episode.name, item.episode.scanlator.as_deref())
+    }
+
+    /// Runs one episode inside `anime_dir`: resolve the video, fetch it into the staging folder, finalise. Returns the
+    /// name of the finished folder. The old queue (`EpisodeRunner`) and `anime::runner` both call this.
+    pub(crate) async fn download(
+        &self,
+        item: &AnimeDownload,
+        anime_dir: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<String, DownloadError> {
+        let target = self.target_name(item, anime_dir);
+        let staging = anime_dir.join(format!("{target}{TMP_DIR_SUFFIX}"));
+
+        let video = resolve_video(item, self.resolver.as_ref(), cancel).await?;
+        check_torrent(&video.url, TORRENT_SERVER_HOST)?;
+        fs::create_dir_all(&staging)?;
+        self.fetch(item, &video, &staging, cancel).await?;
+        if !is_download_successful(&staging) {
+            return Err(DownloadError::DownloadIncomplete(format!("{} is not a single video file", staging.display())));
         }
+        finalise(&staging, &anime_dir.join(&target))?;
+        Ok(target)
     }
 }
 
@@ -174,17 +191,7 @@ impl EpisodeEngine {
 impl EpisodeRunner for EpisodeEngine {
     async fn run(&self, item: Arc<AnimeDownload>, cancel: CancellationToken) -> Result<(), DownloadError> {
         let anime_dir = self.layout.anime_dir(&item.source, &item.anime.title)?;
-        let target = self.target_name(&item, &anime_dir);
-        let staging = anime_dir.join(format!("{target}{TMP_DIR_SUFFIX}"));
-
-        let video = resolve_video(&item, self.resolver.as_ref(), &cancel).await?;
-        check_torrent(&video.url, TORRENT_SERVER_HOST)?;
-        fs::create_dir_all(&staging)?;
-        self.fetch(&item, &video, &staging, &cancel).await?;
-        if !is_download_successful(&staging) {
-            return Err(DownloadError::DownloadIncomplete(format!("{} is not a single video file", staging.display())));
-        }
-        finalise(&staging, &anime_dir.join(&target))
+        self.download(&item, &anime_dir, &cancel).await.map(|_| ())
     }
 }
 
@@ -209,15 +216,10 @@ pub fn is_download_successful(staging: &Path) -> bool {
     }
 }
 
-/// Renames the staging folder to its episode folder and writes `.nomedia` into it (behaviour 5.9). An episode folder that
-/// already holds files is `EpisodeExists`, and the staging folder is kept (T-24a-066, E-F02).
+/// Renames the staging folder to its episode folder and writes `.nomedia` into it (behaviour 5.9). A finished folder or
+/// file of the same name is replaced: the user asked for the episode again (decision 3 of 1b, B12).
 fn finalise(staging: &Path, dest: &Path) -> Result<(), DownloadError> {
-    if is_non_empty_dir(dest) {
-        return Err(DownloadError::EpisodeExists);
-    }
-    if dest.is_dir() {
-        fs::remove_dir(dest)?;
-    }
+    Layout::remove_path(dest)?;
     rename_dir(staging, dest)?;
     if let Err(err) = fs::write(dest.join(NOMEDIA), b"") {
         warn!(target: "kuro_downloads", error = %err, "could not write .nomedia");
@@ -260,11 +262,6 @@ fn subdirs(path: &Path) -> Vec<PathBuf> {
 
 fn subdirs_and_files(path: &Path) -> Vec<PathBuf> {
     fs::read_dir(path).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default()
-}
-
-/// `true` for a folder with at least one entry.
-fn is_non_empty_dir(path: &Path) -> bool {
-    fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_some())
 }
 
 #[cfg(test)]
@@ -507,31 +504,33 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_existing_non_empty_episode_folder_is_an_error_and_staging_is_kept() {
+    async fn an_existing_non_empty_episode_folder_is_replaced_by_the_finished_one() {
         let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         fs::create_dir_all(folder.join("Episode 1")).unwrap();
         fs::write(folder.join("Episode 1").join("old.mkv"), b"old").unwrap();
-        let partial = folder.join("Episode 1 (1)_tmp").join("Episode 1.tmp");
+        let partial = folder.join("Episode 1_tmp").join("Episode 1.tmp");
         let (ffmpeg, ffprobe, _) = programs(tmp.path(), 0, &partial);
         let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
 
-        // The plain name is taken by another non-empty folder, so the download goes to `<name> (<id>)` (T-24a-066).
+        // The plain name is taken by another non-empty folder: the new episode replaces it (B12, E-F03 flipped).
         let outcome = engine.run(download(1, "Episode 1"), CancellationToken::new()).await;
-        assert!(outcome.is_ok(), "the unique name is used: {outcome:?}");
-        assert!(folder.join("Episode 1 (1)").join("Episode 1.mkv").is_file());
-        assert!(folder.join("Episode 1").join("old.mkv").is_file(), "the old folder is untouched");
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert!(folder.join("Episode 1").join("Episode 1.mkv").is_file());
+        assert!(!folder.join("Episode 1").join("old.mkv").exists(), "the old copy is gone");
+        assert!(!folder.join("Episode 1 (1)").exists(), "no second folder named with the episode id");
 
-        // A finalise onto a non-empty folder is refused and the staging folder is kept (E-F02).
+        // A finalise onto a non-empty folder replaces it too (E-F02 flipped).
         let staging = folder.join("Episode 2_tmp");
         fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("Episode 2.mkv"), b"new").unwrap();
         fs::create_dir_all(folder.join("Episode 2")).unwrap();
         fs::write(folder.join("Episode 2").join("old.mkv"), b"old").unwrap();
-        let result = finalise(&staging, &folder.join("Episode 2"));
-        assert!(matches!(result, Err(DownloadError::EpisodeExists)));
-        assert!(staging.join("Episode 2.mkv").is_file(), "staging is kept");
+        finalise(&staging, &folder.join("Episode 2")).unwrap();
+        assert!(folder.join("Episode 2").join("Episode 2.mkv").is_file());
+        assert!(!folder.join("Episode 2").join("old.mkv").exists());
+        assert!(!staging.exists(), "the staging folder was moved into place");
     }
 
     #[tokio::test(start_paused = true)]

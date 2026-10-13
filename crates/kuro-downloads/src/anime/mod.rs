@@ -18,5 +18,6 @@ pub mod offline;
 pub mod pending;
 pub mod progress;
 pub mod resolve;
+pub mod runner;
 pub mod store;
 pub mod torrent;
