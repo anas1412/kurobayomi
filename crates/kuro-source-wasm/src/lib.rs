@@ -12,13 +12,8 @@ pub mod anime_wire;
 pub mod bridge;
 pub mod cache;
 pub mod error;
-pub mod install;
 pub mod limits;
-pub mod manifest;
-pub mod package;
 pub mod source;
-pub mod startup;
-pub mod verify;
 pub mod wire;
 
 #[cfg(test)]

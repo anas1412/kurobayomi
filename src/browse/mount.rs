@@ -67,7 +67,7 @@ fn sources_snapshot(kind: Kind, prefs: &SourcePrefs) -> SourcesSnapshot {
         disabled: BTreeSet::new(),
         pinned: BTreeSet::new(),
         last_used: crate::misc::diet_defaults::BROWSE_LAST_USED_SOURCE,
-        icon_files: if kind == Kind::Anime { crate::ext_host::anime_sources().1 } else { BTreeMap::new() },
+        icon_files: BTreeMap::new(),
         home_urls,
     }
 }
@@ -89,12 +89,6 @@ fn follow_loads(widget: &gtk::Box, show: impl Fn() + 'static) {
 fn watch_check<T: kuro_prefs::values::PrefType + 'static>(pref: &Pref<T>) -> Box<dyn Fn() -> bool> {
     let watch = pref.watch();
     Box::new(move || watch.try_changed().is_some())
-}
-
-/// `has_installed(pkg)` (T-40a-047, D3): whether the local extension registry holds the package as installed. It replaces
-/// the package-manager check of Aniyomi; with no registry yet, nothing is installed.
-pub fn has_installed(pkg: &str) -> bool {
-    crate::ext_host::registry().is_some_and(|registry| registry.snapshot().installed.contains_key(pkg))
 }
 
 /// Pushes a page of the tab with a title and a Back button.

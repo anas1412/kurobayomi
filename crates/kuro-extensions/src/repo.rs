@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::anime::update::next_delay;
 
 /// The most sources one repository may list for one kind. A user has at most this many of each.
 pub const MAX_SOURCES_PER_KIND: usize = 10;
@@ -155,8 +154,22 @@ pub fn remove_link(links: &mut Vec<String>, link: &str) -> bool {
     links.len() != before
 }
 
-/// Whether the daily index check is due. It uses the anime extension check's rule ([`next_delay`]), so one timer serves
-/// both. `last_check` and `now` are Unix seconds.
+/// The minimum gap between two scheduled index checks.
+pub const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// How long to wait before the next check. Zero when no check is stored or the stored one is a day old or more. A stored
+/// time in the future counts as a full day. `now` and `last_check` are Unix seconds.
+pub fn next_delay(last_check: Option<i64>, now: i64) -> Duration {
+    let Some(last) = last_check else {
+        return Duration::ZERO;
+    };
+    match u64::try_from(now.saturating_sub(last)) {
+        Ok(elapsed) => CHECK_INTERVAL.saturating_sub(Duration::from_secs(elapsed)),
+        Err(_) => CHECK_INTERVAL,
+    }
+}
+
+/// Whether the daily index check is due. `last_check` and `now` are Unix seconds.
 pub fn refresh_due(last_check: Option<i64>, now: i64) -> bool {
     next_delay(last_check, now) == Duration::ZERO
 }

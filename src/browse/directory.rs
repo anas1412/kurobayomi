@@ -4,11 +4,9 @@
 //! but cannot run: their page is the missing-source page. With nothing installed every page still builds: global search
 //! has no sources to ask, and the migration picker lists each library source as a stub.
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use kuro_domain::source::model::Source;
-use kuro_extensions::anime::model::Buckets;
 use kuro_source::SourcePref;
 use kuro_source::filter_list::FilterList;
 
@@ -139,29 +137,7 @@ fn remember_stubs(kind: Kind, catalogues: &Catalogues) {
 /// packages of the extension host. It is a snapshot taken when a page is built.
 pub fn current(kind: Kind) -> Arc<dyn SourceDirectory> {
     let installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(of, _)| *of == kind).map(|(_, catalogues)| catalogues.clone());
-    let catalogues = installed.unwrap_or_else(|| Catalogues::new(kind, Vec::new()));
-    Arc::new(match kind {
-        Kind::Anime => catalogues.with_listed(sources_of(&crate::ext_host::anime_lists())),
-        Kind::Manga => catalogues,
-    })
-}
-
-/// The sources of the extension host's anime packages, each with the package it came from and its site. A source id
-/// that two packages declare is listed once.
-pub fn sources_of(buckets: &Buckets) -> Vec<DirectorySource> {
-    let mut seen = BTreeSet::new();
-    buckets
-        .updates
-        .iter()
-        .chain(&buckets.installed)
-        .flat_map(|ext| ext.sources.iter().map(move |source| (ext, source)))
-        .filter(|(_, source)| seen.insert(source.id))
-        .map(|(ext, source)| DirectorySource {
-            source: Source::new(source.id, &source.name, &source.lang),
-            package: ext.pkg.clone(),
-            home_url: Some(source.base_url.clone()).filter(|url| !url.is_empty()),
-        })
-        .collect()
+    Arc::new(installed.unwrap_or_else(|| Catalogues::new(kind, Vec::new())))
 }
 
 /// A source as the migration picker shows it: the installed one, or a stub with no name or language when the directory
@@ -175,15 +151,12 @@ pub fn source_or_stub(directory: Option<&dyn SourceDirectory>, id: i64) -> Sourc
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::path::PathBuf;
 
     use super::*;
     use crate::browse::entries::fake::FakeStore;
     use crate::browse::fake_catalogue::{FakeAnime, FakeCatalogue, anime, anime_page};
     use crate::browse::listing::{ListedPage, LoadFuture};
     use kuro_domain::source::browse::BrowseQuery;
-    use kuro_extensions::anime::abi::AbiVersion;
-    use kuro_extensions::anime::model::{AnimeSourceRef, Installed, SignerDigest};
 
     /// A directory over a list of sources whose search answers with the scripted result of the source id.
     pub struct FakeDirectory {
@@ -235,29 +208,6 @@ pub(crate) mod tests {
         Catalogues::with_store(vec![(source, row)], store).with_listed(vec![entry(43, "Src43", "en", "eu.example.alpha")])
     }
 
-    fn installed(pkg: &str, sources: Vec<AnimeSourceRef>) -> Installed {
-        Installed {
-            name: pkg.into(),
-            pkg: pkg.into(),
-            version_name: "1".into(),
-            version_code: 1,
-            abi: AbiVersion { major: 1, minor: 0 },
-            lang: "en".into(),
-            nsfw: false,
-            torrent: false,
-            sources,
-            icon: Some(PathBuf::from("/icons/a.png")),
-            signer: SignerDigest(String::new()),
-            has_update: false,
-            is_obsolete: false,
-            store: None,
-        }
-    }
-
-    fn source_ref(id: i64, name: &str, base: &str) -> AnimeSourceRef {
-        AnimeSourceRef { id, name: name.into(), lang: "en".into(), base_url: base.into() }
-    }
-
     #[test]
     fn an_unknown_source_is_a_stub_and_a_known_one_is_itself() {
         let directory = FakeDirectory { entries: vec![entry(1, "Alpha", "en", "ext.a")], answers: Arc::new(|_, _| Ok(Vec::new())) };
@@ -286,20 +236,6 @@ pub(crate) mod tests {
     fn without_a_library_store_a_source_has_no_loader() {
         let directory = Catalogues::with_store(vec![(Catalogue::Manga(FakeCatalogue::new(1)), entry(1, "A", "en", ""))], Arc::new(|| None));
         assert!(directory.loader(1).is_none() && directory.filters(1).is_some());
-    }
-
-    #[test]
-    fn the_sources_of_updates_and_installed_packages_are_listed_once_with_their_package_and_site() {
-        let buckets = Buckets {
-            updates: vec![installed("eu.up", vec![source_ref(1, "One", "https://one.test")])],
-            installed: vec![installed("eu.in", vec![source_ref(1, "One again", ""), source_ref(2, "Two", "")])],
-            ..Buckets::default()
-        };
-        let listed = sources_of(&buckets);
-        assert_eq!(listed.iter().map(|s| (s.source.id, s.package.as_str())).collect::<Vec<_>>(), [(1, "eu.up"), (2, "eu.in")], "a repeated id is listed once");
-        assert_eq!(listed[0].home_url.as_deref(), Some("https://one.test"));
-        assert_eq!(listed[1].home_url, None, "an empty site is no site");
-        assert!(sources_of(&Buckets::default()).is_empty());
     }
 
     #[test]

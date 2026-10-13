@@ -144,7 +144,7 @@ pub struct DecodedIcon {
 /// read) or a plain image file. Any failure is `None`, and the row then keeps the default icon. Blocking: callers run
 /// it off the GTK thread.
 pub fn load_icon(path: &Path) -> Option<DecodedIcon> {
-    let bytes = kuro_extensions::anime::package::read_icon(path).or_else(|| std::fs::read(path).ok())?;
+    let bytes = std::fs::read(path).ok()?;
     decode_icon(&bytes)
 }
 

@@ -14,7 +14,6 @@ mod data;
 mod downloads;
 mod entry;
 mod entry_core;
-mod ext_host;
 mod library;
 mod library_update;
 mod misc;
@@ -265,8 +264,8 @@ fn build_window(app: &gtk::Application) {
             incognito: incognito.get(),
         });
     }
-    // the extension host: package scans, icons, load problems and the first-run languages
-    ext_host::start(base.store());
+    // the sources the screens read (repository sources), then the source gate they wait on
+    startup::start_sources(base.store());
     // the library update runner behind the refresh button and the automatic schedule
     misc::start();
     // the restore banner, the Create and Restore hosts, and the close dialog of a running restore

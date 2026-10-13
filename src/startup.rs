@@ -92,11 +92,26 @@ pub fn run_with_splash<T, S>(
     });
 }
 
+/// Starts loading the sources from the app paths (call once on the GTK thread, inside the app's runtime). When the paths
+/// cannot be found no source loads, and the gate opens empty so no screen waits on it forever.
+pub fn start_sources(store: &PrefStore) {
+    match kuro_platform::linux::LinuxPaths::system() {
+        Ok(paths) => {
+            let shared: std::sync::Arc<dyn kuro_platform::paths::Paths + Send + Sync> = std::sync::Arc::new(paths);
+            load_sources(store, &shared);
+        }
+        Err(error) => {
+            tracing::warn!("the sources do not load: {error}");
+            crate::source_gate::mark_loaded();
+        }
+    }
+}
+
 /// Loads the sources the screens read, then opens the source gate (`source_gate::subscribe`). The recipe sources (and
 /// the shared client and image service) come first; the gate opens only after them, so a screen that waits on it never
 /// reads a half-loaded list. Sources of added repositories must be loaded before this call too. When the recipe sources
 /// cannot start (the client does not build) the gate still opens, with no sources, so screens show their empty state
-/// instead of a spinner that never ends; `ext_host::start` does the same when the app paths cannot be found.
+/// instead of a spinner that never ends; `start_sources` does the same when the app paths cannot be found.
 pub fn load_sources(store: &PrefStore, paths: &std::sync::Arc<dyn kuro_platform::paths::Paths + Send + Sync>) {
     let started = std::time::Instant::now();
     crate::recipe_sources::start(store, paths);

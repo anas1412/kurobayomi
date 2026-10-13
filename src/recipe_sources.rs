@@ -54,11 +54,6 @@ pub fn anime_rows() -> Vec<DirectorySource> {
     loaded().anime.iter().map(|(_, row)| row.clone()).collect()
 }
 
-/// The anime recipe sources as the Sources list shows them.
-pub fn anime_list() -> Vec<Source> {
-    anime_rows().into_iter().map(|row| row.source).collect()
-}
-
 /// The runnable anime recipe sources, for the anime entry page.
 pub fn anime_sources() -> Vec<Arc<dyn AnimeSource>> {
     loaded().anime.iter().map(|(source, _)| Arc::clone(source)).collect()
