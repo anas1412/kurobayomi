@@ -33,7 +33,7 @@ use super::season_tile::SeasonExtra;
 use super::set_default::Scope;
 use super::store::EntryStore;
 use crate::entry_core::backend::stub_source_info;
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::library_flow::{self, Hooks, RemoveOutcome, Toggled};
 use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};

@@ -29,7 +29,7 @@ use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::items::missing::{ListRow, insert_missing_separators};
 use kuro_domain::items::sorter::{SortKey, compare_items};
 use kuro_downloads::DownloadState;
-use kuro_i18n::{MsgKey, tr_plural};
+use kuro_i18n::tr_plural;
 use kuro_prefs::store::PrefStore;
 
 use super::entry_state::{EntryFlow, RefreshPlan, refresh_on_open};
@@ -42,7 +42,7 @@ use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
 use crate::entry_core::refresh_rules::open_refresh_due;
 use super::store::EntryStore;
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::list_model::RowItem;
 
@@ -293,7 +293,7 @@ impl EntryModel {
             .filter(|row| complete || matches!(row, ListRow::Item(_)))
             .map(|row| match row {
                 ListRow::Item(ep) => self.row_of(&ep),
-                ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(MsgKey::missing_items, i64::from(count), &[])),
+                ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(crate::entry_core::wording::missing_marker(self.entry.kind), i64::from(count), &[])),
             })
             .collect()
     }

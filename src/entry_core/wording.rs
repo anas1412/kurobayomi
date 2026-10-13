@@ -20,6 +20,15 @@ pub fn numbered(kind: Kind) -> MsgKey {
     }
 }
 
+/// The marker row between two items whose numbers skip some: "Missing 2 chapters". The header over the list says
+/// "Missing 2 items" for both kinds.
+pub fn missing_marker(kind: Kind) -> MsgKey {
+    match kind {
+        Kind::Manga => MsgKey::missing_chapters,
+        Kind::Anime => MsgKey::missing_items,
+    }
+}
+
 /// The empty list text.
 pub fn none_found(kind: Kind) -> MsgKey {
     match kind {

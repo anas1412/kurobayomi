@@ -95,7 +95,7 @@ mod tests {
     use super::super::model::EntryLoadContext;
     use super::super::store::fixture::with_episodes;
     use super::*;
-    use crate::entry_core::detail::SourceInfo;
+    use crate::entry_core::source_info::SourceInfo;
 
     fn model(episodes: usize, seen: usize) -> EntryModel {
         let (_dir, store, id) = with_episodes(true, true, episodes, seen);

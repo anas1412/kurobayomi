@@ -9,7 +9,6 @@ use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
 use kuro_i18n::{MsgKey, tr};
 
 use crate::entry_core::details::layout::fab_expanded;
-use crate::entry_core::toolbar::{background_opaque, title_opaque};
 use crate::ui;
 
 /// The stack of a details page with its `loading` child (a spinner) and its `missing` child (not found, with Back). The
@@ -178,4 +177,15 @@ mod tests {
             assert!(fab_label_shown(&scroll, &adj), "nothing left to scroll forward to");
         });
     }
+}
+
+/// The title is opaque only in the small layout, once the first item has scrolled off. The large layout is always
+/// opaque.
+pub fn title_opaque(small_layout: bool, first_item_visible: bool) -> bool {
+    !small_layout || !first_item_visible
+}
+
+/// The background is opaque in the small layout once the first item is off screen or the list has scrolled.
+pub fn background_opaque(small_layout: bool, first_item_visible: bool, scrolled: bool) -> bool {
+    !small_layout || !first_item_visible || scrolled
 }

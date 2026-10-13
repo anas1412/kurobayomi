@@ -36,7 +36,7 @@ use super::season_fetch::fetch_episodes_of;
 use super::store::EntryStore;
 use crate::browse::errors::limited;
 use crate::entry_core::backend::NoCoverFiles;
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 use crate::entry_core::errors::DetailError;
 
 /// Finds the live anime source of an id.

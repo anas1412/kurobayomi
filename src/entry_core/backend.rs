@@ -22,7 +22,7 @@ use kuro_source::model::{SChapter, SManga};
 use kuro_source::MangaSource;
 
 use crate::browse::errors::limited;
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 use crate::entry_core::details::entry_state::RefreshPlan;
 use crate::entry_core::details::runner::{EntryBackend, EntryFetch};
 use crate::entry_core::refresh_rules::Trigger;

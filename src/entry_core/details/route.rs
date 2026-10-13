@@ -114,6 +114,11 @@ pub fn build() -> GBox {
     page_for(Kind::Anime, TARGET.with(Cell::take).unwrap_or(NO_ENTRY))
 }
 
+/// The page for the `manga_entry_details` screen id: no row to show, so the "not found" page of a manga.
+pub fn build_manga() -> GBox {
+    page_for(Kind::Manga, NO_ENTRY)
+}
+
 /// An id no row has (ids start at 1): `open(NO_ENTRY)` shows the "not found" page, for a caller that has no row to name.
 pub const NO_ENTRY: i64 = 0;
 
@@ -411,7 +416,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let toolbar: Vec<gtk::Widget> =
         vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), options.widget.clone().upcast(), overflow_menu.clone().upcast()];
     let page = ui::page("", &stack, toolbar.clone(), false);
-    ui::tag(&page, "anime_entry_details");
+    ui::tag(&page, if kind.is_anime() { "anime_entry_details" } else { "manga_entry_details" });
     let (header, title, back) = page_shell::header_with_back(&page);
 
     let view = Rc::new(View {
@@ -1635,8 +1640,8 @@ mod tests {
 
     struct Stub;
     impl runner::EntryBackend for Stub {
-        fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
-            crate::entry_core::detail::SourceInfo { name: "Stub".into(), stub: true }
+        fn source_info(&self, _: i64) -> crate::entry_core::source_info::SourceInfo {
+            crate::entry_core::source_info::SourceInfo { name: "Stub".into(), stub: true }
         }
         fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::EntryFetch {
             Box::pin(async { Ok(Vec::new()) })
@@ -1652,8 +1657,8 @@ mod tests {
     /// A backend whose every fetch fails with `error`; it counts the fetches.
     struct Failing(crate::entry_core::errors::DetailError, std::sync::atomic::AtomicUsize);
     impl runner::EntryBackend for Failing {
-        fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
-            crate::entry_core::detail::SourceInfo { name: "Src".into(), stub: false }
+        fn source_info(&self, _: i64) -> crate::entry_core::source_info::SourceInfo {
+            crate::entry_core::source_info::SourceInfo { name: "Src".into(), stub: false }
         }
         fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: crate::entry_core::refresh_rules::Trigger) -> runner::EntryFetch {
             self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

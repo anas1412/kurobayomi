@@ -8,9 +8,8 @@ use std::sync::Arc;
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
 use kuro_downloads::model::DownloadState;
-use kuro_platform::kind::Kind;
 
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 use crate::entry_core::downloaded::download_states;
 use crate::updates::download_host::{self, DownloadBackend};
 

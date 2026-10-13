@@ -15,7 +15,7 @@ use super::dispatch::bottom_cmds;
 use super::model::{EntryModel, EntryLoadContext};
 use super::runner::{self, EntryBackend, EntryCmd, EntryEvent, EntryFetch};
 use super::store::fixture::with_episodes;
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 
 struct Backend;
 

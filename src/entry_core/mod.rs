@@ -33,13 +33,10 @@ pub mod action_row_view;
 pub mod fetch_interval;
 pub mod fetch_interval_dialog;
 pub mod backend;
+pub mod source_info;
 pub mod wording;
-pub mod bulk_bar;
-pub mod chapter_actions;
 pub mod cover_view;
-pub mod chapter;
 pub mod description_view;
-pub mod detail;
 pub mod dialog;
 pub mod download_menu;
 pub mod downloaded;
@@ -56,27 +53,20 @@ pub mod library_flow;
 pub mod list_model;
 pub mod list_options;
 pub mod list_view;
-pub mod live;
 pub mod message;
 pub mod markdown;
 pub mod numfmt;
-pub mod page;
 /// The GTK pieces both details pages build the same way (the state stack, the item header row, the Start button, Back,
 /// menu rows, the scroll fade).
 pub mod overflow_menu;
 pub mod page_shell;
 pub mod readstate;
 pub mod refresh_rules;
-pub mod route;
-pub mod runner;
 /// The runner handle and the entry-and-items live subscription both store runners use.
 pub mod runner_kit;
 pub mod scanlator_sheet;
 pub mod selection;
-pub mod store;
 pub mod text;
-pub mod toolbar;
-pub mod view;
 
 /// Shared constant enums and separator labels (T-38a-045, T-38a-043), the base list row (T-38a-044, T-39a-061), cover
 /// frames (T-38a-039), the header backdrop (T-38a-014) and the header shortcuts (T-38a-046).

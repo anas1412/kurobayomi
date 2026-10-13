@@ -6,8 +6,23 @@ use std::collections::HashSet;
 
 use kuro_data::item::Item;
 
-use crate::entry_core::chapter_actions::previous_ids;
 use crate::entry_core::readstate::plan_done;
+
+/// The items chronologically before `pointer`, in chronological order (6.9.8). `view` is the displayed list. In a
+/// descending view the earlier items come after the pointer; the list is reversed to chronological order. A pointer
+/// that is not in the view marks nothing (E-PREV-1).
+pub fn previous_ids(view: &[i64], pointer: i64, descending: bool) -> Vec<i64> {
+    let Some(at) = view.iter().position(|id| *id == pointer) else {
+        return Vec::new();
+    };
+    if descending {
+        let mut earlier = view[at + 1..].to_vec();
+        earlier.reverse();
+        earlier
+    } else {
+        view[..at].to_vec()
+    }
+}
 
 /// What a mark seen or unseen sends: the ids to write, and the ids whose downloads go after it (T-39b-013, T-MRK-3). Only
 /// episodes that are on disk can lose a download.

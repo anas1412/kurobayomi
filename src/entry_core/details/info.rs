@@ -6,7 +6,7 @@ use kuro_data::entry::Entry;
 use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
-use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::source_info::SourceInfo;
 use crate::entry_core::header::HeaderModel;
 
 /// The icon and label of a status value.

@@ -4,8 +4,7 @@
 use kuro_images::art::{ArtKind, ArtRef};
 use kuro_platform::kind::Kind;
 
-use crate::entry_core::detail::EntryState;
-use crate::entry_core::text::{artist_row, display_author, display_title, status_icon, status_text};
+use crate::entry_core::text::{artist_row, display_author, display_title};
 
 /// The small layout never draws the cover wider than this.
 pub const SMALL_COVER_MAX: i32 = 100;
@@ -62,20 +61,6 @@ impl HeaderModel {
             m
         };
         plain(self) == plain(other)
-    }
-
-    pub fn new(page: &EntryState) -> Self {
-        let m = &page.manga;
-        Self::from_parts(
-            &m.title,
-            m.author.as_deref(),
-            m.artist.as_deref(),
-            (status_icon(m.status), status_text(m.status)),
-            &page.source.name,
-            page.source.stub,
-        )
-        .with_genres(Some(&m.genres))
-        .with_cover(Kind::Manga, m.id, m.source, m.thumbnail_url.as_deref(), m.favorite, m.cover_last_modified)
     }
 
     /// The header of any entry kind: the caller supplies the status icon and text, because manga and anime have
@@ -159,33 +144,10 @@ pub fn cover_size(large: bool, column_width: i32) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry_core::detail::{LoadContext, LoadState, MangaRow, SourceInfo, finish_load};
+    use crate::entry_core::text::{status_icon, status_text};
 
     fn model(title: &str, author: Option<&str>, artist: Option<&str>, stub: bool) -> HeaderModel {
-        let manga = MangaRow {
-            id: 1,
-            source: 1,
-            url: String::new(),
-            title: title.into(),
-            author: author.map(str::to_owned),
-            artist: artist.map(str::to_owned),
-            description: None,
-            genres: vec![],
-            status: 0,
-            thumbnail_url: None,
-            cover_last_modified: 0,
-            initialized: true,
-            favorite: true,
-            next_update: 0,
-            fetch_interval: 0,
-            local: false,
-            flags: Default::default(),
-        };
-        let source = SourceInfo { name: "Source A (EN)".into(), stub };
-        let LoadState::Ready(page) = finish_load(Some(manga), vec![], source, &LoadContext::default()).state else {
-            unreachable!()
-        };
-        HeaderModel::new(&page)
+        HeaderModel::from_parts(title, author, artist, (status_icon(0), status_text(0)), "Source A (EN)", stub)
     }
 
     #[test]
