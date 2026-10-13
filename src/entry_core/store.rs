@@ -20,6 +20,7 @@ use kuro_prefs::store::PrefStore;
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::detail::MangaRow;
 use crate::entry_core::entry_ops;
+use crate::entry_core::library_flow::LibraryRepos;
 use crate::entry_core::flags::ChapterFlags;
 use crate::entry_core::readstate::{ReadPlan, plan_bookmark, plan_done};
 use crate::entry_core::tracking::facts::Summary;
@@ -193,26 +194,9 @@ impl DbStore {
         Ok(updates.len())
     }
 
-    /// Adds the manga to the library and links its categories (`CategoryConfirm::AddToLibrary`), then writes the library
-    /// defaults to its chapter flags (`entry_ops::add_to_library`).
-    pub fn add_to_library(&self, manga_id: i64, category_ids: &[i64], prefs: &PrefStore, now_ms: i64) -> DataResult<()> {
-        entry_ops::add_to_library(&self.entries, prefs, manga_id, category_ids, now_ms).map(drop)
-    }
-
-    /// Removes the manga from the library: `favorite = false` and `date_added = 0` in one write (E-FAV-7). The cover is
-    /// deleted by the caller after this succeeds. `Ok(false)` when the row is gone.
-    pub fn remove_from_library(&self, manga_id: i64) -> DataResult<bool> {
-        entry_ops::set_favorite(&self.entries, manga_id, false, 0)
-    }
-
-    /// The library entries other than this one with the same title (the duplicate check of an add).
-    pub fn duplicates(&self, manga_id: i64) -> DataResult<Vec<Entry>> {
-        entry_ops::duplicates(&self.entries, manga_id)
-    }
-
-    /// The user categories (the default row `0` is left out), for the default-category routing.
-    pub fn user_categories(&self) -> DataResult<Vec<kuro_data::category::Category>> {
-        entry_ops::user_categories(&self.categories)
+    /// The repositories of the library button (`library_flow`).
+    pub fn library(&self, prefs: &PrefStore) -> LibraryRepos {
+        LibraryRepos::new(self.entries.clone(), self.categories.clone(), prefs.clone())
     }
 
     /// Replaces the category links in one transaction (`CategoryConfirm::SetCategories`).
@@ -317,6 +301,7 @@ pub(crate) mod fixture {
 #[cfg(test)]
 mod tests {
     use kuro_db::flags::item as c;
+    use crate::entry_core::library_flow::LibraryStore;
 
     use super::fixture::{store, version};
     use super::*;
@@ -435,12 +420,12 @@ mod tests {
         let (_dir, store, id) = store(false, 0);
         let cat = kuro_testkit::insert_category(&store.db, Kind::Manga, "Reading");
         let prefs = PrefStore::in_memory();
-        store.add_to_library(id, &[cat], &prefs, 1_000).unwrap();
+        store.library(&prefs).add(id, &[cat], 1_000).unwrap();
         assert!(store.manga(id).unwrap().unwrap().favorite);
         assert_eq!(store.categories(id).unwrap().1, vec![cat]);
 
         let (_dir2, store2, id2) = store_fresh();
-        assert!(store2.add_to_library(id2, &[4242], &prefs, 1_000).is_err(), "unknown category");
+        assert!(store2.library(&prefs).add(id2, &[4242], 1_000).is_err(), "unknown category");
         assert!(!store2.manga(id2).unwrap().unwrap().favorite, "the favorite was not written either");
     }
 
@@ -450,22 +435,22 @@ mod tests {
         let prefs = PrefStore::in_memory();
         kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Manga, c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNDONE);
         assert_eq!(store.manga(id).unwrap().unwrap().flags.0, 0, "the stored word is untouched until the add");
-        store.add_to_library(id, &[], &prefs, 1_000).unwrap();
+        store.library(&prefs).add(id, &[], 1_000).unwrap();
         assert_eq!(store.manga(id).unwrap().unwrap().flags.0, c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNDONE);
     }
 
     #[test]
     fn remove_from_library_clears_favorite_and_date_added_in_one_write() {
         let (_dir, store, id) = store(false, 0);
-        store.add_to_library(id, &[], &PrefStore::in_memory(), 5_000).unwrap();
+        store.library(&PrefStore::in_memory()).add(id, &[], 5_000).unwrap();
         assert_eq!(store.entries.by_id(id).unwrap().date_added, 5_000);
         let before = version(&store, id);
-        assert!(store.remove_from_library(id).unwrap());
+        assert!(store.library(&PrefStore::in_memory()).remove(id, 0).unwrap());
         let row = store.entries.by_id(id).unwrap();
         assert!(!row.favorite);
         assert_eq!(row.date_added, 0, "E-FAV-7");
         assert!(version(&store, id) > before);
-        assert!(!store.remove_from_library(999).unwrap(), "a missing row changes nothing");
+        assert!(!store.library(&PrefStore::in_memory()).remove(999, 0).unwrap(), "a missing row changes nothing");
     }
 
     #[test]
@@ -473,10 +458,10 @@ mod tests {
         let (_dir, store, id) = store(false, 0);
         let other = store.insert_manga_for_test("TITLE", true);
         store.insert_manga_for_test("Another", false);
-        assert_eq!(store.duplicates(id).unwrap().iter().map(|m| m.id).collect::<Vec<_>>(), vec![other], "only favorites are duplicates");
-        assert!(store.duplicates(other).unwrap().is_empty(), "the entry is never its own duplicate");
+        assert_eq!(store.library(&PrefStore::in_memory()).duplicates(id).unwrap().iter().map(|m| m.id).collect::<Vec<_>>(), vec![other], "only favorites are duplicates");
+        assert!(store.library(&PrefStore::in_memory()).duplicates(other).unwrap().is_empty(), "the entry is never its own duplicate");
         let cat = store.insert_category_for_test("Reading");
-        let users = store.user_categories().unwrap();
+        let users = store.library(&PrefStore::in_memory()).user_categories().unwrap();
         assert_eq!(users.iter().map(|c| c.id).collect::<Vec<_>>(), vec![cat], "the default row 0 is left out");
     }
 

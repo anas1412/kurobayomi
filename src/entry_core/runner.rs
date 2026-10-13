@@ -22,7 +22,7 @@ use crate::entry_core::detail::{
     LatestWins, LoadContext, LoadState, MangaRow, StoreCmd, StoreEvent, finish_load,
 };
 use crate::entry_core::errors::DetailError;
-use crate::entry_core::favorite::{AddRoute, route_add};
+use crate::entry_core::library_flow::{self, Hooks, Toggled};
 use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};
 use crate::entry_core::store::{DbStore, chapter_rows, manga_row};
 
@@ -330,61 +330,52 @@ impl Shared {
         }
     }
 
-    /// Favorite and categories in one transaction, then the enhanced trackers bind. Every add branch ends here: the
-    /// default category, no categories, and the category dialog's confirm (`bindEnhancedTrackers`, behaviour 4.2 step 6).
+    /// The library button's backend hooks for one manga (`library_flow::Hooks`).
+    fn with_hooks<T>(backend: &Arc<dyn Backend>, manga_id: i64, f: impl FnOnce(&Hooks<'_>) -> T) -> T {
+        let remove_cover = || backend.remove_cover(manga_id);
+        let downloaded_count = || backend.downloads(manga_id).values().filter(|s| **s == kuro_downloads::DownloadState::Downloaded).count();
+        let bind_enhanced = || backend.bind_enhanced(manga_id);
+        f(&Hooks { remove_cover: &remove_cover, downloaded_count: &downloaded_count, bind_enhanced: &bind_enhanced })
+    }
+
+    /// Favorite and categories in one transaction, then the enhanced trackers bind (`library_flow::add`). Every add branch
+    /// ends here: the default category, no categories, and the category dialog's confirm.
     async fn add_to_library(&self, manga_id: i64, category_ids: Vec<i64>) {
         let now = chrono::Utc::now().timestamp_millis();
         let prefs = self.prefs.clone();
-        if self.write_result(move |s, _| s.add_to_library(manga_id, &category_ids, &prefs, now)).await {
-            self.blocking(move |_, backend| backend.bind_enhanced(manga_id)).await;
+        let added = self
+            .blocking(move |store, backend| Self::with_hooks(&backend, manga_id, |hooks| library_flow::add(&store.library(&prefs), hooks, manga_id, &category_ids, now)))
+            .await;
+        if let Err(e) = added {
+            self.fail("SQLiteException", e);
         }
         self.reload_categories(manga_id).await;
     }
 
-    /// `toggleFavorite` (behaviour 4.2). A favorite is removed: `favorite = false` and `date_added = 0` first, the cover
-    /// after that write succeeded. A manga that is not one is checked for a duplicate (no write when found), then
-    /// routed by the default category.
+    /// `toggleFavorite` (behaviour 4.2), the library button (`library_flow::toggle`): a favorite is removed and the
+    /// cover goes after the write; a manga that is not one is checked for a duplicate (no write when found), then routed
+    /// by the default category.
     async fn toggle_favorite(&self, manga_id: i64, default_category: i64, skip_duplicate: bool) {
-        let read = self.blocking(move |store, _| store.manga(manga_id)).await;
-        let manga = match read {
-            Ok(Some(manga)) => manga,
-            Ok(None) => return,
-            Err(e) => return self.fail("SQLiteException", e),
-        };
-        if manga.favorite {
-            let removed = self.blocking(move |store, _| store.remove_from_library(manga_id)).await;
-            match removed {
-                Ok(true) => {
-                    let ask = self
-                        .blocking(move |_, backend| {
-                            backend.remove_cover(manga_id);
-                            backend.downloads(manga_id).values().any(|s| *s == kuro_downloads::DownloadState::Downloaded)
-                        })
-                        .await;
-                    self.emit(StoreEvent::Removed { ask_delete_downloads: ask });
-                }
-                Ok(false) => {}
-                Err(e) => self.fail("SQLiteException", e),
-            }
-            return;
-        }
-        let read = self
-            .blocking(move |store, _| {
-                let duplicate = if skip_duplicate { None } else { store.duplicates(manga_id)?.first().map(|d| d.id) };
-                kuro_data::DataResult::Ok((duplicate, store.user_categories()?))
+        let now = chrono::Utc::now().timestamp_millis();
+        let prefs = self.prefs.clone();
+        let toggled = self
+            .blocking(move |store, backend| {
+                Self::with_hooks(&backend, manga_id, |hooks| {
+                    library_flow::toggle(&store.library(&prefs), hooks, manga_id, default_category, !skip_duplicate, now)
+                })
             })
             .await;
-        let (duplicate, categories) = match read {
-            Ok(read) => read,
-            Err(e) => return self.fail("SQLiteException", e),
-        };
-        if let Some(duplicate_id) = duplicate {
-            self.emit(StoreEvent::Duplicate { duplicate_id });
-            return;
-        }
-        match route_add(default_category, &categories) {
-            AddRoute::AddDefaultCategory(category) => self.add_to_library(manga_id, category.into_iter().collect()).await,
-            AddRoute::ChooseCategory => self.emit(StoreEvent::ChooseCategory),
+        match toggled {
+            Ok(Toggled::Nothing) => {}
+            Ok(Toggled::Removed(outcome)) => self.emit(StoreEvent::Removed { ask_delete_downloads: outcome.ask_delete_downloads }),
+            Ok(Toggled::Duplicate(existing)) => {
+                if let Some(duplicate) = existing.first() {
+                    self.emit(StoreEvent::Duplicate { duplicate_id: duplicate.id });
+                }
+            }
+            Ok(Toggled::ChooseCategory { .. }) => self.emit(StoreEvent::ChooseCategory),
+            Ok(Toggled::Added) => self.reload_categories(manga_id).await,
+            Err(e) => self.fail("SQLiteException", e),
         }
     }
 

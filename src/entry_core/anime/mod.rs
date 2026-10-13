@@ -30,7 +30,6 @@ pub mod dialog_state;
 pub mod dispatch;
 pub mod download_backend;
 pub mod downloads;
-pub mod library;
 pub mod refresh;
 pub mod remote;
 pub mod model;

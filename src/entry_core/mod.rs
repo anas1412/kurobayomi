@@ -51,6 +51,7 @@ pub mod handoff;
 pub mod header_view;
 pub mod info_block;
 pub mod info_pane;
+pub mod library_flow;
 pub mod list_model;
 pub mod list_options;
 pub mod list_view;

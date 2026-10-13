@@ -989,13 +989,10 @@ impl View {
 
     /// The library button: adds the entry, or removes it from the library.
     fn toggle_library(self: &Rc<Self>) {
-        let target = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| (m.anime.id, m.anime.favorite));
-        match target {
-            // a favorite leaves the library
-            Some((anime_id, true)) => self.runner.send(AnimeCmd::ToggleFavorite { anime_id }),
-            // an add checks for a same-named library entry first (T-39a-047)
-            Some((anime_id, false)) => self.runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: true }),
-            None => {}
+        // a favorite leaves the library; an add checks for a same-named library entry first (T-39a-047)
+        let target = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id);
+        if let Some(anime_id) = target {
+            self.runner.send(AnimeCmd::ToggleLibrary { anime_id, check_duplicates: true });
         }
     }
 
@@ -1010,7 +1007,7 @@ impl View {
             move |choice| match choice {
                 DuplicateChoice::Show => open(duplicate.id),
                 DuplicateChoice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
-                DuplicateChoice::AddAnyway => runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: false }),
+                DuplicateChoice::AddAnyway => runner.send(AnimeCmd::ToggleLibrary { anime_id, check_duplicates: false }),
             },
             || {},
         );

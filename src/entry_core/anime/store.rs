@@ -8,7 +8,7 @@ use std::sync::Arc;
 use kuro_data::DataResult;
 use kuro_data::anime_relation::AnimeRelationGroup;
 use kuro_data::anime_relation::AnimeRelationRepo;
-use kuro_data::category::{Category, CategoryRepo};
+use kuro_data::category::CategoryRepo;
 use kuro_data::entry::{Entry, EntryRepo, SeasonEntry};
 use kuro_data::item::{Item, ItemRepo, ItemUpdate};
 use kuro_data::track::TrackRepo;
@@ -17,12 +17,11 @@ use kuro_db::subscribe::Subscription;
 use kuro_domain::entries::defaults::{apply_item_defaults, apply_season_defaults};
 use kuro_domain::entries::viewer_flags::set_skip_intro_length;
 use kuro_platform::kind::Kind;
-use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 
 use super::actions::Mark;
 use crate::entry_core::entry_ops;
-use crate::entry_core::favorite::{AddRoute, route_add};
+use crate::entry_core::library_flow::LibraryRepos;
 use crate::entry_core::tracking::facts::Summary;
 
 /// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
@@ -72,11 +71,9 @@ impl AnimeStore {
         entry_ops::categories(&self.categories, anime_id)
     }
 
-    /// The add branch of the library button for an anime (`favorite::route_add`), with the library's default category.
-    pub fn add_route(&self, prefs: &PrefStore) -> DataResult<AddRoute> {
-        let default = LibraryPrefs::new(prefs.clone()).default_anime_category.get();
-        let user: Vec<Category> = entry_ops::user_categories(&self.categories)?;
-        Ok(route_add(i64::from(default), &user))
+    /// The repositories of the library button (`library_flow`).
+    pub fn library(&self, prefs: &PrefStore) -> LibraryRepos {
+        LibraryRepos::new(self.entries.clone(), self.categories.clone(), prefs.clone())
     }
 
     /// Replaces the category links of the entry in one transaction.
@@ -137,11 +134,6 @@ impl AnimeStore {
         Ok(changed)
     }
 
-    /// The library entries other than this one with the same title, case folded (the duplicate check of an add).
-    pub fn duplicates(&self, anime_id: i64) -> DataResult<Vec<Entry>> {
-        entry_ops::duplicates(&self.entries, anime_id)
-    }
-
     /// The related groups of the entry, published again after a change to the relations or the anime they link.
     pub fn watch_related(&self, anime_id: i64) -> Subscription<Vec<AnimeRelationGroup>> {
         AnimeRelationRepo::new(self.db()).subscribe_related(anime_id)
@@ -151,19 +143,6 @@ impl AnimeStore {
     /// One masked UPDATE of `entries.viewer_flags`, so a write never reads back and touches the other groups (E-AIR-1).
     pub fn set_viewer_bits(&self, anime_id: i64, value: i64, mask: i64) -> DataResult<bool> {
         self.entries.set_viewer_bits(anime_id, value, mask)
-    }
-
-    /// The favorite write: `favorite` and `date_added` (now when it is added, 0 when it is removed) in one update.
-    /// `Ok(false)` when the row is gone.
-    pub fn set_favorite(&self, anime_id: i64, favorite: bool, now_ms: i64) -> DataResult<bool> {
-        entry_ops::set_favorite(&self.entries, anime_id, favorite, now_ms)
-    }
-
-    /// Adds the entry to the library in the given categories (none for "no category"): the links, the favorite write, then the
-    /// library defaults for its episode and season flags (T-39b-012: defaults are written when it joins the library, not
-    /// when it is opened). `Ok(false)` when the row is gone.
-    pub fn add_to_library(&self, anime_id: i64, category_ids: &[i64], prefs: &PrefStore, now_ms: i64) -> DataResult<bool> {
-        entry_ops::add_to_library(&self.entries, prefs, anime_id, category_ids, now_ms)
     }
 
     /// Sets the bookmark or fillermark of exactly these episodes, in one transaction. The caller passes the ids that
@@ -256,17 +235,20 @@ mod tests {
     use super::super::actions::{Mark, bulk_mark_targets};
     use super::fixture::with_episodes;
     use super::*;
+    use crate::entry_core::favorite::{AddRoute, route_add};
+    use crate::entry_core::library_flow::LibraryStore;
 
     #[test]
     fn favorite_writes_the_flag_and_the_date_and_a_missing_row_is_false() {
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
-        assert!(store.set_favorite(id, true, 5_000).unwrap());
+        let library = store.library(&PrefStore::in_memory());
+        assert!(library.add(id, &[], 5_000).unwrap());
         let row = store.anime(id).unwrap().unwrap();
         assert!(row.favorite && row.date_added == 5_000);
-        assert!(store.set_favorite(id, false, 6_000).unwrap());
+        assert!(library.remove(id, 6_000).unwrap());
         let row = store.anime(id).unwrap().unwrap();
         assert!(!row.favorite && row.date_added == 0);
-        assert!(!store.set_favorite(4242, true, 1).unwrap());
+        assert!(!library.add(4242, &[], 1).unwrap() && !library.remove(4242, 1).unwrap());
     }
 
     #[test]
@@ -275,11 +257,11 @@ mod tests {
         let prefs = PrefStore::in_memory();
         kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Anime, ep::SHOW_UNDONE | ep::SORT_ASC | ep::SORTING_NUMBER);
         assert_eq!(store.anime(id).unwrap().unwrap().item_flags, 0, "the stored word is untouched until the add");
-        assert!(store.add_to_library(id, &[], &prefs, 9).unwrap());
+        assert!(store.library(&prefs).add(id, &[], 9).unwrap());
         let row = store.anime(id).unwrap().unwrap();
         assert!(row.favorite);
         assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE, "the library default reached the row");
-        assert!(!store.add_to_library(4242, &[], &prefs, 9).unwrap());
+        assert!(!store.library(&prefs).add(4242, &[], 9).unwrap());
     }
 
     #[test]
@@ -288,16 +270,20 @@ mod tests {
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
         let cat = kuro_testkit::insert_category(&store.db(), Kind::Anime, "Airing");
         let prefs = PrefStore::in_memory();
+        let route = |prefs: &PrefStore| {
+            let default = i64::from(kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.get());
+            route_add(default, &store.library(prefs).user_categories().unwrap())
+        };
         kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(cat as i32).unwrap();
-        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::AddDefaultCategory(Some(cat)));
+        assert_eq!(route(&prefs), AddRoute::AddDefaultCategory(Some(cat)));
         kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(0).unwrap();
-        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::AddDefaultCategory(None));
+        assert_eq!(route(&prefs), AddRoute::AddDefaultCategory(None));
         kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(-1).unwrap();
-        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::ChooseCategory);
+        assert_eq!(route(&prefs), AddRoute::ChooseCategory);
         kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(9_999).unwrap();
-        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::ChooseCategory, "a deleted default asks");
+        assert_eq!(route(&prefs), AddRoute::ChooseCategory, "a deleted default asks");
         // the answer writes the links and the favorite together
-        assert!(store.add_to_library(id, &[cat], &prefs, 9).unwrap());
+        assert!(store.library(&prefs).add(id, &[cat], 9).unwrap());
         assert_eq!(store.categories(id).unwrap().1, vec![cat]);
         assert!(store.anime(id).unwrap().unwrap().favorite);
     }
@@ -418,12 +404,12 @@ mod tests {
     #[test]
     fn a_library_entry_with_the_same_title_is_a_duplicate_and_the_entry_itself_is_not() {
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
-        assert!(store.duplicates(id).unwrap().is_empty());
+        assert!(store.library(&PrefStore::in_memory()).duplicates(id).unwrap().is_empty());
         let twin = EntryRepo::new(store.db())
             .insert(&Entry { source: 8, url: "/b".into(), title: "FRIEREN".into(), favorite: true, ..Entry::create(Kind::Anime) })
             .unwrap();
-        let found = store.duplicates(id).unwrap();
+        let found = store.library(&PrefStore::in_memory()).duplicates(id).unwrap();
         assert_eq!(found.iter().map(|a| a.id).collect::<Vec<_>>(), vec![twin]);
-        assert!(store.duplicates(twin).unwrap().is_empty(), "the other entry is not in the library");
+        assert!(store.library(&PrefStore::in_memory()).duplicates(twin).unwrap().is_empty(), "the other entry is not in the library");
     }
 }

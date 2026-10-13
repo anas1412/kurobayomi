@@ -41,6 +41,15 @@ pub fn binder(kind: Kind) -> TrackerBinder {
     })
 }
 
+/// Binds the enhanced trackers of one entry that just joined the library, from the entry page: the entry's title and
+/// source are read, then the binder of its kind runs, detached (B§5.2). Runs on the blocking pool.
+pub fn bind_entry(db: &Arc<kuro_db::handle::Db>, kind: Kind, id: i64) {
+    match kuro_data::entry::EntryRepo::new(Arc::clone(db)).by_id(id) {
+        Ok(entry) => binder(kind)(entry.id, &entry.title, entry.source),
+        Err(error) => tracing::warn!(entry = id, %error, "could not read the entry to bind its trackers"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

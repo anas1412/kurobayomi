@@ -20,6 +20,7 @@ use kuro_db::codec::FetchType;
 use kuro_domain::download::filter::{CategoryDecision, should_download_new};
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_platform::kind::Kind;
+use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
@@ -28,7 +29,6 @@ use tokio_util::sync::CancellationToken;
 use super::actions::Mark;
 use super::details_error::{DetailsError, join_failed};
 use super::entry_state::RefreshPlan;
-use super::library::{RemoveOutcome, add_to_library_flag, remove_from_library};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
 use super::refresh::{Begin, RefreshGate, Trigger, auto_download_targets, last_empty_open_fetch, record_empty_open_fetch};
 use super::season_tile::SeasonExtra;
@@ -37,7 +37,7 @@ use super::store::AnimeStore;
 use crate::entry_core::backend::stub_source_info;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
-use crate::entry_core::favorite::AddRoute;
+use crate::entry_core::library_flow::{self, Hooks, RemoveOutcome, Toggled};
 use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};
 
 /// What a fetch hands back: the episodes the sync added, which a manual refresh queues for download (T-REF-4).
@@ -53,6 +53,8 @@ pub trait AnimeBackend: Send + Sync + 'static {
     /// Queues new episodes for download. Only a manual refresh reaches this (E-REF-5). The app has no anime download
     /// queue wired yet, so the default does nothing.
     fn enqueue_new_episodes(&self, _anime_id: i64, _episodes: &[Item]) {}
+    /// Binds the enhanced trackers of an entry that just joined the library (`bindEnhancedTrackers`).
+    fn bind_enhanced(&self, _anime_id: i64) {}
     /// Deletes the cover files of an entry that just left the library (`removeCovers`), after the write succeeded.
     /// `true` when a file was removed.
     fn remove_cover(&self, _anime_id: i64) -> bool {
@@ -154,11 +156,9 @@ pub enum AnimeCmd {
     /// "Use as default for all titles": the default of this scope only goes to every favorite. Answered by
     /// `AnimeEvent::DefaultsApplied`.
     ApplyDefaultsToLibrary { scope: Scope },
-    /// The library button of an entry that is not in the library. With `check_duplicates` a same-named library entry
-    /// stops the add and is answered by `AnimeEvent::Duplicate`; "Add anyway" sends it with the check off.
-    AddToLibrary { anime_id: i64, check_duplicates: bool },
-    /// The library button: removes a favorite, or adds an entry that is not one, with the library defaults.
-    ToggleFavorite { anime_id: i64 },
+    /// The library button: remove an entry that is in the library, or add one that is not. With `check_duplicates` a
+    /// library entry with the same title stops the add and the page is asked what to do; Add anyway sends it false.
+    ToggleLibrary { anime_id: i64, check_duplicates: bool },
     /// Sets or clears the bookmark or fillermark of exactly these episodes (`actions::bulk_mark_targets`).
     SetMark { ids: Vec<i64>, mark: Mark, on: bool },
     /// Marks these episodes seen or unseen.
@@ -432,88 +432,52 @@ impl Shared {
         }
     }
 
-    /// The library button. A favorite is removed: the write first, then the cover and the download count. An entry
-    /// that is not one is added with the library defaults written to its flags (T-39b-012). A failed write does
-    /// nothing else (E-LIB-9).
-    async fn toggle_favorite(&self, anime_id: i64) {
+    /// The library button (`library_flow`). A favorite is removed: the write first, then the cover and the download count.
+    /// An entry that is not one is checked for a same-named library entry (with `check_duplicates`, T-39a-047), routed by
+    /// the default category (T-39b-026), and added with the library defaults written to its flags (T-39b-012). A failed
+    /// write does nothing else (E-LIB-9).
+    async fn toggle_library(&self, anime_id: i64, check_duplicates: bool) {
         let prefs = self.prefs.clone();
-        let now = now_ms();
-        let written = self
-            .blocking(move |store| -> DataResult<Option<bool>> {
-                let Some(anime) = store.anime(anime_id)? else { return Ok(None) };
-                if anime.favorite {
-                    Ok(store.set_favorite(anime_id, false, now)?.then_some(false))
-                } else {
-                    Ok(store.add_to_library(anime_id, &[], &prefs, now)?.then_some(add_to_library_flag()))
-                }
-            })
-            .await;
-        match written {
-            Ok(Some(true)) => self.emit(AnimeEvent::Added),
-            Ok(Some(false)) => {
-                let backend = Arc::clone(&self.backend);
-                match tokio::task::spawn_blocking(move || (backend.remove_cover(anime_id), backend.downloaded_count(anime_id))).await {
-                    Ok((covers_changed, downloads)) => {
-                        if let Some(outcome) = remove_from_library(true, covers_changed, downloads) {
-                            self.emit(AnimeEvent::Removed(outcome));
-                        }
-                    }
-                    Err(e) => self.failed(join_failed(&e)),
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                // the favorite write failed: no cover is deleted and no prompt shows
-                self.failed(e);
-            }
-        }
-    }
-
-    /// The library button of an entry that is not in the library. With `check_duplicates`, a library entry with the
-    /// same title stops the add and the page is asked what to do (T-39a-047); nothing is written until it answers.
-    async fn add_to_library(&self, anime_id: i64, check_duplicates: bool) {
-        let found = self
+        let default_category = i64::from(LibraryPrefs::new(prefs.clone()).default_category(Kind::Anime).get());
+        let (backend, now) = (Arc::clone(&self.backend), now_ms());
+        let toggled = self
             .blocking(move |store| {
-                let favorite = store.anime(anime_id)?.map(|a| a.favorite);
-                let existing = if check_duplicates && favorite == Some(false) { store.duplicates(anime_id)? } else { Vec::new() };
-                Ok((favorite, existing))
+                Self::with_hooks(&backend, anime_id, |hooks| {
+                    library_flow::toggle(&store.library(&prefs), hooks, anime_id, default_category, check_duplicates, now)
+                })
             })
             .await;
-        match found {
-            Ok((Some(false), existing)) if !existing.is_empty() => self.emit(AnimeEvent::Duplicate { existing }),
-            Ok((Some(false), _)) => self.add_flow(anime_id).await,
-            // the row is gone, or the entry joined the library meanwhile: there is nothing to add
-            Ok(_) => {}
-            Err(e) => self.failed(e),
-        }
-    }
-
-    /// The add branch of the library button (T-39b-026, behaviour 4.3): the default category adds at once, no default or
-    /// no user category adds without one, and an unset or deleted default asks which categories first. Favorite is not
-    /// written until the answer.
-    async fn add_flow(&self, anime_id: i64) {
-        let prefs = self.prefs.clone();
-        match self.blocking(move |s| s.add_route(&prefs)).await {
-            Ok(AddRoute::AddDefaultCategory(category)) => {
-                self.add_with_categories(anime_id, category.into_iter().collect()).await;
-            }
-            Ok(AddRoute::ChooseCategory) => match self.blocking(move |s| s.categories(anime_id)).await {
-                Ok((all, linked)) => self.emit(AnimeEvent::AddCategories { all, linked }),
-                Err(e) => self.failed(e),
-            },
+        match toggled {
+            Ok(Toggled::Nothing) => {}
+            Ok(Toggled::Removed(outcome)) => self.emit(AnimeEvent::Removed(outcome)),
+            Ok(Toggled::Duplicate(existing)) => self.emit(AnimeEvent::Duplicate { existing }),
+            Ok(Toggled::ChooseCategory { all, linked }) => self.emit(AnimeEvent::AddCategories { all, linked }),
+            Ok(Toggled::Added) => self.emit(AnimeEvent::Added),
             Err(e) => self.failed(e),
         }
     }
 
     /// Adds the entry in these categories: the links and the favorite in order (`moveAnimeToCategoriesAndAddToLibrary`).
     async fn add_with_categories(&self, anime_id: i64, category_ids: Vec<i64>) {
-        let prefs = self.prefs.clone();
-        let now = now_ms();
-        match self.blocking(move |s| s.add_to_library(anime_id, &category_ids, &prefs, now)).await {
+        let (prefs, backend, now) = (self.prefs.clone(), Arc::clone(&self.backend), now_ms());
+        let added = self
+            .blocking(move |store| {
+                Self::with_hooks(&backend, anime_id, |hooks| library_flow::add(&store.library(&prefs), hooks, anime_id, &category_ids, now))
+            })
+            .await;
+        match added {
             Ok(true) => self.emit(AnimeEvent::Added),
             Ok(false) => {}
             Err(e) => self.failed(e),
         }
+    }
+
+    /// The library button's backend hooks for one entry (`library_flow::Hooks`).
+    fn with_hooks<T>(backend: &Arc<dyn AnimeBackend>, anime_id: i64, f: impl FnOnce(&Hooks<'_>) -> T) -> T {
+        let remove_cover = || backend.remove_cover(anime_id);
+        let downloaded_count = || backend.downloaded_count(anime_id);
+        let bind_enhanced = || backend.bind_enhanced(anime_id);
+        f(&Hooks { remove_cover: &remove_cover, downloaded_count: &downloaded_count, bind_enhanced: &bind_enhanced })
     }
 
     /// Reads the episodes on disk again and tells the page.
@@ -569,9 +533,8 @@ impl Shared {
                     Err(e) => return self.failed(e),
                 }
             }
-            AnimeCmd::AddToLibrary { anime_id, check_duplicates } => return self.add_to_library(anime_id, check_duplicates).await,
             AnimeCmd::AddWithCategories { anime_id, category_ids } => return self.add_with_categories(anime_id, category_ids).await,
-            AnimeCmd::ToggleFavorite { anime_id } => return self.toggle_favorite(anime_id).await,
+            AnimeCmd::ToggleLibrary { anime_id, check_duplicates } => return self.toggle_library(anime_id, check_duplicates).await,
             AnimeCmd::SetMark { ids, mark, on } => self.blocking(move |s| s.set_marks(&ids, mark, on).map(|()| true)).await,
             AnimeCmd::SetSeen { ids, seen } => self.blocking(move |s| s.set_seen(&ids, seen).map(|()| true)).await,
             AnimeCmd::SetFetchInterval { anime_id, wheel } => {
@@ -866,7 +829,7 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store.clone(), backend.clone());
             let rx = runner.events();
-            runner.send(AnimeCmd::ToggleFavorite { anime_id: id });
+            runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
             let AnimeEvent::Removed(outcome) = until(&rx, |e| matches!(e, AnimeEvent::Removed(_))).await else { unreachable!() };
             assert_eq!(outcome, RemoveOutcome { cover_removed: true, ask_delete_downloads: true });
             let row = store.anime(id).unwrap().unwrap();
@@ -890,7 +853,7 @@ mod tests {
         rt.block_on(async {
             let runner = spawn(rt.handle(), store.clone(), prefs, Fake::new(0), AnimeLoadContext::default());
             let rx = runner.events();
-            runner.send(AnimeCmd::ToggleFavorite { anime_id: id });
+            runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
             until(&rx, |e| matches!(e, AnimeEvent::Added)).await;
             let row = store.anime(id).unwrap().unwrap();
             assert!(row.favorite);
@@ -968,11 +931,11 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
             let rx = runner.events();
-            runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: true });
+            runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
             let AnimeEvent::Duplicate { existing } = until(&rx, |e| matches!(e, AnimeEvent::Duplicate { .. })).await else { unreachable!() };
             assert_eq!(existing.iter().map(|a| a.id).collect::<Vec<_>>(), vec![twin]);
             assert!(!store.anime(id).unwrap().unwrap().favorite, "nothing is written until the user answers");
-            runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: false });
+            runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: false });
             until(&rx, |e| matches!(e, AnimeEvent::Added)).await;
             assert!(store.anime(id).unwrap().unwrap().favorite);
         });
@@ -984,7 +947,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
-            runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: true });
+            runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
             until(&runner.events(), |e| matches!(e, AnimeEvent::Added)).await;
             assert!(store.anime(id).unwrap().unwrap().favorite);
         });

@@ -22,6 +22,7 @@ use kuro_domain::items::season_sync::SyncSeasons;
 use kuro_domain::items::source_sync::EntrySyncLocks;
 use kuro_domain::items::sync::{NoRenames, SourceItem, SyncItems, SyncItemsError, SyncOptions, source_item_from_episode};
 use kuro_domain::source::remote_update::{AnimeRemote, DbRemoteStore, FetchFlags, ListSync, RemoteError, RemoteStore, UpdateFromRemote};
+use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore;
 use kuro_source::SourceError;
 use kuro_source::anime::{AnimeSource, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
@@ -200,6 +201,10 @@ impl RemoteAnimeBackend {
 impl AnimeBackend for RemoteAnimeBackend {
     fn has_logged_in_tracker(&self) -> bool {
         crate::entry_core::tracking::session::has_logged_in()
+    }
+
+    fn bind_enhanced(&self, anime_id: i64) {
+        crate::updates::track_binding::bind_entry(&self.episodes.db(), Kind::Anime, anime_id);
     }
     fn source_info(&self, source_id: i64) -> SourceInfo {
         self.lookup.info(source_id).unwrap_or_else(|| self.stubs.source_info(source_id))

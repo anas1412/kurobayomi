@@ -208,6 +208,10 @@ impl Backend for SourceBackend {
         self.stub.has_logged_in_tracker()
     }
 
+    fn bind_enhanced(&self, manga_id: i64) {
+        crate::updates::track_binding::bind_entry(&self.db, Kind::Manga, manga_id);
+    }
+
     fn source_info(&self, source_id: i64) -> SourceInfo {
         match (self.lookup)(source_id) {
             Some(source) => SourceInfo { name: kuro_source::display_name(source.name(), source.lang()), stub: false },

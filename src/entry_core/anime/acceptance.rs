@@ -76,7 +76,7 @@ fn filter_to_unseen_mark_seen_and_add_to_library() {
         assert!(model.fab().visible, "an unseen episode is left");
 
         // the library button
-        runner.send(AnimeCmd::ToggleFavorite { anime_id: id });
+        runner.send(AnimeCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
         settle(&rx, &mut model, |m| m.anime.favorite).await;
         assert!(model.anime.favorite, "added to the library");
         assert_eq!(model.episodes.iter().filter(|e| e.done).count(), 2, "the seen marks stay");
