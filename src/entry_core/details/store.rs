@@ -52,24 +52,24 @@ impl EntryStore {
     }
 
     /// The ids of the categories the entry is in, for the auto-download rule. Empty means uncategorized.
-    pub fn category_ids(&self, anime_id: i64) -> DataResult<Vec<i64>> {
-        Ok(self.categories.by_entry(anime_id)?.into_iter().map(|c| c.id).collect())
+    pub fn category_ids(&self, entry_id: i64) -> DataResult<Vec<i64>> {
+        Ok(self.categories.by_entry(entry_id)?.into_iter().map(|c| c.id).collect())
     }
 
     #[cfg(test)]
     /// How many trackers the entry is bound to, for the tracking button of the action row.
-    pub fn track_count(&self, anime_id: i64) -> DataResult<usize> {
-        Ok(self.tracks.by_entry(anime_id)?.len())
+    pub fn track_count(&self, entry_id: i64) -> DataResult<usize> {
+        Ok(self.tracks.by_entry(entry_id)?.len())
     }
 
     /// The tracking count and the logged-in flag of the entry, through the same filter as the sheet (T-TRK-12, D-10).
-    pub fn track_summary(&self, anime_id: i64, source_id: i64) -> DataResult<Summary> {
-        entry_ops::track_summary(&self.tracks, Kind::Anime, anime_id, source_id)
+    pub fn track_summary(&self, entry_id: i64, source_id: i64) -> DataResult<Summary> {
+        entry_ops::track_summary(&self.tracks, Kind::Anime, entry_id, source_id)
     }
 
     /// Every category (the default row `0` included, the dialog drops it) and the ids the entry is linked to.
-    pub fn categories(&self, anime_id: i64) -> DataResult<(Vec<(i64, String)>, Vec<i64>)> {
-        entry_ops::categories(&self.categories, anime_id)
+    pub fn categories(&self, entry_id: i64) -> DataResult<(Vec<(i64, String)>, Vec<i64>)> {
+        entry_ops::categories(&self.categories, entry_id)
     }
 
     /// The repositories of the library button (`library_flow`).
@@ -83,18 +83,18 @@ impl EntryStore {
     }
 
     /// Replaces the category links of the entry in one transaction.
-    pub fn set_categories(&self, anime_id: i64, category_ids: &[i64]) -> DataResult<()> {
-        self.entries.set_categories(anime_id, category_ids)
+    pub fn set_categories(&self, entry_id: i64, category_ids: &[i64]) -> DataResult<()> {
+        self.entries.set_categories(entry_id, category_ids)
     }
 
     /// The entry, or `None` when the row does not exist.
-    pub fn anime(&self, id: i64) -> DataResult<Option<Entry>> {
+    pub fn entry(&self, id: i64) -> DataResult<Option<Entry>> {
         entry_ops::entry_or_none(&self.entries, id)
     }
 
     /// Every episode of the entry (the scanlator exclusions are a manga rule).
-    pub fn episodes(&self, anime_id: i64) -> DataResult<Vec<Item>> {
-        self.items.by_entry_id(anime_id, false)
+    pub fn episodes(&self, entry_id: i64) -> DataResult<Vec<Item>> {
+        self.items.by_entry_id(entry_id, false)
     }
 
     pub fn seasons(&self, parent_id: i64) -> DataResult<Vec<SeasonEntry>> {
@@ -102,18 +102,18 @@ impl EntryStore {
     }
 
     /// One masked UPDATE of `entries.item_flags`: `(old & !mask) | (flag & mask)`.
-    pub fn set_flag_bits(&self, anime_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
-        self.entries.set_item_flags_masked(anime_id, flag, mask)
+    pub fn set_flag_bits(&self, entry_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
+        self.entries.set_item_flags_masked(entry_id, flag, mask)
     }
 
     /// The skip-intro length of the entry: the length bits and the disable bit, in one masked write.
-    pub fn set_skip_intro_length(&self, anime_id: i64, length: i32) -> DataResult<bool> {
-        set_skip_intro_length(&self.entries, anime_id, i64::from(length))
+    pub fn set_skip_intro_length(&self, entry_id: i64, length: i32) -> DataResult<bool> {
+        set_skip_intro_length(&self.entries, entry_id, i64::from(length))
     }
 
     /// One masked UPDATE of `entries.season_flags`: the write of a pick in the season list options.
-    pub fn set_season_flag_bits(&self, anime_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
-        self.entries.set_season_flags_masked(anime_id, flag, mask)
+    pub fn set_season_flag_bits(&self, entry_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
+        self.entries.set_season_flags_masked(entry_id, flag, mask)
     }
 
     /// "Use as default for all titles" on an episode list: the episode default word goes to every
@@ -121,8 +121,8 @@ impl EntryStore {
     /// Returns how many entries changed.
     pub fn apply_episode_defaults_to_library(&self, prefs: &PrefStore) -> DataResult<usize> {
         let mut changed = 0;
-        for anime in self.entries.favorites(Kind::Anime)? {
-            if apply_item_defaults(&self.entries, prefs, &anime)? {
+        for entry in self.entries.favorites(Kind::Anime)? {
+            if apply_item_defaults(&self.entries, prefs, &entry)? {
                 changed += 1;
             }
         }
@@ -132,8 +132,8 @@ impl EntryStore {
     /// The same for a season list: the season default word goes to every favorite, the episode flags stay.
     pub fn apply_season_defaults_to_library(&self, prefs: &PrefStore) -> DataResult<usize> {
         let mut changed = 0;
-        for anime in self.entries.favorites(Kind::Anime)? {
-            if apply_season_defaults(&self.entries, prefs, &anime)? {
+        for entry in self.entries.favorites(Kind::Anime)? {
+            if apply_season_defaults(&self.entries, prefs, &entry)? {
                 changed += 1;
             }
         }
@@ -141,14 +141,14 @@ impl EntryStore {
     }
 
     /// The related groups of the entry, published again after a change to the relations or the anime they link.
-    pub fn watch_related(&self, anime_id: i64) -> Subscription<Vec<AnimeRelationGroup>> {
-        AnimeRelationRepo::new(self.db()).subscribe_related(anime_id)
+    pub fn watch_related(&self, entry_id: i64) -> Subscription<Vec<AnimeRelationGroup>> {
+        AnimeRelationRepo::new(self.db()).subscribe_related(entry_id)
     }
 
     #[cfg(test)]
     /// One masked UPDATE of `entries.viewer_flags`, so a write never reads back and touches the other groups (E-AIR-1).
-    pub fn set_viewer_bits(&self, anime_id: i64, value: i64, mask: i64) -> DataResult<bool> {
-        self.entries.set_viewer_bits(anime_id, value, mask)
+    pub fn set_viewer_bits(&self, entry_id: i64, value: i64, mask: i64) -> DataResult<bool> {
+        self.entries.set_viewer_bits(entry_id, value, mask)
     }
 
     /// Sets the bookmark or fillermark of exactly these episodes, in one transaction. The caller passes the ids that
@@ -165,8 +165,8 @@ impl EntryStore {
     }
 
     /// `setFetchInterval` for an anime: stores `-wheel` (0 is automatic) and recomputes the next update (T-39a-026).
-    pub fn set_fetch_interval(&self, anime_id: i64, wheel: i32) -> DataResult<()> {
-        entry_ops::set_fetch_interval(&self.entries, &self.items, anime_id, wheel)
+    pub fn set_fetch_interval(&self, entry_id: i64, wheel: i32) -> DataResult<()> {
+        entry_ops::set_fetch_interval(&self.entries, &self.items, entry_id, wheel)
     }
 
     /// Marks these episodes seen or unseen in one transaction. Unseen also resets the position (`SetSeenStatus`).
@@ -178,12 +178,12 @@ impl EntryStore {
         entry_ops::mark_done(&self.items, &rows, seen).map(drop)
     }
 
-    pub fn watch_anime(&self, anime_id: i64) -> Subscription<Option<Entry>> {
-        self.entries.subscribe_by_id(anime_id)
+    pub fn watch_anime(&self, entry_id: i64) -> Subscription<Option<Entry>> {
+        self.entries.subscribe_by_id(entry_id)
     }
 
-    pub fn watch_episodes(&self, anime_id: i64) -> Subscription<Vec<Item>> {
-        self.items.subscribe_by_entry_id(anime_id, false)
+    pub fn watch_episodes(&self, entry_id: i64) -> Subscription<Vec<Item>> {
+        self.items.subscribe_by_entry_id(entry_id, false)
     }
 }
 
@@ -249,10 +249,10 @@ mod tests {
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
         let library = store.library(&PrefStore::in_memory());
         assert!(library.add(id, &[], 5_000).unwrap());
-        let row = store.anime(id).unwrap().unwrap();
+        let row = store.entry(id).unwrap().unwrap();
         assert!(row.favorite && row.date_added == 5_000);
         assert!(library.remove(id, 6_000).unwrap());
-        let row = store.anime(id).unwrap().unwrap();
+        let row = store.entry(id).unwrap().unwrap();
         assert!(!row.favorite && row.date_added == 0);
         assert!(!library.add(4242, &[], 1).unwrap() && !library.remove(4242, 1).unwrap());
     }
@@ -262,9 +262,9 @@ mod tests {
         let (_dir, store, id) = with_episodes(false, true, 1, 0);
         let prefs = PrefStore::in_memory();
         kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Anime, ep::SHOW_UNDONE | ep::SORT_ASC | ep::SORTING_NUMBER);
-        assert_eq!(store.anime(id).unwrap().unwrap().item_flags, 0, "the stored word is untouched until the add");
+        assert_eq!(store.entry(id).unwrap().unwrap().item_flags, 0, "the stored word is untouched until the add");
         assert!(store.library(&prefs).add(id, &[], 9).unwrap());
-        let row = store.anime(id).unwrap().unwrap();
+        let row = store.entry(id).unwrap().unwrap();
         assert!(row.favorite);
         assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE, "the library default reached the row");
         assert!(!store.library(&prefs).add(4242, &[], 9).unwrap());
@@ -291,7 +291,7 @@ mod tests {
         // the answer writes the links and the favorite together
         assert!(store.library(&prefs).add(id, &[cat], 9).unwrap());
         assert_eq!(store.categories(id).unwrap().1, vec![cat]);
-        assert!(store.anime(id).unwrap().unwrap().favorite);
+        assert!(store.entry(id).unwrap().unwrap().favorite);
     }
 
     #[test]
@@ -351,19 +351,19 @@ mod tests {
     #[test]
     fn reads_the_entry_and_its_episodes_and_a_missing_row_is_none() {
         let (_dir, store, id) = with_episodes(true, true, 3, 1);
-        assert_eq!(store.anime(id).unwrap().unwrap().title, "Frieren");
+        assert_eq!(store.entry(id).unwrap().unwrap().title, "Frieren");
         assert_eq!(store.episodes(id).unwrap().len(), 3);
-        assert!(store.anime(9999).unwrap().is_none());
+        assert!(store.entry(9999).unwrap().is_none());
     }
 
     #[test]
     fn a_flag_write_changes_only_its_group() {
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
         store.set_flag_bits(id, ep::SHOW_UNDONE, ep::UNDONE_MASK).unwrap();
-        assert_eq!(store.anime(id).unwrap().unwrap().item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE);
+        assert_eq!(store.entry(id).unwrap().unwrap().item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE);
         store.set_flag_bits(id, ep::SORTING_NUMBER, ep::SORTING_MASK).unwrap();
         store.set_flag_bits(id, ep::SORT_ASC, ep::SORT_DIR_MASK).unwrap();
-        let word = store.anime(id).unwrap().unwrap().item_flags;
+        let word = store.entry(id).unwrap().unwrap().item_flags;
         assert_eq!((word & ep::SORTING_MASK, word & ep::SORT_DIR_MASK), (ep::SORTING_NUMBER, ep::SORT_ASC));
         assert_eq!(word & ep::UNDONE_MASK, ep::SHOW_UNDONE, "the filter group survives a sort");
     }
@@ -376,7 +376,7 @@ mod tests {
         let prefs = PrefStore::in_memory();
         kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Anime, ep::SHOW_DONE | ep::SORT_ASC | ep::SORTING_NUMBER);
         assert_eq!(store.apply_episode_defaults_to_library(&prefs).unwrap(), 1);
-        let row = store.anime(id).unwrap().unwrap();
+        let row = store.entry(id).unwrap().unwrap();
         assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_DONE, "the episode default was applied");
         assert_eq!(row.season_flags() & sf::UNSEEN_MASK, sf::SHOW_UNSEEN, "the season flags are not the user's request");
     }
@@ -389,7 +389,7 @@ mod tests {
         let prefs = PrefStore::in_memory();
         kuro_domain::entries::defaults::set_season_settings_default(&prefs, sf::SHOW_COMPLETED);
         assert_eq!(store.apply_season_defaults_to_library(&prefs).unwrap(), 1);
-        let row = store.anime(id).unwrap().unwrap();
+        let row = store.entry(id).unwrap().unwrap();
         assert_eq!(row.season_flags() & sf::COMPLETED_MASK, sf::SHOW_COMPLETED);
         assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE);
     }
@@ -400,10 +400,10 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
         store.set_season_flag_bits(id, sf::SHOW_STARTED, sf::STARTED_MASK).unwrap();
         store.set_season_flag_bits(id, sf::SHOW_BOOKMARKED, sf::BOOKMARKED_MASK).unwrap();
-        let word = store.anime(id).unwrap().unwrap().season_flags();
+        let word = store.entry(id).unwrap().unwrap().season_flags();
         assert_eq!((word & sf::STARTED_MASK, word & sf::BOOKMARKED_MASK), (sf::SHOW_STARTED, sf::SHOW_BOOKMARKED));
         store.set_season_flag_bits(id, sf::SORT_UPLOAD, sf::SORT_MASK).unwrap();
-        let word = store.anime(id).unwrap().unwrap().season_flags();
+        let word = store.entry(id).unwrap().unwrap().season_flags();
         assert_eq!((word & sf::SORT_MASK, word & sf::STARTED_MASK), (sf::SORT_UPLOAD, sf::SHOW_STARTED), "a sort leaves the filters alone");
     }
 

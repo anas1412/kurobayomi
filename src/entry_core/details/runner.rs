@@ -47,7 +47,7 @@ pub trait EntryBackend: Send + Sync + 'static {
     fn source_info(&self, source_id: i64) -> SourceInfo;
     /// `fetchAllFromSource`: fetches what `plan` names and stores it, so the page sees it through the subscriptions.
     /// `trigger` says whether the user asked (`manualFetch`). It returns the episodes the sync added.
-    fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> EntryFetch;
+    fn fetch(&self, entry_id: i64, plan: RefreshPlan, trigger: Trigger) -> EntryFetch;
     /// Queues new episodes for download. Only a manual refresh reaches this (E-REF-5). The app has no anime download
     /// queue wired yet, so the default does nothing.
     fn enqueue_new_episodes(&self, _anime_id: i64, _episodes: &[Item]) {}
@@ -143,41 +143,41 @@ impl EntryBackend for StubEntryBackend {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntryCmd {
-    Load { anime_id: i64 },
+    Load { entry_id: i64 },
     /// A manual refresh: every part of the entry is fetched again, and the new episodes may auto-download.
-    Refresh { anime_id: i64 },
-    SetFlagBits { anime_id: i64, flag: i64, mask: i64 },
+    Refresh { entry_id: i64 },
+    SetFlagBits { entry_id: i64, flag: i64, mask: i64 },
     /// The skip-intro length in seconds; 0 turns the skip off (`setSkipIntroLength`).
-    SetSkipIntroLength { anime_id: i64, length: i32 },
+    SetSkipIntroLength { entry_id: i64, length: i32 },
     /// A masked write of the season flag word (a pick of the season list options).
-    SetSeasonFlagBits { anime_id: i64, flag: i64, mask: i64 },
+    SetSeasonFlagBits { entry_id: i64, flag: i64, mask: i64 },
     /// "Use as default for all titles": the default of this scope only goes to every favorite. Answered by
     /// `EntryEvent::DefaultsApplied`.
     ApplyDefaultsToLibrary { scope: Scope },
     /// The library button: remove an entry that is in the library, or add one that is not. With `check_duplicates` a
     /// library entry with the same title stops the add and the page is asked what to do; Add anyway sends it false.
-    ToggleLibrary { anime_id: i64, check_duplicates: bool },
+    ToggleLibrary { entry_id: i64, check_duplicates: bool },
     /// Sets or clears the bookmark or fillermark of exactly these episodes (`actions::bulk_mark_targets`).
     SetMark { ids: Vec<i64>, mark: Mark, on: bool },
     /// Marks these episodes seen or unseen.
     SetSeen { ids: Vec<i64>, seen: bool },
     /// `setFetchInterval`: the wheel value; the stored value is its negative (0 is automatic).
-    SetFetchInterval { anime_id: i64, wheel: i32 },
+    SetFetchInterval { entry_id: i64, wheel: i32 },
     /// Deletes every download of the entry (the Delete button of the prompt).
-    DeleteDownloads { anime_id: i64 },
+    DeleteDownloads { entry_id: i64 },
     /// Queues these episodes for download. With `start_now` the one episode goes to the front.
-    Download { anime_id: i64, ids: Vec<i64>, start_now: bool },
+    Download { entry_id: i64, ids: Vec<i64>, start_now: bool },
     /// Deletes the downloads of these episodes.
-    DeleteEpisodeDownloads { anime_id: i64, ids: Vec<i64> },
+    DeleteEpisodeDownloads { entry_id: i64, ids: Vec<i64> },
     /// Reads the categories and the entry's links, for the category editor: answered by `EntryEvent::Categories`.
-    LoadCategories { anime_id: i64 },
+    LoadCategories { entry_id: i64 },
     /// Reads the tracking count again, after the tracking page bound, edited or removed a tracker. Answered by
     /// `EntryEvent::Tracking`.
-    ReadTracking { anime_id: i64, source_id: i64 },
+    ReadTracking { entry_id: i64, source_id: i64 },
     /// The category editor's OK: replaces the entry's category links.
-    SetCategories { anime_id: i64, category_ids: Vec<i64> },
+    SetCategories { entry_id: i64, category_ids: Vec<i64> },
     /// The answer of the add dialog: the entry joins the library in these categories.
-    AddWithCategories { anime_id: i64, category_ids: Vec<i64> },
+    AddWithCategories { entry_id: i64, category_ids: Vec<i64> },
     Shutdown,
 }
 
@@ -186,7 +186,7 @@ pub enum EntryEvent {
     /// The load finished: the model, or `None` when the row does not exist.
     Loaded(Option<Box<EntryModel>>),
     /// The live subscription published a newer entry and episode list.
-    Snapshot { anime: Box<Entry>, episodes: Vec<Item> },
+    Snapshot { entry: Box<Entry>, episodes: Vec<Item> },
     /// The refresh started by the first open ended, with or without an error.
     RefreshEnded(Result<(), DetailError>),
     /// The entry joined the library, with the library defaults written to its flags.
@@ -257,10 +257,10 @@ async fn run(shared: Arc<Shared>, cmds: Receiver<EntryCmd>) {
                 shared.cancel.cancel();
                 break;
             }
-            EntryCmd::Load { anime_id } => shared.clone().load(anime_id).await,
-            EntryCmd::Refresh { anime_id } => {
+            EntryCmd::Load { entry_id } => shared.clone().load(entry_id).await,
+            EntryCmd::Refresh { entry_id } => {
                 let all = RefreshPlan { info: true, episodes: true, seasons: true };
-                tokio::spawn(shared.clone().refresh(anime_id, all, Trigger::Manual));
+                tokio::spawn(shared.clone().refresh(entry_id, all, Trigger::Manual));
             }
             write => {
                 tokio::spawn(shared.clone().write(write));
@@ -302,18 +302,18 @@ impl Shared {
     }
 
     /// The load sequence (`EntryModel::load`), then the live subscription, then the first-open refresh.
-    async fn load(self: Arc<Self>, anime_id: i64) {
+    async fn load(self: Arc<Self>, entry_id: i64) {
         let ctx = EntryLoadContext {
-            last_empty_open_fetch_ms: last_empty_open_fetch(Kind::Anime, anime_id),
+            last_empty_open_fetch_ms: last_empty_open_fetch(Kind::Anime, entry_id),
             now_ms: now_ms(),
             ..self.ctx
         };
         let (prefs, backend) = (self.prefs.clone(), Arc::clone(&self.backend));
         let loaded = self
             .blocking(move |store| -> DataResult<Option<EntryModel>> {
-                let mut model = EntryModel::load(&store, &prefs, anime_id, ctx, |source| backend.source_info(source))?;
+                let mut model = EntryModel::load(&store, &prefs, entry_id, ctx, |source| backend.source_info(source))?;
                 if let Some(m) = &mut model {
-                    m.downloaded = backend.downloaded_episodes(anime_id);
+                    m.downloaded = backend.downloaded_episodes(entry_id);
                 }
                 Ok(model)
             })
@@ -322,16 +322,16 @@ impl Shared {
             Ok(Some(model)) => {
                 let plan = model.plan;
                 if plan.episodes {
-                    record_empty_open_fetch(Kind::Anime, anime_id, ctx.now_ms);
+                    record_empty_open_fetch(Kind::Anime, entry_id, ctx.now_ms);
                 }
-                let seasons = model.anime.fetch_type() == FetchType::Seasons;
+                let seasons = model.entry.fetch_type() == FetchType::Seasons;
                 self.emit(EntryEvent::Loaded(Some(Box::new(model))));
-                self.subscribe(anime_id);
+                self.subscribe(entry_id);
                 if seasons {
-                    self.emit_season_facts(anime_id).await;
+                    self.emit_season_facts(entry_id).await;
                 }
                 if plan.any() {
-                    tokio::spawn(self.clone().refresh(anime_id, plan, Trigger::Open));
+                    tokio::spawn(self.clone().refresh(entry_id, plan, Trigger::Open));
                 }
             }
             Ok(None) => self.emit(EntryEvent::Loaded(None)),
@@ -345,16 +345,16 @@ impl Shared {
     /// Step 10 and 11 of the init block, or a manual refresh. Single-flight per entry: a request that arrives while one
     /// runs joins it and fetches nothing (E-CONC-1), and the running one reports the end. A cancelled refresh ends
     /// silently: nobody is left to read its event.
-    async fn refresh(self: Arc<Self>, anime_id: i64, plan: RefreshPlan, trigger: Trigger) {
-        let Some(running) = self.gate.begin(anime_id) else { return };
+    async fn refresh(self: Arc<Self>, entry_id: i64, plan: RefreshPlan, trigger: Trigger) {
+        let Some(running) = self.gate.begin(entry_id) else { return };
         let fetched = tokio::select! {
             () = self.cancel.cancelled() => return,
-            result = self.backend.fetch(anime_id, plan, trigger) => result,
+            result = self.backend.fetch(entry_id, plan, trigger) => result,
         };
         drop(running);
         let result = match fetched {
             Ok(new_episodes) => {
-                self.auto_download(anime_id, trigger, new_episodes).await;
+                self.auto_download(entry_id, trigger, new_episodes).await;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -363,18 +363,18 @@ impl Shared {
         self.emit(EntryEvent::RefreshEnded(result));
         // a refresh of a `Seasons` entry may have added seasons
         if refreshed {
-            self.emit_season_facts(anime_id).await;
+            self.emit_season_facts(entry_id).await;
         }
     }
 
     /// The download count and source language of each season of the entry, read off the GTK thread. Nothing is sent
     /// for an entry with no seasons.
-    async fn emit_season_facts(&self, anime_id: i64) {
+    async fn emit_season_facts(&self, entry_id: i64) {
         let backend = Arc::clone(&self.backend);
         let facts = self
             .blocking(move |store| {
                 Ok(store
-                    .seasons(anime_id)?
+                    .seasons(entry_id)?
                     .iter()
                     .map(|season| SeasonExtra {
                         id: season.entry.id,
@@ -393,16 +393,16 @@ impl Shared {
 
     /// Queues the new episodes of a manual refresh when the preferences and the entry's categories allow it (T-REF-4).
     /// The open-time refresh never gets here with episodes to queue (E-REF-5).
-    async fn auto_download(&self, anime_id: i64, trigger: Trigger, new_episodes: Vec<Item>) {
+    async fn auto_download(&self, entry_id: i64, trigger: Trigger, new_episodes: Vec<Item>) {
         if new_episodes.is_empty() {
             return;
         }
         let prefs = self.prefs.clone();
-        let targets = self.blocking(move |store| store.new_item_targets(&prefs, anime_id, trigger, &new_episodes)).await;
+        let targets = self.blocking(move |store| store.new_item_targets(&prefs, entry_id, trigger, &new_episodes)).await;
         match targets {
             Ok(targets) if !targets.is_empty() => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.enqueue_new_episodes(anime_id, &targets)).await;
+                let _ = tokio::task::spawn_blocking(move || backend.enqueue_new_episodes(entry_id, &targets)).await;
             }
             Ok(_) => {}
             Err(e) => self.failed(e),
@@ -413,14 +413,14 @@ impl Shared {
     /// An entry that is not one is checked for a same-named library entry (with `check_duplicates`, T-39a-047), routed by
     /// the default category (T-39b-026), and added with the library defaults written to its flags (T-39b-012). A failed
     /// write does nothing else (E-LIB-9).
-    async fn toggle_library(&self, anime_id: i64, check_duplicates: bool) {
+    async fn toggle_library(&self, entry_id: i64, check_duplicates: bool) {
         let prefs = self.prefs.clone();
         let default_category = i64::from(LibraryPrefs::new(prefs.clone()).default_category(Kind::Anime).get());
         let (backend, now) = (Arc::clone(&self.backend), now_ms());
         let toggled = self
             .blocking(move |store| {
-                Self::with_hooks(&backend, anime_id, |hooks| {
-                    library_flow::toggle(&store.library(&prefs), hooks, anime_id, default_category, check_duplicates, now)
+                Self::with_hooks(&backend, entry_id, |hooks| {
+                    library_flow::toggle(&store.library(&prefs), hooks, entry_id, default_category, check_duplicates, now)
                 })
             })
             .await;
@@ -435,11 +435,11 @@ impl Shared {
     }
 
     /// Adds the entry in these categories: the links and the favorite in order (`moveAnimeToCategoriesAndAddToLibrary`).
-    async fn add_with_categories(&self, anime_id: i64, category_ids: Vec<i64>) {
+    async fn add_with_categories(&self, entry_id: i64, category_ids: Vec<i64>) {
         let (prefs, backend, now) = (self.prefs.clone(), Arc::clone(&self.backend), now_ms());
         let added = self
             .blocking(move |store| {
-                Self::with_hooks(&backend, anime_id, |hooks| library_flow::add(&store.library(&prefs), hooks, anime_id, &category_ids, now))
+                Self::with_hooks(&backend, entry_id, |hooks| library_flow::add(&store.library(&prefs), hooks, entry_id, &category_ids, now))
             })
             .await;
         match added {
@@ -450,28 +450,28 @@ impl Shared {
     }
 
     /// The library button's backend hooks for one entry (`library_flow::Hooks`).
-    fn with_hooks<T>(backend: &Arc<dyn EntryBackend>, anime_id: i64, f: impl FnOnce(&Hooks<'_>) -> T) -> T {
-        let remove_cover = || backend.remove_cover(anime_id);
-        let downloaded_count = || backend.downloaded_count(anime_id);
-        let bind_enhanced = || backend.bind_enhanced(anime_id);
+    fn with_hooks<T>(backend: &Arc<dyn EntryBackend>, entry_id: i64, f: impl FnOnce(&Hooks<'_>) -> T) -> T {
+        let remove_cover = || backend.remove_cover(entry_id);
+        let downloaded_count = || backend.downloaded_count(entry_id);
+        let bind_enhanced = || backend.bind_enhanced(entry_id);
         f(&Hooks { remove_cover: &remove_cover, downloaded_count: &downloaded_count, bind_enhanced: &bind_enhanced })
     }
 
     /// Reads the episodes on disk again and tells the page.
-    async fn emit_downloads(&self, anime_id: i64) {
+    async fn emit_downloads(&self, entry_id: i64) {
         let backend = Arc::clone(&self.backend);
-        if let Ok(on_disk) = tokio::task::spawn_blocking(move || backend.downloaded_episodes(anime_id)).await {
+        if let Ok(on_disk) = tokio::task::spawn_blocking(move || backend.downloaded_episodes(entry_id)).await {
             self.emit(EntryEvent::Downloads(on_disk));
         }
     }
 
     /// The entry and its episodes as one snapshot (`watch_pair`), and the related groups.
-    fn subscribe(self: &Arc<Self>, anime_id: i64) {
+    fn subscribe(self: &Arc<Self>, entry_id: i64) {
         let shared = Arc::clone(self);
-        let pair = watch_pair(self.store.watch_anime(anime_id), self.store.watch_episodes(anime_id), move |anime: &Entry, episodes: &[Item]| {
-            shared.emit(EntryEvent::Snapshot { anime: Box::new(anime.clone()), episodes: episodes.to_vec() });
+        let pair = watch_pair(self.store.watch_anime(entry_id), self.store.watch_episodes(entry_id), move |entry: &Entry, episodes: &[Item]| {
+            shared.emit(EntryEvent::Snapshot { entry: Box::new(entry.clone()), episodes: episodes.to_vec() });
         });
-        let mut related_sub = self.store.watch_related(anime_id);
+        let mut related_sub = self.store.watch_related(entry_id);
         let shared = Arc::clone(self);
         let related_task = tokio::spawn(async move {
             while let Some(published) = related_sub.changed().await {
@@ -488,14 +488,14 @@ impl Shared {
     /// One write command. Runs in its own task.
     async fn write(self: Arc<Self>, cmd: EntryCmd) {
         let result = match cmd {
-            EntryCmd::SetFlagBits { anime_id, flag, mask } => {
-                self.blocking(move |s| s.set_flag_bits(anime_id, flag, mask)).await
+            EntryCmd::SetFlagBits { entry_id, flag, mask } => {
+                self.blocking(move |s| s.set_flag_bits(entry_id, flag, mask)).await
             }
-            EntryCmd::SetSkipIntroLength { anime_id, length } => {
-                self.blocking(move |s| s.set_skip_intro_length(anime_id, length)).await
+            EntryCmd::SetSkipIntroLength { entry_id, length } => {
+                self.blocking(move |s| s.set_skip_intro_length(entry_id, length)).await
             }
-            EntryCmd::SetSeasonFlagBits { anime_id, flag, mask } => {
-                self.blocking(move |s| s.set_season_flag_bits(anime_id, flag, mask)).await
+            EntryCmd::SetSeasonFlagBits { entry_id, flag, mask } => {
+                self.blocking(move |s| s.set_season_flag_bits(entry_id, flag, mask)).await
             }
             EntryCmd::ApplyDefaultsToLibrary { scope } => {
                 let prefs = self.prefs.clone();
@@ -510,36 +510,36 @@ impl Shared {
                     Err(e) => return self.failed(e),
                 }
             }
-            EntryCmd::AddWithCategories { anime_id, category_ids } => return self.add_with_categories(anime_id, category_ids).await,
-            EntryCmd::ToggleLibrary { anime_id, check_duplicates } => return self.toggle_library(anime_id, check_duplicates).await,
+            EntryCmd::AddWithCategories { entry_id, category_ids } => return self.add_with_categories(entry_id, category_ids).await,
+            EntryCmd::ToggleLibrary { entry_id, check_duplicates } => return self.toggle_library(entry_id, check_duplicates).await,
             EntryCmd::SetMark { ids, mark, on } => self.blocking(move |s| s.set_marks(&ids, mark, on).map(|()| true)).await,
             EntryCmd::SetSeen { ids, seen } => self.blocking(move |s| s.set_seen(&ids, seen).map(|()| true)).await,
-            EntryCmd::SetFetchInterval { anime_id, wheel } => {
-                self.blocking(move |s| s.set_fetch_interval(anime_id, wheel).map(|()| true)).await
+            EntryCmd::SetFetchInterval { entry_id, wheel } => {
+                self.blocking(move |s| s.set_fetch_interval(entry_id, wheel).map(|()| true)).await
             }
-            EntryCmd::DeleteDownloads { anime_id } => {
+            EntryCmd::DeleteDownloads { entry_id } => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.delete_downloads(anime_id)).await;
-                return self.emit_downloads(anime_id).await;
+                let _ = tokio::task::spawn_blocking(move || backend.delete_downloads(entry_id)).await;
+                return self.emit_downloads(entry_id).await;
             }
-            EntryCmd::Download { anime_id, ids, start_now } => {
+            EntryCmd::Download { entry_id, ids, start_now } => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.enqueue_episodes(anime_id, &ids, start_now)).await;
-                return self.emit_downloads(anime_id).await;
+                let _ = tokio::task::spawn_blocking(move || backend.enqueue_episodes(entry_id, &ids, start_now)).await;
+                return self.emit_downloads(entry_id).await;
             }
-            EntryCmd::DeleteEpisodeDownloads { anime_id, ids } => {
+            EntryCmd::DeleteEpisodeDownloads { entry_id, ids } => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.delete_episodes(anime_id, &ids)).await;
-                return self.emit_downloads(anime_id).await;
+                let _ = tokio::task::spawn_blocking(move || backend.delete_episodes(entry_id, &ids)).await;
+                return self.emit_downloads(entry_id).await;
             }
-            EntryCmd::LoadCategories { anime_id } => match self.blocking(move |s| s.categories(anime_id)).await {
+            EntryCmd::LoadCategories { entry_id } => match self.blocking(move |s| s.categories(entry_id)).await {
                 Ok((all, linked)) => return self.emit(EntryEvent::Categories { all, linked }),
                 Err(e) => Err(e),
             },
-            EntryCmd::SetCategories { anime_id, category_ids } => {
-                self.blocking(move |s| s.set_categories(anime_id, &category_ids).map(|()| true)).await
+            EntryCmd::SetCategories { entry_id, category_ids } => {
+                self.blocking(move |s| s.set_categories(entry_id, &category_ids).map(|()| true)).await
             }
-            EntryCmd::ReadTracking { anime_id, source_id } => match self.blocking(move |s| s.track_summary(anime_id, source_id)).await {
+            EntryCmd::ReadTracking { entry_id, source_id } => match self.blocking(move |s| s.track_summary(entry_id, source_id)).await {
                 Ok(summary) => return self.emit(EntryEvent::Tracking(summary.count as usize)),
                 Err(e) => Err(e),
             },
@@ -653,7 +653,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 3, 0);
         rt.block_on(async {
             let runner = start(&rt, store, Fake::new(0));
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             let rx = runner.events();
             let EntryEvent::Loaded(Some(model)) = rx.recv().await.unwrap() else { panic!("the model first") };
             assert_eq!(model.flow.load, LoadState::Success);
@@ -668,7 +668,7 @@ mod tests {
         let (_dir, store, _) = with_episodes(true, true, 0, 0);
         rt.block_on(async {
             let runner = start(&rt, store, Fake::new(0));
-            runner.send(EntryCmd::Load { anime_id: 4242 });
+            runner.send(EntryCmd::Load { entry_id: 4242 });
             assert!(matches!(runner.events().recv().await.unwrap(), EntryEvent::Loaded(None)));
         });
     }
@@ -680,7 +680,7 @@ mod tests {
         let backend = Fake::new(20);
         rt.block_on(async {
             let runner = start(&rt, store, backend.clone());
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             let rx = runner.events();
             let EntryEvent::Loaded(Some(model)) = until(&rx, |e| matches!(e, EntryEvent::Loaded(_))).await else { panic!() };
             assert!(model.flow.refreshing);
@@ -698,8 +698,8 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store, backend.clone());
             let rx = runner.events();
-            runner.send(EntryCmd::Refresh { anime_id: id });
-            runner.send(EntryCmd::Refresh { anime_id: id });
+            runner.send(EntryCmd::Refresh { entry_id: id });
+            runner.send(EntryCmd::Refresh { entry_id: id });
             until(&rx, |e| matches!(e, EntryEvent::RefreshEnded(_))).await;
             assert_eq!(backend.started.load(Ordering::SeqCst), 1, "the second request joined the first");
         });
@@ -711,11 +711,11 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 2, 0);
         rt.block_on(async {
             let runner = start(&rt, store, Fake::new(0));
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             let rx = runner.events();
             until(&rx, |e| matches!(e, EntryEvent::Loaded(_))).await;
-            runner.send(EntryCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_UNDONE, mask: ep::UNDONE_MASK });
-            let event = until(&rx, |e| matches!(e, EntryEvent::Snapshot { anime, .. } if anime.item_flags & ep::UNDONE_MASK == ep::SHOW_UNDONE)).await;
+            runner.send(EntryCmd::SetFlagBits { entry_id: id, flag: ep::SHOW_UNDONE, mask: ep::UNDONE_MASK });
+            let event = until(&rx, |e| matches!(e, EntryEvent::Snapshot { entry, .. } if entry.item_flags & ep::UNDONE_MASK == ep::SHOW_UNDONE)).await;
             let EntryEvent::Snapshot { episodes, .. } = event else { unreachable!() };
             assert_eq!(episodes.len(), 2);
         });
@@ -731,7 +731,7 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store.clone(), backend.clone());
             let rx = runner.events();
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             until(&rx, |e| matches!(e, EntryEvent::Loaded(_))).await;
             // the refresh starts after `Loaded`: wait until the fetch has really started, or a dispose that wins the
             // race would cancel it before it began
@@ -740,10 +740,10 @@ mod tests {
                 assert!(std::time::Instant::now() < started, "the fetch never started");
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            runner.send(EntryCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_BOOKMARKED, mask: ep::BOOKMARKED_MASK });
+            runner.send(EntryCmd::SetFlagBits { entry_id: id, flag: ep::SHOW_BOOKMARKED, mask: ep::BOOKMARKED_MASK });
             drop(runner); // the page was popped while the fetch is held open
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            while store.anime(id).unwrap().unwrap().item_flags & ep::BOOKMARKED_MASK != ep::SHOW_BOOKMARKED {
+            while store.entry(id).unwrap().unwrap().item_flags & ep::BOOKMARKED_MASK != ep::SHOW_BOOKMARKED {
                 assert!(std::time::Instant::now() < deadline, "the queued write never landed");
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
@@ -768,7 +768,7 @@ mod tests {
         rt.block_on(async {
             let runner = spawn(rt.handle(), store.clone(), prefs, backend.clone(), EntryLoadContext::default());
             let rx = runner.events();
-            runner.send(EntryCmd::Refresh { anime_id: id });
+            runner.send(EntryCmd::Refresh { entry_id: id });
             until(&rx, |e| matches!(e, EntryEvent::RefreshEnded(Ok(())))).await;
             assert_eq!(*backend.triggers.lock().unwrap(), vec![Trigger::Manual]);
             assert_eq!(*backend.queued.lock().unwrap(), vec![vec![7.0, 8.0]], "a manual refresh queues what the sync added");
@@ -781,7 +781,7 @@ mod tests {
         rt.block_on(async {
             let runner = spawn(rt.handle(), store2, prefs, backend.clone(), EntryLoadContext::default());
             let rx = runner.events();
-            runner.send(EntryCmd::Load { anime_id: id2 });
+            runner.send(EntryCmd::Load { entry_id: id2 });
             until(&rx, |e| matches!(e, EntryEvent::RefreshEnded(_))).await;
             assert_eq!(*backend.triggers.lock().unwrap(), vec![Trigger::Open]);
             assert!(backend.queued.lock().unwrap().is_empty(), "the open refresh never auto-downloads");
@@ -792,7 +792,7 @@ mod tests {
         rt.block_on(async {
             let runner = spawn(rt.handle(), store3, PrefStore::in_memory(), backend.clone(), EntryLoadContext::default());
             let rx = runner.events();
-            runner.send(EntryCmd::Refresh { anime_id: id3 });
+            runner.send(EntryCmd::Refresh { entry_id: id3 });
             until(&rx, |e| matches!(e, EntryEvent::RefreshEnded(_))).await;
             assert!(backend.queued.lock().unwrap().is_empty());
         });
@@ -806,13 +806,13 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store.clone(), backend.clone());
             let rx = runner.events();
-            runner.send(EntryCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
+            runner.send(EntryCmd::ToggleLibrary { entry_id: id, check_duplicates: true });
             let EntryEvent::Removed(outcome) = until(&rx, |e| matches!(e, EntryEvent::Removed(_))).await else { unreachable!() };
             assert_eq!(outcome, RemoveOutcome { cover_removed: true, ask_delete_downloads: true });
-            let row = store.anime(id).unwrap().unwrap();
+            let row = store.entry(id).unwrap().unwrap();
             assert!(!row.favorite && row.date_added == 0);
             assert_eq!(backend.covers.load(Ordering::SeqCst), 1);
-            runner.send(EntryCmd::DeleteDownloads { anime_id: id });
+            runner.send(EntryCmd::DeleteDownloads { entry_id: id });
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             while backend.deleted.load(Ordering::SeqCst) == 0 {
                 assert!(std::time::Instant::now() < deadline, "Delete never reached the downloads layer");
@@ -830,9 +830,9 @@ mod tests {
         rt.block_on(async {
             let runner = spawn(rt.handle(), store.clone(), prefs, Fake::new(0), EntryLoadContext::default());
             let rx = runner.events();
-            runner.send(EntryCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
+            runner.send(EntryCmd::ToggleLibrary { entry_id: id, check_duplicates: true });
             until(&rx, |e| matches!(e, EntryEvent::Added)).await;
-            let row = store.anime(id).unwrap().unwrap();
+            let row = store.entry(id).unwrap().unwrap();
             assert!(row.favorite);
             assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_UNDONE, "defaults are written at add time");
         });
@@ -893,7 +893,7 @@ mod tests {
             let event = until(&runner.events(), |e| matches!(e, EntryEvent::DefaultsApplied { .. })).await;
             let EntryEvent::DefaultsApplied { scope, updated } = event else { unreachable!() };
             assert_eq!((scope, updated), (Scope::Episode, 1));
-            let row = store.anime(id).unwrap().unwrap();
+            let row = store.entry(id).unwrap().unwrap();
             assert_eq!(row.item_flags & ep::UNDONE_MASK, ep::SHOW_DONE);
             assert_eq!(row.season_flags() & sf::STARTED_MASK, sf::SHOW_STARTED, "the episode scope leaves the season flags alone");
         });
@@ -908,13 +908,13 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
             let rx = runner.events();
-            runner.send(EntryCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
+            runner.send(EntryCmd::ToggleLibrary { entry_id: id, check_duplicates: true });
             let EntryEvent::Duplicate { existing } = until(&rx, |e| matches!(e, EntryEvent::Duplicate { .. })).await else { unreachable!() };
             assert_eq!(existing.iter().map(|a| a.id).collect::<Vec<_>>(), vec![twin]);
-            assert!(!store.anime(id).unwrap().unwrap().favorite, "nothing is written until the user answers");
-            runner.send(EntryCmd::ToggleLibrary { anime_id: id, check_duplicates: false });
+            assert!(!store.entry(id).unwrap().unwrap().favorite, "nothing is written until the user answers");
+            runner.send(EntryCmd::ToggleLibrary { entry_id: id, check_duplicates: false });
             until(&rx, |e| matches!(e, EntryEvent::Added)).await;
-            assert!(store.anime(id).unwrap().unwrap().favorite);
+            assert!(store.entry(id).unwrap().unwrap().favorite);
         });
     }
 
@@ -924,9 +924,9 @@ mod tests {
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
-            runner.send(EntryCmd::ToggleLibrary { anime_id: id, check_duplicates: true });
+            runner.send(EntryCmd::ToggleLibrary { entry_id: id, check_duplicates: true });
             until(&runner.events(), |e| matches!(e, EntryEvent::Added)).await;
-            assert!(store.anime(id).unwrap().unwrap().favorite);
+            assert!(store.entry(id).unwrap().unwrap().favorite);
         });
     }
 
@@ -940,7 +940,7 @@ mod tests {
         rt.block_on(async {
             let runner = start(&rt, store.clone(), Fake::new(0));
             let rx = runner.events();
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             until(&rx, |e| matches!(e, EntryEvent::Related(groups) if groups.is_empty())).await;
             let group = AnimeRelationGroup { name: "Sequel".into(), anime: vec![Entry { id: other, ..Entry::create(Kind::Anime) }] };
             AnimeRelationRepo::new(store.db()).replace_relations(id, &[group], 1).unwrap();
@@ -963,7 +963,7 @@ mod tests {
             Arc::get_mut(&mut fake).unwrap().downloads = 3;
             let runner = start(&rt, store.clone(), fake);
             let rx = runner.events();
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             let EntryEvent::SeasonFacts(facts) = until(&rx, |e| matches!(e, EntryEvent::SeasonFacts(_))).await else { unreachable!() };
             assert_eq!(facts, vec![SeasonExtra { id: season, download_count: 3, source_language: "ja".into() }]);
         });

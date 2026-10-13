@@ -85,8 +85,8 @@ thread_local! {
 
 /// Names the anime the next `build()` shows. `ui::open("anime_entry_details")` carries no argument, so a caller sets
 /// the target first.
-pub fn target(anime_id: i64) {
-    TARGET.with(|t| t.set(Some(anime_id)));
+pub fn target(entry_id: i64) {
+    TARGET.with(|t| t.set(Some(entry_id)));
 }
 
 /// The anime sources this build runs: the builtin ones (none) and the recipe sources (`docs/source-recipes.md`).
@@ -97,8 +97,8 @@ pub(crate) fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSourc
 }
 
 /// Pushes the details page of one anime.
-pub fn open(anime_id: i64) {
-    ui::push(&page_for(anime_id));
+pub fn open(entry_id: i64) {
+    ui::push(&page_for(entry_id));
 }
 
 /// The page for the `anime_entry_details` screen id. Without a target there is no row to show, so it is the page of a
@@ -110,7 +110,7 @@ pub fn build() -> GBox {
 /// An id no row has (ids start at 1): `open(NO_ENTRY)` shows the "not found" page, for a caller that has no row to name.
 pub const NO_ENTRY: i64 = 0;
 
-fn page_for(anime_id: i64) -> GBox {
+fn page_for(entry_id: i64) -> GBox {
     crate::entry_core::tracking::session::refresh_from_host();
     let app = data::app();
     let db = app.db.clone();
@@ -127,7 +127,7 @@ fn page_for(anime_id: i64) -> GBox {
     let backend: Arc<dyn EntryBackend> =
         Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
     let runner = Rc::new(runner::spawn(&handle, EntryStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
-    runner.send(EntryCmd::Load { anime_id });
+    runner.send(EntryCmd::Load { entry_id });
     assemble(runner, show_airing, Env { prefs, backend, db })
 }
 
@@ -629,7 +629,7 @@ impl View {
         let (favorite, http_source, selecting) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return false };
-            (m.anime.favorite, self.env.backend.is_http_source(m.anime.source), m.selection.is_active())
+            (m.entry.favorite, self.env.backend.is_http_source(m.entry.source), m.selection.is_active())
         };
         let mods = Mods { shift: state.contains(gtk::gdk::ModifierType::SHIFT_MASK), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK) };
         match header_key(letter, mods, http_source) {
@@ -653,19 +653,19 @@ impl View {
                 }
                 *self.model.borrow_mut() = loaded.map(|b| *b);
             }
-            EntryEvent::Snapshot { anime, episodes } => {
+            EntryEvent::Snapshot { entry, episodes } => {
                 if let Some(m) = self.model.borrow_mut().as_mut() {
-                    m.apply_snapshot(*anime, episodes);
+                    m.apply_snapshot(*entry, episodes);
                 }
             }
             EntryEvent::RefreshEnded(result) => {
                 // a failed refresh says why in a notification (behaviour 19)
                 if let Some(message) = result.as_ref().err().and_then(refresh_snack) {
                     // Retry runs the refresh again; an uninstalled source has nothing to retry
-                    let anime_id = self.model.borrow().as_ref().map(|m| m.anime.id);
-                    match anime_id.filter(|_| !matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled))) {
-                        Some(anime_id) => {
-                            self.show_notice(Notice::of(&crate::entry_core::message::with_retry(message), Some(EntryCmd::Refresh { anime_id })));
+                    let entry_id = self.model.borrow().as_ref().map(|m| m.entry.id);
+                    match entry_id.filter(|_| !matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled))) {
+                        Some(entry_id) => {
+                            self.show_notice(Notice::of(&crate::entry_core::message::with_retry(message), Some(EntryCmd::Refresh { entry_id })));
                         }
                         None => self.present(message, None),
                     }
@@ -684,9 +684,9 @@ impl View {
             EntryEvent::Added => {}
             EntryEvent::Removed(outcome) => {
                 // downloads exist: ask whether they go too. Dismissing the prompt keeps them.
-                let anime_id = self.model.borrow().as_ref().map(|m| m.anime.id);
-                if let (true, Some(anime_id)) = (outcome.ask_delete_downloads, anime_id) {
-                    self.present(UserMessage::DeleteDownloadsForAnime, Some(EntryCmd::DeleteDownloads { anime_id }));
+                let entry_id = self.model.borrow().as_ref().map(|m| m.entry.id);
+                if let (true, Some(entry_id)) = (outcome.ask_delete_downloads, entry_id) {
+                    self.present(UserMessage::DeleteDownloadsForAnime, Some(EntryCmd::DeleteDownloads { entry_id }));
                 }
             }
             EntryEvent::Failed(message) => self.present(UserMessage::Plain(message), None),
@@ -713,7 +713,7 @@ impl View {
         if self.two_pane.get() == Some(two) {
             // the layout is the same, but the automatic columns of the season grid follow the width (T-39a-034)
             if resized && let Some(m) = self.model.borrow().as_ref() {
-                self.show_seasons(m, m.anime.fetch_type() == FetchType::Seasons);
+                self.show_seasons(m, m.entry.fetch_type() == FetchType::Seasons);
             }
             return;
         }
@@ -743,10 +743,10 @@ impl View {
         }
         let Some(m) = model.as_ref() else { return };
         if let Some(title) = &self.title {
-            title.set_label(&m.anime.title);
+            title.set_label(&m.entry.title);
         }
         let lines = self.list_rows(m);
-        let seasons_entry = m.anime.fetch_type() == FetchType::Seasons;
+        let seasons_entry = m.entry.fetch_type() == FetchType::Seasons;
         let none_shown = if seasons_entry { m.seasons.is_empty() } else { lines.is_empty() };
         self.list.sync(lines);
         self.show_seasons(m, seasons_entry);
@@ -758,7 +758,7 @@ impl View {
         if self.options_seasons.replace(Some(seasons_entry)) != Some(seasons_entry) {
             self.options.set_sections(&self.spec_of(seasons_entry).sections());
         }
-        let word = if seasons_entry { m.anime.season_flags() } else { m.anime.item_flags };
+        let word = if seasons_entry { m.entry.season_flags() } else { m.entry.item_flags };
         self.spec_of(seasons_entry).sync(&self.options, word, m.downloaded_only);
         // a selection disables the menu, as it did the old header button
         self.options.widget.set_sensitive(header.enabled);
@@ -770,15 +770,15 @@ impl View {
         self.empty_label.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { MsgKey::no_episodes_error }));
         // the anime and manga statuses share the SAnime/SManga completed code (2)
         self.info.action_row.apply(&RowState::of_entry(
-            m.anime.favorite,
-            m.anime.next_update,
-            m.anime.status,
-            m.anime.fetch_interval,
+            m.entry.favorite,
+            m.entry.next_update,
+            m.entry.status,
+            m.entry.fetch_interval,
             m.tracking_count as i64,
-            self.env.backend.is_http_source(m.anime.source),
+            self.env.backend.is_http_source(m.entry.source),
         ));
         // a local or stub source has no downloads to queue (`isLocalOrStub`, T-39b-059)
-        let local_or_stub = m.is_local() || self.env.backend.source_info(m.anime.source).stub;
+        let local_or_stub = m.is_local() || self.env.backend.source_info(m.entry.source).stub;
         self.download_menu.set_visible(menu_visible(local_or_stub, self.env.backend.has_download_handler()));
         // the button stays while nothing is selected, and is disabled when no episode is unseen (T-EPS-NEXT-1)
         let fab = m.fab();
@@ -884,12 +884,12 @@ impl View {
         let model = self.model.borrow();
         let Some(m) = model.as_ref() else { return };
         let numbers: Vec<f64> = m.episodes.iter().filter(|e| ids.contains(&e.id)).map(|e| e.number).collect();
-        crate::entry_core::tracking::progress::marked(Kind::Anime, m.anime.id, true, &numbers, crate::data::app().base.incognito_mode.get());
+        crate::entry_core::tracking::progress::marked(Kind::Anime, m.entry.id, true, &numbers, crate::data::app().base.incognito_mode.get());
     }
 
     /// Whether the entry's source is a torrent source and the torrent server is on (17.4, 17.5).
     fn torrent_server_needed(&self) -> bool {
-        let source = self.model.borrow().as_ref().map(|m| m.anime.source);
+        let source = self.model.borrow().as_ref().map(|m| m.entry.source);
         torrent_enabled(&self.env.prefs) && source.is_some_and(|s| self.env.backend.is_torrent_source(s))
     }
 
@@ -910,13 +910,13 @@ impl View {
 
     /// The refresh button: a manual refresh of everything. One runs at a time; a second request is not sent.
     fn refresh(self: &Rc<Self>) {
-        let anime_id = {
+        let entry_id = {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch() && !m.flow.refreshing) else { return };
             m.flow.begin_refresh();
-            m.anime.id
+            m.entry.id
         };
-        self.runner.send(EntryCmd::Refresh { anime_id });
+        self.runner.send(EntryCmd::Refresh { entry_id });
         self.render();
     }
 
@@ -970,19 +970,19 @@ impl View {
 
     /// The interval button (T-39a-026): the dialog of a favorite. OK and Reset store the wheel through the runner.
     fn open_interval(self: &Rc<Self>) {
-        let (anime_id, interval, expected, favorite) = {
+        let (entry_id, interval, expected, favorite) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            let expected = (m.anime.status != kuro_domain::entries::flags::STATUS_COMPLETED).then_some(m.anime.next_update);
-            (m.anime.id, m.anime.fetch_interval, expected, m.anime.favorite)
+            let expected = (m.entry.status != kuro_domain::entries::flags::STATUS_COMPLETED).then_some(m.entry.next_update);
+            (m.entry.id, m.entry.fetch_interval, expected, m.entry.favorite)
         };
         if !interval_click_opens_dialog(favorite) {
             return;
         }
         let runner = self.runner.clone();
-        let id = self.claim_slot(EntryDialog::SetAnimeFetchInterval { anime_id });
+        let id = self.claim_slot(EntryDialog::SetAnimeFetchInterval { entry_id });
         let window = fetch_interval_dialog::open(interval, expected, move |wheel| {
-            runner.send(EntryCmd::SetFetchInterval { anime_id, wheel });
+            runner.send(EntryCmd::SetFetchInterval { entry_id, wheel });
         });
         self.adopt(id, &window, true);
     }
@@ -990,24 +990,24 @@ impl View {
     /// The library button: adds the entry, or removes it from the library.
     fn toggle_library(self: &Rc<Self>) {
         // a favorite leaves the library; an add checks for a same-named library entry first (T-39a-047)
-        let target = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id);
-        if let Some(anime_id) = target {
-            self.runner.send(EntryCmd::ToggleLibrary { anime_id, check_duplicates: true });
+        let target = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.id);
+        if let Some(entry_id) = target {
+            self.runner.send(EntryCmd::ToggleLibrary { entry_id, check_duplicates: true });
         }
     }
 
     /// The duplicate window of an add that found a same-named library entry. A row closes it first and then acts: Show
     /// opens the entry that is there, Migrate starts the migrate flow from it, Add anyway adds without the check.
     fn show_duplicate(self: &Rc<Self>, existing: &[kuro_data::entry::Entry]) {
-        let (Some(duplicate), Some(anime_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.anime.id)) else { return };
+        let (Some(duplicate), Some(entry_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.entry.id)) else { return };
         let runner = Rc::clone(&self.runner);
-        let id = self.claim_slot(EntryDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
+        let id = self.claim_slot(EntryDialog::DuplicateAnime { entry_id, duplicate_id: duplicate.id });
         let window = duplicate_dialog::open(
             Kind::Anime,
             move |choice| match choice {
                 DuplicateChoice::Show => open(duplicate.id),
                 DuplicateChoice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
-                DuplicateChoice::AddAnyway => runner.send(EntryCmd::ToggleLibrary { anime_id, check_duplicates: false }),
+                DuplicateChoice::AddAnyway => runner.send(EntryCmd::ToggleLibrary { entry_id, check_duplicates: false }),
             },
             || {},
         );
@@ -1017,13 +1017,13 @@ impl View {
     /// The tracking page of this anime. It explains the AniList login itself when AniList is not logged in.
     fn open_tracking(&self) {
         crate::entry_core::tracking::session::refresh_from_host();
-        let loaded = self.model.borrow().as_ref().map(|m| (m.anime.id, m.anime.source, m.anime.title.clone()));
+        let loaded = self.model.borrow().as_ref().map(|m| (m.entry.id, m.entry.source, m.entry.title.clone()));
         if let Some((id, source_id, title)) = loaded {
             // a bind, an edit or a stop on the tracking page reads the count again, so the button follows at once
             let runner = Rc::downgrade(&self.runner);
             let changed = move || {
                 if let Some(runner) = runner.upgrade() {
-                    runner.send(EntryCmd::ReadTracking { anime_id: id, source_id });
+                    runner.send(EntryCmd::ReadTracking { entry_id: id, source_id });
                 }
             };
             crate::entry_core::tracking::page::open_sheet(crate::entry_core::tracking::page::Entry { kind: Kind::Anime, id, title }, changed);
@@ -1038,7 +1038,7 @@ impl View {
 
     /// The WebView button (an HTTP source only): the entry's page in the WebView.
     fn webview_pressed(&self) {
-        let request = self.model.borrow().as_ref().map(|m| WebViewRequest { url: m.anime.url.clone(), title: m.anime.title.clone() });
+        let request = self.model.borrow().as_ref().map(|m| WebViewRequest { url: m.entry.url.clone(), title: m.entry.title.clone() });
         if let Some(request) = request {
             handoff::open_webview(request);
         }
@@ -1046,23 +1046,23 @@ impl View {
 
     /// A long press on the library button of a favorite: reads the categories, and the answer opens the editor.
     fn open_categories(&self) {
-        let anime_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id);
-        if let Some(anime_id) = anime_id {
-            self.runner.send(EntryCmd::LoadCategories { anime_id });
+        let entry_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.id);
+        if let Some(entry_id) = entry_id {
+            self.runner.send(EntryCmd::LoadCategories { entry_id });
         }
     }
 
     /// The category editor over the answer of `LoadCategories`. OK writes the checked ids; any other way out writes
     /// nothing.
     fn show_category_dialog(self: &Rc<Self>, all: &[(i64, String)], linked: &[i64]) {
-        let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
+        let Some(entry_id) = self.model.borrow().as_ref().map(|m| m.entry.id) else { return };
         let runner = Rc::clone(&self.runner);
-        let id = self.claim_slot(EntryDialog::ChangeCategory { anime_id });
+        let id = self.claim_slot(EntryDialog::ChangeCategory { entry_id });
         let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
         let window = crate::category_picker::open(
-            CategoryDialog::new(anime_id, false, all, linked),
+            CategoryDialog::new(entry_id, false, all, linked),
             move |m| {
-                runner.send(EntryCmd::SetCategories { anime_id, category_ids: m.checked_ids() });
+                runner.send(EntryCmd::SetCategories { entry_id, category_ids: m.checked_ids() });
                 if let Some(view) = ok.upgrade() {
                     view.confirm_category(id);
                 }
@@ -1088,16 +1088,16 @@ impl View {
     /// The category dialog of an add with no default category (T-39b-026). OK adds the entry in the ticked categories;
     /// a dismiss adds nothing, since favorite is written only with the answer.
     fn show_add_category_dialog(self: &Rc<Self>, all: &[(i64, String)], linked: &[i64]) {
-        let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
+        let Some(entry_id) = self.model.borrow().as_ref().map(|m| m.entry.id) else { return };
         let runner = Rc::clone(&self.runner);
         // the choose branch sets the pending flag: a dismiss may open the track sheet after it
-        let id = self.claim_slot(EntryDialog::ChangeCategory { anime_id });
-        self.dialogs.borrow_mut().open_change_category_from_add(anime_id);
+        let id = self.claim_slot(EntryDialog::ChangeCategory { entry_id });
+        self.dialogs.borrow_mut().open_change_category_from_add(entry_id);
         let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
         let window = crate::category_picker::open(
-            CategoryDialog::new(anime_id, true, all, linked),
+            CategoryDialog::new(entry_id, true, all, linked),
             move |m| {
-                runner.send(EntryCmd::AddWithCategories { anime_id, category_ids: m.checked_ids() });
+                runner.send(EntryCmd::AddWithCategories { entry_id, category_ids: m.checked_ids() });
                 if let Some(view) = ok.upgrade() {
                     view.confirm_category(id);
                 }
@@ -1126,8 +1126,8 @@ impl View {
             *self.seasons_shown.borrow_mut() = None;
             return;
         }
-        let size = m.anime.season().grid_size();
-        let mode = m.anime.season().grid_mode();
+        let size = m.entry.season().grid_size();
+        let mode = m.entry.season().grid_mode();
         let width = self.grid_width();
         // the facts of a season are what the runner read for it; the filters, the sort and the overlays are the pipeline's
         let seasons: Vec<(SeasonEntry, SeasonFacts)> = m
@@ -1138,10 +1138,10 @@ impl View {
                 (s.clone(), season_facts(s, m.season_extras.get(&s.entry.id), local))
             })
             .collect();
-        let items: Vec<SeasonItem> = process_seasons(&m.anime, &seasons, m.downloaded_only);
+        let items: Vec<SeasonItem> = process_seasons(&m.entry, &seasons, m.downloaded_only);
         let layout = Layout {
             mode,
-            number_mode: m.anime.season().display_mode() == kuro_db::flags::season::DISPLAY_MODE_NUMBER,
+            number_mode: m.entry.season().display_mode() == kuro_db::flags::season::DISPLAY_MODE_NUMBER,
             // the page can continue watching: a tile shows the button when its season has an unseen episode
             has_continue: true,
             columns: Layout::columns_for(width, i64::from(size), mode),
@@ -1163,11 +1163,11 @@ impl View {
         let entry = {
             let model = self.model.borrow();
             model.as_ref().filter(|m| m.accepts_dispatch()).map(|m| {
-                let source = m.anime.source;
+                let source = m.entry.source;
                 (
                     OverflowEntry {
-                        favorite: m.anime.favorite,
-                        has_intro_length: m.anime.fetch_type() == FetchType::Episodes,
+                        favorite: m.entry.favorite,
+                        has_intro_length: m.entry.fetch_type() == FetchType::Episodes,
                         http_source: self.env.backend.is_http_source(source),
                         configurable_source: self.env.backend.is_configurable_source(source),
                     },
@@ -1193,23 +1193,23 @@ impl View {
 
     /// Change intro length (T-39a-075): the wheel of the entry's skip-intro length. OK stores it through the runner.
     fn open_intro_length(self: &Rc<Self>) {
-        let (anime_id, stored, disabled) = {
+        let (entry_id, stored, disabled) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            (m.anime.id, m.anime.viewer().skip_intro_length(), m.anime.viewer().skip_intro_disable())
+            (m.entry.id, m.entry.viewer().skip_intro_length(), m.entry.viewer().skip_intro_disable())
         };
         let default = DEFAULT_INTRO_LENGTH;
         let runner = self.runner.clone();
         let id = self.claim_slot(EntryDialog::ChangeAnimeSkipIntro);
         let window = intro_dialog::open(viewer::dialog_start(stored, disabled, default), move |length| {
-            runner.send(EntryCmd::SetSkipIntroLength { anime_id, length });
+            runner.send(EntryCmd::SetSkipIntroLength { entry_id, length });
         });
         self.adopt(id, &window, true);
     }
 
     /// Settings (T-39a-057): the preferences screen of this entry's source, which the request names.
     fn open_source_preferences(self: &Rc<Self>) {
-        let source_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.source);
+        let source_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.source);
         if let Some(source_id) = source_id {
             handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, kind: Kind::Anime });
         }
@@ -1222,7 +1222,7 @@ impl View {
             .borrow()
             .as_ref()
             .filter(|m| m.accepts_dispatch())
-            .map(|m| MigrateRequest { entry_id: m.anime.id, kind: Kind::Anime, title: m.anime.title.clone() });
+            .map(|m| MigrateRequest { entry_id: m.entry.id, kind: Kind::Anime, title: m.entry.title.clone() });
         if let Some(request) = request {
             handoff::open_migrate(request);
         }
@@ -1230,7 +1230,7 @@ impl View {
 
     /// Share (T-39a-075): copies the entry's address to the clipboard and says so (`overflow_menu::share`).
     fn share(self: &Rc<Self>) {
-        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
+        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.url.clone());
         if let Some(text) = url.and_then(|url| overflow_menu::share(&url)) {
             self.present(UserMessage::Plain(text), None);
         }
@@ -1238,7 +1238,7 @@ impl View {
 
     /// Open in browser (T-39b-051): the entry's address in the desktop's browser. Offered for an HTTP source only.
     fn open_in_browser(self: &Rc<Self>) {
-        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
+        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.url.clone());
         if let Some(url) = url {
             overflow_menu::open_in_browser(&url);
         }
@@ -1255,24 +1255,24 @@ impl View {
     }
 
     fn run_download(&self, amount: DownloadAmount) {
-        let (anime_id, ids) = {
+        let (entry_id, ids) = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            (m.anime.id, m.download_targets(amount))
+            (m.entry.id, m.download_targets(amount))
         };
         if !ids.is_empty() {
-            self.runner.send(EntryCmd::Download { anime_id, ids, start_now: false });
+            self.runner.send(EntryCmd::Download { entry_id, ids, start_now: false });
         }
     }
 
     /// Draws the info block: the header in the layout and column of the page, then the description with its genre chips.
     fn render_info(self: &Rc<Self>, m: &EntryModel) {
         let two = self.two_pane.get().unwrap_or(false);
-        let model = header_model(&m.anime, &m.source);
+        let model = header_model(&m.entry, &m.source);
         let column = if two { LEFT_PANE_WIDTH } else { self.width.get() };
         let handlers = self.handlers();
         self.info.set_header(&model, two, column, &handlers);
-        self.info.set_description(&description(m.anime.description.as_deref()), &model.genres, &self.expansion, &handlers);
+        self.info.set_description(&description(m.entry.description.as_deref()), &model.genres, &self.expansion, &handlers);
     }
 
     fn handlers(self: &Rc<Self>) -> Handlers {
@@ -1282,7 +1282,7 @@ impl View {
             on_search: Rc::new({
                 move |request: SearchRequest| {
                     let http_source = weak.upgrade().is_some_and(|view| {
-                        let source = view.model.borrow().as_ref().map(|m| m.anime.source);
+                        let source = view.model.borrow().as_ref().map(|m| m.entry.source);
                         source.is_some_and(|source| view.env.backend.is_http_source(source))
                     });
                     handoff::open_search(request, Kind::Anime, http_source);
@@ -1313,9 +1313,9 @@ impl View {
     fn tick_airing(&self) {
         let model = self.model.borrow();
         let Some(m) = model.as_ref() else { return };
-        let airing = Airing::of(&m.anime);
+        let airing = Airing::of(&m.entry);
         let remaining = airing.map_or(0, |a| a.remaining(now_ms()));
-        let show = airing_visible(remaining, self.show_airing, m.anime.status);
+        let show = airing_visible(remaining, self.show_airing, m.entry.status);
         self.airing_row.set_visible(show);
         if let (true, Some(airing)) = (show, airing) {
             self.airing_title.set_label(&airing.title());
@@ -1345,7 +1345,7 @@ impl View {
     /// local or stub source, and not without a download handler (`isLocalOrStub`, T-39b-059).
     fn list_rows(&self, m: &EntryModel) -> Vec<crate::entry_core::list_model::RowItem> {
         let mut rows = m.lines();
-        let can_download = !m.is_local() && !self.env.backend.source_info(m.anime.source).stub && self.env.backend.has_download_handler();
+        let can_download = !m.is_local() && !self.env.backend.source_info(m.entry.source).stub && self.env.backend.has_download_handler();
         if !can_download {
             for row in &mut rows {
                 row.indicator = false;
@@ -1368,14 +1368,14 @@ impl View {
     /// A press on an episode's download button: Start queues it (an error is queued again), Cancel takes it out of the
     /// queue at once, and Delete (confirmed in the button's popover) removes its files.
     fn download_pressed(&self, id: i64, request: Request) {
-        let Some(anime_id) = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id) else { return };
+        let Some(entry_id) = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.id) else { return };
         match request {
-            Request::Start => self.runner.send(EntryCmd::Download { anime_id, ids: vec![id], start_now: false }),
+            Request::Start => self.runner.send(EntryCmd::Download { entry_id, ids: vec![id], start_now: false }),
             Request::Cancel => {
                 crate::downloads::live::cancel(Kind::Anime, id);
                 self.live_changed(id, DownloadState::NotDownloaded, 0);
             }
-            Request::Delete => self.runner.send(EntryCmd::DeleteEpisodeDownloads { anime_id, ids: vec![id] }),
+            Request::Delete => self.runner.send(EntryCmd::DeleteEpisodeDownloads { entry_id, ids: vec![id] }),
         }
     }
 
@@ -1393,7 +1393,7 @@ impl View {
     }
 
     fn is_torrent_source(&self) -> bool {
-        let source = self.model.borrow().as_ref().map(|m| m.anime.source);
+        let source = self.model.borrow().as_ref().map(|m| m.entry.source);
         source.is_some_and(|s| self.env.backend.is_torrent_source(s))
     }
 
@@ -1401,19 +1401,19 @@ impl View {
     fn open_episode(&self, id: i64, plan: OpenPlan) {
         let found = {
             let model = self.model.borrow();
-            required(model.as_ref().and_then(|m| m.episodes.iter().find(|e| e.id == id).map(|e| (m.anime.id, m.anime.title.clone(), e.name.clone()))), || {
+            required(model.as_ref().and_then(|m| m.episodes.iter().find(|e| e.id == id).map(|e| (m.entry.id, m.entry.title.clone(), e.name.clone()))), || {
                 DetailsError::EpisodeNotFound(id)
             })
         };
         match found {
-            Ok((anime_id, title, name)) => self.play(anime_id, id, &title, &name, plan),
+            Ok((entry_id, title, name)) => self.play(entry_id, id, &title, &name, plan),
             Err(error) => self.show_error(error),
         }
     }
 
     /// Starts the torrent server when the plan says so, then plays in the external player, or in the internal one when
     /// the external one cannot start.
-    fn play(&self, anime_id: i64, episode_id: i64, title: &str, name: &str, plan: OpenPlan) {
+    fn play(&self, entry_id: i64, episode_id: i64, title: &str, name: &str, plan: OpenPlan) {
         // repeated clicks, or clicks queued while the window was busy, open the player once
         if !crate::ui::first_within("player", 1500) {
             return;
@@ -1435,16 +1435,16 @@ impl View {
                 if let Ok(torrent_server::Outcome::Toast(text)) = rx.recv().await {
                     crate::toast::notify(text);
                 }
-                Self::open_player(&backend, plan, anime_id, episode_id, &title, &name);
+                Self::open_player(&backend, plan, entry_id, episode_id, &title, &name);
             });
             return;
         }
-        Self::open_player(&self.env.backend, plan, anime_id, episode_id, title, name);
+        Self::open_player(&self.env.backend, plan, entry_id, episode_id, title, name);
     }
 
     /// Hands the episode to the external player the plan names, or to the internal one.
-    fn open_player(backend: &Arc<dyn EntryBackend>, plan: OpenPlan, anime_id: i64, episode_id: i64, title: &str, name: &str) {
-        if plan.external && backend.play_external(anime_id, episode_id) {
+    fn open_player(backend: &Arc<dyn EntryBackend>, plan: OpenPlan, entry_id: i64, episode_id: i64, title: &str, name: &str) {
+        if plan.external && backend.play_external(entry_id, episode_id) {
             return;
         }
         // an episode of an online source resolves its video and plays in the internal player
@@ -1463,7 +1463,7 @@ impl View {
     fn continue_season(&self, season_id: i64) {
         let store = EntryStore::new(Arc::clone(&self.env.db));
         let played = (|| -> Result<(), DetailsError> {
-            let season = required(store.anime(season_id)?, || DetailsError::AnimeNotFound(season_id))?;
+            let season = required(store.entry(season_id)?, || DetailsError::AnimeNotFound(season_id))?;
             let episodes = store.episodes(season_id)?;
             let episode = required(continue_episode(&episodes), || DetailsError::EpisodeNotFound(season_id))?;
             let torrent = self.env.backend.is_torrent_source(season.source);
@@ -1541,8 +1541,8 @@ impl View {
             });
             return;
         }
-        let Some((anime_id, seasons)) =
-            self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| (m.anime.id, m.anime.fetch_type() == FetchType::Seasons))
+        let Some((entry_id, seasons)) =
+            self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| (m.entry.id, m.entry.fetch_type() == FetchType::Seasons))
         else {
             return;
         };
@@ -1555,7 +1555,7 @@ impl View {
                 m.note_flag_write(flag, mask);
             }
         }
-        self.runner.send(if seasons { EntryCmd::SetSeasonFlagBits { anime_id, flag, mask } } else { EntryCmd::SetFlagBits { anime_id, flag, mask } });
+        self.runner.send(if seasons { EntryCmd::SetSeasonFlagBits { entry_id, flag, mask } } else { EntryCmd::SetFlagBits { entry_id, flag, mask } });
         self.render();
     }
 
@@ -1565,8 +1565,8 @@ impl View {
     /// settings (E-DEF-3, `EntryEvent::DefaultsApplied`).
     fn use_as_default(self: &Rc<Self>) {
         let Some((seasons, word)) = self.model.borrow().as_ref().map(|m| {
-            let seasons = m.anime.fetch_type() == FetchType::Seasons;
-            (seasons, if seasons { m.anime.season_flags() } else { m.anime.item_flags })
+            let seasons = m.entry.fetch_type() == FetchType::Seasons;
+            (seasons, if seasons { m.entry.season_flags() } else { m.entry.item_flags })
         }) else {
             return;
         };
@@ -1631,14 +1631,14 @@ mod tests {
                 let host = gtk::Overlay::new();
                 crate::toast::attach(&host);
                 let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
-                runner.send(EntryCmd::Load { anime_id: id });
+                runner.send(EntryCmd::Load { entry_id: id });
                 let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
                 assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
                 assert!(
                     !descendants(page.upcast_ref()).iter().any(|w| w.has_css_class("app-notification")),
                     "the page has no notification bar of its own"
                 );
-                runner.send(EntryCmd::Refresh { anime_id: id });
+                runner.send(EntryCmd::Refresh { entry_id: id });
                 let snack = descendants(host.upcast_ref())
                     .into_iter()
                     .filter_map(|w| w.downcast::<gtk::Revealer>().ok())
@@ -1674,11 +1674,11 @@ mod tests {
             let host = gtk::Overlay::new();
             crate::toast::attach(&host);
             let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
             assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
             let before = backend.1.load(Ordering::SeqCst);
-            runner.send(EntryCmd::Refresh { anime_id: id });
+            runner.send(EntryCmd::Refresh { entry_id: id });
             assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "the refresh ran and found nothing");
             let until = std::time::Instant::now() + Duration::from_millis(300);
             while std::time::Instant::now() < until {
@@ -1721,12 +1721,12 @@ mod tests {
             kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(category as i32).expect("default category");
             let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), prefs, Arc::new(Stub), EntryLoadContext::default()));
             let page = assemble(Rc::clone(&runner), true, env_of(&store));
-            runner.send(EntryCmd::Load { anime_id: id });
+            runner.send(EntryCmd::Load { entry_id: id });
             let label = |text: &str| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == text);
             assert!(pump(&ctx, || label("Add to library").is_some()), "the page shows Add to library");
             let button = label("Add to library").and_then(|l| l.ancestor(Button::static_type())).and_downcast::<Button>().expect("the library button");
             button.emit_clicked();
-            assert!(pump(&ctx, || store.anime(id).unwrap().is_some_and(|a| a.favorite)), "the click writes favorite=1");
+            assert!(pump(&ctx, || store.entry(id).unwrap().is_some_and(|a| a.favorite)), "the click writes favorite=1");
             assert_eq!(store.category_ids(id).unwrap(), vec![category], "the default category is linked");
             assert!(pump(&ctx, || label("In library").is_some()), "the button turns to In library");
             runner.send(EntryCmd::Shutdown);
@@ -1744,10 +1744,10 @@ mod tests {
             let _owner = ctx.acquire().expect("main context");
             let rt = kuro_core::runtime::build().expect("runtime");
             let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 3, 1);
-            let spawn = |anime_id| {
+            let spawn = |entry_id| {
                 let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), EntryLoadContext::default()));
                 let page = assemble(Rc::clone(&runner), true, env_of(&store));
-                runner.send(EntryCmd::Load { anime_id });
+                runner.send(EntryCmd::Load { entry_id });
                 (page, runner)
             };
             let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
@@ -1797,7 +1797,7 @@ mod tests {
             assert!(count_row.is_none_or(|l| l.ancestor(Button::static_type()).is_none()), "no second sort button above the list");
             // Unwatched writes the flag and leaves the two unwatched episodes; turning it off brings the third back
             let rows = &store;
-            let unseen = |on: bool| move || rows.anime(id).unwrap().is_some_and(|a| (a.item_flags & ep::UNDONE_MASK == ep::SHOW_UNDONE) == on);
+            let unseen = |on: bool| move || rows.entry(id).unwrap().is_some_and(|a| (a.item_flags & ep::UNDONE_MASK == ep::SHOW_UNDONE) == on);
             options[0].activate_action("viewopt.unseen", None).expect("the Unwatched check");
             assert!(pump(&ctx, unseen(true)), "the check writes the flag");
             assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 4)), "two leading rows and two unwatched episodes, got {:?}", list.model().map(|m| m.n_items()));
@@ -1817,7 +1817,7 @@ mod tests {
             let big = assemble(Rc::clone(&big_runner), true, env_of(&big_store));
             let big_window = gtk::Window::builder().default_width(1000).default_height(700).child(&big).build();
             big_window.present();
-            big_runner.send(EntryCmd::Load { anime_id: big_id });
+            big_runner.send(EntryCmd::Load { entry_id: big_id });
             let started = std::time::Instant::now();
             let big_list = descendants(big.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::ListView>().ok()).expect("the list view");
             assert!(pump(&ctx, || big_list.model().is_some_and(|m| m.n_items() == 3001)), "3000 rows and the list head");

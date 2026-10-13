@@ -21,10 +21,10 @@ pub struct Airing {
 
 impl Airing {
     /// `None` when the entry has no airing time (`airingTime > 0`).
-    pub fn of(anime: &Entry) -> Option<Self> {
-        let at = anime.viewer().next_episode_airing_at();
+    pub fn of(entry: &Entry) -> Option<Self> {
+        let at = entry.viewer().next_episode_airing_at();
         (at > 0).then(|| Self {
-            episode: anime.viewer().next_episode_to_air(),
+            episode: entry.viewer().next_episode_to_air(),
             at_ms: at.saturating_mul(1000),
         })
     }
@@ -74,16 +74,16 @@ mod tests {
 
     #[test]
     fn airing_reads_the_viewer_flags_and_the_remaining_time_follows_the_absolute_target() {
-        let mut anime = Entry::create(kuro_platform::kind::Kind::Anime);
-        assert_eq!(Airing::of(&anime), None);
-        anime.set_next_episode_airing(7, 1_700_000_000);
-        let airing = Airing::of(&anime).unwrap();
+        let mut entry = Entry::create(kuro_platform::kind::Kind::Anime);
+        assert_eq!(Airing::of(&entry), None);
+        entry.set_next_episode_airing(7, 1_700_000_000);
+        let airing = Airing::of(&entry).unwrap();
         assert_eq!(airing, Airing { episode: 7, at_ms: 1_700_000_000_000 });
         assert_eq!(airing.title(), "Episode 7");
         assert_eq!(airing.remaining(1_699_999_999_000), 1000);
         // a refreshed airing time moves the target: the next tick shows the new remaining time
-        anime.set_next_episode_airing(8, 1_700_000_100);
-        assert_eq!(Airing::of(&anime).unwrap().remaining(1_699_999_999_000), 101_000);
+        entry.set_next_episode_airing(8, 1_700_000_100);
+        assert_eq!(Airing::of(&entry).unwrap().remaining(1_699_999_999_000), 101_000);
         assert_eq!(airing.remaining(1_700_000_001_000), -1000);
     }
 }

@@ -5,12 +5,12 @@
 /// Every dialog the anime page can show, with the ids it needs. The widgets read the entry for the rest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntryDialog {
-    ChangeCategory { anime_id: i64 },
+    ChangeCategory { entry_id: i64 },
     DeleteEpisodes(Vec<i64>),
-    DuplicateAnime { anime_id: i64, duplicate_id: i64 },
+    DuplicateAnime { entry_id: i64, duplicate_id: i64 },
     Migrate { new_id: i64, old_id: i64 },
-    SetAnimeFetchInterval { anime_id: i64 },
-    ShowQualities { anime_id: i64, episode_id: i64 },
+    SetAnimeFetchInterval { entry_id: i64 },
+    ShowQualities { entry_id: i64, episode_id: i64 },
     ChangeAnimeSkipIntro,
     TrackSheet,
 }
@@ -34,9 +34,9 @@ impl DialogSlot {
     }
 
     /// The choose-category branch of an add: the category dialog opens and the track sheet may follow its dismiss.
-    pub fn open_change_category_from_add(&mut self, anime_id: i64) {
+    pub fn open_change_category_from_add(&mut self, entry_id: i64) {
         self.from_change_category = true;
-        self.open(EntryDialog::ChangeCategory { anime_id });
+        self.open(EntryDialog::ChangeCategory { entry_id });
     }
 
     /// Dismisses the dialog on screen. When the add flow set the flag and auto-open is on, the flag is cleared and the

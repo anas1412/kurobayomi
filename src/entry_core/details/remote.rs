@@ -99,12 +99,12 @@ struct SourceRemote(Arc<dyn AnimeSource>);
 
 #[async_trait]
 impl AnimeRemote for SourceRemote {
-    async fn episode_update(&self, anime: SAnime, episodes: Vec<SEpisode>, fetch_details: bool, fetch_episodes: bool) -> Result<SAnimeEpisodeUpdate, SourceError> {
-        limited(self.0.anime_episode_update(anime, episodes, fetch_details, fetch_episodes)).await
+    async fn episode_update(&self, entry: SAnime, episodes: Vec<SEpisode>, fetch_details: bool, fetch_episodes: bool) -> Result<SAnimeEpisodeUpdate, SourceError> {
+        limited(self.0.anime_episode_update(entry, episodes, fetch_details, fetch_episodes)).await
     }
 
-    async fn season_update(&self, anime: SAnime, seasons: Vec<SAnime>, fetch_details: bool, fetch_seasons: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
-        limited(self.0.anime_season_update(anime, seasons, fetch_details, fetch_seasons)).await
+    async fn season_update(&self, entry: SAnime, seasons: Vec<SAnime>, fetch_details: bool, fetch_seasons: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
+        limited(self.0.anime_season_update(entry, seasons, fetch_details, fetch_seasons)).await
     }
 }
 
@@ -140,16 +140,16 @@ struct EpisodeListSync {
 }
 
 impl ListSync for EpisodeListSync {
-    fn sync_episodes(&self, raw: &[SEpisode], anime: &Entry, manual: bool, window: (i64, i64)) -> Result<Vec<Item>, DomainError> {
+    fn sync_episodes(&self, raw: &[SEpisode], entry: &Entry, manual: bool, window: (i64, i64)) -> Result<Vec<Item>, DomainError> {
         let opts = SyncOptions {
             now_ms: chrono::Utc::now().timestamp_millis(),
             manual,
             window,
             mark_duplicate_done: self.mark_duplicate_done,
-            is_local: anime.source == kuro_source::local::LOCAL_SOURCE_ID,
+            is_local: entry.source == kuro_source::local::LOCAL_SOURCE_ID,
         };
         let items: Vec<SourceItem> = raw.iter().map(source_item_from_episode).collect();
-        let run = self.sync.run(items, anime, opts, None);
+        let run = self.sync.run(items, entry, opts, None);
         tokio::task::block_in_place(|| self.handle.block_on(run))
             .map_err(|e| match e {
                 SyncItemsError::Db(e) => DomainError::Db(e),
@@ -157,8 +157,8 @@ impl ListSync for EpisodeListSync {
             })
     }
 
-    fn sync_seasons(&self, raw: &[SAnime], anime: &Entry, manual: bool, window: (i64, i64)) -> Result<Vec<Entry>, DomainError> {
-        self.seasons.run(raw, anime, manual, window, chrono::Utc::now().timestamp_millis())
+    fn sync_seasons(&self, raw: &[SAnime], entry: &Entry, manual: bool, window: (i64, i64)) -> Result<Vec<Entry>, DomainError> {
+        self.seasons.run(raw, entry, manual, window, chrono::Utc::now().timestamp_millis())
     }
 }
 
@@ -190,11 +190,11 @@ impl RemoteAnimeBackend {
     }
 
     /// The entry and the episodes with these ids (all of them when `ids` is `None`), with the source line.
-    fn entry_episodes(&self, anime_id: i64, ids: Option<&[i64]>) -> Option<(Entry, Vec<Item>, SourceInfo)> {
-        let anime = self.episodes.anime(anime_id).ok().flatten()?;
-        let episodes: Vec<Item> = self.episodes.episodes(anime_id).ok()?.into_iter().filter(|e| ids.is_none_or(|ids| ids.contains(&e.id))).collect();
-        let info = self.source_info(anime.source);
-        Some((anime, episodes, info))
+    fn entry_episodes(&self, entry_id: i64, ids: Option<&[i64]>) -> Option<(Entry, Vec<Item>, SourceInfo)> {
+        let entry = self.episodes.entry(entry_id).ok().flatten()?;
+        let episodes: Vec<Item> = self.episodes.episodes(entry_id).ok()?.into_iter().filter(|e| ids.is_none_or(|ids| ids.contains(&e.id))).collect();
+        let info = self.source_info(entry.source);
+        Some((entry, episodes, info))
     }
 }
 
@@ -203,22 +203,22 @@ impl EntryBackend for RemoteAnimeBackend {
         crate::entry_core::tracking::session::has_logged_in()
     }
 
-    fn bind_enhanced(&self, anime_id: i64) {
-        crate::updates::track_binding::bind_entry(&self.episodes.db(), Kind::Anime, anime_id);
+    fn bind_enhanced(&self, entry_id: i64) {
+        crate::updates::track_binding::bind_entry(&self.episodes.db(), Kind::Anime, entry_id);
     }
     fn source_info(&self, source_id: i64) -> SourceInfo {
         self.lookup.info(source_id).unwrap_or_else(|| self.stubs.source_info(source_id))
     }
 
-    fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> EntryFetch {
+    fn fetch(&self, entry_id: i64, plan: RefreshPlan, trigger: Trigger) -> EntryFetch {
         let (store, update, lookup) = (Arc::clone(&self.store), Arc::clone(&self.update), Arc::clone(&self.lookup));
         let season_episodes = crate::misc::diet_defaults::LIBRARY_UPDATE_SEASON;
         Box::pin(async move {
-            let anime = store.anime(anime_id).map_err(domain_error)?;
-            let Some(remote) = lookup.remote(anime.source) else {
+            let entry = store.anime(entry_id).map_err(domain_error)?;
+            let Some(remote) = lookup.remote(entry.source) else {
                 return Err(DetailError::SourceNotInstalled);
             };
-            let name = lookup.name(anime.source).unwrap_or_default();
+            let name = lookup.name(entry.source).unwrap_or_default();
             let flags = FetchFlags {
                 fetch_details: plan.info,
                 fetch_episodes: plan.episodes,
@@ -226,18 +226,18 @@ impl EntryBackend for RemoteAnimeBackend {
                 manual_fetch: trigger == Trigger::Manual,
                 fetch_window: (0, 0),
             };
-            match anime.fetch_type() {
+            match entry.fetch_type() {
                 FetchType::Episodes => update
-                    .episodes(&anime, &*remote, flags)
+                    .episodes(&entry, &*remote, flags)
                     .await
                     .map(|r| r.new_episodes)
                     .map_err(|e| detail_error(e, &name)),
                 FetchType::Seasons => {
-                    let seasons = update.seasons(&anime, &*remote, flags).await.map_err(|e| detail_error(e, &name))?.new_seasons;
+                    let seasons = update.seasons(&entry, &*remote, flags).await.map_err(|e| detail_error(e, &name))?.new_seasons;
                     // behaviour 6.4.1: with "update seasons on refresh" on, the episodes of the unfinished seasons follow
                     if season_episodes {
                         let episode_flags = FetchFlags { fetch_details: false, fetch_episodes: true, fetch_seasons: false, ..flags };
-                        fetch_episodes_of(seasons, lookup.is_unmetered(anime.source), |season| {
+                        fetch_episodes_of(seasons, lookup.is_unmetered(entry.source), |season| {
                             let (update, remote) = (Arc::clone(&update), Arc::clone(&remote));
                             async move {
                                 // one failing season is logged and does not stop the others; new episodes are not downloaded
@@ -271,29 +271,29 @@ impl EntryBackend for RemoteAnimeBackend {
         self.downloads.as_ref().is_some_and(EntryDownloads::can_enqueue)
     }
 
-    fn downloaded_episodes(&self, anime_id: i64) -> HashSet<i64> {
-        let (Some(downloads), Some((anime, episodes, info))) = (&self.downloads, self.entry_episodes(anime_id, None)) else { return HashSet::new() };
-        downloads.downloaded(&anime, &episodes, &info)
+    fn downloaded_episodes(&self, entry_id: i64) -> HashSet<i64> {
+        let (Some(downloads), Some((entry, episodes, info))) = (&self.downloads, self.entry_episodes(entry_id, None)) else { return HashSet::new() };
+        downloads.downloaded(&entry, &episodes, &info)
     }
 
-    fn downloaded_count(&self, anime_id: i64) -> usize {
-        self.downloaded_episodes(anime_id).len()
+    fn downloaded_count(&self, entry_id: i64) -> usize {
+        self.downloaded_episodes(entry_id).len()
     }
 
-    fn enqueue_episodes(&self, anime_id: i64, episode_ids: &[i64], start_now: bool) -> bool {
-        let (Some(downloads), Some((anime, episodes, info))) = (&self.downloads, self.entry_episodes(anime_id, Some(episode_ids))) else { return false };
-        downloads.enqueue(&anime, &episodes, &info, start_now)
+    fn enqueue_episodes(&self, entry_id: i64, episode_ids: &[i64], start_now: bool) -> bool {
+        let (Some(downloads), Some((entry, episodes, info))) = (&self.downloads, self.entry_episodes(entry_id, Some(episode_ids))) else { return false };
+        downloads.enqueue(&entry, &episodes, &info, start_now)
     }
 
-    fn delete_episodes(&self, anime_id: i64, episode_ids: &[i64]) {
-        let (Some(downloads), Some((anime, episodes, info))) = (&self.downloads, self.entry_episodes(anime_id, Some(episode_ids))) else { return };
-        let categories = self.episodes.category_ids(anime_id).unwrap_or_default();
-        downloads.delete(&anime, &episodes, categories, &info);
+    fn delete_episodes(&self, entry_id: i64, episode_ids: &[i64]) {
+        let (Some(downloads), Some((entry, episodes, info))) = (&self.downloads, self.entry_episodes(entry_id, Some(episode_ids))) else { return };
+        let categories = self.episodes.category_ids(entry_id).unwrap_or_default();
+        downloads.delete(&entry, &episodes, categories, &info);
     }
 
-    fn delete_downloads(&self, anime_id: i64) {
-        let on_disk: Vec<i64> = self.downloaded_episodes(anime_id).into_iter().collect();
-        self.delete_episodes(anime_id, &on_disk);
+    fn delete_downloads(&self, entry_id: i64) {
+        let on_disk: Vec<i64> = self.downloaded_episodes(entry_id).into_iter().collect();
+        self.delete_episodes(entry_id, &on_disk);
     }
 }
 
@@ -329,7 +329,7 @@ mod tests {
     /// A source that answers with canned data, records the `(fetch_details, fetch_list)` flags of each call and can
     /// fail with an HTTP status.
     struct FakeSource {
-        anime: SAnime,
+        entry: SAnime,
         episodes: Vec<SEpisode>,
         seasons: Vec<SAnime>,
         http_failure: Option<u16>,
@@ -338,7 +338,7 @@ mod tests {
 
     impl FakeSource {
         fn new(episodes: Vec<SEpisode>) -> Arc<Self> {
-            Arc::new(Self { anime: SAnime { title: "Frieren".into(), ..SAnime::default() }, episodes, seasons: Vec::new(), http_failure: None, asked: Mutex::default() })
+            Arc::new(Self { entry: SAnime { title: "Frieren".into(), ..SAnime::default() }, episodes, seasons: Vec::new(), http_failure: None, asked: Mutex::default() })
         }
     }
 
@@ -349,14 +349,14 @@ mod tests {
             if let Some(code) = self.http_failure {
                 return Err(SourceError::Http(code));
             }
-            Ok(SAnimeEpisodeUpdate { anime: self.anime.clone(), episodes: self.episodes.clone() })
+            Ok(SAnimeEpisodeUpdate { anime: self.entry.clone(), episodes: self.episodes.clone() })
         }
 
         async fn season_update(&self, _: SAnime, _: Vec<SAnime>, _: bool, _: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
             if self.seasons.is_empty() {
                 return Err(SourceError::Unsupported("seasons"));
             }
-            Ok(SAnimeSeasonUpdate { anime: self.anime.clone(), seasons: self.seasons.clone() })
+            Ok(SAnimeSeasonUpdate { anime: self.entry.clone(), seasons: self.seasons.clone() })
         }
     }
 
@@ -390,7 +390,7 @@ mod tests {
         let new = rt.block_on(backend.fetch(id, PLAN, Trigger::Manual)).expect("the fetch works");
         assert_eq!(new.iter().map(|e| e.number).collect::<Vec<_>>(), [2.0], "the one that was not stored before");
         assert_eq!(store.episodes(id).unwrap().len(), 2);
-        assert!(store.anime(id).unwrap().unwrap().initialized, "the metadata write marks it initialized");
+        assert!(store.entry(id).unwrap().unwrap().initialized, "the metadata write marks it initialized");
     }
 
     #[test]

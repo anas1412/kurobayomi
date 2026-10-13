@@ -24,8 +24,8 @@ pub struct SeasonFilters {
 }
 
 impl SeasonFilters {
-    pub fn of(anime: &Entry, downloaded_only: bool) -> Self {
-        let season = anime.season();
+    pub fn of(entry: &Entry, downloaded_only: bool) -> Self {
+        let season = entry.season();
         Self {
             unseen: season.unseen_filter(),
             downloaded: downloaded_filter(
@@ -54,13 +54,13 @@ impl SeasonFilters {
 
 /// The cards of the season grid: the seasons that pass the filters, sorted by the season sort (the alphabetical tie-break
 /// is always ascending), each with the overlays of the parent applied. `seasons` pairs each season with its facts.
-pub fn process_seasons(anime: &Entry, seasons: &[(SeasonEntry, SeasonFacts)], downloaded_only: bool) -> Vec<SeasonItem> {
-    let overlays = Overlays::of(anime);
-    let filters = SeasonFilters::of(anime, downloaded_only);
+pub fn process_seasons(entry: &Entry, seasons: &[(SeasonEntry, SeasonFacts)], downloaded_only: bool) -> Vec<SeasonItem> {
+    let overlays = Overlays::of(entry);
+    let filters = SeasonFilters::of(entry, downloaded_only);
     let facts: HashMap<i64, &SeasonFacts> = seasons.iter().map(|(s, f)| (s.entry.id, f)).collect();
     let mut kept: Vec<SeasonEntry> =
         seasons.iter().filter(|(s, f)| filters.keeps(s, f)).map(|(s, _)| s.clone()).collect();
-    sort_seasons(&mut kept, anime);
+    sort_seasons(&mut kept, entry);
     kept.iter().map(|s| season_item(s, overlays, facts[&s.entry.id])).collect()
 }
 
@@ -71,12 +71,12 @@ mod tests {
     use super::*;
 
     fn season(id: i64, title: &str, total: i64, seen: i64, bookmarks: i64) -> (SeasonEntry, SeasonFacts) {
-        let mut anime = Entry::create(Kind::Anime);
-        anime.id = id;
-        anime.title = title.into();
+        let mut entry = Entry::create(Kind::Anime);
+        entry.id = id;
+        entry.title = title.into();
         (
             SeasonEntry {
-                entry: anime,
+                entry: entry,
                 total,
                 done: seen,
                 bookmarks,
@@ -90,9 +90,9 @@ mod tests {
     }
 
     fn parent(flags: i64) -> Entry {
-        let mut anime = Entry::create(Kind::Anime);
-        anime.season_flags = Some(flags);
-        anime
+        let mut entry = Entry::create(Kind::Anime);
+        entry.season_flags = Some(flags);
+        entry
     }
 
     #[test]

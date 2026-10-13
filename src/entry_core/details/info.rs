@@ -34,28 +34,28 @@ pub fn status(value: i64) -> StatusView {
 
 /// The info box lines of an anime: title, author and artist with their placeholders (`entry_core::text`), the anime
 /// status table, and the source line with its stub flag. The widget is `entry_core::header_view`, shared with manga.
-pub fn header_model(anime: &Entry, source: &SourceInfo) -> HeaderModel {
-    let shown = status(anime.status);
+pub fn header_model(entry: &Entry, source: &SourceInfo) -> HeaderModel {
+    let shown = status(entry.status);
     let mut model = HeaderModel::from_parts(
-        &anime.title,
-        anime.author.as_deref(),
-        anime.artist.as_deref(),
+        &entry.title,
+        entry.author.as_deref(),
+        entry.artist.as_deref(),
         (shown.icon, shown.text),
         &source.name,
         source.stub,
     )
-    .with_genres(anime.genre.as_deref());
+    .with_genres(entry.genre.as_deref());
     // T-39a-029: an anime genre chip searches every source (global), where the shared chip searches the entry's source
     for chip in &mut model.genres {
         chip.search.global = true;
     }
     model.with_cover(
         Kind::Anime,
-        anime.id,
-        anime.source,
-        anime.thumbnail_url.as_deref(),
-        anime.favorite,
-        anime.cover_last_modified,
+        entry.id,
+        entry.source,
+        entry.thumbnail_url.as_deref(),
+        entry.favorite,
+        entry.cover_last_modified,
     )
 }
 
@@ -81,8 +81,8 @@ mod tests {
 
     #[test]
     fn the_info_box_uses_the_placeholders_the_anime_status_and_the_stub_flag() {
-        let anime = Entry { status: 7, ..Entry::create(Kind::Anime) };
-        let model = header_model(&anime, &SourceInfo { name: "Src".into(), stub: true });
+        let entry = Entry { status: 7, ..Entry::create(Kind::Anime) };
+        let model = header_model(&entry, &SourceInfo { name: "Src".into(), stub: true });
         assert_eq!(model.title, tr(MsgKey::unknown_title));
         assert_eq!(model.author, tr(MsgKey::unknown_author));
         assert_eq!(model.artist, None);
@@ -97,8 +97,8 @@ mod tests {
     #[test]
     fn anime_genre_chips_search_every_source() {
         // T-39a-029: the chip search is global, unlike the manga chip
-        let anime = Entry { genre: Some(vec!["Action".into(), "Drama".into()]), ..Entry::create(Kind::Anime) };
-        let model = header_model(&anime, &SourceInfo { name: "Src".into(), stub: false });
+        let entry = Entry { genre: Some(vec!["Action".into(), "Drama".into()]), ..Entry::create(Kind::Anime) };
+        let model = header_model(&entry, &SourceInfo { name: "Src".into(), stub: false });
         assert_eq!(model.genres.len(), 2);
         assert!(model.genres.iter().all(|c| c.search.global));
     }

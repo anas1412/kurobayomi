@@ -22,7 +22,7 @@ pub fn seen_cmds(m: &EntryModel, episodes: &[Item], seen: bool, remove_after_see
         cmds.push(EntryCmd::SetSeen { ids: effects.write_ids, seen });
     }
     if !effects.delete_ids.is_empty() {
-        cmds.push(EntryCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: effects.delete_ids });
+        cmds.push(EntryCmd::DeleteEpisodeDownloads { entry_id: m.entry.id, ids: effects.delete_ids });
     }
     cmds
 }
@@ -36,7 +36,7 @@ pub struct BarDispatch {
 
 pub fn bottom_cmds(m: &EntryModel, effect: Effect, remove_after_seen: bool) -> BarDispatch {
     let selected = m.selected_episodes();
-    let anime_id = m.anime.id;
+    let entry_id = m.entry.id;
     let mut out = BarDispatch::default();
     match effect {
         Effect::Mark(mark, on) => out.cmds.push(EntryCmd::SetMark { ids: bulk_mark_targets(&selected, mark, on), mark, on }),
@@ -50,13 +50,13 @@ pub fn bottom_cmds(m: &EntryModel, effect: Effect, remove_after_seen: bool) -> B
         Effect::Download => {
             let ids = selection_to_download(&selected, &m.downloaded);
             if !ids.is_empty() {
-                out.cmds.push(EntryCmd::Download { anime_id, ids, start_now: false });
+                out.cmds.push(EntryCmd::Download { entry_id, ids, start_now: false });
             }
         }
         Effect::Delete => {
             let ids = selection_to_delete(&selected, &m.downloaded);
             if !ids.is_empty() {
-                out.cmds.push(EntryCmd::DeleteEpisodeDownloads { anime_id, ids });
+                out.cmds.push(EntryCmd::DeleteEpisodeDownloads { entry_id, ids });
             }
         }
     }
@@ -80,8 +80,8 @@ pub fn menu_cmds(m: &EntryModel, id: i64, action: RowAction, has_download_handle
         (Some(MenuEffect::Mark { ids, mark, on }), _) => vec![EntryCmd::SetMark { ids, mark, on }],
         (None, RowAction::MarkPrevious) => previous_seen_cmds(m, id, remove_after_seen),
         (None, RowAction::Download) if has_download_handler => {
-            let (anime_id, ids) = (m.anime.id, vec![id]);
-            vec![if m.downloaded.contains(&id) { EntryCmd::DeleteEpisodeDownloads { anime_id, ids } } else { EntryCmd::Download { anime_id, ids, start_now: false } }]
+            let (entry_id, ids) = (m.entry.id, vec![id]);
+            vec![if m.downloaded.contains(&id) { EntryCmd::DeleteEpisodeDownloads { entry_id, ids } } else { EntryCmd::Download { entry_id, ids, start_now: false } }]
         }
         (None, _) => Vec::new(),
     }
@@ -124,7 +124,7 @@ mod tests {
             on.cmds,
             vec![
                 EntryCmd::SetSeen { ids: vec![id_of(&m, 2.0)], seen: true },
-                EntryCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![id_of(&m, 2.0)] },
+                EntryCmd::DeleteEpisodeDownloads { entry_id: m.entry.id, ids: vec![id_of(&m, 2.0)] },
             ],
             "episode 1 was already seen, so its download stays"
         );
@@ -155,7 +155,7 @@ mod tests {
         let mut want = vec![id_of(&m, 1.0), id_of(&m, 2.0)];
         want.sort_unstable();
         assert_eq!(written, want);
-        assert_eq!(out.cmds[1], EntryCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![id_of(&m, 1.0)] });
+        assert_eq!(out.cmds[1], EntryCmd::DeleteEpisodeDownloads { entry_id: m.entry.id, ids: vec![id_of(&m, 1.0)] });
     }
 
     #[test]
@@ -164,9 +164,9 @@ mod tests {
         m.downloaded.insert(id_of(&m, 2.0));
         select(&mut m, &[1.0, 2.0]);
         let download = bottom_cmds(&m, Effect::Download, false);
-        assert_eq!(download.cmds, vec![EntryCmd::Download { anime_id: m.anime.id, ids: vec![id_of(&m, 1.0)], start_now: false }]);
+        assert_eq!(download.cmds, vec![EntryCmd::Download { entry_id: m.entry.id, ids: vec![id_of(&m, 1.0)], start_now: false }]);
         let delete = bottom_cmds(&m, Effect::Delete, false);
-        assert_eq!(delete.cmds, vec![EntryCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![id_of(&m, 2.0)] }]);
+        assert_eq!(delete.cmds, vec![EntryCmd::DeleteEpisodeDownloads { entry_id: m.entry.id, ids: vec![id_of(&m, 2.0)] }]);
     }
 
     #[test]
@@ -185,9 +185,9 @@ mod tests {
         let menu = |m: &EntryModel, id, action, handler, remove| menu_cmds(m, id, action, handler, remove);
         let seen = menu(&m, one, RowAction::ToggleRead, false, true);
         assert_eq!(seen.len(), 2, "the write and the delete");
-        assert_eq!(menu(&m, one, RowAction::Download, true, false), vec![EntryCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![one] }]);
+        assert_eq!(menu(&m, one, RowAction::Download, true, false), vec![EntryCmd::DeleteEpisodeDownloads { entry_id: m.entry.id, ids: vec![one] }]);
         let two = id_of(&m, 2.0);
-        assert_eq!(menu(&m, two, RowAction::Download, true, false), vec![EntryCmd::Download { anime_id: m.anime.id, ids: vec![two], start_now: false }]);
+        assert_eq!(menu(&m, two, RowAction::Download, true, false), vec![EntryCmd::Download { entry_id: m.entry.id, ids: vec![two], start_now: false }]);
         assert!(menu(&m, two, RowAction::Download, false, false).is_empty(), "no download handler");
         assert!(menu(&m, two, RowAction::Select, true, false).is_empty(), "Select writes nothing");
         assert!(menu(&m, 9999, RowAction::ToggleRead, true, false).is_empty(), "a row that is gone");

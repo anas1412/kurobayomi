@@ -55,8 +55,8 @@ pub fn section(groups: &[AnimeRelationGroup], mode: LibraryDisplayMode, on_open:
             let column = GBox::new(O::Vertical, 4);
             column.append(&heading(&group.name));
             let items = GBox::new(O::Horizontal, 4);
-            for anime in &group.anime {
-                items.append(&item(&anime.title, anime.favorite, mode, anime.id, &on_open));
+            for entry in &group.anime {
+                items.append(&item(&entry.title, entry.favorite, mode, entry.id, &on_open));
             }
             column.append(&items);
             column.set_halign(match pack::align(start, size) {
@@ -74,8 +74,8 @@ pub fn section(groups: &[AnimeRelationGroup], mode: LibraryDisplayMode, on_open:
         let items = GBox::new(O::Horizontal, 4);
         items.set_margin_start(8);
         items.set_margin_end(8);
-        for anime in &group.anime {
-            items.append(&item(&anime.title, anime.favorite, mode, anime.id, &on_open));
+        for entry in &group.anime {
+            items.append(&item(&entry.title, entry.favorite, mode, entry.id, &on_open));
         }
         let scroller = ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).child(&items).build();
         root.append(&heading_with_margin(&group.name));

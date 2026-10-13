@@ -38,14 +38,14 @@ impl EntryDownloads {
     }
 
     /// The ids of the episodes that are finished on disk.
-    pub fn downloaded(&self, anime: &Entry, episodes: &[Item], _info: &SourceInfo) -> HashSet<i64> {
-        let states = download_states(self.host.as_ref(), Kind::Anime, anime, episodes);
+    pub fn downloaded(&self, entry: &Entry, episodes: &[Item], _info: &SourceInfo) -> HashSet<i64> {
+        let states = download_states(self.host.as_ref(), Kind::Anime, entry, episodes);
         states.into_iter().filter(|(_, state)| *state == DownloadState::Downloaded).map(|(id, _)| id).collect()
     }
 
     /// Queues the episodes and starts the queue. `false` when nothing was queued. `start_now` puts the one episode at
     /// the front and starts the run.
-    pub fn enqueue(&self, anime: &Entry, episodes: &[Item], _info: &SourceInfo, start_now: bool) -> bool {
+    pub fn enqueue(&self, entry: &Entry, episodes: &[Item], _info: &SourceInfo, start_now: bool) -> bool {
         if !self.can_enqueue {
             return false;
         }
@@ -55,7 +55,7 @@ impl EntryDownloads {
             return true;
         }
         let ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
-        let queued = self.host.enqueue(Kind::Anime, anime.id, &ids);
+        let queued = self.host.enqueue(Kind::Anime, entry.id, &ids);
         if queued {
             self.host.start_queue(Kind::Anime);
         }
@@ -64,9 +64,9 @@ impl EntryDownloads {
 
     /// Deletes the downloads of these episodes: they leave the queue and their folders go. The bookmark rule does not
     /// keep any back (an explicit delete); the entry's categories no longer matter.
-    pub fn delete(&self, anime: &Entry, episodes: &[Item], _categories: Vec<i64>, _info: &SourceInfo) {
+    pub fn delete(&self, entry: &Entry, episodes: &[Item], _categories: Vec<i64>, _info: &SourceInfo) {
         let ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
-        self.host.delete(Kind::Anime, anime.id, &ids);
+        self.host.delete(Kind::Anime, entry.id, &ids);
     }
 }
 
@@ -80,7 +80,7 @@ mod tests {
         SourceInfo { name: "Reader (EN)".into(), stub: false }
     }
 
-    fn anime() -> Entry {
+    fn entry() -> Entry {
         Entry { id: 1, source: 7, title: "Frieren".into(), ..Entry::create(Kind::Anime) }
     }
 
@@ -96,11 +96,11 @@ mod tests {
         fake.disk.lock().unwrap().push(2);
         let downloads = EntryDownloads::over(fake.clone(), true);
         assert!(downloads.can_enqueue());
-        assert_eq!(downloads.downloaded(&anime(), &episodes(3), &info()), HashSet::from([2]));
+        assert_eq!(downloads.downloaded(&entry(), &episodes(3), &info()), HashSet::from([2]));
 
-        assert!(downloads.enqueue(&anime(), &episodes(2), &info(), false));
-        assert!(downloads.enqueue(&anime(), &episodes(2)[1..], &info(), true));
-        downloads.delete(&anime(), &episodes(2)[1..], Vec::new(), &info());
+        assert!(downloads.enqueue(&entry(), &episodes(2), &info(), false));
+        assert!(downloads.enqueue(&entry(), &episodes(2)[1..], &info(), true));
+        downloads.delete(&entry(), &episodes(2)[1..], Vec::new(), &info());
         assert_eq!(
             fake.calls(),
             [
@@ -116,6 +116,6 @@ mod tests {
     fn without_the_service_nothing_is_queued() {
         let downloads = EntryDownloads::over(Arc::new(crate::updates::download_host::fake::Fake::default()), false);
         assert!(!downloads.can_enqueue());
-        assert!(!downloads.enqueue(&anime(), &episodes(1), &info(), false));
+        assert!(!downloads.enqueue(&entry(), &episodes(1), &info(), false));
     }
 }
