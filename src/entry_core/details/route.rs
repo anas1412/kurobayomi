@@ -395,7 +395,9 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let bottom_row = GBox::new(O::Horizontal, 6);
     bottom_row.add_css_class("toolbar");
     bottom_row.set_halign(Align::Center);
-    let bottom = gtk::Revealer::builder().child(&bottom_row).transition_type(gtk::RevealerTransitionType::SlideUp).build();
+    // the row scrolls sideways when its labels do not fit, so a narrow window is never pushed wider than itself
+    let bottom_scroll = gtk::ScrolledWindow::builder().child(&bottom_row).vscrollbar_policy(gtk::PolicyType::Never).hscrollbar_policy(gtk::PolicyType::Automatic).propagate_natural_height(true).build();
+    let bottom = gtk::Revealer::builder().child(&bottom_scroll).transition_type(gtk::RevealerTransitionType::SlideUp).build();
 
     let ready = GBox::new(O::Vertical, 0);
     ready.append(&bar);
