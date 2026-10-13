@@ -1771,7 +1771,7 @@ mod tests {
             let page = assemble(Rc::clone(&runner), true, env_of(&store));
             runner.send(EntryCmd::Load { entry_id: id });
             let label = |text: &str| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == text);
-            assert!(pump(&ctx, || label("Add to library").is_some()), "the page shows Add to library");
+            assert!(pump(&ctx, || label("Frieren").is_some()), "the page loaded the entry");
             let button = label("Add to library").and_then(|l| l.ancestor(Button::static_type())).and_downcast::<Button>().expect("the library button");
             button.emit_clicked();
             assert!(pump(&ctx, || store.entry(id).unwrap().is_some_and(|a| a.favorite)), "the click writes favorite=1");
