@@ -567,25 +567,24 @@ pub fn popover_menu(rows: impl FnOnce(&gtk::Popover) -> Vec<Button>) -> gtk::Pop
     popover
 }
 
-/// Popover menu of plain buttons; clicking one runs `on(label)`.
-pub fn menu_button(icon: &str, entries: &[String], on: impl Fn(&str) + Clone + 'static) -> gtk::MenuButton {
-    let pop = popover_menu(|pop| {
-        entries
-            .iter()
-            .map(|e| {
-                let (on, e, pop) = (on.clone(), e.clone(), pop.clone());
-                let b = Button::builder().label(e.as_str()).css_classes(["flat"]).build();
-                b.child().and_downcast::<Label>().map(|l| l.set_xalign(0.0));
-                b.connect_clicked(move |_| {
-                    pop.popdown();
-                    on(&e);
-                });
-                b
-            })
-            .collect()
-    });
-    quiet_menu(gtk::MenuButton::builder().icon_name(icon).popover(&pop).tooltip_text("More").build())
+/// The app's one "more" menu: a native menu of plain entries (the look of the view-options and library menus) on a button
+/// with the one overflow icon. Choosing an entry runs `on(label)`.
+pub fn menu_button(entries: &[String], on: impl Fn(&str) + Clone + 'static) -> gtk::MenuButton {
+    let (model, group) = (gtk::gio::Menu::new(), gtk::gio::SimpleActionGroup::new());
+    for (i, entry) in entries.iter().enumerate() {
+        let (name, on, label) = (format!("e{i}"), on.clone(), entry.clone());
+        let action = gtk::gio::SimpleAction::new(&name, None);
+        action.connect_activate(move |_, _| on(&label));
+        group.add_action(&action);
+        model.append(Some(entry.as_str()), Some(&format!("more.{name}")));
+    }
+    let button = quiet_menu(gtk::MenuButton::builder().icon_name(OVERFLOW_ICON).menu_model(&model).tooltip_text("More").build());
+    button.insert_action_group("more", Some(&group));
+    button
 }
+
+/// The icon of every page's "more" menu.
+pub const OVERFLOW_ICON: &str = "view-more-symbolic";
 
 // ---------- spec items ----------
 
@@ -957,7 +956,7 @@ pub fn toolbar(s: &Screen) -> Vec<gtk::Widget> {
     }
     if !s.menu.is_empty() {
         let id = s.id.clone();
-        out.push(menu_button("view-more-symbolic", &s.menu, move |l| {
+        out.push(menu_button(&s.menu, move |l| {
             resolve(&id, l);
         }).upcast());
     }

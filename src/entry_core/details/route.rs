@@ -406,7 +406,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     // the Download menu: shown for an entry that is not local, when the app can queue downloads
     let download_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).visible(false).build());
     // the overflow menu: the items `overflow::items` gives for this entry and its source (T-39a-075)
-    let overflow_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(tr(MsgKey::action_menu_overflow_description)).build());
+    let overflow_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name(crate::ui::OVERFLOW_ICON).tooltip_text(tr(MsgKey::action_menu_overflow_description)).build());
     let toolbar: Vec<gtk::Widget> =
         vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), options.widget.clone().upcast(), overflow_menu.clone().upcast()];
     let page = ui::page("", &stack, toolbar.clone(), false);

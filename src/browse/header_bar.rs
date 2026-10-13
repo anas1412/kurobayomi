@@ -8,8 +8,12 @@ use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::LibraryDisplayMode;
 
-use super::header::{DISPLAY_MENU, OverflowItem, display_button_icon, display_label, overflow_items, overflow_label, selected_radio};
+use super::header::{DISPLAY_MENU, OverflowItem, display_label, overflow_items, overflow_label};
 use super::prefs::BrowsePrefs;
+use crate::widgets::view_options::{Item, Pick, Section, ViewOptions};
+
+/// The action name of the display-mode radio group.
+const DISPLAY: &str = "display";
 
 pub struct HeaderDeps {
     pub source_name: String,
@@ -29,9 +33,8 @@ pub struct HeaderDeps {
 pub struct SourceHeader {
     pub bar: gtk::HeaderBar,
     pub search: gtk::ToggleButton,
-    pub display: gtk::MenuButton,
+    pub display: ViewOptions,
     pub overflow: gtk::MenuButton,
-    pub radios: Vec<gtk::CheckButton>,
 }
 
 pub fn build(deps: HeaderDeps) -> SourceHeader {
@@ -44,14 +47,14 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
     let overflow = overflow_menu(&deps);
     bar.pack_end(&overflow);
 
-    let (display, radios) = display_menu(&deps);
-    bar.pack_end(&display);
+    let display = display_menu(&deps);
+    bar.pack_end(&display.widget);
 
     let search = deps.search.clone();
     bar.pack_end(&search);
     crate::ui::no_sticky_focus(&bar);
 
-    SourceHeader { bar, search, display, overflow, radios }
+    SourceHeader { bar, search, display, overflow }
 }
 
 /// The header of a page that has nothing but its title and a way back: the missing-source page (T-41a-008).
@@ -71,49 +74,28 @@ fn back_button(on_back: Rc<dyn Fn()>) -> gtk::Button {
     back
 }
 
-/// The display-mode button and its popover of two radio items. Choosing one stores it, updates the icon and calls
-/// `on_display_mode`.
-fn display_menu(deps: &HeaderDeps) -> (gtk::MenuButton, Vec<gtk::CheckButton>) {
-    let mode = deps.prefs.display_mode();
-    let button = gtk::MenuButton::new();
-    button.set_icon_name(display_button_icon(mode));
-    button.set_tooltip_text(Some(&tr(MsgKey::action_display_mode)));
-    let popover = gtk::Popover::new();
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let mut radios: Vec<gtk::CheckButton> = Vec::new();
-    for item in DISPLAY_MENU {
-        let radio = gtk::CheckButton::with_label(&display_label(item));
-        if let Some(first) = radios.first() {
-            radio.set_group(Some(first));
+/// The display-mode button: the app's one view-options menu with a single radio group, grid or list. Choosing one stores
+/// it and calls `on_display_mode`.
+fn display_menu(deps: &HeaderDeps) -> ViewOptions {
+    let items = DISPLAY_MENU.iter().map(|mode| Item::radio(DISPLAY, format!("{mode:?}"), display_label(*mode))).collect();
+    let menu = ViewOptions::new(&tr(MsgKey::action_display_mode), &[Section::new("View", items)]);
+    menu.set_radio(DISPLAY, &format!("{:?}", deps.prefs.display_mode()));
+    let on_mode = Rc::clone(&deps.on_display_mode);
+    menu.connect(move |pick| {
+        if let Pick::Radio(_, value) = pick
+            && let Some(mode) = DISPLAY_MENU.into_iter().find(|m| format!("{m:?}") == value)
+        {
+            on_mode(mode);
         }
-        radios.push(radio.clone());
-        column.append(&radio);
-    }
-    // set after grouping, so selecting the current mode does not fire the change
-    if let Some(index) = selected_radio(mode) {
-        radios[index].set_active(true);
-    }
-    for (radio, item) in radios.iter().zip(DISPLAY_MENU) {
-        let (on_mode, button, popover) = (Rc::clone(&deps.on_display_mode), button.clone(), popover.clone());
-        radio.connect_toggled(move |radio| {
-            if !radio.is_active() {
-                return;
-            }
-            button.set_icon_name(display_button_icon(item));
-            popover.popdown();
-            on_mode(item);
-        });
-    }
-    popover.set_child(Some(&column));
-    button.set_popover(Some(&popover));
-    (button, radios)
+    });
+    menu
 }
 
 fn overflow_menu(deps: &HeaderDeps) -> gtk::MenuButton {
     let items = overflow_items(deps.is_local, deps.configurable);
     let labels: Vec<String> = items.iter().map(|item| overflow_label(*item)).collect();
     let on_overflow = Rc::clone(&deps.on_overflow);
-    let button = crate::ui::menu_button("view-more-symbolic", &labels, move |label| {
+    let button = crate::ui::menu_button(&labels, move |label| {
         if let Some(item) = items.iter().find(|item| overflow_label(**item) == label) {
             on_overflow(*item);
         }
@@ -149,12 +131,9 @@ pub(crate) mod tests {
         let log = Rc::new(RefCell::new(Vec::new()));
         let prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory(), Kind::Manga));
         let header = build(deps(Rc::clone(&prefs), &log, false, true));
-        assert_eq!(header.radios.len(), 2, "the popover has two items");
-        assert!(header.radios[0].is_active(), "compact grid is selected by default");
-        assert_eq!(header.display.icon_name().as_deref(), Some("view-grid-symbolic"));
+        assert_eq!(header.display.radio(DISPLAY).as_deref(), Some("CompactGrid"), "compact grid is selected by default");
 
-        header.radios[1].set_active(true);
-        assert_eq!(header.display.icon_name().as_deref(), Some("view-list-symbolic"));
+        header.display.group().activate_action(DISPLAY, Some(&"List".to_variant()));
         assert_eq!(*log.borrow(), ["mode List"]);
 
         assert!(header.search.is_ancestor(&header.bar), "the search toggle is in the header");

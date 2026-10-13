@@ -168,7 +168,7 @@ impl Inner {
 
         let entries = vec![tr(MsgKey::action_global_search), tr(MsgKey::label_extension_repos)];
         let weak = Rc::downgrade(self);
-        let menu = crate::ui::menu_button("open-menu-symbolic", &entries, move |label| {
+        let menu = crate::ui::menu_button(&entries, move |label| {
             let Some(inner) = weak.upgrade() else { return };
             if label == tr(MsgKey::action_global_search) {
                 (inner.deps.on_route)(reselect_route(inner.visible()));

@@ -443,7 +443,7 @@ fn header_menu(kind: Kind, view: &LibraryView) -> gtk::MenuButton {
         }
         model.append_section(None, &part);
     }
-    let button = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&model).tooltip_text("Library menu").build());
+    let button = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name(crate::ui::OVERFLOW_ICON).menu_model(&model).tooltip_text("Library menu").build());
     button.update_property(&[gtk::accessible::Property::Label("Library menu")]);
     button.insert_action_group("lib", Some(&menu_actions(kind, view)));
     button

@@ -7,19 +7,6 @@ use kuro_prefs::library::LibraryDisplayMode;
 /// The two radio items of the display-mode popover, in order: grid and list. The comfortable grid is cut (two modes only).
 pub const DISPLAY_MENU: [LibraryDisplayMode; 2] = [LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List];
 
-/// Icon of the display-mode button: a list when the mode is List, a grid otherwise.
-pub fn display_button_icon(mode: LibraryDisplayMode) -> &'static str {
-    match mode {
-        LibraryDisplayMode::List => "view-list-symbolic",
-        _ => "view-grid-symbolic",
-    }
-}
-
-/// The selected radio item. Cover-only grid is not in the popover, so no item is selected for it.
-pub fn selected_radio(mode: LibraryDisplayMode) -> Option<usize> {
-    DISPLAY_MENU.iter().position(|m| *m == mode)
-}
-
 /// Overflow entries of the source header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OverflowItem {
@@ -88,22 +75,6 @@ mod tests {
     #[test]
     fn the_popover_has_exactly_two_items_in_order() {
         assert_eq!(DISPLAY_MENU, [LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List]);
-    }
-
-    #[test]
-    fn the_button_shows_a_list_only_in_list_mode() {
-        assert_eq!(display_button_icon(LibraryDisplayMode::List), "view-list-symbolic");
-        assert_eq!(display_button_icon(LibraryDisplayMode::CompactGrid), "view-grid-symbolic");
-        assert_eq!(display_button_icon(LibraryDisplayMode::ComfortableGrid), "view-grid-symbolic");
-        assert_eq!(display_button_icon(LibraryDisplayMode::CoverOnlyGrid), "view-grid-symbolic");
-    }
-
-    #[test]
-    fn the_selected_radio_follows_the_mode() {
-        assert_eq!(selected_radio(LibraryDisplayMode::CompactGrid), Some(0));
-        assert_eq!(selected_radio(LibraryDisplayMode::List), Some(1));
-        assert_eq!(selected_radio(LibraryDisplayMode::ComfortableGrid), None, "cut from the popover");
-        assert_eq!(selected_radio(LibraryDisplayMode::CoverOnlyGrid), None);
     }
 
     #[test]
