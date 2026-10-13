@@ -98,19 +98,24 @@ pub(crate) fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSourc
 
 /// Pushes the details page of one anime.
 pub fn open(entry_id: i64) {
-    ui::push(&page_for(entry_id));
+    open_kind(Kind::Anime, entry_id);
+}
+
+/// Pushes the details page of one entry of either kind.
+pub fn open_kind(kind: Kind, entry_id: i64) {
+    ui::push(&page_for(kind, entry_id));
 }
 
 /// The page for the `anime_entry_details` screen id. Without a target there is no row to show, so it is the page of a
 /// row that does not exist: the "not found" state with a Back button.
 pub fn build() -> GBox {
-    page_for(TARGET.with(Cell::take).unwrap_or(NO_ENTRY))
+    page_for(Kind::Anime, TARGET.with(Cell::take).unwrap_or(NO_ENTRY))
 }
 
 /// An id no row has (ids start at 1): `open(NO_ENTRY)` shows the "not found" page, for a caller that has no row to name.
 pub const NO_ENTRY: i64 = 0;
 
-fn page_for(entry_id: i64) -> GBox {
+fn page_for(kind: Kind, entry_id: i64) -> GBox {
     crate::entry_core::tracking::session::refresh_from_host();
     let app = data::app();
     let db = app.db.clone();
@@ -123,12 +128,15 @@ fn page_for(entry_id: i64) -> GBox {
     };
     let handle = tokio::runtime::Handle::current();
     // the live sources of this build; an id it does not know reports that the source is not installed
-    let downloads = EntryDownloads::new();
-    let backend: Arc<dyn EntryBackend> =
-        Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
-    let runner = Rc::new(runner::spawn(&handle, EntryStore::new(Arc::clone(&db), Kind::Anime), prefs.clone(), Arc::clone(&backend), ctx));
+    let backend: Arc<dyn EntryBackend> = match kind {
+        Kind::Anime => Arc::new(
+            RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(EntryDownloads::new()),
+        ),
+        Kind::Manga => Arc::new(crate::entry_core::backend::SourceBackend::live(Arc::clone(&db), &prefs)),
+    };
+    let runner = Rc::new(runner::spawn(&handle, EntryStore::new(Arc::clone(&db), kind), prefs.clone(), Arc::clone(&backend), ctx));
     runner.send(EntryCmd::Load { entry_id });
-    assemble(runner, show_airing, Env { prefs, backend, db })
+    assemble(runner, show_airing, Env { prefs, backend, db, kind })
 }
 
 /// What the page needs from the app besides its runner: the preference store, the backend the runner uses (for the
@@ -137,6 +145,7 @@ struct Env {
     prefs: PrefStore,
     backend: Arc<dyn EntryBackend>,
     db: Arc<Db>,
+    kind: Kind,
 }
 
 /// Everything the widgets and handlers share. Handlers hold `Weak<View>`; the event pump holds the only strong
@@ -223,6 +232,7 @@ fn torrent_enabled(prefs: &PrefStore) -> bool {
 }
 
 fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
+    let kind = env.kind;
     let stack = page_shell::state_stack();
 
     // the list head: the item header row, the refresh spinner and the empty line
@@ -286,7 +296,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
         })),
     );
     let library = action_row.library.clone();
-    let list = ItemList::new(Kind::Anime, Callbacks {
+    let list = ItemList::new(kind, Callbacks {
         on_row: {
             let weak = Rc::clone(&weak_view);
             Rc::new(move |id: i64, press: Press| {
@@ -389,7 +399,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     ready.append(&bottom);
     stack.add_named(&ready, Some("ready"));
 
-    let (episode_spec, season_spec) = (list_options::item_spec(Kind::Anime), list_options::season_spec());
+    let (episode_spec, season_spec) = (list_options::item_spec(kind), list_options::season_spec());
     let options = ViewOptions::new(list_options::TOOLTIP, &episode_spec.sections());
     let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
     // the Download menu: shown for an entry that is not local, when the app can queue downloads
@@ -553,7 +563,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     crate::downloads::live::follow(&page, {
         let weak = weak.clone();
         move |live| {
-            if live.kind == Kind::Anime
+            if live.kind == kind
                 && let Some(view) = weak.upgrade()
             {
                 view.live_changed(live.id, live.state, live.percent);
@@ -884,7 +894,7 @@ impl View {
         let model = self.model.borrow();
         let Some(m) = model.as_ref() else { return };
         let numbers: Vec<f64> = m.episodes.iter().filter(|e| ids.contains(&e.id)).map(|e| e.number).collect();
-        crate::entry_core::tracking::progress::marked(Kind::Anime, m.entry.id, true, &numbers, crate::data::app().base.incognito_mode.get());
+        crate::entry_core::tracking::progress::marked(self.env.kind, m.entry.id, true, &numbers, crate::data::app().base.incognito_mode.get());
     }
 
     /// Whether the entry's source is a torrent source and the torrent server is on (17.4, 17.5).
@@ -1003,7 +1013,7 @@ impl View {
         let runner = Rc::clone(&self.runner);
         let id = self.claim_slot(EntryDialog::DuplicateAnime { entry_id, duplicate_id: duplicate.id });
         let window = duplicate_dialog::open(
-            Kind::Anime,
+            self.env.kind,
             move |choice| match choice {
                 DuplicateChoice::Show => open(duplicate.id),
                 DuplicateChoice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
@@ -1026,7 +1036,7 @@ impl View {
                     runner.send(EntryCmd::ReadTracking { entry_id: id, source_id });
                 }
             };
-            crate::entry_core::tracking::page::open_sheet(crate::entry_core::tracking::page::Entry { kind: Kind::Anime, id, title }, changed);
+            crate::entry_core::tracking::page::open_sheet(crate::entry_core::tracking::page::Entry { kind: self.env.kind, id, title }, changed);
         }
     }
 
@@ -1211,7 +1221,7 @@ impl View {
     fn open_source_preferences(self: &Rc<Self>) {
         let source_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.entry.source);
         if let Some(source_id) = source_id {
-            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, kind: Kind::Anime });
+            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, kind: self.env.kind });
         }
     }
 
@@ -1222,7 +1232,7 @@ impl View {
             .borrow()
             .as_ref()
             .filter(|m| m.accepts_dispatch())
-            .map(|m| MigrateRequest { entry_id: m.entry.id, kind: Kind::Anime, title: m.entry.title.clone() });
+            .map(|m| MigrateRequest { entry_id: m.entry.id, kind: self.env.kind, title: m.entry.title.clone() });
         if let Some(request) = request {
             handoff::open_migrate(request);
         }
@@ -1247,7 +1257,7 @@ impl View {
     /// The Download menu (`download_menu`): the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
     fn download_popover(self: &Rc<Self>) -> gtk::Popover {
         let weak = Rc::downgrade(self);
-        download_menu::popover(Kind::Anime, move |amount| {
+        download_menu::popover(self.env.kind, move |amount| {
             if let Some(view) = weak.upgrade() {
                 view.run_download(amount);
             }
@@ -1277,6 +1287,7 @@ impl View {
 
     fn handlers(self: &Rc<Self>) -> Handlers {
         let weak = Rc::downgrade(self);
+        let kind = self.env.kind;
         Handlers {
             // the query goes to the opened screen through `handoff::take_search`
             on_search: Rc::new({
@@ -1285,7 +1296,7 @@ impl View {
                         let source = view.model.borrow().as_ref().map(|m| m.entry.source);
                         source.is_some_and(|source| view.env.backend.is_http_source(source))
                     });
-                    handoff::open_search(request, Kind::Anime, http_source);
+                    handoff::open_search(request, kind, http_source);
                 }
             }),
             on_copy: Rc::new(|text: String| {
@@ -1372,7 +1383,7 @@ impl View {
         match request {
             Request::Start => self.runner.send(EntryCmd::Download { entry_id, ids: vec![id], start_now: false }),
             Request::Cancel => {
-                crate::downloads::live::cancel(Kind::Anime, id);
+                crate::downloads::live::cancel(self.env.kind, id);
                 self.live_changed(id, DownloadState::NotDownloaded, 0);
             }
             Request::Delete => self.runner.send(EntryCmd::DeleteEpisodeDownloads { entry_id, ids: vec![id] }),
@@ -1406,9 +1417,24 @@ impl View {
             })
         };
         match found {
+            Ok((entry_id, _, _)) if self.env.kind == Kind::Manga => self.open_chapter(entry_id, id),
             Ok((entry_id, title, name)) => self.play(entry_id, id, &title, &name, plan),
             Err(error) => self.show_error(error),
         }
+    }
+
+    /// A chapter opens the reader, by ids so two folders with one title keep apart and a browsed entry needs no library row.
+    fn open_chapter(&self, entry_id: i64, chapter_id: i64) {
+        // repeated clicks, or clicks queued while the window was busy, open the reader once
+        if !ui::first_within("reader", 1500) {
+            return;
+        }
+        let local = self.model.borrow().as_ref().is_some_and(|m| m.entry.source == kuro_local::LOCAL_SOURCE_ID);
+        ui::push(&if local {
+            crate::local_flow::reader::open_local_chapter(entry_id, chapter_id)
+        } else {
+            crate::reader::launch::open_chapter(entry_id, chapter_id)
+        });
     }
 
     /// Starts the torrent server when the plan says so, then plays in the external player, or in the internal one when
@@ -1461,7 +1487,7 @@ impl View {
 
     /// The continue button of a season tile: plays that season's next unseen episode, as the FAB does for an entry.
     fn continue_season(&self, season_id: i64) {
-        let store = EntryStore::new(Arc::clone(&self.env.db), Kind::Anime);
+        let store = EntryStore::new(Arc::clone(&self.env.db), self.env.kind);
         let played = (|| -> Result<(), DetailsError> {
             let season = required(store.entry(season_id)?, || DetailsError::AnimeNotFound(season_id))?;
             let episodes = store.episodes(season_id)?;
@@ -1574,7 +1600,7 @@ impl View {
             set_season_settings_default(&self.env.prefs, word);
             Scope::Season
         } else {
-            set_item_settings_default(&self.env.prefs, Kind::Anime, word);
+            set_item_settings_default(&self.env.prefs, self.env.kind, word);
             Scope::Episode
         };
         self.runner.send(EntryCmd::ApplyDefaultsToLibrary { scope });
@@ -1596,7 +1622,7 @@ mod tests {
     }
 
     fn env_of(store: &EntryStore) -> Env {
-        Env { prefs: PrefStore::in_memory(), backend: Arc::new(Stub), db: store.db() }
+        Env { prefs: PrefStore::in_memory(), backend: Arc::new(Stub), db: store.db(), kind: Kind::Anime }
     }
 
     use crate::entry_core::page_shell::test_util::{descendants, pump};
