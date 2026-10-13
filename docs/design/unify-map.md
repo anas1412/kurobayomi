@@ -238,6 +238,13 @@ pre-step-4 survey.
 
 ### Sources and plug-ins (steps 10-11)
 
+Status 2026-10-13 (step 10, drift fixes only): loaded sources are recorded in the stub table and the backup registry reads it,
+one anime-sources lookup (`screens::anime_sources`), a broken `episodes.json` is ignored, local episode extensions are
+case-insensitive and a torrent file is not an episode, the WASM anime wire sends the real status, artist, update strategy
+and initialized. Not done: the structural collapse (one `Source` trait with a content strategy, one wire/WASM/scrape
+implementation, about 900 lines, high risk with no user-visible gain), anime deep links (no source implements
+`ResolvableAnimeSource`; the WASM ABI has no such op), the scrape engine's url rule. `tachiyomi://add-repo` is handled.
+
 Added 2026-10-12 (found on the test display): `stub_sources` is never filled, so a backup made while the repository
 sources are not loaded (always the case for `--run-backup`, which runs without the GUI) writes source ids as their
 names, and the restore screen then lists missing sources as numbers. Aniyomi records every installed source (kind, id,
