@@ -61,6 +61,9 @@ pub struct Tracker {
     stored: Item,
     incognito: bool,
     throttle: WriteThrottle,
+    /// When the watched time was last added to the history, while the episode plays. A pause, a stop or a switch of
+    /// episode (a forced save) clears it, so the time spent paused is never counted.
+    played_since: Option<i64>,
     /// Called once with the anime id and the episode number when an episode crosses the threshold.
     on_seen: Box<dyn Fn(i64, f64)>,
 }
@@ -87,6 +90,7 @@ impl Tracker {
             stored,
             incognito,
             throttle: WriteThrottle::new(HISTORY_INTERVAL_MS),
+            played_since: None,
             on_seen: Box::new(move |anime_id, number| {
                 crate::entry_core::tracking::progress::item_finished(Kind::Anime, anime_id, number, incognito);
             }),
@@ -147,10 +151,12 @@ impl Tracker {
             }
         }
         if let Some(seen_at) = plan.history_seen_at {
-            // no playback time yet: `WatchTicker` hands the watched time over when the player is wired to it
-            if let Err(e) = self.history.upsert(self.episode_id, seen_at, 0) {
+            // the time watched since the last write goes onto the history row (at most two intervals at once)
+            let watched = self.played_since.map_or(0, |since| (seen_at - since).clamp(0, 2 * HISTORY_INTERVAL_MS));
+            if let Err(e) = self.history.upsert(self.episode_id, seen_at, watched) {
                 tracing::error!(episode_id = self.episode_id, error = %e, "history write failed");
             }
+            self.played_since = (!forced).then_some(seen_at);
         }
     }
 
@@ -260,6 +266,26 @@ mod tests {
         open.save(0, 2_000, 4_000, true);
         let history = HistoryRepo::new(Arc::clone(&db)).by_entry_id(row(&db, id).entry_id).unwrap();
         assert_eq!(history.len(), 1);
+    }
+
+    #[test]
+    fn the_watched_time_is_added_to_the_history_while_playing_and_never_for_a_pause() {
+        let dir = TempDir::new().unwrap();
+        let (db, id) = seeded(&dir);
+        let anime_id = row(&db, id).entry_id;
+        let watched = || HistoryRepo::new(Arc::clone(&db)).by_entry_id(anime_id).unwrap().first().map_or(0, |h| h.duration_ms);
+        let mut tracker = Tracker::open(Arc::clone(&db), id, false).expect("tracker");
+        tracker.save(1_000, 2_000, 100_000, false);
+        assert_eq!(watched(), 0, "the first write starts the clock");
+        tracker.save(6_000, 7_000, 100_000, false);
+        tracker.save(11_000, 12_000, 100_000, false);
+        assert_eq!(watched(), 10_000, "two intervals of playing");
+        tracker.save(14_000, 15_000, 100_000, true);
+        assert_eq!(watched(), 13_000, "the pause adds the time up to it");
+        // a long pause, then playing again: the pause is not counted
+        tracker.save(500_000, 15_000, 100_000, false);
+        tracker.save(505_000, 20_000, 100_000, false);
+        assert_eq!(watched(), 18_000);
     }
 
     #[test]
