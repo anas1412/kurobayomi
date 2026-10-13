@@ -1,17 +1,24 @@
 //! The download layer as the Updates and Storage screens see it (T-42a-029, T-42a-031, T-42a-051, T-42a-054, T-42b-002).
 //!
-//! The app has no live download manager object yet, so the screens talk to a [`DownloadBackend`] seam: the queue
-//! snapshot, the disk check, the source check and the four write actions. [`install`] replaces the default backend
-//! when the downloads layer is wired; until then the default answers the disk check from the shell's download index
-//! (manga), its queue state from the running queues (`downloads::live`), and reports that nothing can be queued or
-//! deleted. The [`Hub`] carries the cache or queue change signal that re-derives the visible rows; the live status and
-//! progress of each unit come from `downloads::live`.
+//! The screens talk to a [`DownloadBackend`] seam: the queue state, the disk check, the source check and the write
+//! actions. The shell installs a [`LiveBackend`] over the one download service when it starts the downloads; before that
+//! the default [`IndexBackend`] answers the disk check, the queue state and the usage from the service's index and queue
+//! (when it runs) and reports that nothing can be queued or deleted. The [`Hub`] carries the cache or queue change
+//! signal that re-derives the visible rows.
 
 use std::sync::{Arc, OnceLock, RwLock};
 
+use kuro_data::item::ItemRepo;
+use kuro_db::handle::Db;
+use kuro_downloads::next::delete::DeleteRules;
+use kuro_downloads::next::index::DownloadIndex;
+use kuro_downloads::next::queue::{CancelTarget, Place, Queue};
+use kuro_downloads::next::runner::SourceDirectory as _;
+use kuro_downloads::next::service::Downloads;
+use kuro_downloads::next::unit::Availability;
 use kuro_platform::kind::Kind;
-use kuro_downloads::index::DownloadIndex;
 
+use crate::downloads::directory::AppDirectory;
 use crate::updates::download_state::{DiskKey, QueueEntry};
 use crate::updates::signals::CacheSignals;
 
@@ -78,30 +85,35 @@ pub fn current() -> Arc<dyn DownloadBackend> {
     if let Some(backend) = BACKEND.read().unwrap_or_else(|e| e.into_inner()).clone() {
         return backend;
     }
+    let service = crate::shell::host::Shell::get().and_then(|shell| shell.download_service());
     Arc::new(IndexBackend {
-        index: crate::shell::host::Shell::get().map(|shell| shell.downloads().clone()),
+        index: service.as_ref().map(|downloads| downloads.index().clone()),
         runtime: crate::shell::host::Shell::get().map(|shell| shell.runtime().clone()),
-        queues: crate::downloads::live::queues(),
+        queue: service.map(|downloads| downloads.queue().clone()),
     })
 }
 
-/// The default backend: the disk check reads the shell's download index (manga only), the queue state reads the
-/// running queues, and nothing can be queued or deleted through it.
+/// The unit's place in the queue as the screens show it: its state and percent.
+fn queue_entry_of(queue: &Queue, kind: Kind, unit_id: i64) -> Option<QueueEntry> {
+    let unit = queue.queued(kind, unit_id)?;
+    Some(QueueEntry { status: unit.state, progress: i64::from(unit.progress.percent()) })
+}
+
+/// The default backend before the service is installed: the disk check, the queue state and the usage read the one
+/// index and queue of both kinds, and nothing can be queued or deleted through it.
 pub struct IndexBackend {
     index: Option<DownloadIndex>,
     runtime: Option<tokio::runtime::Handle>,
-    queues: Option<crate::downloads::Queues>,
+    queue: Option<Queue>,
 }
 
 impl DownloadBackend for IndexBackend {
     fn queue_entry(&self, kind: Kind, unit_id: i64) -> Option<QueueEntry> {
-        let (status, percent) = crate::downloads::live::queued(self.queues.as_ref()?, kind, unit_id)?;
-        Some(QueueEntry { status, progress: i64::from(percent) })
+        queue_entry_of(self.queue.as_ref()?, kind, unit_id)
     }
 
     fn on_disk(&self, kind: Kind, key: &DiskKey) -> bool {
-        kind == Kind::Manga
-            && self.index.as_ref().is_some_and(|i| i.is_chapter_downloaded(key.source_id, &key.entry_title, &key.unit_name, key.scanlator.as_deref()))
+        self.index.as_ref().is_some_and(|i| i.is_downloaded(kind, key.source_id, &key.entry_title, &key.unit_name, key.scanlator.as_deref()))
     }
 
     fn source_installed(&self, _kind: Kind, _source_id: i64) -> bool {
@@ -125,36 +137,102 @@ impl DownloadBackend for IndexBackend {
     }
 
     fn entry_usage(&self, kind: Kind, source_id: i64, title: &str) -> (u64, usize) {
-        let (Kind::Manga, Some(index), Some(runtime)) = (kind, &self.index, &self.runtime) else { return (0, 0) };
-        (runtime.block_on(index.size_manga(source_id, title)), index.chapter_count_manga(source_id, title))
+        let (Some(index), Some(runtime)) = (&self.index, &self.runtime) else { return (0, 0) };
+        (runtime.block_on(index.size_entry(kind, source_id, title)), index.unit_count_entry(kind, source_id, title))
     }
 }
 
-/// The anime download index (T-42a-045): over the anime downloads folder of `storage`, with its own snapshot file in the
-/// platform cache folder. Opened on the first call and shared (later calls get the same index); `None` when the
-/// platform folders cannot be resolved. It rescans after each load of the repository sources, so their downloads are
-/// recognised; open it inside the app's runtime.
-pub fn anime_index(storage: &kuro_domain::storage::StorageManager) -> Option<kuro_downloads::anime::cache::AnimeIndex> {
-    static INDEX: OnceLock<Option<kuro_downloads::anime::cache::AnimeIndex>> = OnceLock::new();
-    INDEX
-        .get_or_init(|| {
-            use kuro_platform::paths::Paths as _;
-            let paths = kuro_platform::linux::paths::LinuxPaths::system().ok()?;
-            let cache = paths.cache_dir();
-            if let Err(e) = std::fs::create_dir_all(&cache) {
-                tracing::warn!("the anime download index snapshot folder was not created: {e}");
+/// The backend over the one download service, for both kinds. `external` of `enqueue` is not used: the app always passes
+/// the diet constant.
+pub struct LiveBackend {
+    downloads: Downloads,
+    directory: AppDirectory,
+    db: Arc<Db>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl LiveBackend {
+    pub fn new(downloads: Downloads, db: Arc<Db>, runtime: tokio::runtime::Handle) -> Self {
+        Self { downloads, directory: AppDirectory::new(Arc::clone(&db)), db, runtime }
+    }
+
+    /// Waits for `work`. Callers run off the GTK thread (see [`spawn_detached`]); one that already runs on the runtime's
+    /// pool is let to block there.
+    fn block<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| self.runtime.block_on(work))
+        } else {
+            self.runtime.block_on(work)
+        }
+    }
+}
+
+impl DownloadBackend for LiveBackend {
+    fn queue_entry(&self, kind: Kind, unit_id: i64) -> Option<QueueEntry> {
+        queue_entry_of(self.downloads.queue(), kind, unit_id)
+    }
+
+    fn on_disk(&self, kind: Kind, key: &DiskKey) -> bool {
+        self.downloads.index().is_downloaded(kind, key.source_id, &key.entry_title, &key.unit_name, key.scanlator.as_deref())
+    }
+
+    fn source_installed(&self, kind: Kind, source_id: i64) -> bool {
+        self.directory.source_key(kind, source_id).is_some_and(|source| source.availability == Availability::Live)
+    }
+
+    fn enqueue(&self, kind: Kind, entry_id: i64, unit_ids: &[i64], _external: bool) -> bool {
+        // paused: the caller starts the queue once (a hand pick keeps its fillermarked units, D6)
+        let Some(request) = self.directory.enqueue_request(kind, entry_id, unit_ids, Place::Back, false, false) else { return false };
+        match self.block(self.downloads.enqueue(request)) {
+            Ok(done) => !done.added.is_empty(),
+            Err(error) => {
+                tracing::warn!(%error, entry_id, "the units were not queued");
+                false
             }
-            let index = kuro_downloads::anime::cache::AnimeIndex::open(storage.downloads_path(Kind::Anime), &cache);
-            let follower = index.clone();
-            crate::recipe_sources::follow_loads(move || {
-                let index = follower.clone();
-                async move {
-                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(Kind::Anime)).await;
-                }
-            });
-            Some(index)
-        })
-        .clone()
+        }
+    }
+
+    fn start_queue(&self, kind: Kind) {
+        self.downloads.start(kind);
+    }
+
+    fn start_now(&self, kind: Kind, unit_id: i64) {
+        let entry_id = ItemRepo::new(Arc::clone(&self.db)).by_id(unit_id).ok().flatten().map(|item| item.entry_id);
+        let request = entry_id.and_then(|id| self.directory.enqueue_request(kind, id, &[unit_id], Place::Front, true, false));
+        let Some(request) = request else { return };
+        if let Err(error) = self.block(self.downloads.start_now(request)) {
+            tracing::debug!(%error, unit_id, "the unit was not started now");
+        }
+    }
+
+    fn cancel(&self, kind: Kind, unit_id: i64) {
+        if let Err(error) = self.block(self.downloads.cancel(kind, CancelTarget::Units(vec![unit_id]))) {
+            tracing::warn!(%error, unit_id, "the unit was not cancelled");
+        }
+    }
+
+    fn delete(&self, kind: Kind, entry_id: i64, unit_ids: &[i64]) {
+        let Some((entry, source)) = self.directory.entry_context(kind, entry_id) else { return };
+        let units = self.directory.units(entry_id, unit_ids);
+        if let Err(error) = self.block(self.downloads.delete_units(&entry, &source, units, DeleteRules::EXPLICIT)) {
+            tracing::warn!(%error, entry_id, "the downloads were not deleted");
+        }
+    }
+
+    fn delete_entry(&self, kind: Kind, entry_id: i64) -> bool {
+        let Some((entry, source)) = self.directory.entry_context(kind, entry_id) else { return false };
+        match self.block(self.downloads.delete_entry(&entry, &source, true)) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, entry_id, "the entry's downloads were not deleted");
+                false
+            }
+        }
+    }
+
+    fn entry_usage(&self, kind: Kind, source_id: i64, title: &str) -> (u64, usize) {
+        self.block(self.downloads.entry_usage(kind, source_id, title, None))
+    }
 }
 
 /// Runs `work` detached from the screen: on the shell's runtime when it exists, else on a thread. The work is not
@@ -264,10 +342,14 @@ pub mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_downloads::next::index::IndexRoots;
+    use kuro_downloads::next::runner::{RunCtx, UnitDone, UnitJob, UnitRunner};
+    use kuro_downloads::next::unit::{SourceKey, UnitRef};
+    use crate::updates::download_state::DownloadState;
 
     #[test]
     fn the_default_backend_has_no_queue_and_refuses_writes() {
-        let backend = IndexBackend { index: None, runtime: None, queues: None };
+        let backend = IndexBackend { index: None, runtime: None, queue: None };
         assert_eq!(backend.queue_entry(Kind::Manga, 1), None);
         assert!(!backend.enqueue(Kind::Manga, 1, &[2], false));
         assert!(!backend.delete_entry(Kind::Manga, 1));
@@ -276,16 +358,102 @@ mod tests {
     }
 
     #[test]
-    fn the_default_disk_check_reads_the_index_for_manga_only() {
+    fn the_default_disk_check_reads_the_index_for_both_kinds() {
         let dir = tempfile::tempdir().unwrap();
-        let index = DownloadIndex::open(dir.path(), dir.path());
-        index.add_chapter(7, "Source", "Title", "Ch 1");
-        let backend = IndexBackend { index: Some(index), runtime: None, queues: None };
+        let roots = IndexRoots { manga: dir.path().join("manga"), anime: dir.path().join("anime") };
+        let index = DownloadIndex::open(roots, dir.path());
+        index.add_unit(Kind::Manga, 7, "Source (EN)", "Title", "Ch 1");
+        index.add_unit(Kind::Anime, 7, "Source (EN)", "Title", "Episode 1");
+        let backend = IndexBackend { index: Some(index), runtime: None, queue: None };
         let key = DiskKey { source_id: 7, entry_title: "Title".into(), unit_name: "Ch 1".into(), scanlator: None };
         assert!(backend.on_disk(Kind::Manga, &key));
-        assert!(!backend.on_disk(Kind::Anime, &key), "the anime cache is not in the shell yet");
+        assert!(!backend.on_disk(Kind::Anime, &key), "the other kind has no such unit");
+        let episode = DiskKey { unit_name: "Episode 1".into(), ..key.clone() };
+        assert!(backend.on_disk(Kind::Anime, &episode));
         let other = DiskKey { unit_name: "Ch 2".into(), ..key };
         assert!(!backend.on_disk(Kind::Manga, &other));
+    }
+
+    /// A runner that cannot run any source: its units queue and wait.
+    struct Idle(Kind);
+
+    #[async_trait::async_trait]
+    impl UnitRunner for Idle {
+        fn kind(&self) -> Kind {
+            self.0
+        }
+        fn can_run(&self, _: &SourceKey) -> bool {
+            false
+        }
+        fn staging_names(&self, _: &UnitRef) -> Vec<String> {
+            Vec::new()
+        }
+        async fn run(&self, _: UnitJob, _: RunCtx) -> Result<UnitDone, kuro_downloads::DownloadError> {
+            Err(kuro_downloads::DownloadError::Internal("idle".to_owned()))
+        }
+    }
+
+    /// A service over runners that run nothing: units queue and wait, nothing downloads.
+    fn live_backend(rt: &tokio::runtime::Runtime) -> (tempfile::TempDir, Arc<Db>, LiveBackend) {
+        use kuro_downloads::next::index::IndexRoots;
+        use kuro_downloads::next::layout::Layout;
+        use kuro_downloads::next::pending::PendingStore;
+        use kuro_downloads::next::queue::{Layouts, QueueParams};
+        use kuro_downloads::next::store::QueueStore;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).unwrap()).unwrap());
+        let directory = Arc::new(AppDirectory::new(db.clone()));
+        let layouts = || Layouts {
+            manga: Layout::new(Kind::Manga, dir.path().join("manga")),
+            anime: Layout::new(Kind::Anime, dir.path().join("anime")),
+        };
+        let roots = IndexRoots { manga: dir.path().join("manga"), anime: dir.path().join("anime") };
+        let index = DownloadIndex::open(roots, dir.path());
+        let (_tx, connectivity) = tokio::sync::watch::channel(kuro_downloads::next::gate::Connectivity { online: true, metered: false });
+        let queue = {
+            let _entered = rt.enter();
+            Queue::spawn(QueueParams {
+                db: db.clone(),
+                store: Arc::new(QueueStore::new(db.clone())),
+                runners: Kind::ALL.map(|kind| Arc::new(Idle(kind)) as Arc<dyn UnitRunner>).to_vec(),
+                directory: directory.clone(),
+                layouts: layouts(),
+                index: index.clone(),
+                free_space: |_| Some(u64::MAX),
+                max_active: Arc::new(|| 1),
+                connectivity,
+                only_over_wifi: false,
+            })
+        };
+        let downloads = Downloads::new(queue, index, layouts(), Arc::new(PendingStore::new(db.clone())), directory, db.clone());
+        (dir, db.clone(), LiveBackend::new(downloads, db, rt.handle().clone()))
+    }
+
+    #[test]
+    fn the_live_backend_queues_and_cancels_units_of_both_kinds() {
+        use kuro_data::entry::{Entry, EntryRepo};
+        use kuro_data::item::Item;
+        use kuro_data::source::StubSourceRepo;
+
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let (_dir, db, backend) = live_backend(&rt);
+        for kind in Kind::ALL {
+            StubSourceRepo::new(db.clone(), kind).upsert(77, "en", "Site").unwrap();
+            let entry = Entry { url: "/e".into(), title: "Title".into(), source: 77, status: 1, ..Entry::create(kind) };
+            let entry_id = EntryRepo::new(db.clone()).insert(&entry).unwrap();
+            let item = Item { entry_id, url: "/e/1".into(), name: "Unit 1".into(), ..Item::create(kind) };
+            let unit_id = ItemRepo::new(db.clone()).add_all(&[item]).unwrap()[0].id;
+            assert!(!backend.source_installed(kind, 77), "a stub is not installed");
+            assert_eq!(backend.queue_entry(kind, unit_id), None);
+            assert!(backend.enqueue(kind, entry_id, &[unit_id], false), "{kind:?} is queued");
+            assert!(!backend.enqueue(kind, entry_id, &[unit_id], false), "a queued unit is not queued twice");
+            let queued = backend.queue_entry(kind, unit_id).expect("the unit is in the queue");
+            assert_eq!(queued.status, DownloadState::Queue);
+            backend.cancel(kind, unit_id);
+            assert_eq!(backend.queue_entry(kind, unit_id), None);
+        }
     }
 
     #[test]

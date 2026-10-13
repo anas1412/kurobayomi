@@ -28,6 +28,8 @@ pub struct Shell {
     index_cache: std::path::PathBuf,
     /// The running download managers, once [`Shell::start_downloads`] has started them.
     downloads_started: RefCell<Option<crate::downloads::Started>>,
+    /// The one download service of both kinds, started beside the old managers until the callers have moved.
+    download_service: RefCell<Option<crate::downloads::Service>>,
 }
 
 thread_local! {
@@ -51,6 +53,7 @@ impl Shell {
                     downloads: OnceCell::new(),
                     index_cache,
                     downloads_started: RefCell::new(None),
+                    download_service: RefCell::new(None),
                 })
             })
             .clone()
@@ -121,7 +124,7 @@ impl Shell {
     }
 
     /// Starts the download managers on the data the app has opened (call once, after the migrations): the manga manager
-    /// and the anime queue, whose notices go to `notifier`. A failure is logged and the app runs without downloads. The
+    /// and the anime queue, whose notices go to `notifier`, and the one download service of both kinds. A failure is logged and the app runs without downloads. The
     /// first call wins.
     pub fn start_downloads(&self, notifier: Arc<dyn Notifier>) {
         if self.downloads_started.borrow().is_some() {
@@ -136,7 +139,7 @@ impl Shell {
             }
         };
         let app = crate::data::app();
-        match crate::downloads::start(&paths, self.downloads().clone(), Arc::clone(&app.db), app.base.store().clone(), notifier) {
+        match crate::downloads::start(&paths, self.downloads().clone(), Arc::clone(&app.db), app.base.store().clone(), notifier.clone()) {
             Ok(started) => {
                 if let Some(queue) = &started.queues.anime {
                     crate::entry_core::anime::download_backend::install_queue(queue.clone());
@@ -145,6 +148,23 @@ impl Shell {
             }
             Err(e) => tracing::error!("the download managers did not start: {e}"),
         }
+        // The queue is not saved by this service until the callers have moved: the old managers save it.
+        match crate::downloads::start_service(&paths, Arc::clone(&app.db), app.base.store().clone(), notifier, false) {
+            Ok(service) => {
+                crate::updates::download_host::install(Arc::new(crate::updates::download_host::LiveBackend::new(
+                    service.downloads.clone(),
+                    Arc::clone(&app.db),
+                    self.runtime.clone(),
+                )));
+                *self.download_service.borrow_mut() = Some(service);
+            }
+            Err(e) => tracing::error!("the download service did not start: {e}"),
+        }
+    }
+
+    /// The one download service of both kinds, or `None` before [`Shell::start_downloads`] has started it.
+    pub fn download_service(&self) -> Option<kuro_downloads::next::service::Downloads> {
+        self.download_service.borrow().as_ref().map(|service| service.downloads.clone())
     }
 
     /// The running download managers, or `None` before [`Shell::start_downloads`] has started them.
@@ -176,6 +196,7 @@ mod tests {
             downloads: OnceCell::from(DownloadIndex::open(dir.path(), dir.path())),
             index_cache: dir.path().to_path_buf(),
             downloads_started: RefCell::new(None),
+            download_service: RefCell::new(None),
         }
     }
 

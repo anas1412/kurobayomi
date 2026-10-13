@@ -6,7 +6,7 @@
 //! listed before. A row whose episode, anime or source name is unknown is dropped; its folder stays on disk.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
@@ -49,7 +49,7 @@ pub fn start(
     notifier: Arc<dyn Notifier>,
 ) -> Result<AnimeQueue, String> {
     let root = storage.downloads_dir(Kind::Anime).map_err(|e| format!("the anime downloads folder is not available: {e}"))?;
-    let index = crate::updates::download_host::anime_index(storage).ok_or("the anime download index has no folder")?;
+    let index = anime_index(storage).ok_or("the anime download index has no folder")?;
     let layout = AnimeLayout::new(Some(root));
     let store = AnimeQueueStore::open(schema_unified::open_in_data_dir(paths).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
@@ -74,6 +74,33 @@ pub fn start(
     });
     notices(queue.clone(), notifier);
     Ok(queue)
+}
+
+/// The old anime download index (T-42a-045), until the one index replaces it: over the anime downloads folder of `storage`, with its own snapshot file in the
+/// platform cache folder. Opened on the first call and shared (later calls get the same index); `None` when the
+/// platform folders cannot be resolved. It rescans after each load of the repository sources, so their downloads are
+/// recognised; open it inside the app's runtime.
+fn anime_index(storage: &kuro_domain::storage::StorageManager) -> Option<kuro_downloads::anime::cache::AnimeIndex> {
+    static INDEX: OnceLock<Option<kuro_downloads::anime::cache::AnimeIndex>> = OnceLock::new();
+    INDEX
+        .get_or_init(|| {
+            use kuro_platform::paths::Paths as _;
+            let paths = kuro_platform::linux::paths::LinuxPaths::system().ok()?;
+            let cache = paths.cache_dir();
+            if let Err(e) = std::fs::create_dir_all(&cache) {
+                tracing::warn!("the anime download index snapshot folder was not created: {e}");
+            }
+            let index = kuro_downloads::anime::cache::AnimeIndex::open(storage.downloads_path(Kind::Anime), &cache);
+            let follower = index.clone();
+            crate::recipe_sources::follow_loads(move || {
+                let index = follower.clone();
+                async move {
+                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(Kind::Anime)).await;
+                }
+            });
+            Some(index)
+        })
+        .clone()
 }
 
 /// The saved queue as QUEUE entries, in saved order. The store keeps only the rows whose entry could be rebuilt.
