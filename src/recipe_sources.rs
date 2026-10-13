@@ -553,9 +553,9 @@ mod tests {
         assert_eq!(names, [(id, "Example Manga (EN)".to_owned())]);
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("Example Manga (EN)").join("Solo").join("Chapter 1")).unwrap();
-        let tree = kuro_downloads::index::scan(root.path(), &names);
-        assert!(tree.sources[&id].manga["Solo"].chapters.contains("Chapter 1"));
-        assert!(kuro_downloads::index::scan(root.path(), &[]).sources.is_empty(), "without the repository source the folder is unknown");
+        let tree = kuro_downloads::next::index::scan(Kind::Manga, root.path(), &names);
+        assert!(tree.sources[&id].entries["Solo"].units.contains("Chapter 1"));
+        assert!(kuro_downloads::next::index::scan(Kind::Manga, root.path(), &[]).sources.is_empty(), "without the repository source the folder is unknown");
     }
 
     /// Lets the spawned follower run until it waits again (the test runtime has one thread).

@@ -28,6 +28,7 @@ use kuro_extensions::anime::service::{AnimeExtensions, pump};
 use kuro_extensions::anime::trust::TrustStore;
 use kuro_extensions::registry::{ExtensionRegistry, Snapshot};
 use kuro_domain::source::model::Source;
+use kuro_downloads::next::layout::Layout;
 use kuro_platform::paths::Paths;
 use kuro_prefs::source::{SourcePrefs, system_locale};
 use kuro_prefs::store::PrefStore;
@@ -96,10 +97,11 @@ fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
 }
 
 /// The download folder names of every installed source (T-17a-048), as (anime, manga): `Name (LANG)` for the anime
-/// sources, and the extension names for the manga packages, whose sources the manga registry does not list.
+/// sources, and the extension names for the manga packages, whose sources the manga registry does not list. Both come
+/// from the one folder naming of the download layout.
 fn download_folder_names(state: &ExtensionState, manga: &Snapshot) -> (Vec<String>, Vec<String>) {
-    let anime = state.installed().values().flat_map(|ext| &ext.sources).map(|s| kuro_downloads::anime::naming::source_dir_name(&s.name, &s.lang));
-    let manga = manga.installed.values().map(|ext| kuro_downloads::layout::DownloadLayout::source_dir_name(&ext.name));
+    let anime = state.installed().values().flat_map(|ext| &ext.sources).map(|s| Layout::source_dir_name(&s.name, &s.lang));
+    let manga = manga.installed.values().map(|ext| Layout::source_dir_name(&ext.name, ""));
     (anime.collect(), manga.collect())
 }
 
@@ -218,10 +220,21 @@ pub fn start(store: &PrefStore) {
     let roots = storage.map(|s| (s.downloads_path(kuro_platform::kind::Kind::Anime), s.downloads_path(kuro_platform::kind::Kind::Manga)));
     let (apply_registry, apply_handle) = (registry.clone(), tokio::runtime::Handle::current());
     let mut orphans_logged = false;
+    let mut known_sources: Vec<i64> = Vec::new();
     glib::spawn_future_local(pump(inbox, move |event| {
         let mut state = apply_state.borrow_mut();
         state.apply(event);
         publish(&state, &apply_prefs);
+        // An anime package was installed or removed: the index rescans and the waiting downloads are asked about their
+        // source, as after a repository load.
+        let sources: Vec<i64> = state.installed().values().flat_map(|ext| &ext.sources).map(|s| s.id).collect();
+        if orphans_logged && sources != known_sources {
+            if let Some(downloads) = crate::shell::host::Shell::get().and_then(|shell| shell.download_service()) {
+                downloads.reindex(Some(kuro_platform::kind::Kind::Anime));
+                downloads.sources_changed();
+            }
+        }
+        known_sources = sources;
         if state.initialized() && !orphans_logged {
             orphans_logged = true;
             if let Some((anime_root, manga_root)) = &roots {

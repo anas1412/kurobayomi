@@ -257,7 +257,7 @@ define_prefs! {
     "remove_after_read_slots", Normal, Int, -1, "downloads", "remove_after_read_slots";
     "download_new", Normal, Bool, false, "downloads", "download_new_chapters";
     "download_new_episode", Normal, Bool, false, "downloads", "download_new_episodes";
-    "download_slots", Normal, Int, 1, "downloads", "number_of_downloads";
+    "download_slots", Normal, Int, 3, "downloads", "number_of_downloads";
     "backup_interval", Normal, Int, 12, "backup", "backup_interval";
     "__APP_STATE_last_auto_backup_timestamp", AppState, Long, 0, "backup", "last_auto_backup_timestamp";
     "__APP_STATE_storage_dir", AppState, Str, "", "storage", "base_storage_directory";

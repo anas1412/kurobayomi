@@ -21,7 +21,7 @@ pub fn remove_after_read_label(slots: i32) -> String {
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let d = DownloadPrefs::new(prefs.store());
     vec![
-        item(ranged_choice("Maximum anime downloads", &d.number_of_downloads_pref, |n| n.to_string(), true)),
+        item(ranged_choice("Maximum downloads", &d.number_of_downloads_pref, |n| n.to_string(), true)),
         group(
             "Delete chapters/episodes",
             vec![ranged_choice("After reading/watching automatically delete", &d.remove_after_read_slots, remove_after_read_label, true)],
@@ -50,7 +50,7 @@ mod tests {
     fn the_page_holds_the_slots_the_delete_rule_and_the_two_new_item_switches() {
         let rows = page_rows(&Prefs::in_memory());
         let top: Vec<&str> = rows.iter().filter_map(|r| match r { Preference::Item(i) => Some(i.title()), _ => None }).collect();
-        assert_eq!(top, ["Maximum anime downloads"]);
+        assert_eq!(top, ["Maximum downloads"]);
         let auto: Vec<&str> = find(&rows, "Auto-download").iter().map(PreferenceItem::title).collect();
         assert_eq!(auto, ["Download new episodes", "Download new chapters"]);
         let delete: Vec<&str> = find(&rows, "Delete chapters/episodes").iter().map(PreferenceItem::title).collect();

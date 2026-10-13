@@ -188,12 +188,12 @@ pub fn share_crash_logs_row() -> PreferenceItem {
     }
 }
 
-/// Invalidates the shell's download index (the one the banners and filters read): its next renewal rescans the download
-/// folders, and the snapshot file on disk is gone. The one index serves manga and anime alike.
+/// Invalidates the download index of both kinds (the one the banners and filters read): its next renewal rescans the
+/// download folders, and the snapshot file on disk is gone.
 fn reindex_downloads() {
-    match crate::shell::host::Shell::get() {
-        Some(shell) => {
-            shell.downloads().invalidate();
+    match crate::shell::host::Shell::get().and_then(|shell| shell.download_service()) {
+        Some(downloads) => {
+            downloads.reindex(None);
             crate::toast::notify("Downloads index invalidated");
         }
         None => crate::toast::notify("Failed to reindex downloads"),
