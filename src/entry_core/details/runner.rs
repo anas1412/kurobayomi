@@ -50,7 +50,7 @@ pub trait EntryBackend: Send + Sync + 'static {
     fn fetch(&self, entry_id: i64, plan: RefreshPlan, trigger: Trigger) -> EntryFetch;
     /// Queues new episodes for download. Only a manual refresh reaches this (E-REF-5). The app has no anime download
     /// queue wired yet, so the default does nothing.
-    fn enqueue_new_episodes(&self, _anime_id: i64, _episodes: &[Item]) {}
+    fn enqueue_new_items(&self, _anime_id: i64, _episodes: &[Item]) {}
     /// Binds the enhanced trackers of an entry that just joined the library (`bindEnhancedTrackers`).
     fn bind_enhanced(&self, _anime_id: i64) {}
     /// Deletes the cover files of an entry that just left the library (`removeCovers`), after the write succeeded.
@@ -70,16 +70,16 @@ pub trait EntryBackend: Send + Sync + 'static {
         false
     }
     /// The ids of the entry's episodes that are on disk.
-    fn downloaded_episodes(&self, _anime_id: i64) -> HashSet<i64> {
+    fn downloaded_items(&self, _anime_id: i64) -> HashSet<i64> {
         HashSet::new()
     }
     /// Queues these episodes. With `start_now` the one episode goes to the front and the queue starts. `false` when
     /// the downloads layer is not there: nothing was queued.
-    fn enqueue_episodes(&self, _anime_id: i64, _episode_ids: &[i64], _start_now: bool) -> bool {
+    fn enqueue_items(&self, _anime_id: i64, _episode_ids: &[i64], _start_now: bool) -> bool {
         false
     }
     /// Deletes the downloads of these episodes (the Delete row, and a mark seen with "remove after seen").
-    fn delete_episodes(&self, _anime_id: i64, _episode_ids: &[i64]) {}
+    fn delete_items(&self, _anime_id: i64, _episode_ids: &[i64]) {}
     /// Whether a tracker is logged in: the tracking button opens the tracking sheet then, the tracking settings
     /// otherwise (E-25). The default is no; the app's backends read the published tracker session.
     fn has_logged_in_tracker(&self) -> bool {
@@ -313,7 +313,7 @@ impl Shared {
             .blocking(move |store| -> DataResult<Option<EntryModel>> {
                 let mut model = EntryModel::load(&store, &prefs, entry_id, ctx, |source| backend.source_info(source))?;
                 if let Some(m) = &mut model {
-                    m.downloaded = backend.downloaded_episodes(entry_id);
+                    m.downloaded = backend.downloaded_items(entry_id);
                 }
                 Ok(model)
             })
@@ -402,7 +402,7 @@ impl Shared {
         match targets {
             Ok(targets) if !targets.is_empty() => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.enqueue_new_episodes(entry_id, &targets)).await;
+                let _ = tokio::task::spawn_blocking(move || backend.enqueue_new_items(entry_id, &targets)).await;
             }
             Ok(_) => {}
             Err(e) => self.failed(e),
@@ -460,7 +460,7 @@ impl Shared {
     /// Reads the episodes on disk again and tells the page.
     async fn emit_downloads(&self, entry_id: i64) {
         let backend = Arc::clone(&self.backend);
-        if let Ok(on_disk) = tokio::task::spawn_blocking(move || backend.downloaded_episodes(entry_id)).await {
+        if let Ok(on_disk) = tokio::task::spawn_blocking(move || backend.downloaded_items(entry_id)).await {
             self.emit(EntryEvent::Downloads(on_disk));
         }
     }
@@ -524,12 +524,12 @@ impl Shared {
             }
             EntryCmd::Download { entry_id, ids, start_now } => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.enqueue_episodes(entry_id, &ids, start_now)).await;
+                let _ = tokio::task::spawn_blocking(move || backend.enqueue_items(entry_id, &ids, start_now)).await;
                 return self.emit_downloads(entry_id).await;
             }
             EntryCmd::DeleteEpisodeDownloads { entry_id, ids } => {
                 let backend = Arc::clone(&self.backend);
-                let _ = tokio::task::spawn_blocking(move || backend.delete_episodes(entry_id, &ids)).await;
+                let _ = tokio::task::spawn_blocking(move || backend.delete_items(entry_id, &ids)).await;
                 return self.emit_downloads(entry_id).await;
             }
             EntryCmd::LoadCategories { entry_id } => match self.blocking(move |s| s.categories(entry_id)).await {
@@ -608,7 +608,7 @@ mod tests {
             })
         }
 
-        fn enqueue_new_episodes(&self, _: i64, episodes: &[Item]) {
+        fn enqueue_new_items(&self, _: i64, episodes: &[Item]) {
             self.queued.lock().unwrap().push(episodes.iter().map(|e| e.number).collect());
         }
 

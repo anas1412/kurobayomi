@@ -23,6 +23,9 @@ use kuro_source::MangaSource;
 
 use crate::browse::errors::limited;
 use crate::entry_core::detail::SourceInfo;
+use crate::entry_core::details::entry_state::RefreshPlan;
+use crate::entry_core::details::runner::{EntryBackend, EntryFetch};
+use crate::entry_core::refresh_rules::Trigger;
 use crate::entry_core::downloaded::download_states;
 use crate::entry_core::errors::DetailError;
 use crate::updates::download_host::{self, DownloadBackend};
@@ -290,6 +293,80 @@ impl Backend for SourceBackend {
     }
 }
 
+/// The same source as the details page of either kind sees it (`details`): the generic page asks for what `plan`
+/// names, and gets the chapters the sync added. The manga page's own `Backend` and this trait share the methods below.
+impl EntryBackend for SourceBackend {
+    fn source_info(&self, source_id: i64) -> SourceInfo {
+        Backend::source_info(self, source_id)
+    }
+
+    fn fetch(&self, entry_id: i64, plan: RefreshPlan, _trigger: Trigger) -> EntryFetch {
+        let details = plan.info.then(|| Backend::fetch_details(self, entry_id));
+        let chapters = plan.episodes.then(|| Backend::fetch_chapters(self, entry_id));
+        Box::pin(async move {
+            let (details, chapters) = futures::join!(async { Some(details?.await) }, async { Some(chapters?.await) });
+            // a details failure that the page ignores (HTTP 103) does not stop the chapters
+            if let Some(Err(error)) = details {
+                if !error.is_ignored() {
+                    return Err(error);
+                }
+            }
+            chapters.unwrap_or(Ok(Vec::new()))
+        })
+    }
+
+    fn enqueue_new_items(&self, entry_id: i64, items: &[Item]) {
+        let ids: Vec<i64> = items.iter().map(|item| item.id).collect();
+        Backend::enqueue_downloads(self, entry_id, &ids, false);
+    }
+
+    fn bind_enhanced(&self, entry_id: i64) {
+        Backend::bind_enhanced(self, entry_id);
+    }
+
+    fn remove_cover(&self, entry_id: i64) -> bool {
+        Backend::remove_cover(self, entry_id)
+    }
+
+    fn downloaded_count(&self, entry_id: i64) -> usize {
+        self.downloaded_items(entry_id).len()
+    }
+
+    fn delete_downloads(&self, entry_id: i64) {
+        let Ok(items) = ItemRepo::new(Arc::clone(&self.db)).by_entry_id(entry_id, false) else { return };
+        let ids: Vec<i64> = items.iter().map(|item| item.id).collect();
+        Backend::delete_downloads(self, entry_id, &ids);
+    }
+
+    fn has_download_handler(&self) -> bool {
+        self.downloads.is_some()
+    }
+
+    fn downloaded_items(&self, entry_id: i64) -> std::collections::HashSet<i64> {
+        Backend::downloads(self, entry_id).into_iter().filter(|(_, state)| *state == DownloadState::Downloaded).map(|(id, _)| id).collect()
+    }
+
+    fn enqueue_items(&self, entry_id: i64, item_ids: &[i64], start_now: bool) -> bool {
+        Backend::enqueue_downloads(self, entry_id, item_ids, start_now)
+    }
+
+    fn delete_items(&self, entry_id: i64, item_ids: &[i64]) {
+        Backend::delete_downloads(self, entry_id, item_ids);
+    }
+
+    fn has_logged_in_tracker(&self) -> bool {
+        Backend::has_logged_in_tracker(self)
+    }
+
+    fn is_http_source(&self, source_id: i64) -> bool {
+        Backend::is_http_source(self, source_id)
+    }
+
+    fn source_language(&self, source_id: i64) -> String {
+        (self.lookup)(source_id).map(|source| source.lang().to_owned()).unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,7 +416,7 @@ mod tests {
         // details: the page's backend fills the row and its chapters
         let source: Arc<dyn MangaSource> = fake.clone();
         let backend = SourceBackend::new(Arc::clone(&db), Arc::new(move |sid| (sid == 41).then(|| Arc::clone(&source))), false);
-        assert_eq!(backend.source_info(41), SourceInfo { name: "Fake Central (EN)".into(), stub: false });
+        assert_eq!(Backend::source_info(&backend, 41), SourceInfo { name: "Fake Central (EN)".into(), stub: false });
         rt.block_on(backend.fetch_details(id)).expect("details");
         rt.block_on(backend.fetch_chapters(id)).expect("chapters");
         let manga = EntryRepo::new(Arc::clone(&db)).by_id(id).unwrap();
@@ -366,7 +443,7 @@ mod tests {
         assert_eq!(ItemRepo::new(Arc::clone(&db)).by_entry_id(id, false).unwrap().len(), 2, "a failed refresh keeps the chapters");
         let other = EntryRepo::new(Arc::clone(&db)).insert(&Entry { source: 99, url: "/x".into(), title: "X".into(), ..Entry::create(Kind::Manga) }).unwrap();
         assert_eq!(rt.block_on(backend.fetch_details(other)), Err(DetailError::SourceNotInstalled));
-        assert!(backend.source_info(99).stub);
+        assert!(Backend::source_info(&backend, 99).stub);
     }
 
     #[test]
@@ -420,7 +497,7 @@ mod tests {
         assert!(backend.enqueue_downloads(id, &ids, false));
         assert!(backend.enqueue_downloads(id, &ids, true));
         backend.cancel_download(ids[0]);
-        backend.delete_downloads(id, &ids[..1]);
+        Backend::delete_downloads(&backend, id, &ids[..1]);
         assert_eq!(
             fake.calls(),
             [

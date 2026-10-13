@@ -271,29 +271,29 @@ impl EntryBackend for RemoteAnimeBackend {
         self.downloads.as_ref().is_some_and(EntryDownloads::can_enqueue)
     }
 
-    fn downloaded_episodes(&self, entry_id: i64) -> HashSet<i64> {
+    fn downloaded_items(&self, entry_id: i64) -> HashSet<i64> {
         let (Some(downloads), Some((entry, episodes, info))) = (&self.downloads, self.entry_episodes(entry_id, None)) else { return HashSet::new() };
         downloads.downloaded(&entry, &episodes, &info)
     }
 
     fn downloaded_count(&self, entry_id: i64) -> usize {
-        self.downloaded_episodes(entry_id).len()
+        self.downloaded_items(entry_id).len()
     }
 
-    fn enqueue_episodes(&self, entry_id: i64, episode_ids: &[i64], start_now: bool) -> bool {
+    fn enqueue_items(&self, entry_id: i64, episode_ids: &[i64], start_now: bool) -> bool {
         let (Some(downloads), Some((entry, episodes, info))) = (&self.downloads, self.entry_episodes(entry_id, Some(episode_ids))) else { return false };
         downloads.enqueue(&entry, &episodes, &info, start_now)
     }
 
-    fn delete_episodes(&self, entry_id: i64, episode_ids: &[i64]) {
+    fn delete_items(&self, entry_id: i64, episode_ids: &[i64]) {
         let (Some(downloads), Some((entry, episodes, info))) = (&self.downloads, self.entry_episodes(entry_id, Some(episode_ids))) else { return };
         let categories = self.episodes.category_ids(entry_id).unwrap_or_default();
         downloads.delete(&entry, &episodes, categories, &info);
     }
 
     fn delete_downloads(&self, entry_id: i64) {
-        let on_disk: Vec<i64> = self.downloaded_episodes(entry_id).into_iter().collect();
-        self.delete_episodes(entry_id, &on_disk);
+        let on_disk: Vec<i64> = self.downloaded_items(entry_id).into_iter().collect();
+        self.delete_items(entry_id, &on_disk);
     }
 }
 

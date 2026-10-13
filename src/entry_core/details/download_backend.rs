@@ -39,7 +39,7 @@ impl EntryDownloads {
 
     /// The ids of the episodes that are finished on disk.
     pub fn downloaded(&self, entry: &Entry, episodes: &[Item], _info: &SourceInfo) -> HashSet<i64> {
-        let states = download_states(self.host.as_ref(), Kind::Anime, entry, episodes);
+        let states = download_states(self.host.as_ref(), entry.kind, entry, episodes);
         states.into_iter().filter(|(_, state)| *state == DownloadState::Downloaded).map(|(id, _)| id).collect()
     }
 
@@ -51,13 +51,13 @@ impl EntryDownloads {
         }
         if start_now {
             let Some(first) = episodes.first() else { return false };
-            self.host.start_now(Kind::Anime, first.id);
+            self.host.start_now(entry.kind, first.id);
             return true;
         }
         let ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
-        let queued = self.host.enqueue(Kind::Anime, entry.id, &ids);
+        let queued = self.host.enqueue(entry.kind, entry.id, &ids);
         if queued {
-            self.host.start_queue(Kind::Anime);
+            self.host.start_queue(entry.kind);
         }
         queued
     }
@@ -66,7 +66,7 @@ impl EntryDownloads {
     /// keep any back (an explicit delete); the entry's categories no longer matter.
     pub fn delete(&self, entry: &Entry, episodes: &[Item], _categories: Vec<i64>, _info: &SourceInfo) {
         let ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
-        self.host.delete(Kind::Anime, entry.id, &ids);
+        self.host.delete(entry.kind, entry.id, &ids);
     }
 }
 
