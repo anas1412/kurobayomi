@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kuro_downloads::model::{ChapterRef, Page};
-use kuro_downloads::source::{ChapterSource, ImageResponse};
+use kuro_downloads::manga::source::{ChapterRef, Page};
+use kuro_downloads::manga::source::{ChapterSource, ImageResponse};
 use kuro_source::model::SChapter;
 use kuro_source::{MangaSource, SourceError};
 use reqwest::header::CONTENT_TYPE;

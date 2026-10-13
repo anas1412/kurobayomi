@@ -4,7 +4,6 @@
 
 pub mod comicinfo;
 pub mod images;
-pub mod local;
 pub mod pages;
 pub mod pipeline;
 pub mod runner;

@@ -34,7 +34,6 @@ pub mod runner;
 pub mod sanitize;
 pub mod scheduler;
 pub mod service;
-pub mod source;
 pub mod state;
 pub mod store;
 pub mod throttle;

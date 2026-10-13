@@ -12,7 +12,7 @@ use kuro_db::handle::Db;
 use kuro_downloads::queue::{EnqueueRequest, Place};
 use kuro_downloads::runner::{ChapterSources, SourceDirectory};
 use kuro_downloads::unit::{Availability, EntryRef, SourceKey, UnitRef};
-use kuro_downloads::source::ChapterSource;
+use kuro_downloads::manga::source::ChapterSource;
 use kuro_platform::kind::Kind;
 use kuro_source::local::LOCAL_SOURCE_ID;
 

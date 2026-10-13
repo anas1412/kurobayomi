@@ -16,7 +16,6 @@ use std::sync::atomic::AtomicBool;
 use kuro_db::handle::Db;
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_downloads::anime::downloader::EpisodeEngine;
-use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_downloads::manga::runner::ChapterPipeline;
 use kuro_downloads::gate::Connectivity;
 use kuro_downloads::index::{DownloadIndex, IndexRoots};
@@ -81,10 +80,9 @@ pub fn start_service(paths: &dyn Paths, db: Arc<Db>, prefs: PrefStore, notifier:
     let (manga_root, anime_root) = (root(Kind::Manga)?, root(Kind::Anime)?);
     let directory = Arc::new(AppDirectory::new(db.clone()));
     let client = crate::net_client::build(&NetworkPrefs::new(prefs.clone()), paths).map_err(|e| e.to_string())?;
-    let anime_layout = AnimeLayout::new(Some(anime_root.clone()));
     let runners: Vec<Arc<dyn UnitRunner>> = vec![
         Arc::new(ChapterPipeline::new(directory.clone())),
-        Arc::new(EpisodeEngine::new(anime_layout, Arc::new(LiveHosters)).with_fetch(Arc::new(HttpVideoFetch::new(client)))),
+        Arc::new(EpisodeEngine::new(Arc::new(LiveHosters)).with_fetch(Arc::new(HttpVideoFetch::new(client)))),
     ];
     let index = DownloadIndex::open(
         IndexRoots { manga: storage.downloads_path(Kind::Manga), anime: storage.downloads_path(Kind::Anime) },

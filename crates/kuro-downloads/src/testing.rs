@@ -9,8 +9,7 @@ use futures::StreamExt;
 use futures::stream;
 use kuro_source::SourceError;
 
-use crate::model::{ChapterRef, DownloadState, MangaRef, Page, QueuedDownload, SourceRef};
-use crate::source::{ChapterSource, ImageResponse};
+use crate::manga::source::{ChapterSource, ChapterRef, ImageResponse, Page};
 
 /// A JPEG-looking body: magic bytes followed by filler, so the sniffer sees a JPEG.
 pub fn jpeg_bytes(len: usize) -> Vec<u8> {
@@ -124,50 +123,6 @@ impl ChapterSource for FakeSource {
 
 pub fn fake(id: i64) -> Arc<FakeSource> {
     Arc::new(FakeSource::new(id))
-}
-
-pub fn fake_source(id: i64) -> SourceRef {
-    fake(id)
-}
-
-pub fn manga(id: i64, source_id: i64, title: &str) -> MangaRef {
-    MangaRef {
-        id,
-        url: format!("/manga/{id}"),
-        title: title.into(),
-        source_id,
-        description: None,
-        author: None,
-        artist: None,
-        genre: None,
-        status: 0,
-    }
-}
-
-pub fn chapter(id: i64, manga_id: i64, name: &str) -> ChapterRef {
-    ChapterRef {
-        id,
-        manga_id,
-        url: format!("/chapter/{id}"),
-        name: name.into(),
-        scanlator: None,
-        read: false,
-        bookmark: false,
-        source_order: id,
-        chapter_number: id as f64,
-        date_upload: 0,
-    }
-}
-
-/// A queue item for `source`, with manga `manga_id` titled `Manga <id>` and chapter `chapter_id` named `Chapter <id>`.
-pub fn download(source: &SourceRef, chapter_id: i64, manga_id: i64, status: DownloadState) -> QueuedDownload {
-    QueuedDownload {
-        source: source.clone(),
-        manga: manga(manga_id, source.id(), &format!("Manga {manga_id}")),
-        chapter: chapter(chapter_id, manga_id, &format!("Chapter {chapter_id}")),
-        status,
-        pages: None,
-    }
 }
 
 /// A copy of `tests/fixtures/dl/<name>` in a fresh temp folder (edge-cases section 5). The tests change the copy, never

@@ -12,19 +12,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use kuro_platform::kind::Kind;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, check_on_path, hls_input_options, probe_duration, run_remux, with_playlist_options};
-use crate::anime::layout::{AnimeLayout, episode_folder_names, rename_dir};
 use crate::anime::model::{AnimeDownload, Video};
 use crate::anime::progress::ProgressCell;
-use crate::anime::naming::{episode_dir_name, fat_safe, file_component};
+use crate::naming::{UnitName, fat_safe, file_component, unit_dir_name, unit_dir_names};
 use crate::anime::resolve::{HosterResolver, resolve_video};
 use crate::anime::torrent::{TORRENT_SERVER_HOST, check_torrent};
 use crate::error::DownloadError;
 use crate::naming::TMP_DIR_SUFFIX;
-use crate::layout::Layout;
+use crate::layout::{Layout, rename_dir};
 use crate::redact::redacted_headers;
 use crate::retry::with_retry;
 
@@ -65,7 +65,6 @@ fn copy_ext(url: &str) -> &'static str {
 /// them a direct file is copied through the [`VideoFetch`] port, and an HLS stream fails with `FfmpegMissing`.
 /// `ffmpeg` and `ffprobe` are program names or paths.
 pub struct EpisodeEngine {
-    layout: AnimeLayout,
     resolver: Arc<dyn HosterResolver>,
     ffmpeg: OsString,
     ffprobe: OsString,
@@ -74,9 +73,8 @@ pub struct EpisodeEngine {
 }
 
 impl EpisodeEngine {
-    pub fn new(layout: AnimeLayout, resolver: Arc<dyn HosterResolver>) -> Self {
+    pub fn new(resolver: Arc<dyn HosterResolver>) -> Self {
         Self {
-            layout,
             resolver,
             ffmpeg: FFMPEG.into(),
             ffprobe: FFPROBE.into(),
@@ -155,12 +153,13 @@ impl EpisodeEngine {
     /// The staging folder's episode name. A staging folder left by an earlier attempt keeps its name, so the resume finds
     /// it. Otherwise the plain name is used: a finished folder of that name is replaced at the end (B12).
     fn target_name(&self, item: &AnimeDownload, anime_dir: &Path) -> String {
-        for candidate in episode_folder_names(&item.episode) {
+        let unit = UnitName::new(&item.episode.name, item.episode.scanlator.as_deref());
+        for candidate in unit_dir_names(Kind::Anime, unit) {
             if anime_dir.join(format!("{candidate}{TMP_DIR_SUFFIX}")).is_dir() {
                 return candidate;
             }
         }
-        episode_dir_name(&item.episode.name, item.episode.scanlator.as_deref())
+        unit_dir_name(Kind::Anime, unit)
     }
 
     /// Runs one episode inside `anime_dir`: resolve the video, fetch it into the staging folder, finalise. Returns the
@@ -271,12 +270,11 @@ mod tests {
         SPAWN_LOCK.lock().await
     }
 
-    impl EpisodeEngine {
-        /// One download of `item` into its anime folder, as `anime::runner` does it.
-        async fn run(&self, item: Arc<AnimeDownload>, cancel: CancellationToken) -> Result<(), DownloadError> {
-            let anime_dir = self.layout.anime_dir(&item.source, &item.anime.title)?;
-            self.download(&item, &anime_dir, &cancel).await.map(|_| ())
-        }
+    /// One download of `item` into its anime folder under `root`, as `anime::runner` does it.
+    async fn run(engine: &EpisodeEngine, root: &Path, item: Arc<AnimeDownload>, cancel: CancellationToken) -> Result<(), DownloadError> {
+        let layout = Layout::new(Kind::Anime, root);
+        let anime_dir = layout.entry_dir(&Layout::source_dir_name(&item.source.name, &item.source.lang), &item.anime.title)?;
+        engine.download(&item, &anime_dir, &cancel).await.map(|_| ())
     }
 
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -371,7 +369,7 @@ mod tests {
 
     fn engine(root: &Path, ffmpeg: &Path, ffprobe: &Path) -> (EpisodeEngine, Arc<Hoster>) {
         let hoster = Arc::new(Hoster { answer: Some(video()), calls: AtomicUsize::new(0) });
-        let engine = EpisodeEngine::new(AnimeLayout::new(Some(root.to_path_buf())), hoster.clone())
+        let engine = EpisodeEngine::new(hoster.clone())
             .with_programs(ffmpeg.as_os_str(), ffprobe.as_os_str());
         (engine, hoster)
     }
@@ -458,7 +456,7 @@ mod tests {
         let (engine, hoster) = engine(tmp.path(), &ffmpeg, &ffprobe);
         let item = download(1, "Episode 1");
 
-        engine.run(item.clone(), CancellationToken::new()).await.unwrap();
+        run(&engine, tmp.path(), item.clone(), CancellationToken::new()).await.unwrap();
 
         assert_eq!(runs(&log), 1);
         assert_eq!(hoster.calls.load(Ordering::SeqCst), 1);
@@ -478,7 +476,7 @@ mod tests {
         let (ffmpeg, ffprobe, log) = programs(tmp.path(), 1, &partial);
         let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
 
-        let err = engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
+        let err = run(&engine, tmp.path(), download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
 
         assert_eq!(err.to_string(), "Error in ffmpeg!");
         assert_eq!(runs(&log), 4, "one attempt and three retries");
@@ -496,7 +494,7 @@ mod tests {
         let (ffmpeg, ffprobe, log) = programs(tmp.path(), 1, &staging.join("Episode 1.tmp"));
         let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
 
-        engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap();
+        run(&engine, tmp.path(), download(1, "Episode 1"), CancellationToken::new()).await.unwrap();
 
         assert_eq!(runs(&log), 0, "ffmpeg is not run again");
         assert!(folder.join("Episode 1").join("Episode 1.mkv").is_file());
@@ -514,7 +512,7 @@ mod tests {
         let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
 
         // The plain name is taken by another non-empty folder: the new episode replaces it (B12, E-F03 flipped).
-        let outcome = engine.run(download(1, "Episode 1"), CancellationToken::new()).await;
+        let outcome = run(&engine, tmp.path(), download(1, "Episode 1"), CancellationToken::new()).await;
         assert!(outcome.is_ok(), "{outcome:?}");
         assert!(folder.join("Episode 1").join("Episode 1.mkv").is_file());
         assert!(!folder.join("Episode 1").join("old.mkv").exists(), "the old copy is gone");
@@ -543,7 +541,7 @@ mod tests {
         let (ffmpeg, ffprobe, _) = programs(tmp.path(), 0, &partial);
         let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
 
-        engine.run(download(1, &long), CancellationToken::new()).await.unwrap();
+        run(&engine, tmp.path(), download(1, &long), CancellationToken::new()).await.unwrap();
 
         let finished = folder.join(&long).join(file_component(&long, FINISHED_EXT));
         assert!(finished.is_file(), "the finished file exists under the cut name");
@@ -555,7 +553,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, _) =
             engine(tmp.path(), Path::new("/nonexistent/kuro-ffmpeg"), Path::new("/nonexistent/kuro-ffprobe"));
-        let err = engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
+        let err = run(&engine, tmp.path(), download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
         assert!(matches!(err, DownloadError::FfmpegMissing), "got {err:?}");
     }
 
@@ -563,8 +561,8 @@ mod tests {
     async fn no_video_from_the_hoster_is_no_video() {
         let tmp = tempfile::tempdir().unwrap();
         let hoster = Arc::new(Hoster { answer: None, calls: AtomicUsize::new(0) });
-        let engine = EpisodeEngine::new(AnimeLayout::new(Some(tmp.path().to_path_buf())), hoster);
-        let err = engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
+        let engine = EpisodeEngine::new(hoster);
+        let err = run(&engine, tmp.path(), download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
         assert!(matches!(err, DownloadError::NoVideo));
     }
 
@@ -591,7 +589,7 @@ mod tests {
         });
 
         let started = std::time::Instant::now();
-        let err = engine.run(download(1, "Episode 1"), cancel).await.unwrap_err();
+        let err = run(&engine, tmp.path(), download(1, "Episode 1"), cancel).await.unwrap_err();
 
         assert!(matches!(err, DownloadError::Cancelled), "got {err:?}");
         assert!(started.elapsed() < Duration::from_secs(4), "the probe is killed, not waited for");

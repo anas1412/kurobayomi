@@ -14,7 +14,7 @@ use crate::index::DownloadIndex;
 use crate::layout::Layout;
 use crate::unit::{EntryRef, SourceKey, UnitProgress, UnitRef};
 use crate::error::DownloadError;
-use crate::source::ChapterSource;
+use crate::manga::source::ChapterSource;
 
 #[async_trait]
 pub trait UnitRunner: Send + Sync {

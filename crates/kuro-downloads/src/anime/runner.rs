@@ -101,7 +101,6 @@ mod tests {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    use crate::anime::layout::AnimeLayout;
     use crate::anime::model::Video;
 
     static SPAWN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -131,7 +130,7 @@ mod tests {
             "prev=; last=; for a; do prev=$last; last=$a; done\nprintf video > \"$prev\"\n\
              printf 'out_time_us=30000000\\nprogress=end\\n'",
         );
-        EpisodeEngine::new(AnimeLayout::new(Some(root.to_path_buf())), Arc::new(Hoster(video)))
+        EpisodeEngine::new(Arc::new(Hoster(video)))
             .with_programs(ffmpeg.as_os_str(), ffprobe.as_os_str())
     }
 
