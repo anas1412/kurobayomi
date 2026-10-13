@@ -44,7 +44,9 @@ pub struct Opening {
 
 impl Opening {
     fn of(episode: Item) -> Self {
-        Opening { path: episode.url, episode_id: episode.id, start_ms: episode.progress * 1000 }
+        // a seen episode starts again from the beginning, like every other open (`player_view::store::start_ms`)
+        let start_ms = crate::player_view::start_ms(0, &episode);
+        Opening { path: episode.url, episode_id: episode.id, start_ms }
     }
 }
 
