@@ -75,8 +75,14 @@ pub fn store(kind: Kind) -> Arc<dyn FavoriteStore> {
         EntryRepo::new(db.clone()),
         CategoryRepo::new(db, kind),
         library.default_category(kind).clone(),
-        Arc::new(|_| 0),
-        Arc::new(|_| 0),
+        {
+            let db = app.db.clone();
+            Arc::new(move |id| crate::library::mount::clear_cached(&db, id, kuro_images::art::ArtKind::Cover))
+        },
+        {
+            let db = app.db.clone();
+            Arc::new(move |id| crate::library::mount::clear_cached(&db, id, kuro_images::art::ArtKind::Background))
+        },
     )
     .with_tracker_binder(track_binding::binder(kind));
     // an add from History takes the default item flags like every other add, for both kinds

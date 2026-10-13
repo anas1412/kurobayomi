@@ -228,8 +228,8 @@ impl EntryBackend for SourceBackend {
         crate::updates::track_binding::bind_entry(&self.db, Kind::Manga, entry_id);
     }
 
-    fn remove_cover(&self, _entry_id: i64) -> bool {
-        false
+    fn remove_cover(&self, entry_id: i64) -> bool {
+        crate::library::mount::clear_cached(&self.db, entry_id, kuro_images::art::ArtKind::Cover) > 0
     }
 
     fn downloaded_count(&self, entry_id: i64) -> usize {

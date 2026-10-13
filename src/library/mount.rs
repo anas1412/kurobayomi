@@ -23,6 +23,7 @@ use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 use kuro_images::art::{ArtKind, ArtRef};
+use kuro_images::cover_file::delete_from_cache;
 use kuro_images::invalidate::remove_covers;
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths;
@@ -180,6 +181,31 @@ pub fn remove_from_library(paths: &dyn Paths, db: &Arc<Db>, ids: &[i64]) -> usiz
             done.inspect_err(|e| tracing::error!(error = %e, entry = id, "removing from the library failed")).is_ok()
         })
         .count()
+}
+
+/// Deletes the cached cover (`ArtKind::Cover`) or background of an entry that just left the library, for the screens that
+/// write the favorite themselves (Browse, History, the entry page). The local source keeps its files. Returns how many
+/// files went; a background exists for anime only.
+pub fn clear_cached(db: &Arc<Db>, id: i64, art: ArtKind) -> usize {
+    // a test database has small ids that the real cover cache of the machine also uses: tests delete no files
+    if cfg!(test) {
+        return 0;
+    }
+    let Ok(entry) = EntryRepo::new(db.clone()).by_id(id) else { return 0 };
+    if kuro_local::ids::is_local_source(entry.source) || (art == ArtKind::Background && !entry.kind.is_anime()) {
+        return 0;
+    }
+    let Ok(paths) = LinuxPaths::system() else { return 0 };
+    let image = ArtRef {
+        owner: entry.kind,
+        entry_id: id,
+        source_id: entry.source,
+        kind: art,
+        url: if art == ArtKind::Background { entry.background_url.clone() } else { entry.thumbnail_url.clone() },
+        favorite: entry.favorite,
+        last_modified: if art == ArtKind::Background { entry.background_last_modified() } else { entry.cover_last_modified },
+    };
+    delete_from_cache(&paths, &image, false)
 }
 
 /// One entry of either kind: favorite off and its cached cover (an anime's background too) deleted.

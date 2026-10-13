@@ -199,6 +199,14 @@ impl RemoteAnimeBackend {
 }
 
 impl EntryBackend for RemoteAnimeBackend {
+    fn remove_cover(&self, entry_id: i64) -> bool {
+        use kuro_images::art::ArtKind;
+        let db = self.episodes.db();
+        // both files go; the timestamp moves when either did
+        let cover = crate::library::mount::clear_cached(&db, entry_id, ArtKind::Cover);
+        crate::library::mount::clear_cached(&db, entry_id, ArtKind::Background) + cover > 0
+    }
+
     fn has_logged_in_tracker(&self) -> bool {
         crate::entry_core::tracking::session::has_logged_in()
     }
