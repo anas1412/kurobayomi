@@ -1,22 +1,22 @@
 //! The snackbar, toast and message-key layer of the entry pages (T-39b-019). Upstream: `AnimeScreenModel.kt` (the
-//! `showSnackbar` and toast calls) and behaviour section 19 of the anime plan. Pure: the GTK side takes a
-//! [`Presentation`] and draws it with `banner_view`, and [`Notices`] is the one-at-a-time host.
+//! `showSnackbar` and toast calls) and behaviour section 19 of the anime plan. A [`Notice`] is what both entry pages
+//! hand to the app's one notification layer (`crate::toast`).
 //!
 //! Decision, queue versus replace (E-UI-3): the plan says both. `p2-edge-cases` E-UI-3 and `p2-rust-design` say a new
 //! message replaces the one on screen and its action is dropped (Compose queues them; a documented difference),
 //! while the first draft of this file queued them. The page shows what just happened, so a new message replaces:
-//! [`Notices::show`] keeps one.
+//! the toast layer keeps one.
 //!
 //! The "16 keys" of the task: section 19 of the behaviour plan has 28 rows. Twelve of them are messages with text of
 //! their own, and they are the variants of [`UserMessage`]. The other sixteen are labels of buttons, titles and
 //! texts of dialogs that other modules own (the tracking sheet, the date remover, the share chooser, Cancel, OK,
 //! Delete and Add), so there are twelve message keys, not sixteen.
 
+use std::cell::RefCell;
 use std::time::Duration;
 
 use kuro_i18n::{Arg, MsgKey, tr, trf};
 
-use crate::entry_core::banner::{Banner, Banners, Length};
 
 /// Every user-visible message of the details pages that carries text of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,8 +84,6 @@ impl SnackAction {
 pub struct Snack {
     pub message: UserMessage,
     pub action: Option<SnackAction>,
-    /// True when the snackbar has a dismiss button.
-    pub dismiss: bool,
     pub duration: Duration,
 }
 
@@ -99,68 +97,67 @@ pub enum Presentation {
 /// The presentation of each message, as in behaviour section 19. Trackers updated and tracker errors are toasts;
 /// the auto-track ask is a short snackbar with OK and a dismiss button.
 pub fn present(message: UserMessage) -> Presentation {
-    let snack = |action, dismiss| Snack { message: message.clone(), action, dismiss, duration: SNACK_DURATION };
+    let snack = |action| Snack { message: message.clone(), action, duration: SNACK_DURATION };
     match &message {
         UserMessage::TrackersUpdatedAnime(_) | UserMessage::TrackError { .. } | UserMessage::NoMatchFound => {
             Presentation::Toast(message)
         }
-        UserMessage::DeleteDownloadsForAnime => Presentation::Snack(snack(Some(SnackAction::Delete), true)),
-        UserMessage::AddAnimeToLibrary => Presentation::Snack(snack(Some(SnackAction::Add), true)),
-        UserMessage::ConfirmTrackerUpdateAnime(_) => Presentation::Snack(snack(Some(SnackAction::Ok), true)),
-        _ => Presentation::Snack(snack(None, false)),
+        UserMessage::DeleteDownloadsForAnime => Presentation::Snack(snack(Some(SnackAction::Delete))),
+        UserMessage::AddAnimeToLibrary => Presentation::Snack(snack(Some(SnackAction::Add))),
+        UserMessage::ConfirmTrackerUpdateAnime(_) => Presentation::Snack(snack(Some(SnackAction::Ok))),
+        _ => Presentation::Snack(snack(None)),
     }
 }
 
 /// A failed refresh's snack: its text with Retry and a dismiss button.
 pub fn with_retry(message: UserMessage) -> Presentation {
-    Presentation::Snack(Snack { message, action: Some(SnackAction::Retry), dismiss: true, duration: SNACK_DURATION })
+    Presentation::Snack(Snack { message, action: Some(SnackAction::Retry), duration: SNACK_DURATION })
 }
 
-/// The host of the snackbar layer: one message at a time (E-UI-3). A new message replaces the one on screen and
-/// drops its action. `A` is the page command an action button runs.
-pub struct Notices<A: Clone> {
-    host: Banners<A>,
-    /// The current snack has a dismiss button. A toast and the plain snacks have none.
-    dismissible: bool,
+/// What an entry page puts on the app's notification layer: the text and, for a snack with a button, the button's label
+/// and the page command it runs. A notice with a button stays until it is acted on or dismissed (T-38a-034); a plain
+/// one times out after `duration`. A new notice replaces the one on screen, and its action is gone (E-UI-3).
+#[derive(Debug)]
+pub struct Notice<A> {
+    pub text: String,
+    pub action: Option<(String, A)>,
+    pub duration: Duration,
 }
 
-impl<A: Clone> Default for Notices<A> {
-    fn default() -> Self {
-        Self { host: Banners::default(), dismissible: false }
+impl<A: 'static> Notice<A> {
+    /// A plain message, shown for `duration`.
+    pub fn plain(text: impl Into<String>, duration: Duration) -> Self {
+        Self { text: text.into(), action: None, duration }
     }
-}
 
-impl<A: Clone> Notices<A> {
-    /// Shows `presentation` now. `action` is what the snack's button runs; a toast has no button and a snack without
-    /// an action label ignores it. The length is 4 s for a snack and 2 s for a toast.
-    pub fn show(&mut self, presentation: Presentation, action: Option<A>, now_ms: u64) {
-        let (message, label, dismiss, duration) = match &presentation {
-            Presentation::Snack(snack) => (&snack.message, snack.action.map(SnackAction::label), snack.dismiss, snack.duration),
-            Presentation::Toast(message) => (message, None, false, TOAST_DURATION),
+    /// A message with a button.
+    pub fn with_action(text: impl Into<String>, label: impl Into<String>, command: A) -> Self {
+        Self { text: text.into(), action: Some((label.into(), command)), duration: SNACK_DURATION }
+    }
+
+    /// The notice of a presentation. `action` is what its button runs; a toast has no button and a snack without an
+    /// action label ignores it.
+    pub fn of(presentation: &Presentation, action: Option<A>) -> Self {
+        let (message, label, duration) = match presentation {
+            Presentation::Snack(snack) => (&snack.message, snack.action.map(SnackAction::label), snack.duration),
+            Presentation::Toast(message) => (message, None, TOAST_DURATION),
         };
-        self.host = Banners::default();
-        self.dismissible = dismiss;
-        self.host.push(text(message), label.zip(action), Length::Millis(duration.as_millis() as u64), now_ms);
+        Self { text: text(message), action: label.zip(action), duration }
     }
 
-    /// Expires the message when its time is up.
-    pub fn tick(&mut self, now_ms: u64) {
-        self.host.tick(now_ms);
-    }
-
-    /// The close button.
-    pub fn dismiss(&mut self, now_ms: u64) {
-        self.host.dismiss(now_ms);
-    }
-
-    /// The action button: the page command to run. The message goes away with it.
-    pub fn activate(&mut self, now_ms: u64) -> Option<A> {
-        self.host.activate_action(true, now_ms)
-    }
-
-    /// The message on screen and whether it has a dismiss button.
-    pub fn current(&self) -> Option<(&Banner<A>, bool)> {
-        self.host.current().map(|banner| (banner, self.dismissible))
+    /// Shows the notice on the toast layer. `run` takes the command when its button is pressed.
+    pub fn show(self, run: impl Fn(A) + 'static) {
+        match self.action {
+            Some((label, command)) => {
+                let command = RefCell::new(Some(command));
+                crate::toast::notify_action(&self.text, &label, None, move || {
+                    if let Some(command) = command.borrow_mut().take() {
+                        run(command);
+                    }
+                });
+            }
+            None => crate::toast::notify_for(&self.text, self.duration),
+        }
     }
 }
 
@@ -190,17 +187,17 @@ mod tests {
     #[test]
     fn snack_buttons_follow_the_table() {
         let Presentation::Snack(delete) = present(UserMessage::DeleteDownloadsForAnime) else { panic!("snack") };
-        assert_eq!((delete.action, delete.dismiss), (Some(SnackAction::Delete), true));
+        assert_eq!(delete.action, Some(SnackAction::Delete));
         assert_eq!(delete.duration, SNACK_DURATION);
         let Presentation::Snack(add) = present(UserMessage::AddAnimeToLibrary) else { panic!("snack") };
-        assert_eq!((add.action, add.dismiss), (Some(SnackAction::Add), true));
+        assert_eq!(add.action, Some(SnackAction::Add));
         let Presentation::Snack(ask) = present(UserMessage::ConfirmTrackerUpdateAnime(2)) else { panic!("snack") };
-        assert_eq!((ask.action, ask.dismiss), (Some(SnackAction::Ok), true));
+        assert_eq!(ask.action, Some(SnackAction::Ok));
         let Presentation::Snack(saved) = present(UserMessage::EpisodeSettingsUpdated) else { panic!("snack") };
-        assert_eq!((saved.action, saved.dismiss), (None, false));
+        assert_eq!(saved.action, None);
         assert_eq!(SnackAction::Ok.label(), "OK");
         let Presentation::Snack(failed) = with_retry(UserMessage::Plain("HTTP error 503".into())) else { panic!("snack") };
-        assert_eq!((failed.action.map(SnackAction::label), failed.dismiss), (Some("Retry".to_owned()), true));
+        assert_eq!(failed.action.map(SnackAction::label), Some("Retry".to_owned()));
     }
 
     #[test]
@@ -211,45 +208,18 @@ mod tests {
     }
 
     #[test]
-    fn a_new_message_replaces_the_one_on_screen_and_drops_its_action() {
-        let mut notices: Notices<&'static str> = Notices::default();
-        notices.show(present(UserMessage::DeleteDownloadsForAnime), Some("delete"), 0);
-        let (banner, dismissible) = notices.current().expect("the prompt");
-        assert_eq!((banner.text.as_str(), dismissible), ("Delete downloaded episodes?", true));
-        assert_eq!(banner.action.as_ref().map(|(label, cmd)| (label.as_str(), *cmd)), Some(("Delete", "delete")));
-        notices.show(present(UserMessage::NoEpisodes), None, 10);
-        let (banner, dismissible) = notices.current().expect("the second message");
-        assert_eq!((banner.text.as_str(), dismissible, banner.action.is_none()), ("No episodes found", false, true));
-        assert_eq!(notices.activate(11), None, "the first one's action is gone (E-UI-3)");
-    }
-
-    #[test]
-    fn a_snack_lasts_four_seconds_and_a_toast_two_and_a_toast_has_no_action() {
-        let mut notices: Notices<u8> = Notices::default();
-        notices.show(present(UserMessage::EpisodeSettingsUpdated), Some(1), 100);
-        assert!(notices.current().is_some_and(|(b, _)| b.action.is_none()), "no label, so no action even when one is passed");
-        notices.tick(4099);
-        assert!(notices.current().is_some());
-        notices.tick(4100);
-        assert!(notices.current().is_none(), "short is 4 s (T-UI-1)");
-        notices.show(present(UserMessage::NoMatchFound), Some(1), 0);
-        let (banner, dismissible) = notices.current().expect("the toast");
-        assert!(banner.action.is_none() && !dismissible);
-        notices.tick(1999);
-        assert!(notices.current().is_some());
-        notices.tick(2000);
-        assert!(notices.current().is_none(), "a toast is 2 s");
-    }
-
-    #[test]
-    fn the_action_button_runs_once_and_closes_the_message() {
-        let mut notices: Notices<&'static str> = Notices::default();
-        notices.show(present(UserMessage::AddAnimeToLibrary), Some("add"), 0);
-        assert_eq!(notices.activate(1), Some("add"));
-        assert!(notices.current().is_none());
-        notices.show(present(UserMessage::ConfirmTrackerUpdateAnime(3)), Some("ok"), 0);
-        notices.dismiss(1);
-        assert!(notices.current().is_none());
+    fn a_notice_has_a_button_only_when_the_presentation_has_a_label_and_a_command_comes_with_it() {
+        let delete = Notice::of(&present(UserMessage::DeleteDownloadsForAnime), Some("delete"));
+        assert_eq!(delete.text, "Delete downloaded episodes?");
+        assert_eq!(delete.action, Some(("Delete".to_owned(), "delete")));
+        let saved = Notice::of(&present(UserMessage::EpisodeSettingsUpdated), Some("x"));
+        assert!(saved.action.is_none(), "no label, so no action even when one is passed");
+        assert_eq!(saved.duration, SNACK_DURATION, "a snack is 4 s");
+        let toast = Notice::of(&present(UserMessage::NoMatchFound), Some("x"));
+        assert!(toast.action.is_none());
+        assert_eq!(toast.duration, TOAST_DURATION, "a toast is 2 s");
+        let retry = Notice::of(&with_retry(UserMessage::Plain("HTTP error 503".into())), Some("retry"));
+        assert_eq!(retry.action, Some(("Retry".to_owned(), "retry")));
     }
 
     #[test]

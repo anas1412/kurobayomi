@@ -1,9 +1,9 @@
-//! The Browse tab: the anime and manga source lists behind one header row, with the global search entry and the header
+//! The Browse tab: the anime and manga source lists behind one header row, with the global search and the header
 //! actions (T-40a-001, docs/design/other-tabs.md). The tab has no extensions or migrate pages: a source comes with its
 //! repository link, and the library is the only place that migrates.
 //!
-//! The header has the Anime | Manga switch at the start, the search entry in the middle and the filter and the menu at
-//! the end. Enter in the search entry runs a global search of the visible kind, and so does re-selecting the tab.
+//! The header has the Anime | Manga switch at the start and the search toggle, the filter and the menu at the end; the
+//! search bar (`ui::search_row`) sits under it. Enter in the search entry runs a global search of the visible kind, and so does re-selecting the tab.
 
 use std::rc::Rc;
 
@@ -59,7 +59,7 @@ impl BrowseShell {
         }
 
         let inner = Rc::new(Inner { stack, search: gtk::SearchEntry::new(), deps });
-        // the shared header row: the Anime | Manga switch at the start, the search entry in the middle, the actions at the end
+        // the shared header row: the Anime | Manga switch at the start, the search toggle and the actions at the end, the bar under it
         let mut end: Vec<gtk::Widget> = vec![inner.search.clone().upcast(), gtk::StackSwitcher::builder().stack(&inner.stack).build().upcast()];
         end.extend(inner.header_actions());
         let root = crate::ui::page("", &inner.stack, end, false);
@@ -78,7 +78,7 @@ impl BrowseShell {
                 inner.search_globally(&entry.text());
             }
         });
-        // Ctrl+F, Escape and Ctrl+1 and Ctrl+2 reach the shell from anywhere on the tab (T-40a-035)
+        // Escape and Ctrl+1 and Ctrl+2 reach the shell from anywhere on the tab (T-40a-035); Ctrl+F is the shared search's
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = Rc::downgrade(&inner);
@@ -109,9 +109,9 @@ impl Inner {
     /// One key of the tab. True when it was ours.
     fn key(&self, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
         if key == gtk::gdk::Key::Escape {
-            return match escape_step(!self.search.text().is_empty()) {
+            return match escape_step(self.search_open()) {
                 EscapeStep::CloseSearch => {
-                    self.search.set_text("");
+                    self.close_search();
                     true
                 }
                 EscapeStep::Leave => {
@@ -121,16 +121,23 @@ impl Inner {
             };
         }
         match browse_shortcut(key, modifiers) {
-            Some(BrowseShortcut::FocusSearch) => {
-                self.search.grab_focus();
-                true
-            }
             Some(BrowseShortcut::SubTab(n)) if (1..=2).contains(&n) => {
                 self.select(SOURCE_PAGES[usize::from(n) - 1]);
                 true
             }
             _ => false,
         }
+    }
+
+    /// Whether the shared search bar (`ui::search_row`, built by `ui::page`) is showing.
+    fn search_open(&self) -> bool {
+        self.search.ancestor(gtk::SearchBar::static_type()).and_downcast::<gtk::SearchBar>().is_some_and(|bar| bar.is_search_mode())
+    }
+
+    /// Escape in the entry: closes the bar and clears the text.
+    fn close_search(&self) {
+        self.search.set_text("");
+        self.search.emit_by_name::<()>("stop-search", &[]);
     }
 
     fn select(&self, page: BrowsePage) {
@@ -145,7 +152,7 @@ impl Inner {
     /// Enter in the entry: a global search of the visible kind for the text.
     fn search_globally(&self, text: &str) {
         (self.deps.on_route)(BrowseRoute::GlobalSearch { kind: self.visible().kind(), source_id: None, query: text.trim().to_owned() });
-        self.search.set_text("");
+        self.close_search();
     }
 
     fn header_actions(self: &Rc<Self>) -> Vec<gtk::Widget> {
@@ -228,7 +235,9 @@ pub(crate) mod tests {
         let header = shell.root.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row comes first");
         let mut all = Vec::new();
         walk(header.upcast_ref(), &mut all);
-        assert_eq!(all.iter().filter(|w| w.is::<gtk::SearchEntry>()).count(), 1, "one search, in the header");
+        assert_eq!(all.iter().filter(|w| w.is::<gtk::SearchEntry>()).count(), 0, "the entry is in the bar, not the header");
+        assert!(header.next_sibling().is_some_and(|w| w.is::<gtk::SearchBar>()), "the search bar sits under the header");
+        assert_eq!(all.iter().filter(|w| w.downcast_ref::<gtk::ToggleButton>().is_some_and(|b| b.icon_name().as_deref() == Some("system-search-symbolic"))).count(), 1, "one search toggle");
         assert!(!all.iter().any(|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label() == "Browse")), "no page title");
         assert!(shell.end.is_empty(), "the header is part of the page");
     }
@@ -263,13 +272,14 @@ pub(crate) mod tests {
         assert_eq!(shell.visible(), BrowsePage::MangaSources, "the switch picks the page");
     }
 
-    fn ctrl_f_and_escape_drive_the_search_then_leave() {
+    fn escape_closes_the_search_then_leaves() {
         use gtk::gdk::{Key, ModifierType};
         let (shell, log) = shell();
-        assert!(shell.inner.key(Key::f, ModifierType::CONTROL_MASK), "Ctrl+F goes to the search on every page");
         shell.inner.search.set_text("x");
+        shell.inner.search.emit_by_name::<()>("search-changed", &[]);
+        assert!(shell.inner.search_open(), "typing shows the bar");
         assert!(shell.inner.key(Key::Escape, ModifierType::empty()));
-        assert!(shell.inner.search.text().is_empty(), "the first Escape clears the search");
+        assert!(!shell.inner.search_open() && shell.inner.search.text().is_empty(), "the first Escape closes the search and clears it");
         assert_eq!(*log.left.borrow(), 0);
         assert!(shell.inner.key(Key::Escape, ModifierType::empty()));
         assert_eq!(*log.left.borrow(), 1, "the second Escape leaves");
@@ -301,7 +311,7 @@ pub(crate) mod tests {
         the_tab_has_only_the_two_source_pages_and_one_header_search();
         enter_runs_a_global_search_of_the_visible_kind();
         the_switch_follows_the_page_and_ctrl_digits_pick_only_the_two_pages();
-        ctrl_f_and_escape_drive_the_search_then_leave();
+        escape_closes_the_search_then_leaves();
         the_header_menu_routes_by_its_label();
     }
 }

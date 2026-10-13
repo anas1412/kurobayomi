@@ -239,12 +239,8 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
 
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
-    search.set_margin_start(16);
-    search.set_margin_end(16);
-    search.set_margin_top(8);
-    let search_bar = gtk::Revealer::new();
-    search_bar.set_child(Some(&search));
-    let search_active = Rc::new(Cell::new(false));
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let (search_bar, search_toggle) = crate::ui::search_row(&search, &root);
 
     let header = build_header(HeaderDeps {
         source_name,
@@ -253,23 +249,13 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         configurable,
         // Back with an active search and text in the box clears the text first and stays (B-EC-10)
         on_back: {
-            let (search, active) = (search.clone(), Rc::clone(&search_active));
-            Rc::new(move || match back_action(active.get(), search.text().as_str()) {
+            let (search, toggle) = (search.clone(), search_toggle.clone());
+            Rc::new(move || match back_action(toggle.is_active(), search.text().as_str()) {
                 BackAction::ClearQuery => search.set_text(""),
                 BackAction::Leave => on_back(),
             })
         },
-        on_search: {
-            let bar = search_bar.clone();
-            let (search, active) = (search.clone(), Rc::clone(&search_active));
-            Rc::new(move |on| {
-                active.set(on);
-                bar.set_reveal_child(on);
-                if on {
-                    search.grab_focus();
-                }
-            })
-        },
+        search: search_toggle,
         on_display_mode: {
             let listing = listing_view.clone();
             Rc::new(move |mode| listing.set_display_mode(mode))
@@ -353,17 +339,12 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         filter_chip = Some(chip);
     }
 
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&header.bar);
     root.append(&search_bar);
-    // Escape closes the open search first (the same step as Back, B-EC-10) and then the window's handler leaves
+    // Escape closes the open search first and then the window's handler leaves; Back clears its text first (B-EC-10)
     {
-        let (text, active, clear) = (search.clone(), Rc::clone(&search_active), search.clone());
-        super::keys::attach_escape_step(
-            &root,
-            move || back_action(active.get(), text.text().as_str()) == BackAction::ClearQuery,
-            move || clear.set_text(""),
-        );
+        let (bar, close) = (search_bar.clone(), search_bar.clone());
+        super::keys::attach_escape_step(&root, move || bar.is_search_mode(), move || close.set_search_mode(false));
     }
     root.append(&chips);
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));

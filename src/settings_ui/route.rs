@@ -516,11 +516,12 @@ mod tests {
             list.select_row(list.row_at_index(2).as_ref());
             assert_eq!(open_page(), Some(format!("screen:{}", ids[2])), "selecting a row swaps the page");
 
-            // the settings search: the field in the header, a hint before a query, "No results found" after a miss
+            // the settings search: the field in the bar under the header, a hint before a query, "No results found" after a miss
             let search = crate::screens::build("settings_search");
             let header = search.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row");
-            let entry = all_under(header.upcast_ref(), &|w| w.is::<gtk::SearchEntry>());
-            assert_eq!(entry.len(), 1, "the search field sits in the header");
+            let bar = header.next_sibling().expect("the search bar");
+            let entry = all_under(&bar, &|w| w.is::<gtk::SearchEntry>());
+            assert_eq!(entry.len(), 1, "the search field sits in the bar under the header");
             let entry = entry[0].clone().downcast::<gtk::SearchEntry>().expect("a search entry");
             let root = search.upcast_ref::<gtk::Widget>();
             let hint = label_under(root, "Type to search every setting");

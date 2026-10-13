@@ -23,7 +23,6 @@ use crate::entry_core::backend::SourceBackend;
 use crate::entry_core::constants::{FALLBACK_HEIGHT, FALLBACK_WIDTH, LEFT_PANE_WIDTH};
 use crate::entry_core::action_row::interval_click_opens_dialog;
 use crate::entry_core::action_row_view::{ActionRow, RowState};
-use crate::entry_core::banner_view::{self, BannerView};
 use crate::entry_core::bulk_bar::{BulkAction, bulk_actions};
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state};
@@ -41,7 +40,7 @@ use crate::entry_core::list_options::{self, Spec};
 use crate::entry_core::header::{HeaderModel, SearchRequest, is_large};
 use crate::entry_core::header_view::{Handlers, LibraryButton};
 use crate::entry_core::list_model::{RowAction, list_header};
-use crate::entry_core::list_view::{Callbacks, ItemList, Press};
+use crate::entry_core::list_view::{self, Callbacks, ItemList, Press};
 use crate::entry_core::live::DownloadEvent;
 use crate::entry_core::page::{Page, RowMenuAction, UiAction};
 use crate::entry_core::page_shell::{self, detach, plain_row};
@@ -92,14 +91,13 @@ struct View {
     library: LibraryButton,
     count: Label,
     missing: Label,
-    empty: Label,
+    empty: GBox,
     spinner: gtk::Spinner,
     list: Rc<ItemList>,
     scroller: gtk::ScrolledWindow,
     selection_bar: gtk::Revealer,
     /// The buttons the selection bar shows, so it is rebuilt only when they change (T-38a-024).
     bulk_shown: RefCell<Vec<BulkAction>>,
-    banner: BannerView,
     fab: gtk::Revealer,
     fab_label: Label,
     /// The header bar: every widget that waits for the page to be `Ready`.
@@ -161,9 +159,16 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let page_shell::ItemHeaderRow { row: header_row, count, missing } = page_shell::item_header_row();
     // UI parity 1: a spinner while refreshing, and a line when there are no chapters
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
-    let empty = ui::dim(&tr(MsgKey::no_chapters_error));
-    empty.set_halign(Align::Center);
     let on_row_view: Rc<RefCell<Weak<View>>> = Rc::default();
+    // no chapters: the list says so, with Retry (a fetch that finds nothing raises no notification)
+    let (empty, _) = list_view::empty_list(&tr(MsgKey::no_chapters_error), {
+        let weak = Rc::clone(&on_row_view);
+        move || {
+            if let Some(view) = weak.borrow().upgrade() {
+                view.act(UiAction::Refresh);
+            }
+        }
+    });
     // the action row (T-38a-017): library, interval (the dialog of T-38a-028), tracking and WebView. WebView shows
     // only for an HTTP source (`RowState::webview`).
     let action_row = ActionRow::new(
@@ -235,26 +240,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     col.append(&list.widget);
     let selection_bar = gtk::Revealer::new();
 
-    let banner_weak: Rc<RefCell<Weak<View>>> = Rc::default();
-    let banner = banner_view::build(
-        {
-            let weak = Rc::clone(&banner_weak);
-            move || {
-                if let Some(view) = weak.borrow().upgrade() {
-                    view.run_banner_action();
-                }
-            }
-        },
-        {
-            let weak = Rc::clone(&banner_weak);
-            move || {
-                if let Some(view) = weak.borrow().upgrade() {
-                    view.dismiss_banner();
-                }
-            }
-        },
-    );
-
     // the Resume or Start button floats over the list and fades over 150 ms
     let (fab_button, fab_label) = page_shell::fab_button();
     let fab = gtk::Revealer::builder()
@@ -274,7 +259,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let panes = TwoPane::new(scroller.upcast_ref());
     stack.add_named(&panes.root, Some("ready"));
     overlay.set_child(Some(&stack));
-    overlay.add_overlay(&banner.widget);
     overlay.add_overlay(&fab);
     overlay.set_vexpand(true);
     body.append(&overlay);
@@ -314,7 +298,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         scroller: scroller.clone(),
         selection_bar,
         bulk_shown: RefCell::new(Vec::new()),
-        banner,
         fab,
         fab_label,
         toolbar,
@@ -338,7 +321,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     });
     let weak = Rc::downgrade(&view);
     *on_row_view.borrow_mut() = weak.clone();
-    *banner_weak.borrow_mut() = weak.clone();
     view.render();
 
     library.connect(
@@ -435,18 +417,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         }
     });
     // a page that leaves the stack stops its runner: subscriptions are dropped, detached writes finish
-    glib::timeout_add_local(Duration::from_millis(250), {
-        let weak = weak.clone();
-        move || match weak.upgrade() {
-            Some(view) => {
-                let now = now_ms(view.clock);
-                view.page.borrow_mut().banners.tick(now);
-                view.render_banner();
-                glib::ControlFlow::Continue
-            }
-            None => glib::ControlFlow::Break,
-        }
-    });
     page_widget.connect_destroy(move |_| runner.send(StoreCmd::Shutdown));
     page_widget
 }
@@ -580,8 +550,7 @@ fn escape_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
 
 impl View {
     fn on_event(self: &Rc<Self>, event: StoreEvent) {
-        let now = now_ms(self.clock);
-        let moved = self.page.borrow_mut().apply(event, now);
+        let moved = self.page.borrow_mut().apply(event);
         if let Some(id) = moved {
             self.list.focus_row(id);
         }
@@ -670,24 +639,18 @@ impl View {
         }
     }
 
-    fn run_banner_action(self: &Rc<Self>) {
-        let now = now_ms(self.clock);
-        // the page is alive: this handler only runs while its widgets exist
-        let cmd = self.page.borrow_mut().banners.activate_action(true, now);
-        if let Some(cmd) = cmd {
-            self.runner.send(cmd);
+    /// Hands the notices the page raised to the app's notification layer; an action runs on this page's runner while
+    /// the page is alive (E-UI-1).
+    fn flush_notices(self: &Rc<Self>) {
+        let notices = self.page.borrow_mut().take_notices();
+        for notice in notices {
+            let weak = Rc::downgrade(self);
+            notice.show(move |cmd| {
+                if let Some(view) = weak.upgrade() {
+                    view.runner.send(cmd);
+                }
+            });
         }
-        self.render_banner();
-    }
-
-    fn dismiss_banner(self: &Rc<Self>) {
-        let now = now_ms(self.clock);
-        self.page.borrow_mut().banners.dismiss(now);
-        self.render_banner();
-    }
-
-    fn render_banner(&self) {
-        self.banner.show(self.page.borrow().banners.current());
     }
 
     /// A change of one chapter in the download queue: its state, then its percent; only the list is drawn again.
@@ -706,9 +669,7 @@ impl View {
     }
 
     fn toast(&self, text: String) {
-        let now = now_ms(self.clock);
-        self.page.borrow_mut().toast(text, now);
-        self.render_banner();
+        crate::toast::notify_for(&text, crate::entry_core::message::SNACK_DURATION);
     }
 
     fn handlers(self: &Rc<Self>) -> Handlers {
@@ -737,7 +698,7 @@ impl View {
     }
 
     /// Draws the state: which of the three children shows, the enabled toolbar, the header, the description, the rows
-    /// and the banner. Each part redraws only when its input changed.
+    /// and the notices. Each part redraws only when its input changed.
     fn render(self: &Rc<Self>) {
         let (name, enabled) = {
             let page = self.page.borrow();
@@ -756,7 +717,7 @@ impl View {
             self.render_ready();
             self.sync_duplicate_dialog();
         }
-        self.render_banner();
+        self.flush_notices();
     }
 
     fn render_ready(self: &Rc<Self>) {
@@ -1290,7 +1251,7 @@ mod tests {
     use crate::entry_core::page_shell::test_util::{descendants, pump};
 
     /// One display test (GTK is bound to the thread that starts it): Loading, then Ready with rows, a stub warning in
-    /// the header, a non-focusable banner, and Missing with a Back button.
+    /// the header, and Missing with a Back button.
     #[test]
     fn entry_route_smoke() {
         crate::testing::with_display(|| {
@@ -1354,8 +1315,6 @@ mod tests {
             assert!(!all.iter().any(|w| w.type_().name() == "GtkStackSwitcher"), "no tabbed Filter / Sort / Display sheet");
             window.set_child(None::<&gtk::Widget>);
             window.close();
-            let banner = banner_view::build(|| {}, || {});
-            assert!(!banner.widget.is_focusable() && !banner.widget.can_focus());
 
             // the list model: one items_changed for a reset, one per changed row
             let rows: Vec<crate::entry_core::list_model::RowItem> = (1..=3)

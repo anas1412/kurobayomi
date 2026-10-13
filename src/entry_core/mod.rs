@@ -1,8 +1,8 @@
 //! Manga entry details (plan area 38). The model, the chapter engine, the store runner and the page controller have no
-//! GTK in them: `backend`, `banner`, `chapter`, `detail`, `dialog`, `errors`, `flags`, `header`, `list_model`, `live`,
+//! GTK in them: `backend`, `chapter`, `detail`, `dialog`, `errors`, `flags`, `header`, `list_model`, `live`,
 //! `numfmt`, `page`, `readstate`, `runner`, `scanlator_sheet` (its rules), `selection`, `store`, `text` and `view`, plus
 //! `downloaded` (the downloaded lookup of the chapters) and `handoff` (what a page parks for the screen it opens). The thin
-//! widgets are `banner_view`, `cover_view`, `description_view`, `header_view`, `list_view` and
+//! widgets are `cover_view`, `description_view`, `header_view`, `list_view` and
 //! `route`; they read those types and draw them.
 //!
 //! Decision records (Android-only parts dropped or replaced; the user loses no function unless a line says so):
@@ -36,8 +36,6 @@ pub mod backend;
 pub mod bulk_bar;
 pub mod chapter_actions;
 pub mod cover_view;
-pub mod banner;
-pub mod banner_view;
 pub mod chapter;
 pub mod description_view;
 pub mod detail;

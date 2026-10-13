@@ -177,27 +177,34 @@ fn libraries() -> Option<Built> {
 }
 
 /// The one builder of a page with a view per kind, from the Anime and the Manga views in that order: the switch at the
-/// start of the header row, the visible kind's search in the middle (the view hands its `gtk::SearchEntry` first in
-/// `Built.end`) and its other `end` widgets at the end; `back` adds Back before the switch, for a pushed page. Library, Updates, History, Downloads, Categories and Storage
-/// use it (`updates::mount` for the tabs).
+/// start of the header row, the visible kind's search toggle first among its other `end` widgets at the end (the view
+/// hands its `gtk::SearchEntry` first in `Built.end`, when it has one), and that kind's search bar under the header
+/// (`ui::search_row`); `back` adds Back before the switch, for a pushed page. Library, Updates, History, Downloads,
+/// Categories and Storage use it (`updates::mount` for the tabs).
 pub(crate) fn kind_page(views: [Built; 2], back: bool) -> GBox {
     let kinds = gtk::Stack::new();
     kinds.set_transition_type(gtk::StackTransitionType::Crossfade);
     kinds.set_vexpand(true);
-    let (centre, end) = (gtk::Stack::new(), gtk::Stack::new());
+    let (bars, end) = (gtk::Stack::new(), gtk::Stack::new());
     for (b, anime) in views.into_iter().zip([true, false]) {
         let name = if anime { "anime" } else { "manga" };
         kinds.add_titled(&b.content, Some(name), if anime { "Anime" } else { "Manga" });
         let mut rest = b.end.into_iter().peekable();
-        // the live view hands its search entry first; it takes the middle of the header
-        let search = rest.next_if(|w| w.is::<gtk::SearchEntry>()).unwrap_or_else(|| GBox::new(O::Horizontal, 0).upcast());
-        // the same width limit as every other header search (`ui::page`)
-        centre.add_named(&crate::ui::clamp(&search, crate::ui::SEARCH_WIDTH), Some(name));
         let actions = GBox::new(O::Horizontal, 4);
+        let bar: gtk::Widget = match rest.next_if(|w| w.is::<gtk::SearchEntry>()).and_downcast::<gtk::SearchEntry>() {
+            // keys typed in this kind's content open its bar; the other kind's content is hidden and takes none
+            Some(entry) => {
+                let (bar, toggle) = crate::ui::search_row(&entry, &b.content);
+                actions.append(&toggle);
+                bar.upcast()
+            }
+            None => GBox::new(O::Horizontal, 0).upcast(),
+        };
+        bars.add_named(&bar, Some(name));
         rest.for_each(|w| actions.append(&w));
         end.add_named(&actions, Some(name));
     }
-    for follower in [&centre, &end] {
+    for follower in [&bars, &end] {
         kinds.bind_property("visible-child-name", follower, "visible-child-name").sync_create().build();
     }
     let header = crate::ui::header_bar();
@@ -206,11 +213,13 @@ pub(crate) fn kind_page(views: [Built; 2], back: bool) -> GBox {
         header.pack_start(&crate::ui::back_button());
     }
     header.pack_start(&gtk::StackSwitcher::builder().stack(&kinds).build());
-    header.set_title_widget(Some(&centre));
+    // an empty box, not None: without a title widget GTK shows the window title
+    header.set_title_widget(Some(&GBox::new(O::Horizontal, 0)));
     header.pack_end(&end);
     no_sticky_focus(&header);
     let page = GBox::new(O::Vertical, 0);
     page.append(&header);
+    page.append(&bars);
     page.append(&kinds);
     page
 }
@@ -233,8 +242,8 @@ fn downloads_view(kind: Kind) -> Built {
     let library = Button::with_label("Library");
     library.connect_clicked(|_| open("library"));
     let (page, _) = crate::browse::look::empty_state("folder-download-symbolic", &screen("download_queue").empty.unwrap_or_default(), Some(&library));
-    // nothing to filter, but the header keeps its search
-    Built { content: page.upcast(), end: vec![gtk::SearchEntry::builder().hexpand(true).sensitive(false).build().upcast()] }
+    // nothing to filter, so no search
+    Built { content: page.upcast(), end: vec![] }
 }
 
 /// Categories: a page per kind under the shared header, with Add (for that kind) at the end.
@@ -424,7 +433,7 @@ mod tests {
             assert_eq!(count(&|w| w.downcast_ref::<Button>().is_some_and(|b| b.label().as_deref() == Some("Library"))), 1, "one action");
             assert_eq!(count(&|w| w.is::<gtk::MenuButton>()), 0, "no menus that do nothing");
             assert_eq!(count(&|w| w.is::<gtk::StackSwitcher>()), 1, "the Anime | Manga switch");
-            assert_eq!(count(&|w| w.is::<gtk::SearchEntry>()), 1, "the header search");
+            assert_eq!(count(&|w| w.is::<gtk::SearchEntry>()), 0, "nothing to search in an empty queue");
         });
     }
 
@@ -433,12 +442,15 @@ mod tests {
         crate::testing::with_display(|| {
             let page = kind_page([view("anime grid"), view("manga grid")], false);
             assert!(page.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>()), "the header row comes first");
-            assert!(page.first_child().and_then(|w| w.next_sibling()).is_some_and(|w| !w.is::<gtk::HeaderBar>() && w.next_sibling().is_none()), "then only the views");
+            let bars = page.first_child().and_then(|w| w.next_sibling()).expect("the search bars follow the header");
+            assert!(bars.is::<gtk::Stack>() && bars.next_sibling().is_some_and(|w| w.next_sibling().is_none()), "then the views");
             let mut all = vec![];
             shown(page.upcast_ref(), &mut all);
             let count = |f: &dyn Fn(&gtk::Widget) -> bool| all.iter().filter(|w| f(w)).count();
             assert_eq!(count(&|w| w.is::<gtk::StackSwitcher>()), 1, "the Anime | Manga switch");
             assert_eq!(count(&|w| w.is::<gtk::SearchEntry>()), 1, "one search");
+            assert_eq!(count(&|w| w.is::<gtk::SearchBar>()), 1, "one search bar, under the header");
+            assert_eq!(count(&|w| w.downcast_ref::<gtk::ToggleButton>().is_some_and(|b| b.icon_name().as_deref() == Some("system-search-symbolic"))), 1, "one search toggle");
             assert_eq!(count(&|w| w.is::<gtk::MenuButton>()), 1, "one menu");
             let refresh = |w: &gtk::Widget| w.downcast_ref::<Button>().is_some_and(|b| b.icon_name().as_deref() == Some("view-refresh-symbolic"));
             assert_eq!(count(&refresh), 1, "one refresh");

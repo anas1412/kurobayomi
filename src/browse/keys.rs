@@ -1,4 +1,4 @@
-//! The keyboard map of the browse pages (T-40a-035, U§9). Pure: the views apply the answer. Ctrl+F focuses the search,
+//! The keyboard map of the browse pages (T-40a-035, U§9). Pure: the views apply the answer. Ctrl+F opens the search (the shared `ui::search_row` owns it),
 //! Escape closes the search and then leaves the page, and Ctrl+1 to Ctrl+6 pick a Browse sub-tab. In the migrate dialog Ctrl+Enter migrates and Ctrl+Shift+Enter copies.
 
 use gtk::gdk::{Key, ModifierType};
@@ -8,7 +8,6 @@ use kuro_i18n::{MsgKey, tr};
 /// The shortcuts of the browse pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowseShortcut {
-    FocusSearch,
     /// Ctrl+1 is 1, and so on to Ctrl+6. The number is the position of the sub-tab, counted from one.
     SubTab(u8),
 }
@@ -21,7 +20,6 @@ pub fn browse_shortcut(key: Key, modifiers: ModifierType) -> Option<BrowseShortc
         return None;
     }
     match key.to_unicode()? {
-        'f' | 'F' => Some(BrowseShortcut::FocusSearch),
         digit @ '1'..='6' => Some(BrowseShortcut::SubTab(digit as u8 - b'0')),
         _ => None,
     }
@@ -108,13 +106,6 @@ mod tests {
 
     fn ctrl() -> ModifierType {
         ModifierType::CONTROL_MASK
-    }
-
-    #[test]
-    fn ctrl_f_focuses_the_search() {
-        assert_eq!(browse_shortcut(Key::f, ctrl()), Some(BrowseShortcut::FocusSearch));
-        assert_eq!(browse_shortcut(Key::F, ctrl()), Some(BrowseShortcut::FocusSearch));
-        assert_eq!(browse_shortcut(Key::F, ModifierType::empty()), None, "a plain F types into a field");
     }
 
     #[test]

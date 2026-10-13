@@ -208,6 +208,15 @@ impl RowWidgets {
     }
 }
 
+/// The empty state of a chapter or episode list, for both kinds: `message` over a Retry button (the shared
+/// `browse::look::empty_state_with`). A fetch that finds nothing says so here, not in a notification. Returns the
+/// state and its message label, for a page that changes the message.
+pub fn empty_list(message: &str, on_retry: impl Fn() + 'static) -> (GBox, Label) {
+    let retry = gtk::Button::with_label(&tr(MsgKey::action_retry));
+    retry.connect_clicked(move |_| on_retry());
+    crate::browse::look::empty_state_with("view-list-symbolic", message, &[retry])
+}
+
 /// The items of the right-click menu of the row behind `list_item`, built when the menu opens so the labels match the
 /// row as it is now. The row is copied out of the store item before anything runs.
 fn menu_items(list_item: &glib::WeakRef<gtk::ListItem>, kind: Kind, on_menu: &Rc<dyn Fn(i64, RowAction)>) -> Vec<MenuItem> {
@@ -617,6 +626,21 @@ mod tests {
             menu().expect("the menu").activate_action(&format!("ctx.item{select}"), None).expect("the Select item");
             assert!(pump(&ctx, || selects() == 2), "Select from the menu reached the page");
             window.close();
+        });
+    }
+
+    /// The one empty state of both kinds' lists: the message and a Retry that runs `on_retry`.
+    #[test]
+    fn the_empty_list_shows_its_message_with_retry() {
+        crate::testing::with_display(|| {
+            let retried = Rc::new(std::cell::Cell::new(0));
+            let count = Rc::clone(&retried);
+            let (state, label) = empty_list("No chapters found", move || count.set(count.get() + 1));
+            assert_eq!(label.text(), "No chapters found");
+            let retry = state.last_child().and_downcast::<gtk::Button>().expect("the Retry button under the message");
+            assert_eq!(retry.label().as_deref(), Some("Retry"));
+            retry.emit_clicked();
+            assert_eq!(retried.get(), 1);
         });
     }
 }

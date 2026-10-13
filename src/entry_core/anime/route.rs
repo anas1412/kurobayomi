@@ -57,7 +57,6 @@ use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeRunner};
 use super::store::AnimeStore;
 use super::{duplicate_view, related_view};
 use crate::data;
-use crate::entry_core::banner_view::{self, BannerView};
 use crate::entry_core::dialog::CategoryDialog;
 use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
 use crate::entry_core::header::SearchRequest;
@@ -65,12 +64,12 @@ use crate::entry_core::action_row::interval_click_opens_dialog;
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::fetch_interval_dialog;
 use crate::entry_core::header_view::{Handlers, LibraryButton};
-use crate::entry_core::message::{Notices, UserMessage, present};
+use crate::entry_core::message::{Notice, UserMessage, present};
 use crate::entry_core::info_block::InfoBlock;
 use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::list_model::RowAction;
 use crate::entry_core::list_options::{self, Spec};
-use crate::entry_core::list_view::{Callbacks, ItemList, Press};
+use crate::entry_core::list_view::{self, Callbacks, ItemList, Press};
 use crate::entry_core::text::{Expansion, description};
 use crate::entry_core::page_shell::{self, detach, plain_row};
 use crate::ui;
@@ -152,9 +151,6 @@ struct View {
     env: Env,
     show_airing: bool,
     clock: std::time::Instant,
-    /// The snackbar layer: one message at a time, a new one replaces it (E-UI-3).
-    notices: RefCell<Notices<AnimeCmd>>,
-    snack: BannerView,
     library: LibraryButton,
     refresh_button: Button,
     download_menu: gtk::MenuButton,
@@ -175,7 +171,8 @@ struct View {
     count: Label,
     missing: Label,
     spinner: gtk::Spinner,
-    empty: Label,
+    empty: GBox,
+    empty_label: Label,
     airing_row: GBox,
     airing_title: Label,
     airing_time: Label,
@@ -217,11 +214,6 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// Milliseconds since the page opened, the clock of the snackbar layer.
-fn now_ms_u64(clock: std::time::Instant) -> u64 {
-    clock.elapsed().as_millis() as u64
-}
-
 /// The preference of the player the taps use (`pref_always_use_external_player`).
 fn always_external(prefs: &PrefStore) -> bool {
     prefs.pref::<bool>("pref_always_use_external_player", false).get()
@@ -238,10 +230,16 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     // the list head: the item header row, the refresh spinner and the empty line
     let page_shell::ItemHeaderRow { row: header_row, count, missing } = page_shell::item_header_row();
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
-    let empty = ui::dim(&tr(MsgKey::no_episodes_error));
-    empty.set_halign(Align::Center);
-    empty.set_wrap(true);
     let weak_view: Rc<RefCell<Weak<View>>> = Rc::default();
+    // nothing listed: the list says so, with Retry (a refresh that finds nothing raises no notification)
+    let (empty, empty_label) = list_view::empty_list(&tr(MsgKey::no_episodes_error), {
+        let weak = Rc::clone(&weak_view);
+        move || {
+            if let Some(view) = weak.borrow().upgrade() {
+                view.refresh();
+            }
+        }
+    });
     // a `Seasons` entry lists its seasons in a grid under the head; the grid is hidden for an episode list. A tile's
     // continue button plays the next unseen episode of that season.
     let seasons = SeasonGrid::new(
@@ -363,29 +361,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let column = GBox::new(O::Vertical, 0);
     column.append(&airing_row);
     column.append(&panes.root);
-    let snack_weak: Rc<RefCell<Weak<View>>> = Rc::default();
-    let snack = banner_view::build(
-        {
-            let weak = Rc::clone(&snack_weak);
-            move || {
-                if let Some(view) = weak.borrow().upgrade() {
-                    view.snack_action();
-                }
-            }
-        },
-        {
-            let weak = Rc::clone(&snack_weak);
-            move || {
-                if let Some(view) = weak.borrow().upgrade() {
-                    view.snack_dismiss();
-                }
-            }
-        },
-    );
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&column));
     overlay.add_overlay(&fab);
-    overlay.add_overlay(&snack.widget);
     overlay.set_vexpand(true);
 
     // the action bar: cancel, the count, select all and invert
@@ -433,8 +411,6 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         env,
         show_airing,
         clock: std::time::Instant::now(),
-        notices: RefCell::new(Notices::default()),
-        snack,
         library: library.clone(),
         refresh_button: refresh_button.clone(),
         download_menu: download_menu.clone(),
@@ -453,6 +429,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         missing,
         spinner,
         empty,
+        empty_label,
         airing_row,
         airing_title,
         airing_time,
@@ -479,7 +456,6 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     });
     let weak = Rc::downgrade(&view);
     *weak_view.borrow_mut() = weak.clone();
-    *snack_weak.borrow_mut() = weak.clone();
     view.apply_width(FALLBACK_WIDTH);
 
     let on_view = |f: fn(&Rc<View>)| {
@@ -569,19 +545,6 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         move || match weak.upgrade() {
             Some(view) => {
                 view.tick_airing();
-                glib::ControlFlow::Continue
-            }
-            None => glib::ControlFlow::Break,
-        }
-    });
-
-    // the snackbar times out on its own clock
-    glib::timeout_add_local(Duration::from_millis(250), {
-        let weak = weak.clone();
-        move || match weak.upgrade() {
-            Some(view) => {
-                view.notices.borrow_mut().tick(now_ms_u64(view.clock));
-                view.render_snack();
                 glib::ControlFlow::Continue
             }
             None => glib::ControlFlow::Break,
@@ -698,13 +661,13 @@ impl View {
                 }
             }
             AnimeEvent::RefreshEnded(result) => {
-                // a failed refresh says why in a snackbar (behaviour 19)
+                // a failed refresh says why in a notification (behaviour 19)
                 if let Some(message) = result.as_ref().err().and_then(refresh_snack) {
                     // Retry runs the refresh again; an uninstalled source has nothing to retry
                     let anime_id = self.model.borrow().as_ref().map(|m| m.anime.id);
                     match anime_id.filter(|_| !matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled))) {
                         Some(anime_id) => {
-                            self.notices.borrow_mut().show(crate::entry_core::message::with_retry(message), Some(AnimeCmd::Refresh { anime_id }), now_ms_u64(self.clock));
+                            self.show_notice(Notice::of(&crate::entry_core::message::with_retry(message), Some(AnimeCmd::Refresh { anime_id })));
                         }
                         None => self.present(message, None),
                     }
@@ -806,7 +769,7 @@ impl View {
         // one refresh runs at a time
         self.refresh_button.set_sensitive(!m.flow.refreshing && !m.selection.is_active());
         self.empty.set_visible(none_shown && !m.flow.refreshing);
-        self.empty.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { MsgKey::no_episodes_error }));
+        self.empty_label.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { MsgKey::no_episodes_error }));
         // the anime and manga statuses share the SAnime/SManga completed code (2)
         self.info.action_row.apply(&RowState::of_entry(
             m.anime.favorite,
@@ -832,7 +795,6 @@ impl View {
         self.render_related();
         self.render_bottom(m);
         drop(model);
-        self.render_snack();
         self.tick_airing();
     }
 
@@ -933,30 +895,19 @@ impl View {
         torrent_enabled(&self.env.prefs) && source.is_some_and(|s| self.env.backend.is_torrent_source(s))
     }
 
-    /// Shows a message in the snackbar layer, replacing the one on screen. `action` is what its button runs.
+    /// Shows a message on the app's notification layer, replacing the one on screen. `action` is what its button runs.
     fn present(&self, message: UserMessage, action: Option<AnimeCmd>) {
-        self.notices.borrow_mut().show(present(message), action, now_ms_u64(self.clock));
+        self.show_notice(Notice::of(&present(message), action));
     }
 
-    fn render_snack(&self) {
-        let notices = self.notices.borrow();
-        match notices.current() {
-            Some((banner, dismissible)) => self.snack.show_with(Some(banner), dismissible),
-            None => self.snack.show_with::<AnimeCmd>(None, true),
-        }
-    }
-
-    fn snack_action(self: &Rc<Self>) {
-        let cmd = self.notices.borrow_mut().activate(now_ms_u64(self.clock));
-        if let Some(cmd) = cmd {
-            self.runner.send(cmd);
-        }
-        self.render_snack();
-    }
-
-    fn snack_dismiss(self: &Rc<Self>) {
-        self.notices.borrow_mut().dismiss(now_ms_u64(self.clock));
-        self.render_snack();
+    /// Shows `notice`; its button sends its command to this page's runner while the page is alive (E-UI-1).
+    fn show_notice(&self, notice: Notice<AnimeCmd>) {
+        let runner = Rc::downgrade(&self.runner);
+        notice.show(move |cmd| {
+            if let Some(runner) = runner.upgrade() {
+                runner.send(cmd);
+            }
+        });
     }
 
     /// The refresh button: a manual refresh of everything. One runs at a time; a second request is not sent.
@@ -1540,7 +1491,6 @@ impl View {
     /// Logs a typed error and shows its text in the snackbar.
     fn show_error(&self, error: DetailsError) {
         self.present(UserMessage::Plain(error.record().user_message()), None);
-        self.render_snack();
     }
 
     /// The continue button of a season tile: plays that season's next unseen episode, as the FAB does for an entry.
@@ -1698,8 +1648,8 @@ mod tests {
         }
     }
 
-    /// A failed refresh (HTTP 503) shows its snackbar with Retry, and Retry refreshes again; an uninstalled source shows
-    /// its snackbar with no Retry.
+    /// A failed refresh (HTTP 503) shows its notification with Retry, and Retry refreshes again; an uninstalled source
+    /// shows its notification with no Retry. The notification is the app's one layer (`toast::attach`).
     #[test]
     fn a_failed_refresh_offers_retry_and_an_uninstalled_source_does_not() {
         use crate::entry_core::errors::DetailError;
@@ -1712,17 +1662,23 @@ mod tests {
             for (error, retry) in [(DetailError::Http(503), true), (DetailError::SourceNotInstalled, false)] {
                 let backend = Arc::new(Failing(error.clone(), Default::default()));
                 let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), AnimeLoadContext::default()));
+                let host = gtk::Overlay::new();
+                crate::toast::attach(&host);
                 let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
                 runner.send(AnimeCmd::Load { anime_id: id });
                 let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
                 assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
+                assert!(
+                    !descendants(page.upcast_ref()).iter().any(|w| w.has_css_class("app-notification")),
+                    "the page has no notification bar of its own"
+                );
                 runner.send(AnimeCmd::Refresh { anime_id: id });
-                let snack = descendants(page.upcast_ref())
+                let snack = descendants(host.upcast_ref())
                     .into_iter()
                     .filter_map(|w| w.downcast::<gtk::Revealer>().ok())
-                    .find(|r| r.child().is_some_and(|c| c.has_css_class("osd")))
-                    .expect("the snackbar");
-                assert!(pump(&ctx, || snack.reveals_child()), "{error:?}: the failed refresh shows a snackbar");
+                    .find(|r| r.child().is_some_and(|c| c.has_css_class("app-notification")))
+                    .expect("the notification layer");
+                assert!(pump(&ctx, || snack.reveals_child()), "{error:?}: the failed refresh shows a notification");
                 let action = snack.child().and_then(|bar| bar.first_child()).and_then(|label| label.next_sibling()).and_downcast::<Button>().expect("the action button");
                 assert_eq!(action.is_visible(), retry, "{error:?}: Retry only when there is something to retry");
                 if retry {
@@ -1733,6 +1689,55 @@ mod tests {
                 }
                 runner.send(AnimeCmd::Shutdown);
             }
+        });
+    }
+
+    /// A refresh that finds no episodes raises no notification: the list's empty state says so, with a Retry button that
+    /// refreshes again.
+    #[test]
+    fn no_episodes_is_the_empty_state_with_retry_not_a_notification() {
+        use crate::entry_core::errors::DetailError;
+        use std::sync::atomic::Ordering;
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 0, 0);
+            let backend = Arc::new(Failing(DetailError::NoEpisodes, Default::default()));
+            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), AnimeLoadContext::default()));
+            let host = gtk::Overlay::new();
+            crate::toast::attach(&host);
+            let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
+            runner.send(AnimeCmd::Load { anime_id: id });
+            let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
+            assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
+            let before = backend.1.load(Ordering::SeqCst);
+            runner.send(AnimeCmd::Refresh { anime_id: id });
+            assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "the refresh ran and found nothing");
+            let until = std::time::Instant::now() + Duration::from_millis(300);
+            while std::time::Instant::now() < until {
+                ctx.iteration(false);
+            }
+            let layer = descendants(host.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Revealer>().ok()).find(|r| r.child().is_some_and(|c| c.has_css_class("app-notification"))).expect("the notification layer");
+            assert!(!layer.reveals_child(), "nothing pops up for an empty list");
+            // the list head is a row of the list view, so it exists once the page has a size
+            let window = gtk::Window::builder().default_width(900).default_height(700).child(&page).build();
+            window.present();
+            let find_retry = || {
+                descendants(page.upcast_ref())
+                    .into_iter()
+                    .filter_map(|w| w.downcast::<Button>().ok())
+                    .find(|b| b.label().as_deref() == Some(tr(MsgKey::action_retry).as_str()))
+            };
+            assert!(pump(&ctx, || find_retry().is_some()), "the empty state has Retry");
+            let retry = find_retry().expect("Retry");
+            assert!(retry.parent().is_some_and(|state| state.is_visible()), "and it shows, since the list is empty");
+            let before = backend.1.load(Ordering::SeqCst);
+            retry.emit_clicked();
+            assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "Retry refreshes again");
+            runner.send(AnimeCmd::Shutdown);
+            window.set_child(None::<&gtk::Widget>);
+            window.close();
         });
     }
 

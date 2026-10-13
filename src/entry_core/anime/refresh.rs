@@ -37,15 +37,13 @@ pub fn auto_download_allowed(trigger: Trigger) -> bool {
     trigger == Trigger::Manual
 }
 
-/// The snackbar a failed refresh shows (behaviour 19): the two empty-list texts, and the error text otherwise. A
-/// cancellation shows nothing.
+/// The notification a failed refresh shows (behaviour 19): the error text. A cancellation shows nothing, and neither do
+/// the two empty-list errors: the list's empty state says them, with Retry.
 pub fn refresh_snack(error: &crate::entry_core::errors::DetailError) -> Option<crate::entry_core::message::UserMessage> {
     use crate::entry_core::errors::DetailError;
     use crate::entry_core::message::UserMessage;
     match error {
-        DetailError::Cancelled => None,
-        DetailError::NoEpisodes => Some(UserMessage::NoEpisodes),
-        DetailError::NoSeasons => Some(UserMessage::NoSeasons),
+        DetailError::Cancelled | DetailError::NoEpisodes | DetailError::NoSeasons => None,
         other => other.refresh_message().map(UserMessage::Plain),
     }
 }
@@ -121,9 +119,9 @@ mod tests {
     #[test]
     fn a_failed_refresh_shows_its_text_and_a_cancelled_one_nothing() {
         use crate::entry_core::errors::DetailError;
-        use crate::entry_core::message::{UserMessage, text};
-        assert_eq!(refresh_snack(&DetailError::NoEpisodes), Some(UserMessage::NoEpisodes));
-        assert_eq!(refresh_snack(&DetailError::NoSeasons), Some(UserMessage::NoSeasons));
+        use crate::entry_core::message::text;
+        assert_eq!(refresh_snack(&DetailError::NoEpisodes), None, "the empty list says it");
+        assert_eq!(refresh_snack(&DetailError::NoSeasons), None, "the empty list says it");
         assert_eq!(refresh_snack(&DetailError::Cancelled), None);
         assert_eq!(text(&refresh_snack(&DetailError::Http(500)).expect("a snack")), DetailError::Http(500).user_message());
     }

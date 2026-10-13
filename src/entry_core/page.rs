@@ -1,10 +1,9 @@
-//! The page controller: the load state, the banners and every user action, with no widgets. The widget layer
+//! The page controller: the load state, the notices and every user action, with no widgets. The widget layer
 //! feeds it `StoreEvent`s and `UiAction`s and draws what it holds. Actions return `StoreCmd`s to send to the runner.
 //! Upstream: `MangaScreenModel.kt` (selection `:971-1057`, mark read `:788-840`, setters `:878-949`).
 
 use kuro_i18n::{MsgKey, tr};
 
-use crate::entry_core::banner::{Banners, Length};
 use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, acts_on, download_targets, indicator_action, previous_ids, state_after_cancel};
 use crate::entry_core::detail::{EntryState, LoadState, StoreCmd, StoreEvent, apply_snapshot};
 use crate::entry_core::dialog::{CategoryConfirm, Dialog};
@@ -12,6 +11,7 @@ use crate::entry_core::errors::DetailError;
 use crate::entry_core::flags::Write;
 use crate::entry_core::list_model::{RowItem, focus_after, row_items};
 use crate::entry_core::live::{DownloadEvent, ProgressThrottle, apply_event};
+use crate::entry_core::message::{Notice, SNACK_DURATION};
 use crate::entry_core::selection::{Command, Key, Mods, Pick, back_clears_selection, click_command, key_command};
 use crate::entry_core::view::view;
 
@@ -97,7 +97,8 @@ pub struct Outcome {
 pub struct Page {
     pub manga_id: i64,
     pub state: LoadState,
-    pub banners: Banners<StoreCmd>,
+    /// What the page asks the notification layer to show; the widget layer takes them with [`Page::take_notices`].
+    notices: Vec<Notice<StoreCmd>>,
     /// The `removeAfterMarkedAsRead` preference.
     pub remove_after_read: bool,
     /// The stored default category of the library (`-1` when unset), read once at open.
@@ -113,13 +114,25 @@ impl Page {
         Self {
             manga_id,
             state: LoadState::Loading,
-            banners: Banners::default(),
+            notices: Vec::new(),
             remove_after_read,
             default_category: -1,
             throttle: ProgressThrottle::default(),
             focused: None,
             choose_category: false,
         }
+    }
+
+    /// A failed fetch says why, with Retry when there is something to retry. An empty list is not announced: the list's
+    /// own empty state says so and has the Retry.
+    fn fail(&mut self, error: &DetailError, text: String) {
+        if matches!(error, DetailError::NoChapters) {
+            return;
+        }
+        self.notices.push(match self.retry(error) {
+            Some((label, cmd)) => Notice::with_action(text, label, cmd),
+            None => Notice::plain(text, SNACK_DURATION),
+        });
     }
 
     /// The Retry button of a failed fetch: a manual refresh. None for an uninstalled source or a cancelled fetch, which a
@@ -164,7 +177,7 @@ impl Page {
     }
 
     /// Applies a store event. Returns the row that should hold focus after it, when focus moved.
-    pub fn apply(&mut self, event: StoreEvent, now_ms: u64) -> Option<i64> {
+    pub fn apply(&mut self, event: StoreEvent) -> Option<i64> {
         let before = self.view_ids();
         match event {
             StoreEvent::Loaded(loaded) => self.state = loaded.state,
@@ -178,14 +191,8 @@ impl Page {
                     page.is_refreshing = on;
                 }
             }
-            StoreEvent::Failed(error) => {
-                let retry = self.retry(&error);
-                self.banners.push(error.user_message(), retry, Length::Short, now_ms);
-            }
-            StoreEvent::ChapterFetchFailed(error) => {
-                let retry = self.retry(&error);
-                self.banners.push(error.chapter_fetch_message(), retry, Length::Short, now_ms);
-            }
+            StoreEvent::Failed(error) => self.fail(&error, error.user_message()),
+            StoreEvent::ChapterFetchFailed(error) => self.fail(&error, error.chapter_fetch_message()),
             StoreEvent::Categories { all, membership } => {
                 if let Some(page) = self.ready_mut() {
                     page.categories = all;
@@ -208,7 +215,7 @@ impl Page {
                     .unwrap_or_default();
                 if ask_delete_downloads && !downloaded.is_empty() {
                     let action = (tr(MsgKey::action_delete), StoreCmd::DeleteDownloads { manga_id, chapter_ids: downloaded });
-                    self.banners.push(tr(MsgKey::delete_downloads_for_manga), Some(action), Length::Short, now_ms);
+                    self.notices.push(Notice::with_action(tr(MsgKey::delete_downloads_for_manga), action.0, action.1));
                 }
             }
             StoreEvent::Scanlators { available, excluded } => {
@@ -229,7 +236,7 @@ impl Page {
                 let prompt = self.ready_mut().is_some_and(|p| !p.manga.favorite && !std::mem::replace(&mut p.has_prompted_add, true));
                 if prompt {
                     let action = (tr(MsgKey::action_add), StoreCmd::ToggleFavorite { manga_id, default_category, skip_duplicate: false });
-                    self.banners.push(tr(MsgKey::snack_add_to_manga_library), Some(action), Length::Short, now_ms);
+                    self.notices.push(Notice::with_action(tr(MsgKey::snack_add_to_manga_library), action.0, action.1));
                 }
             }
         }
@@ -245,9 +252,9 @@ impl Page {
         apply_event(&mut self.state, event, &mut self.throttle, now_ms)
     }
 
-    /// Toasts use the banner component with the Short length (T-38b-024).
-    pub fn toast(&mut self, text: impl Into<String>, now_ms: u64) {
-        self.banners.push(text, None, Length::Toast, now_ms);
+    /// The notices raised since the last call.
+    pub fn take_notices(&mut self) -> Vec<Notice<StoreCmd>> {
+        std::mem::take(&mut self.notices)
     }
 
     pub fn act(&mut self, action: UiAction) -> Outcome {
@@ -478,7 +485,7 @@ mod tests {
         let rows = (1..=n).map(|i| ChapterRow::new(i, &format!("c{i}"), i as f64)).collect();
         let loaded = finish_load(Some(manga(0x201)), rows, SourceInfo::default(), &LoadContext::default());
         let mut page = Page::new(1, false);
-        page.apply(StoreEvent::Loaded(Box::new(loaded)), 0);
+        page.apply(StoreEvent::Loaded(Box::new(loaded)));
         page
     }
 
@@ -496,7 +503,7 @@ mod tests {
         assert!(!page.actions_enabled());
         assert_eq!(page.act(UiAction::Refresh), Outcome::default());
         assert!(page.rows().is_empty());
-        page.apply(StoreEvent::Loaded(Box::new(finish_load(None, vec![], SourceInfo::default(), &LoadContext::default()))), 0);
+        page.apply(StoreEvent::Loaded(Box::new(finish_load(None, vec![], SourceInfo::default(), &LoadContext::default()))));
         assert_eq!(page.state, LoadState::NotFound);
         assert!(!page.actions_enabled());
     }
@@ -598,7 +605,6 @@ mod tests {
         assert_eq!(page.ready().unwrap().manga.flags, before, "the view changes only when the store snapshot arrives");
         page.apply(
             StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: vec![ChapterRow::new(1, "c1", 1.0)] },
-            0,
         );
         assert_eq!(page.ready().unwrap().manga.flags.0, 0x201 | c::SHOW_UNDONE);
     }
@@ -610,7 +616,7 @@ mod tests {
         let out = page.act(UiAction::ConfirmCategory(CategoryConfirm::AddToLibrary { manga_id: 1, category_ids: vec![4] }));
         assert_eq!(out.cmds, vec![StoreCmd::AddToLibrary { manga_id: 1, category_ids: vec![4] }]);
         assert!(page.ready().unwrap().dialog.current().is_none());
-        page.apply(StoreEvent::Categories { all: vec![(4, "A".into())], membership: vec![4] }, 0);
+        page.apply(StoreEvent::Categories { all: vec![(4, "A".into())], membership: vec![4] });
         assert_eq!(page.ready().unwrap().category_membership, vec![4]);
     }
 
@@ -629,33 +635,24 @@ mod tests {
     }
 
     #[test]
-    fn refresh_sends_a_manual_fetch_and_errors_become_banners() {
+    fn refresh_sends_a_manual_fetch_and_errors_become_notices() {
         let mut page = ready(1);
         assert_eq!(page.act(UiAction::Refresh).cmds, vec![StoreCmd::FetchAll { manga_id: 1, manual: true }]);
-        page.apply(StoreEvent::Refreshing(true), 0);
+        page.apply(StoreEvent::Refreshing(true));
         assert!(page.ready().unwrap().is_refreshing);
-        page.apply(StoreEvent::Refreshing(false), 0);
+        page.apply(StoreEvent::Refreshing(false));
         assert!(!page.ready().unwrap().is_refreshing);
-        page.apply(StoreEvent::ChapterFetchFailed(DetailError::NoChapters), 10);
-        assert_eq!(page.banners.current().unwrap().text, "No chapters found");
-        page.apply(StoreEvent::Failed(DetailError::Http(500)), 20);
-        assert_eq!(page.banners.queued(), 1);
+        // an empty list is not announced: the list's empty state says it, with Retry
+        page.apply(StoreEvent::ChapterFetchFailed(DetailError::NoChapters));
+        assert!(page.take_notices().is_empty());
         // a failed fetch offers Retry, which runs a manual refresh; an uninstalled source offers none
-        let retry = page.banners.activate_action(true, 30);
-        assert_eq!(retry, Some(StoreCmd::FetchAll { manga_id: 1, manual: true }));
-        page.banners.dismiss(40);
-        page.apply(StoreEvent::Failed(DetailError::SourceNotInstalled), 50);
-        assert_eq!(page.banners.current().unwrap().action, None);
-    }
-
-    #[test]
-    fn a_toast_is_a_four_second_banner() {
-        let mut page = ready(1);
-        page.toast("Copied", 100);
-        page.banners.tick(4099);
-        assert!(page.banners.current().is_some());
-        page.banners.tick(4100);
-        assert!(page.banners.current().is_none());
+        page.apply(StoreEvent::Failed(DetailError::Http(500)));
+        let notices = page.take_notices();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].action, Some(("Retry".to_owned(), StoreCmd::FetchAll { manga_id: 1, manual: true })));
+        assert!(page.take_notices().is_empty(), "taken once");
+        page.apply(StoreEvent::Failed(DetailError::SourceNotInstalled));
+        assert_eq!(page.take_notices()[0].action, None);
     }
 
     #[test]
@@ -666,7 +663,7 @@ mod tests {
             page.act(UiAction::SetExcludedScanlators(excluded.clone())).cmds,
             vec![StoreCmd::SetExcludedScanlators { manga_id: 1, excluded: excluded.clone() }]
         );
-        page.apply(StoreEvent::Scanlators { available: vec!["A".into(), "B".into()], excluded: excluded.clone() }, 0);
+        page.apply(StoreEvent::Scanlators { available: vec!["A".into(), "B".into()], excluded: excluded.clone() });
         let ready = page.ready().expect("ready");
         assert_eq!((ready.available_scanlators.clone(), ready.excluded_scanlators.clone()), (vec!["A".to_owned(), "B".to_owned()], excluded));
     }
@@ -675,7 +672,7 @@ mod tests {
     fn a_tracking_read_updates_the_count_the_tracking_button_shows() {
         let mut page = ready(1);
         assert_eq!(page.ready().expect("ready").tracking_count, 0);
-        page.apply(StoreEvent::Tracking { count: 1, logged_in: true }, 0);
+        page.apply(StoreEvent::Tracking { count: 1, logged_in: true });
         let ready = page.ready().expect("ready");
         assert_eq!((ready.tracking_count, ready.has_logged_in_trackers), (1, true));
     }
@@ -696,7 +693,6 @@ mod tests {
         let rows = vec![ChapterRow::new(1, "c1", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "c2", 2.0) }, ChapterRow::new(3, "c3", 3.0)];
         let moved = page.apply(
             StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: rows },
-            0,
         );
         assert_eq!(moved, Some(3), "focus goes to a visible neighbour");
     }
@@ -721,7 +717,7 @@ mod tests {
         // chapter 2 is selected, then a filter hides every read row, and 2 is read
         page.act(UiAction::Key { key: Key::Space, mods: Mods::default(), focused: Some(2) });
         let rows = vec![ChapterRow::new(1, "c1", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "c2", 2.0) }, ChapterRow::new(3, "c3", 3.0)];
-        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: rows }, 0);
+        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x201 | c::SHOW_UNDONE)), chapters: rows });
         assert_eq!(page.rows().iter().filter(|r| r.selected).count(), 0, "the selected row is hidden");
         assert!(!page.act(UiAction::Back).pop, "a hidden selection still counts (E-04)");
         assert!(page.ready().unwrap().selection.is_empty());
@@ -770,7 +766,7 @@ mod tests {
         assert!(page.act(UiAction::MarkPrevious(99)).cmds.is_empty(), "a pointer outside the view marks nothing (E-PREV-1)");
         // number descending (0x200): the earlier chapters are the ones below, in chronological order
         let rows = (1..=4).map(|i| ChapterRow::new(i, &format!("c{i}"), i as f64)).collect();
-        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x200)), chapters: rows }, 0);
+        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x200)), chapters: rows });
         let out = page.act(UiAction::MarkPrevious(3));
         assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![1, 2], read: true, remove_after_read: false }]);
     }
@@ -789,10 +785,10 @@ mod tests {
     #[test]
     fn the_store_answers_of_the_favorite_toggle_open_the_dialogs() {
         let mut page = ready(1);
-        page.apply(StoreEvent::Duplicate { duplicate_id: 9 }, 0);
+        page.apply(StoreEvent::Duplicate { duplicate_id: 9 });
         assert_eq!(page.ready().unwrap().dialog.current(), Some(&Dialog::DuplicateManga { manga_id: 1, duplicate_id: 9 }));
         assert!(!page.take_category_request());
-        page.apply(StoreEvent::ChooseCategory, 0);
+        page.apply(StoreEvent::ChooseCategory);
         assert!(page.take_category_request());
         assert!(!page.take_category_request(), "the request is taken once");
     }
@@ -801,30 +797,28 @@ mod tests {
     fn a_removed_favorite_with_downloads_asks_to_delete_them() {
         let mut page = ready(2);
         page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Downloaded }, 0);
-        page.apply(StoreEvent::Removed { ask_delete_downloads: false }, 0);
-        assert!(page.banners.current().is_none());
-        page.apply(StoreEvent::Removed { ask_delete_downloads: true }, 0);
-        let banner = page.banners.current().expect("the prompt");
-        assert_eq!(banner.text, "Delete downloaded chapters?");
-        assert_eq!(banner.action.as_ref().map(|(label, _)| label.as_str()), Some("Delete"));
-        assert_eq!(page.banners.activate_action(true, 1), Some(StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![2] }));
+        page.apply(StoreEvent::Removed { ask_delete_downloads: false });
+        assert!(page.take_notices().is_empty());
+        page.apply(StoreEvent::Removed { ask_delete_downloads: true });
+        let notice = page.take_notices().remove(0);
+        assert_eq!(notice.text, "Delete downloaded chapters?");
+        assert_eq!(notice.action, Some(("Delete".to_owned(), StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![2] })));
     }
 
     #[test]
     fn the_first_queued_download_of_a_non_favorite_offers_to_add_it_once() {
         let mut page = ready(1);
         page.state = finish_load(Some(MangaRow { favorite: false, ..manga(0x201) }), vec![ChapterRow::new(1, "c1", 1.0)], SourceInfo::default(), &LoadContext::default()).state;
-        page.apply(StoreEvent::Queued, 0);
-        let banner = page.banners.current().expect("the add prompt");
-        assert_eq!(banner.text, "Add manga to library?");
-        assert_eq!(banner.action.as_ref().map(|(label, _)| label.as_str()), Some("Add"));
-        page.banners.dismiss(1);
-        page.apply(StoreEvent::Queued, 2);
-        assert!(page.banners.current().is_none(), "once per open (E-DL-3)");
+        page.apply(StoreEvent::Queued);
+        let notice = page.take_notices().remove(0);
+        assert_eq!(notice.text, "Add manga to library?");
+        assert_eq!(notice.action.as_ref().map(|(label, _)| label.as_str()), Some("Add"));
+        page.apply(StoreEvent::Queued);
+        assert!(page.take_notices().is_empty(), "once per open (E-DL-3)");
         // a favorite is never asked
         let mut favorite = ready(1);
-        favorite.apply(StoreEvent::Queued, 0);
-        assert!(favorite.banners.current().is_none());
+        favorite.apply(StoreEvent::Queued);
+        assert!(favorite.take_notices().is_empty());
     }
 
     #[test]

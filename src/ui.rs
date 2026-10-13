@@ -131,28 +131,81 @@ pub fn back_button() -> Button {
     b
 }
 
+/// The one search of the app: a `gtk::SearchBar` for `entry` and the header toggle that shows it. The toggle is bound to
+/// the bar's `search-mode-enabled`; typing anywhere in `page` opens the bar (key capture), Ctrl+F opens it and focuses
+/// the entry, and Escape closes it. Closing clears the text, so a filter never stays on behind a hidden bar, and text put
+/// in the entry from outside opens the bar. Put the bar under the header and the toggle among the header actions.
+pub fn search_row(entry: &gtk::SearchEntry, page: &impl IsA<gtk::Widget>) -> (gtk::SearchBar, gtk::ToggleButton) {
+    entry.set_hexpand(true);
+    let bar = gtk::SearchBar::new();
+    bar.set_child(Some(&clamp(entry, SEARCH_WIDTH)));
+    bar.connect_entry(entry);
+    bar.set_key_capture_widget(Some(page));
+    let tip = kuro_i18n::tr(kuro_i18n::MsgKey::action_search);
+    let toggle = gtk::ToggleButton::builder().icon_name("system-search-symbolic").tooltip_text(&tip).build();
+    toggle.update_property(&[gtk::accessible::Property::Label(&tip)]);
+    bar.bind_property("search-mode-enabled", &toggle, "active").bidirectional().sync_create().build();
+    let (weak_bar, weak_entry) = (bar.downgrade(), entry.downgrade());
+    let ctrl_f = gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("<Control>f"),
+        Some(gtk::CallbackAction::new(move |_, _| {
+            if let (Some(bar), Some(entry)) = (weak_bar.upgrade(), weak_entry.upgrade()) {
+                bar.set_search_mode(true);
+                entry.grab_focus();
+            }
+            glib::Propagation::Stop
+        })),
+    );
+    let shortcuts = gtk::ShortcutController::new();
+    shortcuts.add_shortcut(ctrl_f);
+    page.add_controller(shortcuts);
+    let weak_entry = entry.downgrade();
+    bar.connect_search_mode_enabled_notify(move |bar| {
+        if let Some(entry) = weak_entry.upgrade().filter(|_| !bar.is_search_mode()) {
+            entry.set_text("");
+        }
+    });
+    let weak_bar = bar.downgrade();
+    entry.connect_search_changed(move |entry| {
+        if let Some(bar) = weak_bar.upgrade().filter(|_| !entry.text().is_empty()) {
+            bar.set_search_mode(true);
+        }
+    });
+    bar.set_search_mode(!entry.text().is_empty());
+    (bar, toggle)
+}
+
 /// A navigation page: one header row above `content` (docs/design/other-tabs.md). A pushed page (`back`) shows the
 /// back button and its title; a sidebar destination shows no title, because the sidebar already names it. When the
-/// first `end` widget is a search entry it takes the middle of the row in place of the title. An Anime | Manga switch
-/// (a stack switcher) among `end` goes to the start of the row, after Back, where the Library has its switch.
+/// first `end` widget is a search entry the page gets the shared search ([`search_row`]): the toggle leads the actions
+/// and the bar sits under the header; a pushed page opens with the bar showing. An Anime | Manga switch (a stack
+/// switcher) among `end` goes to the start of the row, after Back, where the Library has its switch.
 pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>, back: bool) -> GBox {
     let header = header_bar();
     header.set_decoration_layout(Some(&decoration(false)));
-    let mut end = end.into_iter().peekable();
-    let centre: gtk::Widget = match end.next_if(|w| w.is::<gtk::SearchEntry>()) {
-        Some(search) => {
-            search.set_hexpand(true);
-            clamp(&search, SEARCH_WIDTH).upcast()
+    let b = GBox::new(O::Vertical, 0);
+    let mut end = end;
+    let mut bar = None;
+    if let Some(entry) = end.first().and_then(|w| w.downcast_ref::<gtk::SearchEntry>()).cloned() {
+        end.remove(0);
+        let (search_bar, toggle) = search_row(&entry, &b);
+        end.insert(0, toggle.upcast());
+        if back {
+            search_bar.set_search_mode(true);
         }
-        None if back => Label::builder().label(title).css_classes(["title"]).build().upcast(),
+        bar = Some(search_bar);
+    }
+    let centre: gtk::Widget = if back {
+        Label::builder().label(title).css_classes(["title"]).build().upcast()
+    } else {
         // an empty box, not None: without a title widget GTK shows the window title
-        None => GBox::new(O::Horizontal, 0).upcast(),
+        GBox::new(O::Horizontal, 0).upcast()
     };
     header.set_title_widget(Some(&centre));
     if back {
         header.pack_start(&back_button());
     }
-    let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.partition(|w| w.is::<gtk::StackSwitcher>());
+    let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.into_iter().partition(|w| w.is::<gtk::StackSwitcher>());
     for w in &switches {
         header.pack_start(w);
     }
@@ -160,8 +213,10 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
         header.pack_end(w);
     }
     no_sticky_focus(&header);
-    let b = GBox::new(O::Vertical, 0);
     b.append(&header);
+    if let Some(bar) = &bar {
+        b.append(bar);
+    }
     content.set_vexpand(true);
     b.append(content);
     b
@@ -330,7 +385,7 @@ fn row_title_text(w: &gtk::Widget) -> Option<String> {
     std::iter::successors(w.first_child(), |c| c.next_sibling()).find_map(|c| row_title_text(&c))
 }
 
-/// The header search entry of a page that lists rows: it hides the rows of `list` whose title lacks the typed text
+/// The search entry of a page that lists rows (the page hands it to the shared search, `search_row`): it hides the rows of `list` whose title lacks the typed text
 /// (`title_matches`). The filter stays on the list, so rows added later are filtered too. Hand it first in `Built.end`.
 pub fn list_search(list: &ListBox) -> gtk::SearchEntry {
     let search = gtk::SearchEntry::builder().placeholder_text(kuro_i18n::tr(kuro_i18n::MsgKey::action_search_hint)).hexpand(true).build();
@@ -1019,14 +1074,33 @@ mod tests {
     }
 
     #[test]
-    fn a_search_entry_handed_first_takes_the_middle_of_the_header() {
+    fn a_search_entry_handed_first_becomes_a_toggle_in_the_header_and_a_bar_under_it() {
         crate::testing::with_display(|| {
             let search = gtk::SearchEntry::new();
             let refresh = icon_button("view-refresh-symbolic", "Refresh");
-            let p = page("Search settings", &GBox::new(O::Vertical, 0), vec![search.clone().upcast(), refresh.upcast()], true);
+            let p = page("Updates", &GBox::new(O::Vertical, 0), vec![search.clone().upcast(), refresh.upcast()], false);
             let header = p.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row");
-            assert!(search.is_ancestor(&header.title_widget().expect("the middle")), "the entry is the title widget");
-            assert!(!labels(header.upcast_ref()).iter().any(|l| l == "Search settings"), "no title beside the search");
+            let bar = header.next_sibling().and_downcast::<gtk::SearchBar>().expect("the bar sits under the header");
+            assert!(search.is_ancestor(&bar) && !search.is_ancestor(&header), "the entry is in the bar, not the header");
+            let mut w = Vec::new();
+            all(header.upcast_ref(), &mut w);
+            let toggle = w.iter().find_map(|w| w.downcast_ref::<gtk::ToggleButton>().filter(|b| b.icon_name().as_deref() == Some("system-search-symbolic"))).expect("the search toggle");
+            assert_eq!(toggle.tooltip_text().as_deref(), Some("Search"));
+            assert!(!bar.is_search_mode(), "closed to start with");
+            // the toggle opens the bar, and Escape in the entry (its stop-search) closes it, clearing the text
+            toggle.set_active(true);
+            assert!(bar.is_search_mode(), "the toggle opens the bar");
+            search.set_text("one");
+            search.emit_by_name::<()>("stop-search", &[]);
+            assert!(!bar.is_search_mode() && !toggle.is_active(), "Escape closes the bar");
+            assert_eq!(search.text(), "", "closing clears the filter text");
+            // text put in from outside opens it
+            search.set_text("two");
+            search.emit_by_name::<()>("search-changed", &[]);
+            assert!(bar.is_search_mode(), "text in the entry shows the bar");
+            // a pushed page opens with the bar showing
+            let pushed = page("Search settings", &GBox::new(O::Vertical, 0), vec![gtk::SearchEntry::new().upcast()], true);
+            assert!(pushed.first_child().and_then(|h| h.next_sibling()).and_downcast::<gtk::SearchBar>().is_some_and(|b| b.is_search_mode()));
         });
     }
 }

@@ -1,5 +1,6 @@
-//! The toast overlay (T-12a-014 presenter). `kuro_platform::toast` queues the messages; this shows them one at a
-//! time at the bottom of the main window, each for its length. GTK objects stay on the main thread.
+//! The app's one notification bar (T-12a-014 presenter). `kuro_platform::toast` queues the messages; this shows them one
+//! at a time at the bottom centre of the main window, each for its length, in GTK's own `app-notification` style. The
+//! entry pages' Undo and Retry prompts use it too (`entry_core::message::Notice`). GTK objects stay on the main thread.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -60,6 +61,8 @@ pub fn notify(text: impl Into<String>) {
 struct Layer {
     label: gtk::Label,
     action: gtk::Button,
+    /// Dismisses a toast that waits for its action; a plain toast times out or is dismissed with a click.
+    close: gtk::Button,
     /// What the action button runs now; replaced with each toast.
     on_action: RefCell<Option<Rc<dyn Fn()>>>,
     revealer: gtk::Revealer,
@@ -86,10 +89,12 @@ impl Layer {
             Some((label, run)) => {
                 self.action.set_label(label);
                 self.action.set_visible(true);
+                self.close.set_visible(true);
                 *self.on_action.borrow_mut() = Some(run);
             }
             None => {
                 self.action.set_visible(false);
+                self.close.set_visible(false);
                 *self.on_action.borrow_mut() = None;
             }
         }
@@ -133,9 +138,11 @@ pub fn attach(overlay: &gtk::Overlay) -> Toaster {
     let (toaster, feed) = toast_channel();
     let label = gtk::Label::builder().wrap(true).max_width_chars(60).hexpand(true).xalign(0.0).focusable(false).can_focus(false).build();
     let action = gtk::Button::builder().css_classes(["flat"]).visible(false).focusable(false).can_focus(false).focus_on_click(false).build();
-    let bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).css_classes(["osd"]).margin_bottom(24).margin_start(12).margin_end(12).build();
+    let close = gtk::Button::builder().icon_name("window-close-symbolic").css_classes(["flat"]).visible(false).focusable(false).can_focus(false).focus_on_click(false).build();
+    let bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).css_classes(["app-notification", "osd"]).margin_bottom(24).margin_start(12).margin_end(12).build();
     bar.append(&label);
     bar.append(&action);
+    bar.append(&close);
     let revealer = gtk::Revealer::builder()
         .child(&bar)
         .halign(gtk::Align::Center)
@@ -144,7 +151,7 @@ pub fn attach(overlay: &gtk::Overlay) -> Toaster {
         .focusable(false)
         .can_focus(false)
         .build();
-    let layer = Rc::new(Layer { label: label.clone(), action: action.clone(), on_action: RefCell::new(None), revealer: revealer.clone(), generation: Cell::new(0) });
+    let layer = Rc::new(Layer { label: label.clone(), action: action.clone(), close: close.clone(), on_action: RefCell::new(None), revealer: revealer.clone(), generation: Cell::new(0) });
 
     let click = gtk::GestureClick::new();
     click.connect_pressed({
@@ -162,6 +169,11 @@ pub fn attach(overlay: &gtk::Overlay) -> Toaster {
                 run();
             }
         }
+    });
+
+    close.connect_clicked({
+        let layer = layer.clone();
+        move |_| layer.dismiss()
     });
 
     let keys = gtk::EventControllerKey::new();
@@ -251,6 +263,49 @@ mod tests {
             assert!(revealer.reveals_child(), "the first toast's timer does not hide the second");
             pump(1200);
             assert!(!revealer.reveals_child(), "hidden 2 s after the last toast");
+        });
+    }
+
+    // One notification bar for the whole app: GTK's own `app-notification` look, centred at the bottom, and the entry
+    // pages' Undo and Retry prompts go through it. A prompt shows its button and a close button; pressing the button
+    // runs it once and hides the bar; a new toast replaces it.
+    #[test]
+    fn the_one_layer_is_app_notification_styled_and_runs_an_action_once() {
+        crate::testing::with_display(|| {
+            let overlay = gtk::Overlay::new();
+            attach(&overlay);
+            let revealer: gtk::Revealer = find(overlay.upcast_ref()).expect("the toast revealer");
+            let bar = revealer.child().expect("the bar");
+            assert!(bar.has_css_class("app-notification"), "GTK's own notification style");
+            let buttons: Vec<gtk::Button> = {
+                let mut out = Vec::new();
+                let mut child = bar.first_child();
+                while let Some(c) = child {
+                    out.extend(c.downcast_ref::<gtk::Button>().cloned());
+                    child = c.next_sibling();
+                }
+                out
+            };
+            let (action, close) = (&buttons[0], &buttons[1]);
+            assert!(!action.is_visible() && !close.is_visible(), "a plain toast has no buttons");
+
+            let runs = Rc::new(Cell::new(0));
+            let count = Rc::clone(&runs);
+            notify_action("Delete downloaded chapters?", "Delete", None, move || count.set(count.get() + 1));
+            assert!(revealer.reveals_child() && action.is_visible() && close.is_visible());
+            assert_eq!(action.label().as_deref(), Some("Delete"));
+            action.emit_clicked();
+            assert_eq!(runs.get(), 1);
+            assert!(!revealer.reveals_child(), "the action hides the bar");
+            action.emit_clicked();
+            assert_eq!(runs.get(), 1, "and it runs once");
+
+            notify_action("Retry?", "Retry", None, || {});
+            notify_for("plain", Duration::from_secs(2));
+            assert!(!action.is_visible(), "a new toast replaces the prompt and its button");
+            notify_action("Retry?", "Retry", None, || {});
+            close.emit_clicked();
+            assert!(!revealer.reveals_child(), "the close button dismisses a prompt");
         });
     }
 }
