@@ -32,6 +32,13 @@ pub fn open_source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) ->
     let Some(found) = source_episode(sources, episode_id) else {
         return false;
     };
+    // a downloaded episode plays from its file, without asking the source
+    if !super::is_open() {
+        if let Some(media) = super::downloaded_media(episode_id) {
+            super::open_media(media, episode_id, 0);
+            return true;
+        }
+    }
     // a second click while the first still loads, or while a player is open, does nothing: the first answer opens it
     if super::is_open() || RESOLVING.with(|r| r.replace(true)) {
         return true;

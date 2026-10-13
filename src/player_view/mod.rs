@@ -664,6 +664,20 @@ fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
     }
 }
 
+/// The file of a downloaded episode of an online source. Such an episode plays from its file, online or not. The disk is
+/// asked once (a folder lookup), on the GTK thread, as the local episodes' open is.
+pub(super) fn downloaded_media(episode_id: i64) -> Option<Media> {
+    if !crate::data::is_installed() {
+        return None;
+    }
+    let db = crate::data::app().db.clone();
+    let episode = ItemRepo::new(Arc::clone(&db)).by_id(episode_id).ok().flatten()?;
+    let (entry, source) = crate::downloads::directory::AppDirectory::new(db).entry_context(kuro_platform::kind::Kind::Anime, episode.entry_id)?;
+    let service = crate::shell::host::Shell::get()?.download_service()?;
+    let path = service.locate(&entry, &source, &kuro_downloads::unit::UnitRef::from(&episode))?;
+    Some(Media { target: path.to_string_lossy().into_owned(), title: title_or_file(episode_id, &path), headers: None, tracks: Vec::new() })
+}
+
 /// Starts episode row `episode_id` in this window: a local file at once, a source's stream once it resolves.
 fn play_episode(shared: &Shared, episode_id: i64) {
     let db = crate::data::app().db.clone();
@@ -680,6 +694,10 @@ fn play_episode(shared: &Shared, episode_id: i64) {
 
 /// A source episode in this window: its stream resolves in the background, then the page plays it.
 fn play_source_episode(shared: &Shared, episode_id: i64) {
+    if let Some(media) = downloaded_media(episode_id) {
+        shared.borrow_mut().play(media, episode_id);
+        return;
+    }
     let Some(found) = source::source_episode(&crate::screens::anime_sources(), episode_id) else {
         return crate::toast::notify(tr(MsgKey::episode_not_found));
     };
