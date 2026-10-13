@@ -6,8 +6,9 @@ use crate::names::extension;
 
 /// `ArchiveManga.SUPPORTED_ARCHIVE_TYPES`. Matched case-insensitively.
 pub const MANGA_ARCHIVE_EXTENSIONS: [&str; 8] = ["zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt"];
-/// `ArchiveAnime.SUPPORTED_ARCHIVE_TYPES`. Matched case-sensitively: `EP01.MKV` is not an episode.
-pub const ANIME_EPISODE_EXTENSIONS: [&str; 8] = ["avi", "flv", "mkv", "mov", "mp4", "webm", "wmv", "torrent"];
+/// The video formats a local episode may have (`ArchiveAnime.SUPPORTED_ARCHIVE_TYPES` without the torrent file, which the
+/// app does not play). Matched case-insensitively, as the manga archives are: `EP01.MKV` is an episode.
+pub const ANIME_EPISODE_EXTENSIONS: [&str; 7] = ["avi", "flv", "mkv", "mov", "mp4", "webm", "wmv"];
 
 pub fn is_manga_archive(name: &str) -> bool {
     let ext = extension(name).to_lowercase();
@@ -15,7 +16,7 @@ pub fn is_manga_archive(name: &str) -> bool {
 }
 
 pub fn is_anime_episode(name: &str) -> bool {
-    ANIME_EPISODE_EXTENSIONS.contains(&extension(name))
+    ANIME_EPISODE_EXTENSIONS.contains(&extension(name).to_lowercase().as_str())
 }
 
 pub fn is_epub(name: &str) -> bool {
@@ -59,10 +60,10 @@ mod tests {
     }
 
     #[test]
-    fn episodes_are_case_sensitive() {
+    fn episodes_are_case_insensitive_and_a_torrent_file_is_not_one() {
         assert!(is_anime_episode("Show - 01.mkv"));
-        assert!(is_anime_episode("ep.torrent"));
-        assert!(!is_anime_episode("EP01.MKV"));
+        assert!(is_anime_episode("EP01.MKV"));
+        assert!(!is_anime_episode("ep.torrent"));
         assert!(!is_anime_episode("Vol.cbz"));
     }
 

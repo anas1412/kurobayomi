@@ -36,10 +36,10 @@ fn t_14_format_manga_archive_case_insensitive() {
 }
 
 #[test]
-fn t_14_format_anime_case_sensitive() {
+fn t_14_format_anime_case_insensitive() {
     assert!(is_anime_episode("Ep.mkv"));
-    assert!(!is_anime_episode("Ep.MKV"));
-    assert!(is_anime_episode("Ep.torrent"));
+    assert!(is_anime_episode("Ep.MKV"));
+    assert!(!is_anime_episode("Ep.torrent"));
 }
 
 #[test]

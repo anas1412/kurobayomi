@@ -134,7 +134,7 @@ mod tests {
             entry("EP 2.MKV", false),
             entry("Season 1", true),
         ];
-        assert_eq!(local_anime_download_count(&children), 1);
+        assert_eq!(local_anime_download_count(&children), 2, "the extension is not case-sensitive");
     }
 }
 

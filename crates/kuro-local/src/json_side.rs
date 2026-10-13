@@ -125,9 +125,16 @@ pub fn read_chapters_json(path: &Path) -> Option<Vec<ChapterDetails>> {
     }
 }
 
-/// `episodes.json`. A decode error propagates to the caller (E-ANIME-3).
-pub fn read_episodes_json(path: &Path) -> Result<Vec<EpisodeDetails>, LocalSourceError> {
-    read_json(path)
+/// `episodes.json`. Like `chapters.json`, any read or decode error gives `None`: a broken side file is ignored, for both
+/// kinds (decision 10 of the unify map).
+pub fn read_episodes_json(path: &Path) -> Option<Vec<EpisodeDetails>> {
+    match read_json::<Vec<EpisodeDetails>>(path) {
+        Ok(list) => Some(list),
+        Err(error) => {
+            tracing::warn!("ignoring {}: {error}", path.display());
+            None
+        }
+    }
 }
 
 /// `details.json` as `T`. A decode error propagates to the caller.
@@ -180,12 +187,12 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_episodes_file_propagates_and_needs_episode_number() {
+    fn a_bad_episodes_file_is_ignored_and_needs_episode_number() {
         let dir = tempfile::tempdir().expect("tempdir");
         let missing = write(dir.path(), "episodes.json", r#"[{"name":"x"}]"#);
-        assert!(read_episodes_json(&missing).is_err());
+        assert!(read_episodes_json(&missing).is_none());
         let garbage = write(dir.path(), "bad.json", "[");
-        assert!(read_episodes_json(&garbage).is_err());
+        assert!(read_episodes_json(&garbage).is_none());
     }
 
     #[test]

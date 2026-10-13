@@ -137,11 +137,11 @@ async fn t_14_episodes_number_uses_anime_title() -> io::Result<()> {
 }
 
 #[tokio::test]
-async fn t_14_episodes_uppercase_rejected() -> io::Result<()> {
+async fn t_14_episodes_uppercase_accepted() -> io::Result<()> {
     let (_root, source) = library(&[("Show", &["EP01.MKV", "ep01.mkv"])])?;
     let got = AnimeSource::episode_list(&source, &anime("Show")).await.map_err(io::Error::other)?;
     let urls: Vec<&str> = got.iter().map(|e| e.url.as_str()).collect();
-    assert_eq!(urls, ["Show/ep01.mkv"]);
+    assert_eq!(urls, ["Show/EP01.MKV", "Show/ep01.mkv"], "the extension is not case-sensitive");
     Ok(())
 }
 
@@ -155,18 +155,18 @@ async fn t_14_episodes_dir_named_mkv_excluded() -> io::Result<()> {
 }
 
 #[tokio::test]
-async fn t_14_episodes_json_bad_fails_listing() -> io::Result<()> {
+async fn t_14_episodes_json_bad_is_ignored() -> io::Result<()> {
     let (root, source) = library(&[("Show", &["Show 1.mkv"])])?;
     fs::write(root.path().join("Show").join("episodes.json"), "{")?;
-    assert!(AnimeSource::episode_list(&source, &anime("Show")).await.is_err());
+    assert_eq!(AnimeSource::episode_list(&source, &anime("Show")).await.map_err(io::Error::other)?.len(), 1);
     Ok(())
 }
 
 #[tokio::test]
-async fn t_14_episodes_json_missing_number_fails() -> io::Result<()> {
+async fn t_14_episodes_json_missing_number_is_ignored() -> io::Result<()> {
     let (root, source) = library(&[("Show", &["Show 1.mkv"])])?;
     fs::write(root.path().join("Show").join("episodes.json"), r#"[{"name":"no number"}]"#)?;
-    assert!(AnimeSource::episode_list(&source, &anime("Show")).await.is_err());
+    assert_eq!(AnimeSource::episode_list(&source, &anime("Show")).await.map_err(io::Error::other)?.len(), 1);
     Ok(())
 }
 

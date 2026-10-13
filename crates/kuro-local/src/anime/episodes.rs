@@ -42,10 +42,7 @@ where
         return Ok(Vec::new());
     };
     let entries = list_dir(&dir)?;
-    let overrides = match side_file(&entries, "episodes") {
-        Some(file) => Some(read_episodes_json(&file.path)?),
-        None => None,
-    };
+    let overrides = side_file(&entries, "episodes").and_then(|file| read_episodes_json(&file.path));
     let mut found: Vec<(SEpisode, PathBuf)> = entries
         .iter()
         .filter(|e| is_episode_entry(e))
@@ -209,11 +206,10 @@ mod tests {
     }
 
     #[test]
-    fn the_episode_extension_is_case_sensitive() -> io::Result<()> {
+    fn the_episode_extension_is_case_insensitive() -> io::Result<()> {
         let (root, anime) = show_with(&["EP01.MKV", "EP02.mkv"])?;
         let got = episode_list(root.path(), &anime).map_err(io::Error::other)?;
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].name, "EP02");
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["EP02", "EP01"]);
         Ok(())
     }
 
@@ -369,13 +365,14 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_episodes_json_fails_the_listing() -> io::Result<()> {
+    fn a_bad_episodes_json_is_ignored_and_the_files_still_list() -> io::Result<()> {
         let (root, anime) = show_with(&["Show - 1.mkv"])?;
         fs::write(
             root.path().join("Show").join("episodes.json"),
             r#"[{"name":"no number"}]"#,
         )?;
-        assert!(episode_list(root.path(), &anime).is_err());
+        let got = episode_list(root.path(), &anime).map_err(io::Error::other)?;
+        assert_eq!(got.len(), 1);
         Ok(())
     }
 }
