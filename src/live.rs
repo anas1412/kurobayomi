@@ -164,7 +164,7 @@ impl CategoryList {
 /// The categories screen of one kind: a live list of the non-system categories in the page column, or the empty
 /// state with an Add button. The header gets the name search and an Add button, which runs [`add_category`] too.
 pub fn categories_content(kind: Kind) -> crate::screens::Built {
-    let add = Button::with_label("Add category");
+    let add = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_add_category));
     add.connect_clicked(move |_| add_category(kind));
     let (empty, _) = crate::browse::look::empty_state("tag-symbolic", &screen("categories").empty.unwrap_or_default(), Some(&add));
     let column = column();

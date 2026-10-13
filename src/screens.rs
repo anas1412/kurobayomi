@@ -239,7 +239,7 @@ fn downloads_view(kind: Kind) -> Built {
     if let Some((page, search)) = crate::downloads::queue_page::page(kind) {
         return Built { content: scrolled(&page).upcast(), end: vec![search.upcast()] };
     }
-    let library = Button::with_label("Library");
+    let library = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::label_library));
     library.connect_clicked(|_| open("library"));
     let (page, _) = crate::browse::look::empty_state("folder-download-symbolic", &screen("download_queue").empty.unwrap_or_default(), Some(&library));
     // nothing to filter, so no search

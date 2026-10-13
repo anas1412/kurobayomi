@@ -161,7 +161,7 @@ mod tests {
             let text = cover.first_child().and_downcast::<gtk::Label>().expect("the initials");
             assert_eq!(text.label(), "SL");
 
-            let action = gtk::Button::with_label("Update library");
+            let action = gtk::Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_update_library));
             let (page, label) = empty_state("view-refresh-symbolic", "No recent updates", Some(&action));
             assert_eq!(label.label(), "No recent updates");
             assert!(label.has_css_class("kb-empty-title"));

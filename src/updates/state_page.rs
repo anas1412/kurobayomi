@@ -73,7 +73,7 @@ mod tests {
     fn the_empty_page_has_the_library_look_and_one_action() {
         crate::testing::with_display(|| {
             let pages = PageStates::new(&gtk::Label::new(Some("rows")), || {});
-            let action = Button::with_label("Update library");
+            let action = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_update_library));
             pages.set_empty_look("software-update-available-symbolic", Some(&action));
             pages.show(&PageState::Empty("No recent updates".into()));
             assert_eq!(pages.stack.visible_child_name().as_deref(), Some("empty"));

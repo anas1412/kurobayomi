@@ -208,7 +208,7 @@ fn anilist_list(entry: &Entry, tracker: &dyn Tracker, bound: Option<Bound>, redr
             }
         }
         None => {
-            let search = Button::with_label("Search");
+            let search = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_search));
             search.set_valign(Align::Center);
             search.connect_clicked(|_| ui::open("tracker_search"));
             list.append(&ui::row(tracker.name(), Some("Not tracked yet"), Some(search.upcast::<gtk::Widget>())));

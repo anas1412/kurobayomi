@@ -15,7 +15,6 @@ pub mod page;
 pub mod pickers;
 pub mod progress;
 pub mod remove;
-#[cfg(test)]
 pub mod session;
 pub mod summary;
 pub mod writes;
