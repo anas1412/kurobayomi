@@ -41,7 +41,7 @@ use super::torrent_server;
 use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem, LINK_COPIED, can_launch};
 use super::viewer;
 use super::dialog_state::{AnimeDialog, DialogSlot};
-use super::duplicate::Choice;
+use crate::duplicate_dialog::{self, DuplicateChoice};
 use super::season_grid::{Layout, SeasonGrid};
 use super::season_pipeline::process_seasons;
 use super::season_tile::{SeasonFacts, SeasonItem, continue_episode, season_facts};
@@ -54,7 +54,7 @@ use super::refresh::refresh_snack;
 use super::remote::{LiveSources, RemoteAnimeBackend};
 use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeRunner};
 use super::store::AnimeStore;
-use super::{duplicate_view, related_view};
+use super::related_view;
 use crate::data;
 use crate::entry_core::dialog::CategoryDialog;
 use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
@@ -1005,11 +1005,15 @@ impl View {
         let (Some(duplicate), Some(anime_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.anime.id)) else { return };
         let runner = Rc::clone(&self.runner);
         let id = self.claim_slot(AnimeDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
-        let window = duplicate_view::open(move |choice| match choice {
-            Choice::ShowAnime => open(duplicate.id),
-            Choice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
-            Choice::AddAnyway => runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: false }),
-        });
+        let window = duplicate_dialog::open(
+            Kind::Anime,
+            move |choice| match choice {
+                DuplicateChoice::Show => open(duplicate.id),
+                DuplicateChoice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
+                DuplicateChoice::AddAnyway => runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: false }),
+            },
+            || {},
+        );
         self.adopt(id, &window, true);
     }
 

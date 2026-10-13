@@ -2,7 +2,6 @@
 //! the confirm callback, Cancel and a confirm button. `show_dialog_then` of the shell passes no value to its callback,
 //! so the remove dialog with its "Reset all" checkbox is built here. Escape closes the dialog. A modal window has no scrim, so a click outside it cannot cancel; the parent window is blocked instead.
 
-use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{Box as GBox, CheckButton, Orientation as O};
@@ -41,20 +40,4 @@ pub fn show(copy: ConfirmCopy, destructive: bool, on_ok: impl Fn(bool) + 'static
         gtk::glib::Propagation::Proceed
     });
     win.present();
-}
-
-/// A message with one button per label, in order, the last one the main button. `on_pick` gets the index of the
-/// pressed button; a dismissal calls nothing. Used by the duplicate dialog of an add from History.
-pub fn pick(title: String, text: String, labels: Vec<String>, on_pick: impl Fn(usize) + 'static) {
-    let on_pick = Rc::new(on_pick);
-    let last = labels.len().saturating_sub(1);
-    let buttons = labels
-        .into_iter()
-        .enumerate()
-        .map(|(index, label)| {
-            let on_pick = Rc::clone(&on_pick);
-            DialogButton::new(label, if index == last { Role::Suggested } else { Role::Normal }, move || on_pick(index))
-        })
-        .collect();
-    crate::ui::dialog(&title, &crate::ui::message(&text), 420, buttons).present();
 }

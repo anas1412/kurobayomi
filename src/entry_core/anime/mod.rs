@@ -1,7 +1,7 @@
 //! Anime entry details (plan areas 39a and 39b). Pure rules and state: `airing`, `entry_state`, `episode_row`, `format`,
 //! `header`, `info`, `layout`, `model` (the load sequence), `remote` (the source refresh), `runner` (the store
 //! runner) and `store`, plus `dispatch` (what the bar and the menu send), `downloads` (the Download menu rules)
-//! and `download_backend` (the downloads folder and queue). The thin widgets are `season_grid`, `duplicate_view` and
+//! and `download_backend` (the downloads folder and queue). The thin widgets are `season_grid` and
 //! `route`; they read those values. The list options (episodes and seasons) are the shared `entry_core::list_options`. The episode list and its row menu are
 //! the shared `entry_core::list_view` and `entry_core::list_model::row_menu`.
 //!
@@ -39,8 +39,6 @@ pub mod runner;
 pub mod related_pack;
 pub mod related_view;
 pub mod details_error;
-pub mod duplicate;
-pub mod duplicate_view;
 pub mod summary;
 pub mod set_default;
 pub mod season_grid;

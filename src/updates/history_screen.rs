@@ -14,7 +14,7 @@ use gtk::prelude::*;
 use gtk::{Box as GBox, ListBox};
 use crate::browse::entries::FavoriteStore;
 use crate::browse::look;
-use crate::browse::favorite::{DuplicateAnswer, duplicate_answer, duplicate_dialog};
+use crate::duplicate_dialog::DuplicateChoice;
 use kuro_domain::dates::ListRow;
 use kuro_domain::history::model::HistoryWithRelations;
 use kuro_domain::history::repo::HistoryRepo;
@@ -247,31 +247,31 @@ impl HistoryScreen {
         );
     }
 
-    /// The duplicate dialog: show the existing entry, migrate it, add anyway, or cancel (nothing is written).
+    /// The duplicate dialog (`duplicate_dialog`): show the existing entry, migrate it, add anyway, or cancel (nothing is
+    /// written).
     fn duplicate_dialog(self: &Rc<Self>, store: Arc<dyn FavoriteStore>, entry_id: i64, existing: i64, now: i64) {
-        let copy = duplicate_dialog();
-        let labels = vec![copy.show, copy.migrate, copy.add_anyway, copy.cancel];
         let weak = Rc::downgrade(self);
         let db = self.db();
         let kind = self.kind;
-        history_dialog::pick(copy.title, copy.body, labels, move |index| {
-            let Some(screen) = weak.upgrade() else { return };
-            match duplicate_answer(Some(index)) {
-                DuplicateAnswer::ShowExisting => {
-                    crate::screens::open_entry(kind, existing);
+        crate::duplicate_dialog::open(
+            kind,
+            move |choice| {
+                let Some(screen) = weak.upgrade() else { return };
+                match choice {
+                    DuplicateChoice::Show => crate::screens::open_entry(kind, existing),
+                    DuplicateChoice::Migrate => {
+                        let title = history_data::entry_title(&db, kind, existing).unwrap_or_default();
+                        crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id: existing, kind, title });
+                    }
+                    DuplicateChoice::AddAnyway => match history_add::add_anyway(store.as_ref(), entry_id, now) {
+                        Ok(Step::Chooser) => screen.choose_categories(Arc::clone(&store), entry_id, now),
+                        Ok(_) => {}
+                        Err(_) => toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
+                    },
                 }
-                DuplicateAnswer::MigrateExisting => {
-                    let title = history_data::entry_title(&db, kind, existing).unwrap_or_default();
-                    crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id: existing, kind, title });
-                }
-                DuplicateAnswer::AddAnyway => match history_add::add_anyway(store.as_ref(), entry_id, now) {
-                    Ok(Step::Chooser) => screen.choose_categories(Arc::clone(&store), entry_id, now),
-                    Ok(_) => {}
-                    Err(_) => toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
-                },
-                DuplicateAnswer::Nothing => {}
-            }
-        });
+            },
+            || {},
+        );
     }
 
     /// A click on a row: the first next unit of its entry opens, or the not-found toast shows.

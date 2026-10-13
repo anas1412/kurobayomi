@@ -12,9 +12,10 @@ use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
+use crate::duplicate_dialog::DuplicateChoice;
 use super::entries::{CategoryChoice, FavoriteStore, add_entry, add_entry_to, chooser_rows, remove_entry};
 use super::favorite::{
-    AddOutcome, DuplicateAnswer, LongClick, OptimisticFavorite, duplicate_answer, duplicate_dialog_for, long_click, on_remove_answer,
+    AddOutcome, LongClick, OptimisticFavorite, long_click, on_remove_answer,
     remove_confirm,
 };
 use super::listing::ListItem;
@@ -118,24 +119,18 @@ impl FavoriteFlow {
     }
 
     fn ask_duplicate(self: &Rc<Self>, item: ListItem, existing: i64) {
-        let text = duplicate_dialog_for(self.kind);
-        let spec = DialogSpec {
-            title: text.title,
-            body: Some(text.body),
-            buttons: vec![
-                (text.show, ButtonStyle::Plain),
-                (text.migrate, ButtonStyle::Plain),
-                (text.add_anyway, ButtonStyle::Suggested),
-                (text.cancel, ButtonStyle::Plain),
-            ],
-        };
         let this = Rc::clone(self);
-        self.show(spec, None, move |chosen| match duplicate_answer(chosen) {
-            DuplicateAnswer::ShowExisting => (this.hooks.open_entry)(existing),
-            DuplicateAnswer::MigrateExisting => (this.hooks.migrate)(existing, item.id),
-            DuplicateAnswer::AddAnyway => this.add(item.clone()),
-            DuplicateAnswer::Nothing => {}
-        });
+        let window = crate::duplicate_dialog::open(
+            self.kind,
+            move |choice| match choice {
+                DuplicateChoice::Show => (this.hooks.open_entry)(existing),
+                DuplicateChoice::Migrate => (this.hooks.migrate)(existing, item.id),
+                DuplicateChoice::AddAnyway => this.add(item.clone()),
+            },
+            || {},
+        );
+        // a second ask replaces the dialog the first one opened
+        self.dialogs.adopt(&window);
     }
 
     fn show(&self, spec: DialogSpec, extra: Option<gtk::Widget>, on_answer: impl Fn(Option<usize>) + 'static) {
@@ -307,23 +302,24 @@ pub(crate) mod tests {
         rig.flow.long_press(item(false));
         assert!(pump(|| rig.flow.dialog().is_some()));
         let window = rig.flow.dialog().expect("dialog");
+        // Cancel, Show, Migrate existing entry, Add anyway
         assert_eq!(buttons_of(&window).len(), 4);
-        buttons_of(&window)[0].emit_clicked();
-        assert_eq!(*rig.opened.borrow(), ["open 42"]);
-
-        rig.flow.long_press(item(false));
-        assert!(pump(|| rig.flow.dialog().is_some()));
-        buttons_of(&rig.flow.dialog().expect("dialog"))[1].emit_clicked();
-        assert_eq!(*rig.opened.borrow(), ["open 42", "migrate 42 to 7"], "T-40b-046: old = the duplicate, new = the browsed entry");
+        buttons_of(&window)[1].emit_clicked();
+        assert!(pump(|| *rig.opened.borrow() == ["open 42"]));
 
         rig.flow.long_press(item(false));
         assert!(pump(|| rig.flow.dialog().is_some()));
         buttons_of(&rig.flow.dialog().expect("dialog"))[2].emit_clicked();
+        assert!(pump(|| *rig.opened.borrow() == ["open 42", "migrate 42 to 7"]), "T-40b-046: old = the duplicate, new = the browsed entry");
+
+        rig.flow.long_press(item(false));
+        assert!(pump(|| rig.flow.dialog().is_some()));
+        buttons_of(&rig.flow.dialog().expect("dialog"))[3].emit_clicked();
         assert!(pump(|| rig.store.calls().contains(&"favorite 7 true 5000".to_owned())), "Add anyway adds");
         assert_eq!(rig.flags.borrow().first(), Some(&(7, true)));
     }
 
-    /// T-41b-021: the anime page's duplicate dialog offers Show anime, Migrate existing entry, Add anyway and Cancel.
+    /// T-41b-021: the anime page's duplicate dialog offers Cancel, Show anime, Migrate existing entry and Add anyway.
     fn the_anime_duplicate_dialog_says_show_anime_and_each_row_runs_its_action() {
         let rig = rig_for(Kind::Anime);
         *rig.store.duplicates.lock().expect("lock") = vec![42];
@@ -331,11 +327,9 @@ pub(crate) mod tests {
         assert!(pump(|| rig.flow.dialog().is_some()));
         let window = rig.flow.dialog().expect("dialog");
         let labels: Vec<String> = buttons_of(&window).iter().filter_map(|b| b.label().map(|l| l.to_string())).collect();
-        let text = duplicate_dialog_for(Kind::Anime);
-        assert_eq!(labels, [text.show, text.migrate, text.add_anyway, text.cancel]);
-        assert_eq!(labels[0], tr(MsgKey::action_show_anime));
-        buttons_of(&window)[0].emit_clicked();
-        assert_eq!(*rig.opened.borrow(), ["open 42"]);
+        assert_eq!(labels[1], tr(MsgKey::action_show_anime));
+        buttons_of(&window)[1].emit_clicked();
+        assert!(pump(|| *rig.opened.borrow() == ["open 42"]));
     }
 
     fn a_second_long_press_replaces_the_open_dialog() {

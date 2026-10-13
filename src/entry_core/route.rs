@@ -31,6 +31,7 @@ use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::tracking;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
+use crate::duplicate_dialog::DuplicateChoice;
 use crate::entry_core::fetch_interval_dialog;
 use crate::entry_core::shortcut_help_view;
 use crate::entry_core::shortcuts::{HeaderKey, header_key};
@@ -1135,7 +1136,7 @@ impl View {
         });
     }
 
-    /// The duplicate dialog of the library button: Add anyway, or Migrate existing entry. Cancel keeps nothing written.
+    /// The duplicate dialog of the library button (`duplicate_dialog`). Cancel keeps nothing written.
     fn sync_duplicate_dialog(self: &Rc<Self>) {
         let open = matches!(self.page.borrow().ready().and_then(|p| p.dialog.current()), Some(Dialog::DuplicateManga { .. }));
         if !open || self.duplicate_open.replace(true) {
@@ -1145,35 +1146,29 @@ impl View {
             Some(Dialog::DuplicateManga { duplicate_id, .. }) => *duplicate_id,
             _ => return,
         };
-        let body = ui::message(&tr(MsgKey::confirm_add_duplicate_manga));
-        let (weak_migrate, weak_add, weak_dismiss) = (Rc::downgrade(self), Rc::downgrade(self), Rc::downgrade(self));
-        let buttons = vec![
-            ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
-            // Show entry dismisses the sheet first, then pushes the duplicate page on top (E-24)
-            ui::DialogButton::new(tr(MsgKey::action_show_manga), ui::Role::Normal, move || crate::entry_core::route::open(duplicate_id)),
-            ui::DialogButton::new(tr(MsgKey::action_migrate_duplicate), ui::Role::Normal, move || {
-                if let Some(view) = weak_migrate.upgrade() {
-                    // one primary-key read names the old entry for the migrate dialog
-                    let title = kuro_data::entry::EntryRepo::new(data::app().db.clone()).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
-                    view.migrate_entry(duplicate_id, title);
+        let (weak_choice, weak_closed) = (Rc::downgrade(self), Rc::downgrade(self));
+        crate::duplicate_dialog::open(
+            Kind::Manga,
+            move |choice| {
+                let Some(view) = weak_choice.upgrade() else { return };
+                match choice {
+                    DuplicateChoice::Show => crate::entry_core::route::open(duplicate_id),
+                    DuplicateChoice::Migrate => {
+                        // one primary-key read names the old entry for the migrate dialog
+                        let title = kuro_data::entry::EntryRepo::new(data::app().db.clone()).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
+                        view.migrate_entry(duplicate_id, title);
+                    }
+                    DuplicateChoice::AddAnyway => view.act(UiAction::ToggleFavorite { skip_duplicate: true }),
                 }
-            }),
-            ui::DialogButton::new(tr(MsgKey::action_add_anyway), ui::Role::Suggested, move || {
-                if let Some(view) = weak_add.upgrade() {
-                    view.act(UiAction::ToggleFavorite { skip_duplicate: true });
+            },
+            // every way out lets the page show the dialog again next time
+            move || {
+                if let Some(view) = weak_closed.upgrade() {
+                    view.duplicate_open.set(false);
+                    view.act(UiAction::DismissDialog);
                 }
-            }),
-        ];
-        // every way out lets the page show the dialog again next time
-        let window = ui::dialog(&tr(MsgKey::are_you_sure), &body, 400, buttons);
-        window.connect_close_request(move |_| {
-            if let Some(view) = weak_dismiss.upgrade() {
-                view.duplicate_open.set(false);
-                view.act(UiAction::DismissDialog);
-            }
-            glib::Propagation::Proceed
-        });
-        window.present();
+            },
+        );
     }
 
     /// The change-categories dialog (add flow for a manga outside the library).
