@@ -9,7 +9,7 @@
 pub const PREFERENCE_KEYS: [(&str, &str); 4] = [
     ("download_new", "false"),
     ("download_new_episode", "false"),
-    ("download_slots", "1"),
+    ("download_slots", "3"),
     ("remove_after_read_slots", "-1"),
 ];
 
@@ -32,7 +32,7 @@ mod tests {
         assert_eq!(PREFERENCE_KEYS.len(), 4);
         assert_eq!(default_of("download_new"), Some("false"));
         assert_eq!(default_of("download_new_episode"), Some("false"));
-        assert_eq!(default_of("download_slots"), Some("1"));
+        assert_eq!(default_of("download_slots"), Some("3"));
         assert_eq!(default_of("remove_after_read_slots"), Some("-1"), "-1 disables the slots");
         assert_eq!(default_of("downloadSlots"), None, "a camel-case name is not a key");
         assert_eq!(default_of("pref_download_only_over_wifi_key"), None, "cut by the settings diet");
@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn download_slots_is_stored_but_hidden_and_not_read_by_the_engine() {
-        assert_eq!(default_of("download_slots"), Some("1"), "the key and its default are still stored");
+        assert_eq!(default_of("download_slots"), Some("3"), "the key and its default are still stored");
         // The engine's parallel count is the scheduler limit, whatever `download_slots` holds.
         assert_eq!(crate::scheduler::MAX_ACTIVE_SOURCES, 5);
     }

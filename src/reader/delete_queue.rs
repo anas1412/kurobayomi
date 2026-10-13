@@ -45,67 +45,6 @@ impl DeleteQueue {
 }
 
 #[cfg(test)]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-/// Serialises every read-modify-write of a queue file in this process (the reader and a flush run on different threads).
-static FILE_LOCK: Mutex<()> = Mutex::new(());
-
-/// The queue in its file. A missing or unreadable file is an empty queue.
-#[derive(Clone, Debug)]
-pub struct QueueFile {
-    path: PathBuf,
-}
-
-impl QueueFile {
-    pub fn in_dir(data_dir: &Path) -> Self {
-        Self { path: data_dir.join(FILE_NAME) }
-    }
-
-    fn read(&self) -> Vec<Pending> {
-        std::fs::read(&self.path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
-    }
-
-    fn write(&self, entries: &[Pending]) -> std::io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec(entries).map_err(std::io::Error::other)?)?;
-        std::fs::rename(&tmp, &self.path)
-    }
-
-    fn update(&self, change: impl FnOnce(&mut DeleteQueue)) -> std::io::Result<()> {
-        let _guard = FILE_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        let mut queue = DeleteQueue { entries: Vec::new() };
-        self.read().into_iter().for_each(|entry| queue.push(entry));
-        change(&mut queue);
-        self.write(&queue.entries)
-    }
-
-    /// Adds a chapter to the file.
-    pub fn add(&self, entry: Pending) -> std::io::Result<()> {
-        self.update(|queue| queue.push(entry))
-    }
-
-    /// Every queued chapter, oldest first.
-    pub fn list(&self) -> Vec<Pending> {
-        let _guard = FILE_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        self.read()
-    }
-
-    /// Removes the chapters that were dealt with. Chapters queued since the list was read stay.
-    pub fn remove(&self, done: &[Pending]) -> std::io::Result<()> {
-        self.update(|queue| {
-            let kept: Vec<Pending> = queue.take().into_iter().filter(|entry| !done.contains(entry)).collect();
-            kept.into_iter().for_each(|entry| queue.push(entry));
-        })
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use kuro_data::item::Item;

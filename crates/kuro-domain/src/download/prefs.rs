@@ -20,7 +20,7 @@ pub struct DownloadPrefs {
 impl DownloadPrefs {
     pub fn new(store: &PrefStore) -> Self {
         Self {
-            number_of_downloads_pref: store.pref("download_slots", 1),
+            number_of_downloads_pref: store.pref("download_slots", 3),
             remove_after_read_slots: store.pref("remove_after_read_slots", -1),
             download_new_chapters: store.pref("download_new", false),
             download_new_episodes: store.pref("download_new_episode", false),
@@ -45,7 +45,7 @@ mod tests {
         let store = PrefStore::in_memory();
         let prefs = DownloadPrefs::new(&store);
         let rows = [
-            (prefs.number_of_downloads_pref.key(), 1_i32.encode()),
+            (prefs.number_of_downloads_pref.key(), 3_i32.encode()),
             (prefs.remove_after_read_slots.key(), (-1_i32).encode()),
             (prefs.download_new_chapters.key(), false.encode()),
             (prefs.download_new_episodes.key(), false.encode()),

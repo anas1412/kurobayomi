@@ -44,7 +44,7 @@ impl DownloadPrefs {
 
     /// Stored and written by the settings screen, read by nothing (E-12, [`crate::settings::DOWNLOAD_SLOTS_HIDDEN`]).
     pub fn number_of_downloads(&self) -> Pref<i32> {
-        self.store.pref(keys::DOWNLOAD_SLOTS, 1)
+        self.store.pref(keys::DOWNLOAD_SLOTS, 3)
     }
 }
 
