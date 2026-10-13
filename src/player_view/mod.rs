@@ -134,6 +134,7 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
         episode_id,
         resolving: false,
         skip: skip_button::State::default(),
+        awake: crate::reader::keep_awake::KeepAwake::default(),
     }));
     CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(&shared));
     crate::ui::push(&build_page(&shared, start));
@@ -156,6 +157,8 @@ struct Player {
     closed: bool,
     /// The skip button's state for the playing file.
     skip: skip_button::State,
+    /// The screen stays on while the video plays (released on pause and when the player closes).
+    awake: crate::reader::keep_awake::KeepAwake,
 }
 
 type Shared = Rc<RefCell<Player>>;
@@ -203,6 +206,7 @@ impl Player {
             self.closed = true;
             self.save(true);
             self.playback.stop();
+            self.awake.sync_for(false, "Playing video");
         }
     }
 }
@@ -767,6 +771,7 @@ fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, se
             };
             (snapshot, failed, ended)
         };
+        shared.borrow().awake.sync_for(!snapshot.paused && !ended, "Playing video");
         skip_button::tick(&shared, &skip);
         if failed {
             crate::toast::notify(tr(MsgKey::player_hoster_failed));

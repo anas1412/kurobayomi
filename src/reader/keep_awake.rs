@@ -1,5 +1,5 @@
-//! Keep the screen on while the reader is open (T-043a-051). The inhibit is taken with the application and released
-//! when the reader closes or the preference goes off.
+//! Keep the screen on while the reader is open (T-043a-051) or a video plays. The inhibit is taken with the application and
+//! released when the reader or the player closes, the video pauses, or the preference goes off.
 
 use std::cell::RefCell;
 
@@ -19,15 +19,20 @@ pub struct KeepAwake {
 
 impl KeepAwake {
     pub fn sync(&self, _window: &gtk::Window, want: bool) {
-        self.sync_with(&kuro_platform::linux::ScreenSaver, want);
+        self.sync_for(want, "Reading manga");
     }
 
-    fn sync_with(&self, idle: &dyn IdleInhibitor, want: bool) {
+    /// Takes or releases the inhibit to match `want`; `reason` is what the desktop shows for it.
+    pub fn sync_for(&self, want: bool, reason: &str) {
+        self.sync_with(&kuro_platform::linux::ScreenSaver, want, reason);
+    }
+
+    fn sync_with(&self, idle: &dyn IdleInhibitor, want: bool, reason: &str) {
         let mut guard = self.guard.borrow_mut();
         match (want, guard.is_some()) {
-            (true, false) => match idle.inhibit("Reading manga") {
+            (true, false) => match idle.inhibit(reason) {
                 Ok(taken) => *guard = Some(taken),
-                Err(error) => tracing::warn!(%error, "the screen may blank while reading"),
+                Err(error) => tracing::warn!(%error, "the screen may blank while playing"),
             },
             (false, true) => *guard = None,
             _ => {}
@@ -60,12 +65,12 @@ mod tests {
         let live = Arc::new(AtomicUsize::new(0));
         let idle = Counting(Arc::clone(&live));
         let awake = KeepAwake::default();
-        awake.sync_with(&idle, true);
-        awake.sync_with(&idle, true);
+        awake.sync_with(&idle, true, "test");
+        awake.sync_with(&idle, true, "test");
         assert_eq!(live.load(Ordering::SeqCst), 1);
-        awake.sync_with(&idle, false);
+        awake.sync_with(&idle, false, "test");
         assert_eq!(live.load(Ordering::SeqCst), 0);
-        awake.sync_with(&idle, true);
+        awake.sync_with(&idle, true, "test");
         drop(awake);
         assert_eq!(live.load(Ordering::SeqCst), 0, "dropping releases it");
     }
