@@ -92,7 +92,7 @@ pub struct SecondAction {
     pub total_ms: i64,
     /// Past the completion threshold, and tracking is allowed (step 7).
     pub completed: bool,
-    /// Past 35% of the duration, so download-ahead may run (step 9).
+    /// Past a quarter of the duration, so download-ahead may run (step 9).
     pub download_ahead: bool,
 }
 
@@ -117,7 +117,7 @@ pub fn on_second(
         position_ms,
         total_ms,
         completed: progress_allowed && position_ms as f64 >= total_ms as f64 * threshold,
-        download_ahead: position_s as f64 / duration_s as f64 > 0.35,
+        download_ahead: position_s as f64 / duration_s as f64 > 0.25,
     })
 }
 
@@ -296,7 +296,7 @@ mod tests {
                 .completed
         );
         assert!(
-            !on_second(false, Some(1), 35, 100, 0.85, true)
+            !on_second(false, Some(1), 25, 100, 0.85, true)
                 .unwrap()
                 .download_ahead
         );

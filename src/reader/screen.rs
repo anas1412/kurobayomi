@@ -284,7 +284,7 @@ impl ReaderCore {
             }));
         }
         if self.extras.download_ahead.is_some() {
-            // the download-ahead amount is cut from the settings (0, off)
+            // one chapter ahead, past a quarter of the open one (a fixed rule: the amount is not a setting)
             let amount = diet::DOWNLOAD_AUTO_WHILE_AMOUNT;
             let downloaded = Rc::clone(&self.deps.is_downloaded);
             session.set_download_ahead(amount, Rc::new(move |chapter| downloaded(chapter)));

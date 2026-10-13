@@ -218,7 +218,13 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
         track_update: Some(Rc::new(move |manga_id, number| {
             crate::entry_core::tracking::progress::item_finished(Kind::Manga, manga_id, number, incognito);
         })),
-        download_ahead: None,
+        // the next chapter is queued through the one download host, past a quarter of a downloaded one
+        download_ahead: Some(Rc::new(|manga_id, chapter_ids| {
+            let host = crate::updates::download_host::current();
+            if host.enqueue(Kind::Manga, manga_id, chapter_ids) {
+                host.start_queue(Kind::Manga);
+            }
+        })),
         retry_gate,
     };
     open_with(deps, extras, &gate, toaster(), crate::ui::pop).root

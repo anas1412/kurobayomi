@@ -39,3 +39,28 @@ pub fn flush() {
         }
     });
 }
+
+/// Download-ahead: past a quarter of a downloaded episode, the next one is queued for download (the reader's rule,
+/// `reader::download_ahead`, with the playing position standing for the page). Called once per episode.
+pub fn download_ahead(episode_id: i64, position_s: i64, duration_s: i64) {
+    if !crate::data::is_installed() {
+        return;
+    }
+    let app = crate::data::app();
+    let on_disk = downloaded_ids(&app.db, episode_id);
+    let Ok(Some((list, at))) = playback_list(&app.db, episode_id, false, &on_disk) else { return };
+    let ids: Vec<i64> = list.iter().map(|episode| episode.id).collect();
+    let queue = crate::reader::download_ahead::chapters_to_queue(
+        crate::misc::diet_defaults::DOWNLOAD_AUTO_WHILE_AMOUNT,
+        &ids,
+        |index| on_disk.contains(&ids[index]),
+        at,
+        position_s.max(0) as usize,
+        duration_s.max(0) as usize,
+    );
+    let Some(entry_id) = list.get(at).map(|episode| episode.entry_id) else { return };
+    let host = crate::updates::download_host::current();
+    if !queue.is_empty() && host.enqueue(Kind::Anime, entry_id, &queue) {
+        host.start_queue(Kind::Anime);
+    }
+}

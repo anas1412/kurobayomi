@@ -131,6 +131,7 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
         playback: Playback::new(mpv),
         tracker,
         finished_saved: false,
+        ahead_done: false,
         closed: false,
         media,
         episode_id,
@@ -155,6 +156,8 @@ struct Player {
     resolving: bool,
     /// The end-of-file save has run, so it runs once.
     finished_saved: bool,
+    /// The next episode was queued for download for the playing one (once per episode).
+    ahead_done: bool,
     /// Playback was stopped and saved for good (Back, or the page or its window went away).
     closed: bool,
     /// The skip button's state for the playing file.
@@ -195,6 +198,7 @@ impl Player {
         let start = self.tracker.as_ref().map_or(0, |t| t.start_ms(0));
         self.episode_id = episode_id;
         self.finished_saved = false;
+        self.ahead_done = false;
         self.media = media;
         if let Err(e) = self.playback.load(&self.media.target, self.media.headers.as_deref(), start) {
             tracing::error!(error = %e, "player: could not load the episode");
@@ -774,6 +778,13 @@ fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, se
                         player.skip.file_loaded();
                     }
                     _ => {}
+                }
+            }
+            if !player.ahead_done && !player.playback.is_paused() {
+                let (position, duration) = (player.playback.position_ms().unwrap_or(0) / 1000, player.playback.duration_ms().unwrap_or(0) / 1000);
+                if duration > 0 && position * 4 > duration {
+                    player.ahead_done = true;
+                    after_seen::download_ahead(player.episode_id, position, duration);
                 }
             }
             let ended = player.playback.eof_reached() && !player.finished_saved;

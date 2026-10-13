@@ -84,7 +84,8 @@ pub const BROWSE_LAST_USED_SOURCE: i64 = -1;
 pub const DOWNLOAD_USE_EXTERNAL: bool = false;
 pub const DOWNLOAD_NEW_UNREAD_ONLY: bool = false;
 pub const DOWNLOAD_REMOVE_AFTER_MARKED_READ: bool = false;
-pub const DOWNLOAD_AUTO_WHILE_AMOUNT: i32 = 0;
+/// How many units are queued ahead of a downloaded one while it is read or watched, past a quarter of it (one rule, both kinds).
+pub const DOWNLOAD_AUTO_WHILE_AMOUNT: i32 = 1;
 
 // Player. The external player is cut for now, so the always-external switch is off; the one-off "play in external
 // player" action stays.
