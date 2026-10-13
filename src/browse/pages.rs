@@ -488,6 +488,8 @@ pub struct GlobalSearchPage {
     root: gtk::Widget,
     entry: gtk::SearchEntry,
     view: Rc<SearchView>,
+    /// The header actions of the page: the shared search toggle and the search options button.
+    actions: Vec<gtk::Widget>,
 }
 
 pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> GlobalSearchPage {
@@ -495,12 +497,11 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     let entry = gtk::SearchEntry::new();
     entry.set_placeholder_text(Some(&tr(MsgKey::action_global_search_hint)));
     entry.set_hexpand(true);
-    let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    top.set_margin_start(16);
-    top.set_margin_end(16);
-    top.set_margin_top(8);
-    top.append(&entry);
-    body.append(&top);
+    // the one search bar of the app (`ui::search_row`); the toggle goes among the header actions, and a global search page
+    // opens with the bar showing
+    let (bar, toggle) = crate::ui::search_row(&entry, &body);
+    bar.set_search_mode(true);
+    body.append(&bar);
     // Escape clears the typed query first; with none, it goes on and leaves the page
     {
         let (text, clear) = (entry.clone(), entry.clone());
@@ -516,12 +517,12 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     entry.connect_activate(move |entry| (search.nav.search)(entry.text().as_str()));
     let typing = Rc::clone(&view);
     entry.connect_changed(move |entry| *typing.typed.borrow_mut() = entry.text().to_string());
-    top.append(&search_options(&view).widget);
+    let options = search_options(&view);
     body.append(&view.progress);
     body.append(&gtk::ScrolledWindow::builder().child(&view.column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     // the registry's readiness gates the whole page: the existing source gate shows the spinner, then crossfades in
     let root = crate::source_gate::when_sources_ready(&kuro_core::sources::SourceGate::new(ready), &body);
-    GlobalSearchPage { root, entry, view }
+    GlobalSearchPage { root, entry, view, actions: vec![toggle.upcast(), options.widget.clone().upcast()] }
 }
 
 /// The tooltip of the search options button, and the name of its one check.
@@ -568,6 +569,11 @@ impl SearchView {
 impl GlobalSearchPage {
     pub fn widget(&self) -> &gtk::Widget {
         &self.root
+    }
+
+    /// The widgets the screen puts in its header: the search toggle, then the search options.
+    pub fn actions(&self) -> Vec<gtk::Widget> {
+        self.actions.clone()
     }
 
     /// The progress bar's fraction while it shows, `None` while it is hidden.

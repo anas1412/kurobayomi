@@ -123,7 +123,12 @@ fn error_state(text: &str) -> gtk::Widget {
 
 /// The search page for `start`. The runner lives as long as the page; popping it aborts the fetches.
 pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Widget {
-    let Start::Search { query, extension, origin } = start else { return error_state(&tr(MsgKey::unknown_error)) };
+    search_page(env, start, migrating).0
+}
+
+/// The search page and the widgets its header carries (the search toggle and the options).
+pub fn search_page(env: &SearchEnv, start: &Start, migrating: bool) -> (gtk::Widget, Vec<gtk::Widget>) {
+    let Start::Search { query, extension, origin } = start else { return (error_state(&tr(MsgKey::unknown_error)), Vec::new()) };
     let sources = &env.prefs.sources;
     // the has-results toggle is cut from the settings: it starts off on every open
     let only_has_results = false;
@@ -214,7 +219,7 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
     } else {
         runner.request(query, extension.as_deref());
     }
-    page.widget().clone()
+    (page.widget().clone(), page.actions())
 }
 
 /// The app side of a search page of `kind`. `migrate_from` is the entry a migrate search started from: a card opens the
@@ -326,7 +331,8 @@ pub fn body(migrating: bool) -> Option<Built> {
         };
         (kind, None, start_for(false, None, intent, route, entry_text))
     };
-    Some(Built { content: search_widget(&production_env(kind, migrate_from), &start, migrating), end: Vec::new() })
+    let (content, end) = search_page(&production_env(kind, migrate_from), &start, migrating);
+    Some(Built { content, end })
 }
 
 #[cfg(test)]
