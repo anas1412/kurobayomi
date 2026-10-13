@@ -41,7 +41,7 @@ pub fn build(id: &str) -> GBox {
             }
         }
         "anime_entry_details" => return crate::entry_core::details::route::build(),
-        "manga_entry_details" => return crate::entry_core::route::build(),
+        "manga_entry_details" => return crate::entry_core::details::route::build_manga(),
         "browse_source" | "migrate_source_search" => {
             if let Some(page) = crate::browse::browse_screen::page(id) {
                 return page;
@@ -90,7 +90,7 @@ pub fn open_entry(kind: Kind, id: i64) {
     match kind {
         Kind::Anime => crate::entry_core::details::route::open(id),
         Kind::Manga if is_local_manga(id) => crate::local_flow::open::entry(id),
-        Kind::Manga => crate::entry_core::route::open(id),
+        Kind::Manga => crate::entry_core::details::route::open_kind(Kind::Manga, id),
     }
 }
 

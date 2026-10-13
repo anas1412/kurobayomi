@@ -1358,7 +1358,7 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
     let actions = TopBarActions {
         on_back: Box::new(move || back()),
         // the title pushes the manga's details page above the reader, so returning pops back to the same page
-        on_open_manga: Box::new(move || crate::entry_core::route::open(manga_id)),
+        on_open_manga: Box::new(move || crate::entry_core::details::route::open_kind(kuro_platform::kind::Kind::Manga, manga_id)),
         on_bookmark: Box::new(move || {
             let Some(screen) = bookmark.upgrade() else { return };
             if let Some(Err(_)) = screen.core.toggle_bookmark() {

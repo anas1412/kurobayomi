@@ -285,7 +285,7 @@ fn show_entry(kind: Kind, id: i64) {
     crate::ui::window().present();
     crate::ui::pop_to_root();
     match kind {
-        Kind::Manga => crate::entry_core::route::open(id),
+        Kind::Manga => crate::entry_core::details::route::open_kind(Kind::Manga, id),
         Kind::Anime => crate::entry_core::details::route::open(id),
     }
 }

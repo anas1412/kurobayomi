@@ -26,7 +26,7 @@ pub fn local_id_with_title(db: &Arc<Db>, kind: Kind, title: &str) -> DataResult<
 /// Opens the database-backed entry page of a local manga by its id, and remembers the id for the reader.
 pub fn entry(manga_id: i64) {
     CURRENT.with(|c| c.set(Some(manga_id)));
-    crate::entry_core::route::open(manga_id);
+    crate::entry_core::details::route::open_kind(Kind::Manga, manga_id);
 }
 
 /// The local manga whose page was opened last, when it is still the one the reader is asked about.

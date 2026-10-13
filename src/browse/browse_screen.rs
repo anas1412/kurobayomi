@@ -200,7 +200,7 @@ pub fn visible_page() -> String {
 /// Opens the entry page of `kind` for a library row.
 pub fn open_entry(kind: Kind, id: i64) {
     match kind {
-        Kind::Manga => crate::entry_core::route::open(id),
+        Kind::Manga => crate::entry_core::details::route::open_kind(Kind::Manga, id),
         Kind::Anime => crate::entry_core::details::route::open(id),
     }
 }

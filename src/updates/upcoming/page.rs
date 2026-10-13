@@ -317,7 +317,7 @@ fn heading(text: &str, count: u32) -> GBox {
 fn open_entry(kind: Kind, id: i64) {
     match kind {
         Kind::Anime => crate::entry_core::details::route::open(id),
-        Kind::Manga => crate::entry_core::route::open(id),
+        Kind::Manga => crate::entry_core::details::route::open_kind(Kind::Manga, id),
     }
 }
 
