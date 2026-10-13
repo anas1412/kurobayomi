@@ -56,6 +56,19 @@ pub fn marked(kind: Kind, entry_id: i64, read: bool, numbers: &[f64], incognito:
     }
 }
 
+/// [`marked`] for items of several entries marked read in one write (Library and Updates): one send per entry, from the
+/// items that changed. The items are read before the write, so only the ones that were not read yet count.
+pub fn marked_items(kind: Kind, changed: &[kuro_data::item::Item]) {
+    let incognito = crate::data::is_installed() && crate::data::app().base.incognito_mode.get();
+    let mut entries: Vec<i64> = changed.iter().map(|i| i.entry_id).collect();
+    entries.sort_unstable();
+    entries.dedup();
+    for entry_id in entries {
+        let numbers: Vec<f64> = changed.iter().filter(|i| i.entry_id == entry_id).map(|i| i.number).collect();
+        marked(kind, entry_id, true, &numbers, incognito);
+    }
+}
+
 /// The decision of [`marked`], without its inputs read from the app.
 fn mark_plan(kind: Kind, read: bool, has_logged_in: bool, numbers: &[f64], progress: &[f64], state: AutoTrackState) -> MarkReadPlan {
     let m = Marking { kind, read, has_logged_in, numbers, changed: true, tracker_progress: progress };

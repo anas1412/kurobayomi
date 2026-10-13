@@ -489,7 +489,10 @@ impl UpdatesScreen {
         };
         let Some(target) = target else { return };
         match bulk::apply(&self.db(), self.kind, &[id], BulkAction::MarkRead(read)) {
-            Ok(()) if read => self.remove_downloads_of_read(vec![target]),
+            Ok(()) if read => {
+                self.tell_trackers(&[id]);
+                self.remove_downloads_of_read(vec![target]);
+            }
             Ok(()) => {}
             Err(message) => self.show_toast(&message),
         }
@@ -547,6 +550,7 @@ impl UpdatesScreen {
         };
         let result = bulk::apply(&self.db(), self.kind, &ids, action);
         if result.is_ok() && action == BulkAction::MarkRead(true) {
+            self.tell_trackers(&ids);
             self.remove_downloads_of_read(newly_read);
         }
         let message = match &mut *self.load.borrow_mut() {
@@ -557,6 +561,14 @@ impl UpdatesScreen {
         if let Some(message) = message {
             self.show_toast(&message);
         }
+    }
+
+    /// Tells the trackers about the units just marked read, the same send as the title page and the Library (the numbers are
+    /// read from the stored rows).
+    fn tell_trackers(&self, ids: &[i64]) {
+        let items = kuro_data::item::ItemRepo::new(self.db());
+        let marked: Vec<_> = ids.iter().filter_map(|id| items.by_id(*id).ok().flatten()).collect();
+        crate::entry_core::tracking::progress::marked_items(self.kind, &marked);
     }
 
     /// Removes the downloads of the units just marked read, grouped per entry, when the preference is on (E-U33).

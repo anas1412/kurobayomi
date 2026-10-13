@@ -159,8 +159,15 @@ pub async fn mark_many(db: &Arc<Db>, backend: Arc<dyn DownloadBackend>, ids: &[i
     let status = set_done(db, backend);
     let mut written = 0;
     for id in ids {
+        // read before the write: the items it changes are what the trackers hear about
+        let changed = if done { ItemRepo::new(db.clone()).by_entry_id(*id, false).map(|items| items_to_change(true, &items)).unwrap_or_default() } else { Vec::new() };
         match status.run_entry(*id, done, remove_downloads).await {
-            SetDoneResult::Success | SetDoneResult::NoItems => written += 1,
+            SetDoneResult::Success | SetDoneResult::NoItems => {
+                written += 1;
+                if let Some(kind) = changed.first().map(|item| item.kind) {
+                    crate::entry_core::tracking::progress::marked_items(kind, &changed);
+                }
+            }
             SetDoneResult::InternalError(error) => tracing::error!(%error, entry = *id, "marking the entry failed"),
         }
     }
