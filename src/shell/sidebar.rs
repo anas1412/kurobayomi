@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Box as GBox, Orientation as O, gio, glib};
-use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::ui;
@@ -19,7 +18,7 @@ use crate::widgets::{download_button, rail};
 /// The tab page of the download queue. Its item shows while something is queued, and while the page is open.
 pub const DOWNLOADS: &str = "download_queue";
 
-/// How often the Downloads item reads the queues.
+/// How often the Downloads item reads the queue.
 const POLL: Duration = Duration::from_millis(500);
 
 /// The side of the Downloads circle in px, the size of the symbolic icons beside it.
@@ -35,27 +34,15 @@ pub fn downloads_summary(percents: &[u8]) -> Option<(usize, u8)> {
     Some((percents.len(), (sum / percents.len()) as u8))
 }
 
-/// The percent done of every unit in both queues that is still going, and a 0 for each saved row waiting for its source
-/// (the queue page lists those too); then how many units failed. A failed unit is not "downloading": it waits for a
-/// retry on the Downloads page. Empty when no download manager runs.
+/// The percent done of every unit in the queue that is still going (a unit waiting for its source counts as 0), and then
+/// how many units failed. A failed unit is not "downloading": it waits for a retry on the Downloads page. Empty when no
+/// download service runs.
 fn queued_percents() -> (Vec<u8>, usize) {
-    let Some(queues) = crate::downloads::live::queues() else { return (Vec::new(), 0) };
-    let manga = queues.manga.snapshot();
-    let mut units: Vec<(Kind, i64)> = manga.iter().map(|d| (Kind::Manga, d.chapter.id)).collect();
-    if let Some(anime) = &queues.anime {
-        units.extend(anime.snapshot().iter().map(|d| (Kind::Anime, d.episode.id)));
-    }
-    let states: Vec<_> = units.into_iter().map(|(kind, id)| crate::downloads::live::queued(&queues, kind, id)).collect();
-    let failed = states.iter().filter(|s| matches!(s, Some((kuro_downloads::DownloadState::Error, _)))).count();
-    let mut out: Vec<u8> = states
-        .into_iter()
-        .filter(|s| !matches!(s, Some((kuro_downloads::DownloadState::Error, _))))
-        .map(|s| s.map_or(0, |(_, percent)| percent))
-        .collect();
-    // a waiting row that was queued again is already counted above
-    let waiting = queues.waiting.read().unwrap_or_else(|e| e.into_inner()).iter().filter(|w| !manga.iter().any(|d| d.chapter.id == w.row.chapter_id)).count();
-    out.resize(out.len() + waiting, 0);
-    (out, failed)
+    let Some(downloads) = crate::downloads::live::downloads() else { return (Vec::new(), 0) };
+    let snapshot = downloads.snapshot();
+    let failed = snapshot.items.iter().filter(|unit| unit.state == kuro_downloads::DownloadState::Error).count();
+    let percents = snapshot.items.iter().filter(|unit| unit.state != kuro_downloads::DownloadState::Error).map(|unit| unit.progress.percent()).collect();
+    (percents, failed)
 }
 
 /// One panel row: the icon, the title, then `extra` (badges).

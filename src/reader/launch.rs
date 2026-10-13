@@ -34,7 +34,7 @@ use kuro_downloads::next::service::Downloads;
 use kuro_downloads::next::unit::UnitRef;
 use kuro_db::Db;
 use kuro_platform::kind::Kind;
-use kuro_downloads::index::DownloadIndex;
+use kuro_downloads::next::index::DownloadIndex;
 use kuro_local::is_local_source;
 use kuro_platform::paths::Paths;
 use kuro_platform::toast::{Toaster, toast_channel};
@@ -161,8 +161,8 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let db = app.db.clone();
     let data_dir = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.data_dir());
     let shell = crate::shell::host::Shell::get();
-    let index = shell.as_ref().map(|shell| shell.downloads().clone());
     let service = shell.as_ref().and_then(|shell| shell.download_service());
+    let index = service.as_ref().map(|service| service.index().clone());
     let manga = EntryRepo::new(Arc::clone(&db)).by_id(manga_id).ok();
 
     let mut writer = WriterHandle::spawn(Arc::clone(&db));
@@ -233,6 +233,7 @@ pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_downloads::next::index::IndexRoots;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::super::cache::DiskCache;
@@ -384,8 +385,8 @@ mod tests {
     #[test]
     fn the_lookup_asks_the_index_and_a_local_manga_has_every_chapter() {
         let dir = tempfile::tempdir().unwrap();
-        let index = DownloadIndex::open(dir.path(), dir.path());
-        index.add_chapter(7, "Source (EN)", "Title 1", "Chapter 1");
+        let index = DownloadIndex::open(IndexRoots { manga: dir.path().to_path_buf(), anime: dir.path().join("anime") }, dir.path());
+        index.add_unit(Kind::Manga, 7, "Source (EN)", "Title 1", "Chapter 1");
         let mut manga = Entry::create(Kind::Manga);
         manga.title = "Title 1".into();
         manga.source = 7;

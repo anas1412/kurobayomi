@@ -269,7 +269,7 @@ impl Backend for SourceBackend {
             host.start_now(Kind::Manga, *first);
             return true;
         }
-        let queued = host.enqueue(Kind::Manga, manga_id, chapter_ids, false);
+        let queued = host.enqueue(Kind::Manga, manga_id, chapter_ids);
         if queued {
             host.start_queue(Kind::Manga);
         }
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(
             fake.calls(),
             [
-                Call::Enqueue { entry_id: id, unit_ids: ids.clone(), external: false },
+                Call::Enqueue { entry_id: id, unit_ids: ids.clone() },
                 Call::StartQueue,
                 Call::StartNow(ids[0]),
                 Call::Cancel(ids[0]),

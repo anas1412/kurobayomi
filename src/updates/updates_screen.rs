@@ -581,7 +581,7 @@ impl UpdatesScreen {
             UpdatesLoad::Loaded(rows) => rows.iter().map(|r| (r.row.entry_id, r.row.source_id)).collect(),
             _ => return,
         };
-        let (backend, kind, external) = (download_host::current(), self.kind, self.external_downloader);
+        let (backend, kind) = (download_host::current(), self.kind);
         // every row of the feed is a library entry
         let facts = move |backend: &dyn download_host::DownloadBackend, entry: i64| {
             sources.get(&entry).map(|source| EntryFacts { in_library: true, source_installed: backend.source_installed(kind, *source) })
@@ -595,7 +595,7 @@ impl UpdatesScreen {
             }
         }
         download_host::spawn_detached(move || {
-            download_exec::dispatch(&*backend, kind, action, &targets, |entry| facts(&*backend, entry), external);
+            download_exec::dispatch(&*backend, kind, action, &targets, |entry| facts(&*backend, entry));
         });
     }
 

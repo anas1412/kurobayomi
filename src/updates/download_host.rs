@@ -31,9 +31,9 @@ pub trait DownloadBackend: Send + Sync {
     fn on_disk(&self, kind: Kind, key: &DiskKey) -> bool;
     /// Whether the source of an entry is installed (a download needs it).
     fn source_installed(&self, kind: Kind, source_id: i64) -> bool;
-    /// Queues units of one entry. `external` is the anime "use external downloader" choice read at screen construction.
+    /// Queues units of one entry.
     /// `false`: nothing was queued.
-    fn enqueue(&self, kind: Kind, entry_id: i64, unit_ids: &[i64], external: bool) -> bool;
+    fn enqueue(&self, kind: Kind, entry_id: i64, unit_ids: &[i64]) -> bool;
     /// Starts the queue.
     fn start_queue(&self, kind: Kind);
     /// Starts one unit now.
@@ -120,7 +120,7 @@ impl DownloadBackend for IndexBackend {
         false
     }
 
-    fn enqueue(&self, _kind: Kind, _entry_id: i64, _unit_ids: &[i64], _external: bool) -> bool {
+    fn enqueue(&self, _kind: Kind, _entry_id: i64, _unit_ids: &[i64]) -> bool {
         false
     }
 
@@ -142,8 +142,7 @@ impl DownloadBackend for IndexBackend {
     }
 }
 
-/// The backend over the one download service, for both kinds. `external` of `enqueue` is not used: the app always passes
-/// the diet constant.
+/// The backend over the one download service, for both kinds.
 pub struct LiveBackend {
     downloads: Downloads,
     directory: AppDirectory,
@@ -180,7 +179,7 @@ impl DownloadBackend for LiveBackend {
         self.directory.source_key(kind, source_id).is_some_and(|source| source.availability == Availability::Live)
     }
 
-    fn enqueue(&self, kind: Kind, entry_id: i64, unit_ids: &[i64], _external: bool) -> bool {
+    fn enqueue(&self, kind: Kind, entry_id: i64, unit_ids: &[i64]) -> bool {
         // paused: the caller starts the queue once (a hand pick keeps its fillermarked units, D6)
         let Some(request) = self.directory.enqueue_request(kind, entry_id, unit_ids, Place::Back, false, false) else { return false };
         match self.block(self.downloads.enqueue(request)) {
@@ -273,7 +272,7 @@ pub mod fake {
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum Call {
-        Enqueue { entry_id: i64, unit_ids: Vec<i64>, external: bool },
+        Enqueue { entry_id: i64, unit_ids: Vec<i64> },
         StartQueue,
         StartNow(i64),
         Cancel(i64),
@@ -313,8 +312,8 @@ pub mod fake {
         fn source_installed(&self, _: Kind, _: i64) -> bool {
             self.installed
         }
-        fn enqueue(&self, _: Kind, entry_id: i64, unit_ids: &[i64], external: bool) -> bool {
-            self.calls.lock().unwrap().push(Call::Enqueue { entry_id, unit_ids: unit_ids.to_vec(), external });
+        fn enqueue(&self, _: Kind, entry_id: i64, unit_ids: &[i64]) -> bool {
+            self.calls.lock().unwrap().push(Call::Enqueue { entry_id, unit_ids: unit_ids.to_vec() });
             true
         }
         fn start_queue(&self, _: Kind) {
@@ -351,7 +350,7 @@ mod tests {
     fn the_default_backend_has_no_queue_and_refuses_writes() {
         let backend = IndexBackend { index: None, runtime: None, queue: None };
         assert_eq!(backend.queue_entry(Kind::Manga, 1), None);
-        assert!(!backend.enqueue(Kind::Manga, 1, &[2], false));
+        assert!(!backend.enqueue(Kind::Manga, 1, &[2]));
         assert!(!backend.delete_entry(Kind::Manga, 1));
         assert!(!backend.source_installed(Kind::Anime, 3));
         assert_eq!(backend.entry_usage(Kind::Manga, 1, "T"), (0, 0));
@@ -447,8 +446,8 @@ mod tests {
             let unit_id = ItemRepo::new(db.clone()).add_all(&[item]).unwrap()[0].id;
             assert!(!backend.source_installed(kind, 77), "a stub is not installed");
             assert_eq!(backend.queue_entry(kind, unit_id), None);
-            assert!(backend.enqueue(kind, entry_id, &[unit_id], false), "{kind:?} is queued");
-            assert!(!backend.enqueue(kind, entry_id, &[unit_id], false), "a queued unit is not queued twice");
+            assert!(backend.enqueue(kind, entry_id, &[unit_id]), "{kind:?} is queued");
+            assert!(!backend.enqueue(kind, entry_id, &[unit_id]), "a queued unit is not queued twice");
             let queued = backend.queue_entry(kind, unit_id).expect("the unit is in the queue");
             assert_eq!(queued.status, DownloadState::Queue);
             backend.cancel(kind, unit_id);

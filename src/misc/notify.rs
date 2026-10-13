@@ -35,7 +35,6 @@ use kuro_platform::kind::Kind;
 use crate::library_update::notice::{self, EntryAction};
 use crate::library_update::pass::EntryUpdate;
 use crate::library_update::text;
-use crate::misc::diet_defaults as diet;
 use crate::misc::ids;
 use crate::misc::router::{self, ActionHost, AppAction, QueueOp};
 use crate::misc::rules;
@@ -353,11 +352,10 @@ impl ActionHost for GtkHost {
     fn download(&self, kind: Kind, entry_id: i64, urls: Vec<String>) {
         let data = crate::data::app();
         let db = data.db.clone();
-        let external = diet::DOWNLOAD_USE_EXTERNAL;
         let backend = download_host::current();
         glib::spawn_future_local(async move {
             let queued = download_host::blocking(move || {
-                crate::library::actions::download_notified(&db, &*backend, kind, entry_id, &urls, external)
+                crate::library::actions::download_notified(&db, &*backend, kind, entry_id, &urls)
             })
             .await;
             if queued.is_none() {

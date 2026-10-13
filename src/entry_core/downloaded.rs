@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use kuro_data::entry::Entry;
 use kuro_data::item::Item;
-use kuro_downloads::index::DownloadIndex;
-use kuro_downloads::model::{ChapterRef, DownloadState, MangaRef};
+use kuro_downloads::model::DownloadState;
+use kuro_downloads::next::index::DownloadIndex;
 use kuro_platform::kind::Kind;
 
 use crate::updates::download_host::DownloadBackend;
@@ -16,7 +16,7 @@ use crate::updates::download_state::DiskKey;
 /// The lookup of one manga over the download index, with the local passthrough: it is true for every chapter of a local
 /// manga and otherwise asks the index for the chapter's name and scanlator.
 pub fn downloaded_lookup(index: DownloadIndex, source_id: i64, manga_title: String, local: bool) -> impl Fn(&Item) -> bool {
-    move |chapter| local || index.is_chapter_downloaded(source_id, &manga_title, &chapter.name, chapter.scanlator.as_deref())
+    move |chapter| local || index.is_downloaded(Kind::Manga, source_id, &manga_title, &chapter.name, chapter.scanlator.as_deref())
 }
 
 /// The download state of each unit of an entry that is queued or on disk, for either kind: a queued unit shows its queue
@@ -34,39 +34,10 @@ pub fn download_states(host: &dyn DownloadBackend, kind: Kind, entry: &Entry, un
         .collect()
 }
 
-/// The downloads layer's view of a chapter. Still used by the old manga queue (removed with it).
-pub fn chapter_ref(chapter: &Item) -> ChapterRef {
-    ChapterRef {
-        id: chapter.id,
-        manga_id: chapter.entry_id,
-        url: chapter.url.clone(),
-        name: chapter.name.clone(),
-        scanlator: chapter.scanlator.clone(),
-        read: chapter.done,
-        bookmark: chapter.bookmark,
-        source_order: chapter.source_order,
-        chapter_number: chapter.number,
-        date_upload: chapter.date_upload,
-    }
-}
-
-/// The downloads layer's view of a manga.
-pub fn manga_ref(manga: &Entry) -> MangaRef {
-    MangaRef {
-        id: manga.id,
-        url: manga.url.clone(),
-        title: manga.title.clone(),
-        source_id: manga.source,
-        description: manga.description.clone(),
-        author: manga.author.clone(),
-        artist: manga.artist.clone(),
-        genre: manga.genre.clone(),
-        status: manga.status,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use kuro_downloads::next::index::IndexRoots;
+
     use super::*;
 
     fn chapter(id: i64, name: &str, scanlator: Option<&str>) -> Item {
@@ -76,8 +47,8 @@ mod tests {
     #[test]
     fn the_index_lookup_matches_the_chapter_folder_and_a_local_manga_passes_everything() {
         let dir = tempfile::tempdir().unwrap();
-        let index = DownloadIndex::open(dir.path(), dir.path());
-        index.add_chapter(7, "Source (EN)", "Berserk", "Ch 1");
+        let index = DownloadIndex::open(IndexRoots { manga: dir.path().join("manga"), anime: dir.path().join("anime") }, dir.path());
+        index.add_unit(Kind::Manga, 7, "Source (EN)", "Berserk", "Ch 1");
         let (one, two) = (chapter(1, "Ch 1", None), chapter(2, "Ch 2", None));
         let lookup = downloaded_lookup(index.clone(), 7, "Berserk".into(), false);
         assert!(lookup(&one) && !lookup(&two));

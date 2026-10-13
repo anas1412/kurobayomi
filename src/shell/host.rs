@@ -1,13 +1,14 @@
 //! The shell object (T-36a-001): one per process on the GTK thread. It owns the tokio runtime handle that `main`
 //! creates once, the queue of launch requests that arrive before the window exists, the home tab selection that
-//! survives layout changes, and the download index the banners and the reader read.
+//! survives layout changes, and the one download service.
 
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use kuro_downloads::index::DownloadIndex;
-use kuro_platform::kind::Kind;
+use gtk::prelude::*;
+use kuro_downloads::anime::lifecycle::CLOSE_PROMPT;
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::notifier::Notifier;
 use kuro_platform::paths::Paths;
 use kuro_prefs::ui::StartScreen;
@@ -16,19 +17,14 @@ use super::argv::LaunchRequest;
 use super::bootstrap::Bootstrap;
 use super::lifecycle::Lifecycle;
 use super::tabs::HomeTabs;
+use crate::ui::{DialogButton, Role};
 
 pub struct Shell {
     #[allow(dead_code)] // read through `runtime()` by the background tasks that start from the shell
     runtime: tokio::runtime::Handle,
     boot: RefCell<Bootstrap<LaunchRequest>>,
     home: RefCell<Option<Rc<RefCell<HomeTabs>>>>,
-    /// The manga download index, opened on first use (the storage location is a preference, read once the data is open).
-    downloads: OnceCell<DownloadIndex>,
-    /// Where the index keeps its snapshot.
-    index_cache: std::path::PathBuf,
-    /// The running download managers, once [`Shell::start_downloads`] has started them.
-    downloads_started: RefCell<Option<crate::downloads::Started>>,
-    /// The one download service of both kinds, started beside the old managers until the callers have moved.
+    /// The one download service of both kinds, once [`Shell::start_downloads`] has started it.
     download_service: RefCell<Option<crate::downloads::Service>>,
 }
 
@@ -46,15 +42,7 @@ impl Shell {
                 if let Err(e) = std::fs::create_dir_all(&index_cache) {
                     tracing::warn!("the download index snapshot folder was not created: {e}");
                 }
-                Rc::new(Shell {
-                    runtime,
-                    boot: RefCell::new(Bootstrap::new()),
-                    home: RefCell::new(None),
-                    downloads: OnceCell::new(),
-                    index_cache,
-                    downloads_started: RefCell::new(None),
-                    download_service: RefCell::new(None),
-                })
+                Rc::new(Shell { runtime, boot: RefCell::new(Bootstrap::new()), home: RefCell::new(None), download_service: RefCell::new(None) })
             })
             .clone()
         })
@@ -80,26 +68,6 @@ impl Shell {
         &self.runtime
     }
 
-    /// The manga download index, for the indexing banner and the downloaded-only filters. It is opened on the first call,
-    /// over the manga downloads folder of the storage location; call it after the data is open. It rescans after each
-    /// load of the repository sources, so their downloads are recognised.
-    pub fn downloads(&self) -> &DownloadIndex {
-        self.downloads.get_or_init(|| {
-            let storage = crate::settings_ui::storage::manager(crate::data::app().base.store())
-                .expect("main resolved the platform folders before the shell");
-            let index = DownloadIndex::open(storage.downloads_path(Kind::Manga), &self.index_cache);
-            let follower = index.clone();
-            let _entered = self.runtime.enter();
-            crate::recipe_sources::follow_loads(move || {
-                let index = follower.clone();
-                async move {
-                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(Kind::Manga)).await;
-                }
-            });
-            index
-        })
-    }
-
     /// A launch request arrived. `Some` means the window exists and the caller applies it now; `None` means it is
     /// queued until [`Shell::window_built`].
     pub fn submit(&self, request: LaunchRequest) -> Option<LaunchRequest> {
@@ -123,39 +91,29 @@ impl Shell {
         self.boot.borrow().library_state()
     }
 
-    /// Starts the download managers on the data the app has opened (call once, after the migrations): the manga manager
-    /// and the anime queue, whose notices go to `notifier`, and the one download service of both kinds. A failure is logged and the app runs without downloads. The
-    /// first call wins.
+    /// Starts the one download service on the data the app has opened (call once, after the migrations); its notices go
+    /// to `notifier`. A failure is logged and the app runs without downloads. The first call wins.
     pub fn start_downloads(&self, notifier: Arc<dyn Notifier>) {
-        if self.downloads_started.borrow().is_some() {
+        if self.download_service.borrow().is_some() {
             return;
         }
         let _entered = self.runtime.enter();
         let paths = match kuro_platform::linux::LinuxPaths::system() {
             Ok(paths) => paths,
             Err(e) => {
-                tracing::error!("the download managers did not start: {e}");
+                tracing::error!("the download service did not start: {e}");
                 return;
             }
         };
         let app = crate::data::app();
-        match crate::downloads::start(&paths, self.downloads().clone(), Arc::clone(&app.db), app.base.store().clone(), notifier.clone()) {
-            Ok(started) => {
-                if let Some(queue) = &started.queues.anime {
-                    crate::entry_core::anime::download_backend::install_queue(queue.clone());
-                }
-                *self.downloads_started.borrow_mut() = Some(started);
-            }
-            Err(e) => tracing::error!("the download managers did not start: {e}"),
-        }
-        // The queue is not saved by this service until the callers have moved: the old managers save it.
-        match crate::downloads::start_service(&paths, Arc::clone(&app.db), app.base.store().clone(), notifier, false) {
+        match crate::downloads::start_service(&paths, Arc::clone(&app.db), app.base.store().clone(), notifier) {
             Ok(service) => {
                 crate::updates::download_host::install(Arc::new(crate::updates::download_host::LiveBackend::new(
                     service.downloads.clone(),
                     Arc::clone(&app.db),
                     self.runtime.clone(),
                 )));
+                crate::downloads::wire_library_download(Arc::clone(&app.db));
                 *self.download_service.borrow_mut() = Some(service);
             }
             Err(e) => tracing::error!("the download service did not start: {e}"),
@@ -167,9 +125,25 @@ impl Shell {
         self.download_service.borrow().as_ref().map(|service| service.downloads.clone())
     }
 
-    /// The running download managers, or `None` before [`Shell::start_downloads`] has started them.
-    pub fn download_queues(&self) -> Option<crate::downloads::Queues> {
-        self.downloads_started.borrow().as_ref().map(|started| started.queues.clone())
+    /// Asks before the main window closes while a lane downloads (D4): the dialog says "Downloads will pause. Quit?" and
+    /// Quit closes the window. There is no background process, so the run stops and the saved queue goes on at the next
+    /// start. Connect it once to the main window.
+    pub fn guard_close(window: &gtk::ApplicationWindow) {
+        window.connect_close_request(|win| {
+            let running = Shell::get().and_then(|shell| shell.download_service()).is_some_and(|downloads| crate::downloads::any_lane_running(&downloads));
+            if !running {
+                return gtk::glib::Propagation::Proceed;
+            }
+            let quit = win.clone();
+            let buttons = vec![
+                DialogButton::cancel(tr(MsgKey::action_cancel)),
+                DialogButton::new("Quit", Role::Destructive, move || quit.destroy()),
+            ];
+            let dialog = crate::ui::dialog("Downloads running", &crate::ui::message(CLOSE_PROMPT), 360, buttons);
+            dialog.set_transient_for(Some(win));
+            dialog.present();
+            gtk::glib::Propagation::Stop
+        });
     }
 
     /// The home tab selection. It is built once, the first time this runs, so a wide or narrow switch keeps it.
@@ -188,16 +162,7 @@ mod tests {
     }
 
     fn shell(rt: &tokio::runtime::Runtime) -> Shell {
-        let dir = tempfile::tempdir().unwrap();
-        Shell {
-            runtime: rt.handle().clone(),
-            boot: RefCell::new(Bootstrap::new()),
-            home: RefCell::new(None),
-            downloads: OnceCell::from(DownloadIndex::open(dir.path(), dir.path())),
-            index_cache: dir.path().to_path_buf(),
-            downloads_started: RefCell::new(None),
-            download_service: RefCell::new(None),
-        }
+        Shell { runtime: rt.handle().clone(), boot: RefCell::new(Bootstrap::new()), home: RefCell::new(None), download_service: RefCell::new(None) }
     }
 
     #[test]

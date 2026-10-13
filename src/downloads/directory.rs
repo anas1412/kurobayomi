@@ -36,10 +36,11 @@ impl AppDirectory {
         Some((EntryRef::from(&entry), source))
     }
 
-    /// The listed units of an entry whose ids are in `unit_ids`.
+    /// The listed units of an entry whose ids are in `unit_ids`, in the order of `unit_ids`.
     pub fn units(&self, entry_id: i64, unit_ids: &[i64]) -> Vec<UnitRef> {
         let items = ItemRepo::new(Arc::clone(&self.db)).by_entry_id(entry_id, false).unwrap_or_default();
-        items.iter().filter(|item| unit_ids.contains(&item.id)).map(UnitRef::from).collect()
+        // in the caller's order: it is the order the units queue in
+        unit_ids.iter().filter_map(|id| items.iter().find(|item| item.id == *id)).map(UnitRef::from).collect()
     }
 
     /// The request that queues `unit_ids` of entry `entry_id`: `None` when the entry or the source name is unknown, or no

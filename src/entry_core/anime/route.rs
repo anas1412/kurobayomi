@@ -24,7 +24,6 @@ use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
-use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_prefs::store::PrefStore;
 
@@ -33,7 +32,7 @@ use crate::entry_core::constants::{FALLBACK_WIDTH, LEFT_PANE_WIDTH};
 use super::actions::{OpenPlan, continue_plan, tap_plan};
 use super::airing::{Airing, format_airing, visible as airing_visible};
 use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
-use super::download_backend::{AnimeDownloads, installed_queue};
+use super::download_backend::AnimeDownloads;
 use super::dispatch::{bottom_cmds, menu_cmds};
 use super::details_error::{DetailsError, required};
 use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
@@ -124,8 +123,7 @@ fn page_for(anime_id: i64) -> GBox {
     };
     let handle = tokio::runtime::Handle::current();
     // the live sources of this build; an id it does not know reports that the source is not installed
-    let root = crate::settings_ui::storage::manager(&prefs).map(|storage| storage.downloads_path(Kind::Anime));
-    let downloads = AnimeDownloads::new(AnimeLayout::new(root), installed_queue());
+    let downloads = AnimeDownloads::new();
     let backend: Arc<dyn AnimeBackend> =
         Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
     let runner = Rc::new(runner::spawn(&handle, AnimeStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));

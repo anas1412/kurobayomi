@@ -262,9 +262,9 @@ fn build_window(app: &gtk::Application) {
     let banners = std::rc::Rc::new(shell::banners::Banners::new());
     outer.prepend(&banners.widget);
     {
-        let (index, downloaded_only, incognito) = (host.downloads().clone(), base.downloaded_only.clone(), base.incognito_mode.clone());
+        let (index, downloaded_only, incognito) = (host.download_service().map(|d| d.index().clone()), base.downloaded_only.clone(), base.incognito_mode.clone());
         shell::banners::watch(banners, move || shell::banners::BannerState {
-            indexing: index.checking_indicator_visible(),
+            indexing: index.as_ref().is_some_and(|index| index.checking_indicator_visible()),
             downloaded_only: downloaded_only.get(),
             incognito: incognito.get(),
         });
@@ -275,6 +275,8 @@ fn build_window(app: &gtk::Application) {
     misc::start();
     // the restore banner, the Create and Restore hosts, and the close dialog of a running restore
     outer.prepend(&backup_host::attach(app, &win));
+    // closing while a download runs asks first (the downloads pause)
+    shell::Shell::guard_close(&win);
     // the automatic backup schedule follows the interval setting (T-02a-024)
     backup_schedule::start(app);
     open_link::register(app, &win);

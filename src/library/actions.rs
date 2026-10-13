@@ -10,6 +10,7 @@ use kuro_db::handle::Db;
 use kuro_domain::category::bulk;
 use kuro_domain::category::service::CategoryService;
 use kuro_domain::error::DomainError;
+use kuro_domain::history::next_item::next_items;
 use kuro_domain::items::status::{ItemDownloads, SetDoneResult, SetDoneStatus, items_to_change};
 use kuro_platform::kind::Kind;
 use kuro_domain::library::model::LibraryRow;
@@ -116,15 +117,40 @@ pub fn download_notified(
     kind: Kind,
     entry_id: i64,
     urls: &[String],
-    external: bool,
 ) -> usize {
     let ids = item_ids_by_url(db, entry_id, urls);
     if ids.is_empty() {
         return 0;
     }
-    backend.enqueue(kind, entry_id, &ids, external);
+    backend.enqueue(kind, entry_id, &ids);
     backend.start_queue(kind);
     ids.len()
+}
+
+/// The selection bar's Download: for each selected entry the unread units in reading order that are neither queued nor on
+/// disk (`plan_download`), queued together, and then the lane starts once. Returns how many units were queued.
+pub fn download_selection(db: &Arc<Db>, backend: &dyn DownloadBackend, kind: Kind, entry_ids: &[i64], amount: DownloadAmount) -> usize {
+    let mut queued = 0;
+    for &entry_id in entry_ids {
+        let Ok(entry) = EntryRepo::new(Arc::clone(db)).by_id(entry_id) else { continue };
+        let units = ItemRepo::new(Arc::clone(db)).by_entry_id(entry_id, false).unwrap_or_default();
+        let pending: Vec<i64> = next_items(db, kind, entry_id, None, true).into_iter().map(|item| item.id).collect();
+        let skip = |id: i64| {
+            backend.queue_entry(kind, id).is_some()
+                || units.iter().find(|unit| unit.id == id).is_some_and(|unit| {
+                    let key = DiskKey { source_id: entry.source, entry_title: entry.title.clone(), unit_name: unit.name.clone(), scanlator: unit.scanlator.clone() };
+                    backend.on_disk(kind, &key)
+                })
+        };
+        let ids = plan_download(&pending, amount, skip);
+        if !ids.is_empty() && backend.enqueue(kind, entry_id, &ids) {
+            queued += ids.len();
+        }
+    }
+    if queued > 0 {
+        backend.start_queue(kind);
+    }
+    queued
 }
 
 /// Marks every item of the selected entries done or undone and returns how many entries were written. A failed entry
@@ -578,18 +604,42 @@ mod tests {
         let (id, ids) = notified_manga(&db);
         let backend = Fake::installed();
         let urls = ["u2".to_owned(), "u3".to_owned(), "gone".to_owned()];
-        assert_eq!(download_notified(&db, &backend, Kind::Manga, id, &urls, false), 2);
+        assert_eq!(download_notified(&db, &backend, Kind::Manga, id, &urls), 2);
         assert_eq!(
             backend.calls(),
             vec![
-                Call::Enqueue { entry_id: id, unit_ids: vec![id_of(&ids, "u2"), id_of(&ids, "u3")], external: false },
+                Call::Enqueue { entry_id: id, unit_ids: vec![id_of(&ids, "u2"), id_of(&ids, "u3")] },
                 Call::StartQueue,
             ],
             "autostart: the queue starts right after the enqueue"
         );
         let other = Fake::installed();
-        assert_eq!(download_notified(&db, &other, Kind::Manga, 9_999, &urls, false), 0);
+        assert_eq!(download_notified(&db, &other, Kind::Manga, 9_999, &urls), 0);
         assert!(other.calls().is_empty(), "a missing entry is a silent no-op");
+    }
+
+    #[test]
+    fn the_selection_bar_download_queues_the_next_unread_items_that_are_not_queued_or_on_disk_and_starts_once() {
+        use crate::updates::download_host::fake::{Call, Fake};
+        use crate::updates::download_state::DownloadState;
+        let (_dir, db) = db();
+        let (id, ids) = notified_manga(&db);
+        let backend = Fake::installed();
+        assert_eq!(download_selection(&db, &backend, Kind::Manga, &[id], DownloadAmount::Next(2)), 2);
+        assert_eq!(
+            backend.calls(),
+            // the fixture's source order is 1..=3, so the oldest chapter (the first to read) is the last one the source lists
+            vec![Call::Enqueue { entry_id: id, unit_ids: vec![id_of(&ids, "u3"), id_of(&ids, "u2")] }, Call::StartQueue],
+            "reading order, then one start"
+        );
+        let other = Fake::installed();
+        other.disk.lock().unwrap().push(3);
+        other.queue(id_of(&ids, "u2"), DownloadState::Queue, 0);
+        assert_eq!(download_selection(&db, &other, Kind::Manga, &[id, 9_999], DownloadAmount::Unviewed), 1);
+        assert_eq!(other.calls()[0], Call::Enqueue { entry_id: id, unit_ids: vec![id_of(&ids, "u1")] });
+        let none = Fake::installed();
+        assert_eq!(download_selection(&db, &none, Kind::Manga, &[9_999], DownloadAmount::Unviewed), 0);
+        assert!(none.calls().is_empty(), "nothing to queue, nothing started");
     }
 
     #[test]

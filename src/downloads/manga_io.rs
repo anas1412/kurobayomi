@@ -1,5 +1,4 @@
-//! The app-side port of the manga downloads: the live manga source as the downloader's `ChapterSource`, and the database
-//! rows as the downloader's chapter and manga refs (`entry_core::downloaded`). Page lists come from the source; each image goes over the shared
+//! The app-side port of the manga downloads: the live manga source as the downloader's `ChapterSource`. Page lists come from the source; each image goes over the shared
 //! client with the source's request headers, and its bytes pass through the source's fix-up, as the reader's page images
 //! do. No GTK here. The calls run on the runtime or the blocking pool.
 
@@ -7,18 +6,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kuro_data::entry::EntryRepo;
-use kuro_data::item::ItemRepo;
-use kuro_db::handle::Db;
-use kuro_platform::kind::Kind;
-use kuro_downloads::model::{ChapterRef, DownloadState, Page, QueuedDownload};
+use kuro_downloads::model::{ChapterRef, Page};
 use kuro_downloads::source::{ChapterSource, ImageResponse};
-use kuro_downloads::store::QueueRow;
 use kuro_source::model::SChapter;
 use kuro_source::{MangaSource, SourceError};
 use reqwest::header::CONTENT_TYPE;
-
-use crate::entry_core::downloaded::{chapter_ref, manga_ref};
 
 /// The live manga source of a download. Its display name and id are the ones the downloads folder and the index use.
 pub struct LiveChapterSource(Arc<dyn MangaSource>);
@@ -77,75 +69,4 @@ impl ChapterSource for LiveChapterSource {
         let body = futures::stream::once(async move { Ok::<Vec<u8>, SourceError>(body) }).boxed();
         Ok(ImageResponse { content_type, content_length: Some(length), body })
     }
-}
-
-/// A saved manga row whose source is not installed. The queue page lists it as Waiting for source until the source is back.
-#[derive(Clone, Debug)]
-pub struct Waiting {
-    pub row: QueueRow,
-    pub title: String,
-    pub chapter: String,
-}
-
-/// What one restore pass makes of the saved rows: the downloads to queue, and the rows still waiting for their source.
-#[derive(Default)]
-pub struct RestorePass {
-    pub ready: Vec<QueuedDownload>,
-    pub waiting: Vec<Waiting>,
-}
-
-/// Reads the saved rows, in saved order, against the manga database and the installed sources (`source_of`). A row
-/// whose manga or chapter is gone is dropped. A row whose source is not installed waits.
-pub fn restore_rows(rows: &[QueueRow], db: &Arc<Db>, source_of: &dyn Fn(i64) -> Option<Arc<dyn MangaSource>>) -> RestorePass {
-    let mut pass = RestorePass::default();
-    for row in rows {
-        let manga = EntryRepo::new(Arc::clone(db)).by_id(row.manga_id).ok().filter(|e| e.kind == Kind::Manga);
-        let chapter = ItemRepo::new(Arc::clone(db)).by_id(row.chapter_id).ok().flatten().filter(|i| i.kind == Kind::Manga);
-        let (Some(manga), Some(chapter)) = (manga, chapter) else {
-            tracing::info!(chapter_id = row.chapter_id, "dropped a saved download whose chapter or manga is gone");
-            continue;
-        };
-        match source_of(manga.source) {
-            Some(source) => pass.ready.push(QueuedDownload {
-                source: Arc::new(LiveChapterSource::new(source)),
-                manga: manga_ref(&manga),
-                chapter: chapter_ref(&chapter),
-                status: DownloadState::Queue,
-                pages: None,
-            }),
-            None => pass.waiting.push(Waiting { row: row.clone(), title: manga.title.clone(), chapter: chapter.name.clone() }),
-        }
-    }
-    pass
-}
-
-/// A manga download manager over in-memory stores, for the backend tests. The connectivity is offline, so queued
-/// chapters stay queued and nothing downloads. The sender keeps the connectivity watch open and must live as long as
-/// the manager.
-#[cfg(test)]
-pub(crate) fn test_manager(base: &std::path::Path) -> (Arc<kuro_downloads::manager::DownloadManager>, tokio::sync::watch::Sender<kuro_downloads::downloader::Connectivity>) {
-    use kuro_downloads::downloader::{Connectivity, DownloadSettings, NoHold};
-    use kuro_downloads::index::DownloadIndex;
-    use kuro_downloads::layout::DownloadLayout;
-    use kuro_downloads::manager::{DownloadManager, ManagerParams};
-    use kuro_downloads::pending::MangaPendingStore;
-    use kuro_downloads::store::QueueStore;
-
-    let root = base.join("downloads");
-    std::fs::create_dir_all(&root).unwrap();
-    let (connectivity_tx, connectivity) = tokio::sync::watch::channel(Connectivity { online: false, metered: false });
-    let manager = DownloadManager::spawn(ManagerParams {
-        layout: Arc::new(DownloadLayout::new(&root)),
-        index: Arc::new(DownloadIndex::open(&root, &base.join("cache"))),
-        store: Arc::new(QueueStore::open_in_memory().unwrap()),
-        free_space: crate::downloads::free_space,
-        settings: DownloadSettings::default(),
-        pending: Arc::new(MangaPendingStore::open_in_memory().unwrap()),
-        page_cache: None,
-        connectivity,
-        hold: Arc::new(NoHold),
-        restored: Vec::new(),
-        kept_rows: Vec::new(),
-    });
-    (Arc::new(manager), connectivity_tx)
 }
