@@ -5,7 +5,7 @@
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_prefs::prefs::Prefs;
 
-use crate::pref_model::model::{Preference, PreferenceItem};
+use crate::pref_model::model::Preference;
 use crate::settings_ui::rows::{group, item, ranged_choice, switch};
 
 /// The label of one delete-after-read choice (`remove_after_read_slots`): -1 is Disabled, then the n-th last read chapter.
@@ -35,6 +35,7 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
 
 #[cfg(test)]
 mod tests {
+    use crate::pref_model::model::PreferenceItem;
     use super::*;
 
     fn find<'a>(rows: &'a [Preference], group_title: &str) -> &'a [PreferenceItem] {

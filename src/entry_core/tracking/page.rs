@@ -23,7 +23,7 @@ use kuro_platform::kind::Kind;
 use kuro_track::model::{AnimeTrack, MangaTrack, TrackerId};
 use kuro_track::picker::{StatusRow, anime_status_rows, manga_status_rows, picker_day, picker_today, remove_offered};
 use kuro_track::sheet::{progress_text, score_text_shown};
-use kuro_track::tracker::{AnimeTracker, MangaTracker, Tracker};
+use kuro_track::tracker::Tracker;
 use kuro_track::write::{AnimeEdit, MangaEdit};
 use tokio::task::JoinHandle;
 

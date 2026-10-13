@@ -1,9 +1,6 @@
 //! The Mini player group of the player settings (T-48a-017). It is shown only when the display can run a mini player.
 //! The other groups of the old Internal player page are cut by the settings diet.
-use kuro_prefs::prefs::Prefs;
 
-use crate::pref_model::model::Preference;
-use crate::settings_ui::rows::{group, switch};
 
 /// What the display lets the mini player do (T-48a-017).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

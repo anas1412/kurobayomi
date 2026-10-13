@@ -1,12 +1,11 @@
 //! The player settings root page (task T-48a-010): the kept settings as rows, then the links to the pages that stay.
 //! The rows and the link targets are in `mod.rs`.
-use std::rc::Rc;
 
 use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
 
-use super::{controls, language};
+use super::language;
 use crate::pref_model::bind;
 use crate::pref_model::model::{ItemCommon, Preference, PreferenceItem};
 use crate::pref_model::page;
@@ -60,7 +59,7 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let store = prefs.store();
     let subtitles = Pref::new(store.clone(), "pref_subtitle_lang", String::new());
     let audio = Pref::new(store.clone(), "pref_audio_lang", String::new());
-    let mut tree = vec![group(
+    let tree = vec![group(
         "",
         vec![
             language::language_row("Subtitle language", &subtitles),

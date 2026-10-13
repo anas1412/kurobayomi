@@ -3,7 +3,6 @@
 
 use std::rc::Rc;
 
-use gtk::prelude::*;
 use kuro_player::speed::speed_label;
 
 use super::super::Shared;

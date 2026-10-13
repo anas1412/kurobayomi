@@ -27,7 +27,6 @@ use kuro_db::schema_unified;
 use kuro_domain::extension_repo::{HttpGet, import_legacy_repos};
 use kuro_platform::paths::Paths;
 use kuro_prefs::pref::Pref;
-use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 
 use crate::pref_model::stores_backend::{Ops as _, RepoOps};
@@ -318,6 +317,7 @@ pub fn run_restore(
 
 #[cfg(test)]
 mod tests {
+    use kuro_prefs::source::SourcePrefs;
     use std::sync::Mutex;
 
     use kuro_backup::schema::{BackupManga, BackupPreference, PrefValue};

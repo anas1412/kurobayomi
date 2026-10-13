@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
@@ -219,6 +218,7 @@ impl FavoriteFlow {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use kuro_i18n::{MsgKey, tr};
     use std::cell::RefCell;
     use std::time::{Duration, Instant};
 

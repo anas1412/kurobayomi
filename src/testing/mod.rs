@@ -112,7 +112,6 @@ pub fn nav() -> (gtk::Stack, gtk::ApplicationWindow) {
 mod tests {
     use std::thread::{self, ThreadId};
 
-    use gtk::prelude::*;
 
     use super::*;
 

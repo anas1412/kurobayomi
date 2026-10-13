@@ -3,7 +3,6 @@
 
 use std::rc::Rc;
 
-use gtk::Orientation as O;
 use gtk::prelude::*;
 
 #[derive(Clone)]

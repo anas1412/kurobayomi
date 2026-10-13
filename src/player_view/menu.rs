@@ -4,7 +4,6 @@
 
 use std::rc::Rc;
 
-use gtk::prelude::*;
 use kuro_player::mpv::MpvHandle;
 use kuro_player::tracks::{TRACK_NONE, TrackProps, VideoTrack, load_track_lists, track_id_from_value, track_label};
 

@@ -1,7 +1,6 @@
 //! The `kb-*` component classes and their rules (`p2-rust-design.md` section 5.5), the base
 //! stylesheet, and the pure alpha and padding helpers of T-49b-028 and T-49b-029.
 
-use std::fmt::Write as _;
 
 use super::tokens::{self as tk, Tokens};
 

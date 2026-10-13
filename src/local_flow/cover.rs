@@ -3,7 +3,6 @@
 //! look. Decoding goes through GTK's picture widget (ponytail: not the kuro-images cache yet).
 
 use gtk::gio;
-use gtk::prelude::*;
 
 /// Only a `file://` thumbnail is a local cover; anything else leaves the picture empty.
 pub fn is_local_thumbnail(url: &str) -> bool {

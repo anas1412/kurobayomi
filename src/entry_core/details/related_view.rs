@@ -9,7 +9,6 @@ use kuro_data::anime_relation::AnimeRelationGroup;
 use kuro_prefs::library::LibraryDisplayMode;
 
 use super::related_pack::{self as pack, Align, MAX_ITEMS_PER_ROW, RELATED_ITEM_WIDTH};
-use crate::ui;
 
 /// One related item: its cover, and its title when the mode shows one.
 fn item(entry: &kuro_data::entry::Entry, mode: LibraryDisplayMode, on_open: &Rc<dyn Fn(i64)>) -> Button {

@@ -32,7 +32,7 @@ use crate::updates::history::{
 use crate::updates::history_add::{self, Step};
 use crate::updates::history_data::{self, Unit};
 use crate::updates::history_dialog::{self, ConfirmCopy};
-use crate::updates::history_row::{self, RowActions, history_row};
+use crate::updates::history_row::{RowActions, history_row};
 use crate::updates::list::PageState;
 use crate::updates::open_route::{self, Route};
 use crate::updates::state_page::PageStates;

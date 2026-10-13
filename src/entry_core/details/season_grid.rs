@@ -10,7 +10,6 @@ use gtk::{Align, Box as GBox, Label, Orientation as O};
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 
 use super::season_tile::{self, SeasonItem, Tile, edge_badges, list_badges};
-use crate::ui;
 
 /// What decides how the grid draws and how many columns it takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -150,7 +150,7 @@ fn sorted_by_name(mut sources: Vec<(i64, String, i64)>) -> Vec<(i64, String, i64
 
 /// Housekeeping after "Clear database" committed (T-03a-028): above 1000 removed chapters or episodes the WAL is
 /// checkpointed and the user is offered VACUUM. Both run on their own connection to the file, off the open handle.
-fn after_clear(kind: Kind, removed: usize) {
+fn after_clear(_kind: Kind, removed: usize) {
     use crate::ui::{DialogButton, Role};
     use kuro_platform::paths::Paths as _;
     let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };

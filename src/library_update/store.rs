@@ -10,7 +10,7 @@ use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;
 
 use crate::library_update::error::UpdateError;
-use crate::library_update::queue::{FetchType, LibraryEntry};
+use crate::library_update::queue::LibraryEntry;
 
 pub trait LibraryStore: Send + Sync {
     /// Every favourite entry, one row per category it is in.
@@ -131,6 +131,7 @@ impl LibraryStore for SqliteLibraryStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::library_update::queue::FetchType;
     use super::*;
     use kuro_db::codec::UpdateStrategy as DbUpdateStrategy;
     use kuro_db::codec::FetchType as DbFetchType;

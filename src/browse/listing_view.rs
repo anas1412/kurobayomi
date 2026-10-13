@@ -14,7 +14,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use kuro_platform::kind::Kind;
 
 use gtk::glib;
 use gtk::prelude::*;
@@ -577,6 +576,7 @@ impl Inner {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use kuro_platform::kind::Kind;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 

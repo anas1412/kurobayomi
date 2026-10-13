@@ -4,7 +4,7 @@
 use kuro_i18n::MsgKey;
 
 /// Two panes (info and actions left, list right) at or above `TWO_PANE_MIN_WIDTH`, one column below it.
-pub use crate::entry_core::constants::{TWO_PANE_MIN_WIDTH, two_pane};
+pub use crate::entry_core::constants::two_pane;
 
 /// The width of the bottom action bar: the whole window narrow, half of it in the two-pane layout.
 pub fn bottom_bar_width(window_width: i32) -> Option<i32> {

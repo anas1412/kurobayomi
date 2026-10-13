@@ -3,7 +3,6 @@
 //! `header`. The display mode is cut from the settings: a radio selection changes the grid for this session only.
 
 use std::rc::Rc;
-use kuro_platform::kind::Kind;
 
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
@@ -124,6 +123,7 @@ fn overflow_menu(deps: &HeaderDeps) -> gtk::MenuButton {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use kuro_platform::kind::Kind;
     use std::cell::RefCell;
 
     use kuro_prefs::store::PrefStore;

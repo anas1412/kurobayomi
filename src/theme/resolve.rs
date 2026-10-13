@@ -4,7 +4,7 @@
 //! `TachiyomiTheme.kt`).
 
 use super::baseline::fallback_for;
-use super::schemes::{SchemeDef, DEFAULT_SCHEME};
+use super::schemes::SchemeDef;
 use super::tokens::{Role, Rgba, Tokens, ROLE_COUNT};
 
 /// Resolves the default scheme for a mode.
@@ -37,6 +37,7 @@ pub fn tokens_for(scheme: &SchemeDef, dark: bool) -> Tokens {
 
 #[cfg(test)]
 mod tests {
+    use crate::theme::schemes::DEFAULT_SCHEME;
     use super::*;
 
     #[test]
