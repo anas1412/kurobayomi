@@ -198,7 +198,7 @@ impl LibraryView {
         empty_action.add_css_class("suggested-action");
         empty_action.set_visible(false);
         // the shared empty state; the message and the two actions are set by `render`
-        let (empty, empty_label) = crate::browse::look::empty_state_with(
+        let (empty, empty_label) = crate::browse::look::empty_state(
             match deps.kind {
                 Kind::Anime => "video-x-generic-symbolic",
                 Kind::Manga => "accessories-dictionary-symbolic",

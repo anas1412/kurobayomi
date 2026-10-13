@@ -73,13 +73,13 @@ impl MigrateEntriesView {
         let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
         list.set_vexpand(true);
         root.add_named(&list, Some("list"));
-        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
+        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), &[]).0;
         let banner = InfoBanner::new();
         let failed = gtk::Box::new(gtk::Orientation::Vertical, 0);
         failed.append(banner.widget());
         failed.append(&empty);
         root.add_named(&failed, Some("failed"));
-        let empty_only = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
+        let empty_only = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), &[]).0;
         root.add_named(&empty_only, Some("empty"));
         root.set_vexpand(true);
         root.set_visible_child_name("loading");

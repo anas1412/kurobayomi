@@ -95,7 +95,7 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
         return root;
     }
     if snapshot.sources.is_empty() {
-        root.append(&super::look::empty_state("view-list-symbolic", &snapshot.empty_text, None).0);
+        root.append(&super::look::empty_state("view-list-symbolic", &snapshot.empty_text, &[]).0);
         return root;
     }
     let column = crate::ui::column();
@@ -216,7 +216,7 @@ fn stub_page(listing: &ListingDeps, on_back: Rc<dyn Fn()>) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&stub_header(&listing.source_name, on_back));
     let label = stub_source_label(&listing.source_name, &listing.source_lang, listing.source_id);
-    root.append(&super::look::empty_state("dialog-warning-symbolic", &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&label))]), None).0);
+    root.append(&super::look::empty_state("dialog-warning-symbolic", &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&label))]), &[]).0);
     root
 }
 

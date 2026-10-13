@@ -33,7 +33,7 @@ pub fn empty_state(message: &str, actions: &[EmptyAction], on_action: impl Fn(Em
             button
         })
         .collect();
-    super::look::empty_state_with("dialog-error-symbolic", message, &buttons).0
+    super::look::empty_state("dialog-error-symbolic", message, &buttons).0
 }
 
 /// The icon of a row, 40 px square. A built-in glyph is tinted with the error colour for a stub or an untrusted

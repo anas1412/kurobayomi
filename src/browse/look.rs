@@ -20,14 +20,9 @@ pub fn badge(text: &str, accent: bool) -> gtk::Label {
     label
 }
 
-/// The empty state of a page (`ui::status`: a large dim icon over the message), with at most one action under it.
-/// Returns the page and its message label, for pages that change the message.
-pub fn empty_state(icon: &str, message: &str, action: Option<&gtk::Button>) -> (gtk::Box, gtk::Label) {
-    empty_state_with(icon, message, action.map(std::slice::from_ref).unwrap_or(&[]))
-}
-
-/// [`empty_state`] with any number of actions: one goes straight under the message, several sit in a centred row.
-pub fn empty_state_with(icon: &str, message: &str, actions: &[gtk::Button]) -> (gtk::Box, gtk::Label) {
+/// The empty state of a page (`ui::status`: a large dim icon over the message), with any number of actions: one goes straight
+/// under the message, several sit in a centred row. Returns the page and its message label, for pages that change the message.
+pub fn empty_state(icon: &str, message: &str, actions: &[gtk::Button]) -> (gtk::Box, gtk::Label) {
     let page = crate::ui::status(icon, message);
     page.set_margin_start(SPACE_L);
     page.set_margin_end(SPACE_L);
@@ -57,7 +52,7 @@ pub fn error_state(message: &str, retry: Option<Rc<dyn Fn()>>) -> gtk::Box {
         button.connect_clicked(move |_| retry());
         button
     });
-    empty_state("dialog-error-symbolic", message, button.as_ref()).0
+    empty_state("dialog-error-symbolic", message, button.as_slice()).0
 }
 
 /// The cover sizes of a list row, width x height (2:3 like the cards): [`SMALL`] in the Updates feed and the Browse
@@ -161,7 +156,7 @@ mod tests {
             assert_eq!(text.label(), "SL");
 
             let action = gtk::Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_update_library));
-            let (page, label) = empty_state("view-refresh-symbolic", "No recent updates", Some(&action));
+            let (page, label) = empty_state("view-refresh-symbolic", "No recent updates", std::slice::from_ref(&action));
             assert_eq!(label.label(), "No recent updates");
             assert!(label.has_css_class("kb-empty-title"));
             assert_eq!(action.parent().as_ref(), Some(page.upcast_ref::<gtk::Widget>()));

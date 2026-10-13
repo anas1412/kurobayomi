@@ -98,7 +98,7 @@ impl SourcePrefsPage {
         let stack = gtk::Stack::new();
         stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("loading"));
         stack.add_named(&scroller, Some("list"));
-        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
+        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), &[]).0;
         stack.add_named(&empty, Some("empty"));
         stack.set_vexpand(true);
         stack.set_visible_child_name("loading");

@@ -109,7 +109,7 @@ fn page_stack(empty_text: &str) -> (gtk::Stack, gtk::Box) {
     let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
     let stack = gtk::Stack::new();
     stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("loading"));
-    stack.add_named(&super::look::empty_state("view-list-symbolic", empty_text, None).0, Some("empty"));
+    stack.add_named(&super::look::empty_state("view-list-symbolic", empty_text, &[]).0, Some("empty"));
     stack.add_named(&scroller, Some("list"));
     stack.set_vexpand(true);
     stack.set_visible_child_name("loading");

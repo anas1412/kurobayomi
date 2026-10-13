@@ -40,7 +40,7 @@ pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry)> {
     actions.append(&clear);
     let list = crate::ui::boxed_list();
     // the app's empty state (icon, line), as the library and history show theirs
-    let (empty, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", None);
+    let (empty, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", &[]);
     empty.set_vexpand(true);
     column.append(&actions);
     column.append(&list);

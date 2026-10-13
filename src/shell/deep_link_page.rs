@@ -105,10 +105,10 @@ pub fn widget(state: &State, on_retry: impl Fn() + 'static, on_search_instead: i
             Some(reason) => format!("{}\n{reason}", shown.title),
             None => shown.title.clone(),
         };
-        return crate::browse::look::empty_state_with("dialog-error-symbolic", &message, &buttons).0;
+        return crate::browse::look::empty_state("dialog-error-symbolic", &message, &buttons).0;
     }
     if !shown.spinner {
-        return crate::browse::look::empty_state("system-search-symbolic", &shown.title, None).0;
+        return crate::browse::look::empty_state("system-search-symbolic", &shown.title, &[]).0;
     }
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
     column.set_halign(gtk::Align::Center);

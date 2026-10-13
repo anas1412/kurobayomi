@@ -214,7 +214,7 @@ impl RowWidgets {
 pub fn empty_list(message: &str, on_retry: impl Fn() + 'static) -> (GBox, Label) {
     let retry = gtk::Button::with_label(&tr(MsgKey::action_retry));
     retry.connect_clicked(move |_| on_retry());
-    crate::browse::look::empty_state_with("view-list-symbolic", message, &[retry])
+    crate::browse::look::empty_state("view-list-symbolic", message, &[retry])
 }
 
 /// The items of the right-click menu of the row behind `list_item`, built when the menu opens so the labels match the

@@ -133,10 +133,10 @@ impl ListingView {
         let stub = super::look::empty_state(
             "dialog-warning-symbolic",
             &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&stub_source_label(&deps.source_name, &deps.source_lang, deps.source_id)))]),
-            None,
+            &[],
         )
         .0;
-        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), None).0;
+        let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), &[]).0;
         let stack = gtk::Stack::new();
         stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("spinner"));
         stack.add_named(&stub, Some("stub"));

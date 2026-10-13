@@ -166,7 +166,7 @@ impl CategoryList {
 pub fn categories_content(kind: Kind) -> crate::screens::Built {
     let add = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_add_category));
     add.connect_clicked(move |_| add_category(kind));
-    let (empty, _) = crate::browse::look::empty_state("tag-symbolic", &screen("categories").empty.unwrap_or_default(), Some(&add));
+    let (empty, _) = crate::browse::look::empty_state("tag-symbolic", &screen("categories").empty.unwrap_or_default(), std::slice::from_ref(&add));
     let column = column();
     column.append(&boxed_list());
     column.append(&empty);

@@ -251,7 +251,7 @@ fn section_list(column: &gtk::Box, list: &mut Option<gtk::ListBox>) -> gtk::List
 pub(super) fn sources_empty() -> gtk::Box {
     let repos = gtk::Button::with_label(&tr(MsgKey::label_extension_repos));
     repos.connect_clicked(move |_| super::mount::open_repos());
-    super::look::empty_state("system-search-symbolic", &tr(MsgKey::source_empty_screen), Some(&repos)).0
+    super::look::empty_state("system-search-symbolic", &tr(MsgKey::source_empty_screen), std::slice::from_ref(&repos)).0
 }
 
 #[cfg(test)]

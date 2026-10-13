@@ -27,7 +27,7 @@ impl PageStates {
         stack.add_named(&loading(LoadSize::Page), Some("loading"));
 
         // the empty look of the Library page (docs/design/other-tabs.md); the screen sets its icon and action
-        let (empty, empty_label) = look::empty_state("view-list-symbolic", "", None);
+        let (empty, empty_label) = look::empty_state("view-list-symbolic", "", &[]);
         let empty_icon = empty.first_child().and_downcast::<gtk::Image>().expect("the empty state starts with its icon");
         stack.add_named(&empty, Some("empty"));
 
