@@ -194,7 +194,7 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         let settings = InMemorySettings::new();
         let domain = Domain::new(deps(&dir, &settings));
-        domain.backup_prefs().interval.set(0);
+        let _ = domain.backup_prefs().interval.set(0);
         assert_eq!(settings.get_raw("backup_interval"), Some(kuro_prefs::values::PrefValue::Int(0)));
         // The default base is created on first use, so the user is never asked for a folder.
         assert_eq!(domain.storage().base().unwrap(), dir.path().join("no-such-base"));

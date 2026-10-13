@@ -111,11 +111,8 @@ impl Prefs {
 
 #[cfg(test)]
 mod tests {
-    use kuro_platform::paths::Paths;
-
     use super::*;
     use crate::testutil::{MemorySecrets, TestDir, TestPaths};
-    use crate::toml_backend::config_file;
     use crate::values::PrefValue;
 
     fn secrets() -> Arc<dyn SecretStore> {

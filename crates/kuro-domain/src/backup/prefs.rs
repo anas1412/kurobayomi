@@ -39,7 +39,7 @@ pub fn interval_hours(raw: i32) -> Option<u32> {
 /// `EnableAutoBackupMigration`: switching automatic backup on turns a zero interval into 12 hours.
 pub fn enable_auto_backup(prefs: &BackupPrefs) {
     if prefs.interval.get() == 0 {
-        prefs.interval.set(DEFAULT_INTERVAL_HOURS);
+        let _ = prefs.interval.set(DEFAULT_INTERVAL_HOURS);
     }
 }
 
@@ -67,10 +67,10 @@ mod tests {
     fn enabling_turns_a_zero_interval_into_twelve_and_keeps_others() {
         let store = PrefStore::in_memory();
         let prefs = BackupPrefs::new(&store);
-        prefs.interval.set(0);
+        let _ = prefs.interval.set(0);
         enable_auto_backup(&prefs);
         assert_eq!(prefs.interval.get(), 12);
-        prefs.interval.set(6);
+        let _ = prefs.interval.set(6);
         enable_auto_backup(&prefs);
         assert_eq!(prefs.interval.get(), 6);
     }
@@ -80,7 +80,7 @@ mod tests {
         let store = PrefStore::in_memory();
         let prefs = BackupPrefs::new(&store);
         assert_eq!(prefs.last_auto_backup.get(), 0);
-        prefs.last_auto_backup.set(1_760_000_000_123);
+        let _ = prefs.last_auto_backup.set(1_760_000_000_123);
         assert_eq!(prefs.last_auto_backup.get(), 1_760_000_000_123);
         assert_eq!(elapsed_ms(1_000, 400), 600);
         assert_eq!(elapsed_ms(400, 1_000), 0, "E-BK-04: a future last time gives zero");

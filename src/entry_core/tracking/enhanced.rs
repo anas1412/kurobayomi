@@ -2,9 +2,11 @@
 //! "new search" button matches the entry and registers the match without a search page. The banner of a failed match
 //! says "No match found" unless the user accepts D-6, which shows the real error text.
 
+#[cfg(test)]
 /// The text of a match that found nothing, and the default text of a failed one (parity).
 pub const NO_MATCH: &str = "No match found";
 
+#[cfg(test)]
 /// What the auto-match produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Matched<T> {
@@ -14,6 +16,7 @@ pub enum Matched<T> {
     Banner { text: String, log: Option<String> },
 }
 
+#[cfg(test)]
 /// Turns the outcome of `match_entry` into the match or the banner. `show_real_error` is decision D-6 accepted.
 pub fn resolve<T>(outcome: Result<Option<T>, String>, show_real_error: bool) -> Matched<T> {
     match outcome {

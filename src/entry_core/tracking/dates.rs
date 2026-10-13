@@ -11,6 +11,7 @@ pub fn date_selectable(is_start: bool, day: NaiveDate, other: Option<NaiveDate>,
     DatePicker::new(is_start, day, other, today).is_selectable(day)
 }
 
+#[cfg(test)]
 /// The same rules at year granularity, for the year drop-down.
 pub fn year_selectable(is_start: bool, year: i32, other: Option<NaiveDate>, today: NaiveDate) -> bool {
     DatePicker::new(is_start, today, other, today).is_selectable_year(year)

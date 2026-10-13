@@ -15,24 +15,38 @@ pub const LIBRARY_PROGRESS: &str = "library.progress";
 pub const LIBRARY_ERROR: &str = "library.error";
 pub const LIBRARY_SIZE_WARNING: &str = "library.size-warning";
 pub const LIBRARY_SUMMARY: &str = "library.summary";
+#[cfg(test)]
 pub const DOWNLOAD_MANGA_PROGRESS: &str = "download.manga.progress";
+#[cfg(test)]
 pub const DOWNLOAD_MANGA_ERROR: &str = "download.manga.error";
+#[cfg(test)]
 pub const DOWNLOAD_ANIME_PROGRESS: &str = "download.anime.progress";
+#[cfg(test)]
 pub const DOWNLOAD_ANIME_ERROR: &str = "download.anime.error";
 pub const NEW_CHAPTERS: &str = "new.chapters";
 pub const NEW_EPISODES: &str = "new.episodes";
+#[cfg(test)]
 // One id source for backup and restore (T-35a-082): the slots the backup crate posts to are the registry's ids, so the
 // router's withdraw of a restore and the restore's own notice name the same slot.
 pub const BACKUP_PROGRESS: &str = kuro_backup::notify::ID_BACKUP_PROGRESS;
+#[cfg(test)]
 pub const BACKUP_COMPLETE: &str = kuro_backup::notify::ID_BACKUP_RESULT;
+#[cfg(test)]
 pub const RESTORE_PROGRESS: &str = kuro_backup::notify::ID_RESTORE_PROGRESS;
+#[cfg(test)]
 pub const RESTORE_COMPLETE: &str = kuro_backup::notify::ID_RESTORE_RESULT;
+#[cfg(test)]
 pub const INCOGNITO: &str = "incognito";
+#[cfg(test)]
 pub const SERVER_TORRENT: &str = "server.torrent";
+#[cfg(test)]
 pub const SERVER_HTTP: &str = "server.http";
+#[cfg(test)]
 pub const EXTENSIONS_UPDATES: &str = "extensions.updates";
+#[cfg(test)]
 pub const EXTENSIONS_INSTALLING: &str = "extensions.installing";
 
+#[cfg(test)]
 /// Every base id, for the duplicate test.
 pub const ALL_IDS: &[&str] = &[
     APP_UPDATE_PROGRESS,
@@ -60,6 +74,7 @@ pub const ALL_IDS: &[&str] = &[
     EXTENSIONS_INSTALLING,
 ];
 
+#[cfg(test)]
 /// The notice kinds of the registry (T-35a-080, T-35a-081, T-35a-082, T-35a-083, T-35a-084, T-35a-085, T-35a-086).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
@@ -77,6 +92,7 @@ pub enum Category {
     SaveImage,
 }
 
+#[cfg(test)]
 /// How urgently a notice is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Priority {
@@ -85,6 +101,7 @@ pub enum Priority {
     High,
 }
 
+#[cfg(test)]
 impl Category {
     /// The category of a slot id, with or without its per-entry or per-kind `:suffix`. `None` for an id that has no
     /// category (the server notices are status lines in the window, see T-35a-084).

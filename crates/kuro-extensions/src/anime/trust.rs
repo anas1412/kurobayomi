@@ -78,7 +78,7 @@ mod tests {
 
     fn trust_with(entries: &[String]) -> TrustStore {
         let pref = PrefStore::in_memory().pref("__APP_STATE_trusted_extensions", BTreeSet::new());
-        pref.extend(entries.iter().cloned());
+        let _ = pref.extend(entries.iter().cloned());
         TrustStore::new(pref)
     }
 

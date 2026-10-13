@@ -170,11 +170,6 @@ fn anime_statuses(state: &ExtensionState) -> Vec<ExtensionStatus> {
         .collect()
 }
 
-/// The number of anime packages with an update, derived from the state and never stored.
-pub fn anime_update_count() -> usize {
-    HOST.with(|h| h.borrow().as_ref().map_or(0, |host| host.state.borrow().update_count()))
-}
-
 /// Starts the host: scans both package folders and pumps the anime events into the state. Call once from the GTK main
 /// thread inside the app's runtime.
 pub fn start(store: &PrefStore) {

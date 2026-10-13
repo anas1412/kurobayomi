@@ -367,7 +367,7 @@ mod tests {
         fs::read_to_string(log).map(|s| s.lines().count()).unwrap_or(0)
     }
 
-    fn engine(root: &Path, ffmpeg: &Path, ffprobe: &Path) -> (EpisodeEngine, Arc<Hoster>) {
+    fn engine(_root: &Path, ffmpeg: &Path, ffprobe: &Path) -> (EpisodeEngine, Arc<Hoster>) {
         let hoster = Arc::new(Hoster { answer: Some(video()), calls: AtomicUsize::new(0) });
         let engine = EpisodeEngine::new(hoster.clone())
             .with_programs(ffmpeg.as_os_str(), ffprobe.as_os_str());

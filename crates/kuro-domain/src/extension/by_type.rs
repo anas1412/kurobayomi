@@ -332,10 +332,10 @@ mod tests {
         let prefs = SourcePrefs::new(kuro_prefs::store::PrefStore::in_memory());
         let mut rows = subscribe_extension_sources(&prefs, Kind::Manga, vec![src(5, "Five", "en")]);
         assert!(rows.borrow_and_update()[0].enabled);
-        prefs.disabled_manga_sources.set(set(&["5"]));
+        let _ = prefs.disabled_manga_sources.set(set(&["5"]));
         tokio::time::timeout(crate::app::rx::TEST_WAIT, rows.changed()).await.expect("waited").expect("open");
         assert!(!rows.borrow_and_update()[0].enabled, "hidden source is not enabled");
-        prefs.disabled_anime_sources.set(set(&["5"]));
+        let _ = prefs.disabled_anime_sources.set(set(&["5"]));
         let waited = tokio::time::timeout(std::time::Duration::from_millis(200), rows.changed()).await;
         assert!(waited.is_err(), "the anime hidden set does not touch the manga rows");
     }
@@ -343,8 +343,8 @@ mod tests {
     #[tokio::test]
     async fn show_nsfw_source_is_observed_reactively() {
         let prefs = SourcePrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        prefs.show_nsfw_source.set(false);
-        prefs.enabled_languages.set(set(&["en"]));
+        let _ = prefs.show_nsfw_source.set(false);
+        let _ = prefs.enabled_languages.set(set(&["en"]));
         let mut nsfw = ext("n", "Adult", "en", vec![]);
         nsfw.nsfw = true;
         let (_i, installed) = watch::channel(vec![nsfw, ext("s", "Safe", "en", vec![])]);
@@ -352,7 +352,7 @@ mod tests {
         let (_a, available) = watch::channel(Vec::new());
         let mut out = subscribe_extensions_by_type(&prefs, installed, untrusted, available, true);
         assert_eq!(out.borrow_and_update().installed.len(), 1, "NSFW hidden at the start");
-        prefs.show_nsfw_source.set(true);
+        let _ = prefs.show_nsfw_source.set(true);
         tokio::time::timeout(crate::app::rx::TEST_WAIT, out.changed()).await.expect("waited").expect("open");
         assert_eq!(out.borrow_and_update().installed.len(), 2, "the toggle re-filters without a restart");
     }

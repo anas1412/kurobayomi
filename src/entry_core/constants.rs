@@ -7,6 +7,7 @@ pub const LEFT_PANE_WIDTH: i32 = 360;
 pub const TWO_PANE_MIN_WIDTH: i32 = 900;
 /// The window size assumed before the page has a real one: the app's default size.
 pub const FALLBACK_WIDTH: i32 = 1180;
+#[cfg(test)]
 pub const FALLBACK_HEIGHT: i32 = 780;
 
 /// True when a window of this width gets the two-pane entry layout.

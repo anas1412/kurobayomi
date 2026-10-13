@@ -179,12 +179,6 @@ impl EntryStore {
         AnimeRelationRepo::new(self.db()).subscribe_related(entry_id)
     }
 
-    #[cfg(test)]
-    /// One masked UPDATE of `entries.viewer_flags`, so a write never reads back and touches the other groups (E-AIR-1).
-    pub fn set_viewer_bits(&self, entry_id: i64, value: i64, mask: i64) -> DataResult<bool> {
-        self.entries.set_viewer_bits(entry_id, value, mask)
-    }
-
     /// Sets the bookmark or fillermark of exactly these episodes, in one transaction. The caller passes the ids that
     /// differ (`actions::bulk_mark_targets`), so no row is written that does not change.
     pub fn set_marks(&self, ids: &[i64], mark: Mark, on: bool) -> DataResult<()> {

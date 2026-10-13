@@ -444,7 +444,6 @@ fn write_edit(entry: &Entry, edit: Edit, redraw: Rc<dyn Fn()>) {
                 Edit::Score(label) => AnimeEdit::Score(label),
                 Edit::StartDate(ms) => AnimeEdit::StartDate(ms),
                 Edit::FinishDate(ms) => AnimeEdit::FinishDate(ms),
-                Edit::Private(on) => AnimeEdit::Private(on),
             };
             finish(actions::edit_anime(entry.id, TrackerId::ANILIST, edit), failure, redraw);
         }
@@ -455,7 +454,6 @@ fn write_edit(entry: &Entry, edit: Edit, redraw: Rc<dyn Fn()>) {
                 Edit::Score(label) => MangaEdit::Score(label),
                 Edit::StartDate(ms) => MangaEdit::StartDate(ms),
                 Edit::FinishDate(ms) => MangaEdit::FinishDate(ms),
-                Edit::Private(on) => MangaEdit::Private(on),
             };
             finish(actions::edit_manga(entry.id, TrackerId::ANILIST, edit), failure, redraw);
         }

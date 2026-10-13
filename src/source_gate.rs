@@ -19,6 +19,7 @@ fn loaded() -> &'static watch::Sender<bool> {
     LOADED.get_or_init(|| watch::channel(false).0)
 }
 
+#[cfg(test)]
 /// The source-ready flag: `false` until the built-in and recipe sources have been read at start, then `true` for good.
 /// Every view that needs sources waits on a receiver from here, so the spinner is real.
 pub fn subscribe() -> watch::Receiver<bool> {

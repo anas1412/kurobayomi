@@ -13,6 +13,7 @@ use std::sync::{Arc, OnceLock};
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 use kuro_images::art::ArtRef;
+#[cfg(test)]
 use kuro_platform::kind::Kind;
 use kuro_images::cover_image::{CoverBinding, CoverState};
 use kuro_images::fetch::{ImageService, LoadRequest};
@@ -45,26 +46,6 @@ pub fn needs_load(shown: Option<&ArtRef>, wanted: &ArtRef) -> bool {
     shown.is_none_or(|s| {
         (s.owner, s.entry_id, s.source_id, s.kind, &s.url, s.last_modified) != (wanted.owner, wanted.entry_id, wanted.source_id, wanted.kind, &wanted.url, wanted.last_modified)
     })
-}
-
-/// The source id a tracker search cover carries. No source has it, so the image service keeps the file in the shared
-/// image cache (area 12) only; the tracker never stores covers (T-32a-067).
-pub const TRACKER_COVER_SOURCE: i64 = -2;
-
-/// The cover of one tracker search card: the placeholder first, then the image from `CardView::cover_url` through the
-/// shared image cache. A missing url or a failed load keeps the placeholder.
-pub fn tracker_search_cover(width: i32, height: i32, cover_url: Option<&str>) -> CoverView {
-    let view = CoverView::new(width, height);
-    view.load(ArtRef {
-        owner: Kind::Manga,
-        entry_id: 0,
-        source_id: TRACKER_COVER_SOURCE,
-        kind: kuro_images::art::ArtKind::Cover,
-        url: cover_url.map(str::to_owned),
-        favorite: false,
-        last_modified: 0,
-    });
-    view
 }
 
 /// A cover frame of a fixed size. Cloning shares the same widgets.

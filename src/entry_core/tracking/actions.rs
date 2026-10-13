@@ -8,10 +8,10 @@
 
 use std::sync::Arc;
 
-use kuro_track::bind::{spawn_register_anime, spawn_register_manga};
 use kuro_track::ctx::TrackCtx;
 use kuro_track::error::TrackError;
 use kuro_track::messages::MsgKey;
+#[cfg(test)]
 use kuro_track::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use kuro_track::model::{AnimeTrack, MangaTrack, TrackerId};
 use kuro_track::progress::{TrackOutcome, spawn_track_chapter, spawn_track_episode};
@@ -44,16 +44,6 @@ pub fn episode_seen(anime_id: i64, episode: f64) -> Option<Outcomes> {
     start(|ctx| spawn_track_episode(ctx, anime_id, episode))
 }
 
-/// Binds an anime entry to the search result `result` on `tracker`. The handle resolves to the stored row.
-pub fn register_anime(entry_id: i64, result: AnimeTrackSearch, tracker: TrackerId, has_seen: bool) -> Option<JoinHandle<Result<AnimeTrack, TrackError>>> {
-    start(|ctx| spawn_register_anime(ctx, entry_id, result, tracker, has_seen))
-}
-
-/// Binds a manga entry to the search result `result` on `tracker`. The handle resolves to the stored row.
-pub fn register_manga(entry_id: i64, result: MangaTrackSearch, tracker: TrackerId, has_read: bool) -> Option<JoinHandle<Result<MangaTrack, TrackError>>> {
-    start(|ctx| spawn_register_manga(ctx, entry_id, result, tracker, has_read))
-}
-
 /// One remote edit of an anime binding (status, progress, score, dates, private), written detached.
 pub fn edit_anime(entry_id: i64, tracker: TrackerId, edit: AnimeEdit) -> Option<JoinHandle<Result<AnimeTrack, TrackError>>> {
     start(|ctx| spawn_anime_edit(ctx, entry_id, tracker, edit))
@@ -75,33 +65,39 @@ pub fn remove_manga(track: MangaTrack, also_remote: bool) -> Option<JoinHandle<R
     start(|ctx| spawn_remove_manga(ctx, track, also_remote))
 }
 
+#[cfg(test)]
 /// Searches AniList for anime titles (the tracker search screen).
 pub fn search_anime(query: String) -> Option<JoinHandle<Result<Vec<AnimeTrackSearch>, TrackError>>> {
     start(|ctx| tokio::spawn(anilist_search_anime(ctx, query)))
 }
 
+#[cfg(test)]
 /// Searches AniList for manga titles (the tracker search screen).
 pub fn search_manga(query: String) -> Option<JoinHandle<Result<Vec<MangaTrackSearch>, TrackError>>> {
     start(|ctx| tokio::spawn(anilist_search_manga(ctx, query)))
 }
 
+#[cfg(test)]
 /// Refreshes every logged-in anime binding of the entry from its service (the sheet's refresh). The handle resolves to the
 /// failures, which the caller shows; a failed refresh keeps the local row as it was.
 pub fn refresh_anime(entry_id: i64) -> Option<JoinHandle<Result<Vec<(TrackerId, TrackError)>, TrackError>>> {
     start(|ctx| tokio::spawn(async move { kuro_track::sync::refresh_anime(&ctx, entry_id).await }))
 }
 
+#[cfg(test)]
 /// Manga form of [`refresh_anime`].
 pub fn refresh_manga(manga_id: i64) -> Option<JoinHandle<Result<Vec<(TrackerId, TrackError)>, TrackError>>> {
     start(|ctx| tokio::spawn(async move { kuro_track::sync::refresh_manga(&ctx, manga_id).await }))
 }
 
+#[cfg(test)]
 async fn anilist_search_anime(ctx: Arc<TrackCtx>, query: String) -> Result<Vec<AnimeTrackSearch>, TrackError> {
     let tracker = ctx.trackers.get(TrackerId::ANILIST).ok_or(TrackError::UnknownTracker(TrackerId::ANILIST.0))?;
     let anime = tracker.as_anime().ok_or_else(|| TrackError::Message("AniList has no anime list".into()))?;
     anime.search(&query).await
 }
 
+#[cfg(test)]
 async fn anilist_search_manga(ctx: Arc<TrackCtx>, query: String) -> Result<Vec<MangaTrackSearch>, TrackError> {
     let tracker = ctx.trackers.get(TrackerId::ANILIST).ok_or(TrackError::UnknownTracker(TrackerId::ANILIST.0))?;
     let manga = tracker.as_manga().ok_or_else(|| TrackError::Message("AniList has no manga list".into()))?;

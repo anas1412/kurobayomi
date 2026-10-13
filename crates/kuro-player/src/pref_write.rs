@@ -66,15 +66,6 @@ pub(crate) mod test_support {
     }
 
     impl FakeMpv {
-        pub fn with(pairs: &[(&str, &str)]) -> Self {
-            let fake = Self::default();
-            for (k, v) in pairs {
-                fake.values
-                    .borrow_mut()
-                    .insert((*k).to_owned(), (*v).to_owned());
-            }
-            fake
-        }
     }
 
     impl PropertySink for FakeMpv {

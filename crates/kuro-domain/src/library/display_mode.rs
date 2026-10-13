@@ -51,7 +51,7 @@ mod tests {
             crate::category::service::set_display_mode(&prefs, mode);
             assert_eq!(read_display_mode(&prefs), mode);
         }
-        prefs.display_mode.set(LibraryDisplayMode::CompactGrid);
+        let _ = prefs.display_mode.set(LibraryDisplayMode::CompactGrid);
         prefs.store().set_raw("pref_display_mode_library", PrefValue::Str("list".into()));
         assert_eq!(read_display_mode(&prefs), LibraryDisplayMode::CompactGrid, "lower case reads as compact");
         assert_eq!(prefs.store().get_raw("pref_display_mode_library"), Some(PrefValue::Str("list".into())));

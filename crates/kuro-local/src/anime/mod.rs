@@ -348,7 +348,7 @@ mod tests {
             Some(Tool::new("sh").with_args([ffmpeg])),
             temp.path(),
         );
-        let (root, source) = library(&[("Show", &["Show - 1.mkv"])])?;
+        let (root, _source) = library(&[("Show", &["Show - 1.mkv"])])?;
         let source = LocalAnimeSource::with_frames(Some(root.path().to_path_buf()), frames);
         let anime = SAnime { url: "Show".into(), title: "Show".into(), ..SAnime::default() };
         AnimeSource::episode_list(&source, &anime).await.map_err(io::Error::other)?;

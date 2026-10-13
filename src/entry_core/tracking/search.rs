@@ -11,6 +11,7 @@ pub trait Hit: Clone {
     fn set_private(&mut self, private: bool);
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum State<R> {
     Idle,
@@ -21,6 +22,7 @@ pub enum State<R> {
     Failed(String),
 }
 
+#[cfg(test)]
 /// How a query ended. A cancelled query is not an error (E-TRK-8).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -28,6 +30,7 @@ pub enum Failure {
     Error(String),
 }
 
+#[cfg(test)]
 /// One search screen for one entry.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Search<R: Hit> {
@@ -40,6 +43,7 @@ pub struct Search<R: Hit> {
     generation: u64,
 }
 
+#[cfg(test)]
 impl<R: Hit> Search<R> {
     pub fn new(initial_title: &str, current_url: Option<&str>, supports_private: bool) -> Self {
         Self {
@@ -126,11 +130,13 @@ impl<R: Hit> Search<R> {
     }
 }
 
+#[cfg(test)]
 /// A result with no tracker URL is an error row (`T-TRK-6`, D-8): it cannot be opened, and it is not preselected.
 pub fn is_error_row<R: Hit>(hit: &R) -> bool {
     hit.url().trim().is_empty()
 }
 
+#[cfg(test)]
 /// Two results are the same result when their identities are equal, whatever their private flag says (E-TRK-9).
 pub fn same_result<R: Hit>(a: &R, b: &R) -> bool {
     a.key() == b.key()

@@ -66,12 +66,12 @@ impl<K: SigningKeys> TrustExtension<K> {
             .filter(|entry| !entry.starts_with(&prefix))
             .collect();
         set.insert(triple(name, version_code, hash));
-        self.trusted.set(set);
+        let _ = self.trusted.set(set);
     }
 
     /// `revokeAll`: deletes the preference. Repository and store keys are not touched.
     pub fn revoke_all(&self) {
-        self.trusted.delete();
+        let _ = self.trusted.delete();
     }
 }
 

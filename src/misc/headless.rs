@@ -10,7 +10,9 @@
 //! - Mode A (the background portal, autostart) and mode B (this timer) are mutually exclusive: [`Selection`] turns one
 //!   off when the other is turned on, so a pass is never started twice for one interval.
 
+#[cfg(test)]
 use std::io;
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
 use crate::library_update::pass::Trigger;
@@ -71,6 +73,7 @@ fn forward_manual() -> u8 {
     runner::run_headless(Trigger::Manual)
 }
 
+#[cfg(test)]
 /// The two ways a library update runs while no window is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Background {
@@ -80,12 +83,14 @@ pub enum Background {
     Timer,
 }
 
+#[cfg(test)]
 /// Which background mode is on. At most one is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Selection {
     active: Option<Background>,
 }
 
+#[cfg(test)]
 impl Selection {
     pub fn active(&self) -> Option<Background> {
         self.active
@@ -104,11 +109,15 @@ impl Selection {
     }
 }
 
+#[cfg(test)]
 pub const SERVICE_NAME: &str = "kurobayomi-library-update.service";
+#[cfg(test)]
 pub const TIMER_NAME: &str = "kurobayomi-library-update.timer";
+#[cfg(test)]
 /// The timer fires up to this long before the interval is over: with jitter, a pass starts in `[N h - 10 min, N h]`.
 const JITTER_MINUTES: u32 = 10;
 
+#[cfg(test)]
 /// The service the timer starts. `exe` is the absolute path of the app.
 pub fn service_unit(exe: &Path) -> String {
     format!(
@@ -117,6 +126,7 @@ pub fn service_unit(exe: &Path) -> String {
     )
 }
 
+#[cfg(test)]
 /// The timer for an interval of `hours` (at least 1).
 pub fn timer_unit(hours: u32) -> String {
     let minutes = hours.max(1) * 60 - JITTER_MINUTES;
@@ -125,12 +135,14 @@ pub fn timer_unit(hours: u32) -> String {
     )
 }
 
+#[cfg(test)]
 fn write_file(path: &Path, text: &str) -> io::Result<()> {
     let part = path.with_extension("part");
     std::fs::write(&part, text)?;
     std::fs::rename(part, path)
 }
 
+#[cfg(test)]
 /// Writes the two units into `dir` (the user's unit folder). Call only from the settings action the user chose.
 pub fn write_units(dir: &Path, exe: &Path, hours: u32) -> io::Result<[PathBuf; 2]> {
     if hours == 0 {
@@ -143,6 +155,7 @@ pub fn write_units(dir: &Path, exe: &Path, hours: u32) -> io::Result<[PathBuf; 2
     Ok([service, timer])
 }
 
+#[cfg(test)]
 /// Removes the units written by [`write_units`]. A missing file is fine.
 pub fn remove_units(dir: &Path) -> io::Result<()> {
     for name in [SERVICE_NAME, TIMER_NAME] {
@@ -154,6 +167,7 @@ pub fn remove_units(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 /// The settings action "run updates with a timer": writes the units and makes mode B the active mode. Returns the mode
 /// that was on before and must now be withdrawn, if any.
 pub fn enable_timer(selection: &mut Selection, dir: &Path, exe: &Path, hours: u32) -> io::Result<Option<Background>> {
@@ -161,6 +175,7 @@ pub fn enable_timer(selection: &mut Selection, dir: &Path, exe: &Path, hours: u3
     Ok(selection.turn_on(Background::Timer))
 }
 
+#[cfg(test)]
 /// Turning the timer off removes its units and clears the mode.
 pub fn disable_timer(selection: &mut Selection, dir: &Path) -> io::Result<()> {
     remove_units(dir)?;

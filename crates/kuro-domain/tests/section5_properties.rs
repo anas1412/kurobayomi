@@ -43,7 +43,7 @@ proptest! {
     fn every_display_mode_is_stored_under_its_spelling(index in 0usize..4) {
         let mode = LibraryDisplayMode::ALL[index];
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
-        prefs.display_mode.set(mode);
+        let _ = prefs.display_mode.set(mode);
         prop_assert_eq!(prefs.display_mode.get(), mode);
         prop_assert_eq!(prefs.store().get_raw(DISPLAY_KEY), Some(PrefValue::Str(mode.serialize().to_owned())));
     }
@@ -72,16 +72,16 @@ proptest! {
     fn a_tristate_round_trips_through_the_library_prefs(index in 0usize..3) {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
         let state = tristate(index);
-        prefs.filter_unread.set(state);
+        let _ = prefs.filter_unread.set(state);
         prop_assert_eq!(prefs.filter_unread.get(), state);
     }
 
     #[test]
     fn integer_accessors_keep_what_they_are_given(int32: i32, int64: i64) {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
-        prefs.auto_update_interval.set(int32);
+        let _ = prefs.auto_update_interval.set(int32);
         prop_assert_eq!(prefs.auto_update_interval.get(), int32);
-        prefs.last_updated_timestamp.set(int64);
+        let _ = prefs.last_updated_timestamp.set(int64);
         prop_assert_eq!(prefs.last_updated_timestamp.get(), int64);
     }
 
@@ -90,7 +90,7 @@ proptest! {
         let direction = if descending { "DESCENDING" } else { "ASCENDING" };
         let text = format!("{},{direction}", MANGA_SORT_TOKENS[token]);
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
-        prefs.manga_sorting_mode.set(kuro_prefs::library::SortSetting(text.clone()));
+        let _ = prefs.manga_sorting_mode.set(kuro_prefs::library::SortSetting(text.clone()));
         prop_assert_eq!(prefs.manga_sorting_mode.get().0, text);
     }
 }

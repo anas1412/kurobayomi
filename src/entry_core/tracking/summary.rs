@@ -2,12 +2,17 @@
 //! D13). The button text and the tap are the rules of `entry_core::action_row`. The sheet opens after a category
 //! change only when the change came from this flow, and the auto-open follows `kuro_track::policy`.
 
+#[cfg(test)]
 use std::collections::HashSet;
 
+#[cfg(test)]
 use kuro_track::error::TrackError;
+#[cfg(test)]
 use kuro_track::messages::MsgKey;
+#[cfg(test)]
 use kuro_track::policy::auto_open_track_sheet;
 
+#[cfg(test)]
 /// The sheet opens after the category dialog closed only when the change came from this flow, auto-open is on and the
 /// entry already has a supported binding (E-74, D13).
 pub fn sheet_after_category_change(from_flow: bool, track_on_adding: bool, tracking_count: usize) -> bool {
@@ -20,23 +25,27 @@ pub fn open_track_sheet_on_add(pref_on: bool, logged_in: bool) -> bool {
     pref_on && logged_in
 }
 
+#[cfg(test)]
 /// The refresh failure of a tracker. The service name is the one captured when the refresh failed (E-TRK-6).
 pub fn refresh_failure(service: &str, error: &TrackError) -> MsgKey {
     error.toast(service)
 }
 
+#[cfg(test)]
 /// One toast per failing tracker, in the order the failures came (T-39b-049, `MR track_error`). Each failure is its own
 /// toast, so one failing tracker does not hide the others (E-TRK-14).
 pub fn refresh_toasts(failures: &[(String, TrackError)]) -> Vec<MsgKey> {
     failures.iter().map(|(service, error)| refresh_failure(service, error)).collect()
 }
 
+#[cfg(test)]
 /// Single-flight refresh per track id (RC-10): a refresh of a binding that is already running is not started again.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RefreshFlight {
     running: HashSet<i64>,
 }
 
+#[cfg(test)]
 impl RefreshFlight {
     /// `true` when the caller may start the refresh of `track_id`; `false` while one is still running.
     pub fn begin(&mut self, track_id: i64) -> bool {
@@ -49,13 +58,16 @@ impl RefreshFlight {
     }
 }
 
+#[cfg(test)]
 /// The refresh on open runs once per opening of the sheet, and reports its failures as banners (behaviour 5.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RefreshOnOpen {
     started: bool,
 }
 
+#[cfg(test)]
 impl RefreshOnOpen {
+    #[cfg(test)]
     /// `true` the first time it is asked in one opening of the sheet, `false` after that.
     pub fn begin(&mut self) -> bool {
         !std::mem::replace(&mut self.started, true)

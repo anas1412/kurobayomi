@@ -6,11 +6,8 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntryDialog {
     ChangeCategory { entry_id: i64 },
-    DeleteEpisodes(Vec<i64>),
     DuplicateAnime { entry_id: i64, duplicate_id: i64 },
-    Migrate { new_id: i64, old_id: i64 },
     SetAnimeFetchInterval { entry_id: i64 },
-    ShowQualities { entry_id: i64, episode_id: i64 },
     ChangeAnimeSkipIntro,
     TrackSheet,
 }

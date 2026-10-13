@@ -62,7 +62,7 @@ use crate::entry_core::header::SearchRequest;
 use crate::entry_core::action_row::interval_click_opens_dialog;
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::fetch_interval_dialog;
-use crate::entry_core::header_view::{Handlers, LibraryButton};
+use crate::entry_core::header_view::Handlers;
 use crate::entry_core::message::{Notice, UserMessage, present};
 use crate::entry_core::info_block::InfoBlock;
 use crate::entry_core::info_pane::TwoPane;
@@ -84,12 +84,6 @@ const DEFAULT_INTRO_LENGTH: i32 = 85;
 
 thread_local! {
     static TARGET: Cell<Option<i64>> = const { Cell::new(None) };
-}
-
-/// Names the anime the next `build()` shows. `ui::open("anime_entry_details")` carries no argument, so a caller sets
-/// the target first.
-pub fn target(entry_id: i64) {
-    TARGET.with(|t| t.set(Some(entry_id)));
 }
 
 /// Pushes the details page of one anime.
@@ -158,8 +152,6 @@ struct View {
     runner: Rc<EntryRunner>,
     env: Env,
     show_airing: bool,
-    clock: std::time::Instant,
-    library: LibraryButton,
     refresh_button: Button,
     download_menu: gtk::MenuButton,
     bottom: gtk::Revealer,
@@ -424,8 +416,6 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
         runner: Rc::clone(&runner),
         env,
         show_airing,
-        clock: std::time::Instant::now(),
-        library: library.clone(),
         refresh_button: refresh_button.clone(),
         download_menu: download_menu.clone(),
         bottom,

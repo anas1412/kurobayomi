@@ -73,14 +73,6 @@ impl RowItem {
         Self { id: -marker_number(&key), subtitle: text, missing: Some(count), ..Self::new(0, key) }
     }
 
-    /// The list key of the row: `chapter-{id}`, or `missing-count-{id}` for a marker, where the marker id is the
-    /// upstream `"{lower|null}-{higher}"` string (`MangaScreen.kt:776`).
-    pub fn key(&self) -> String {
-        match &self.missing {
-            Some(_) => format!("missing-count-{}", self.title),
-            None => format!("chapter-{}", self.id),
-        }
-    }
 }
 
 /// The upload date as `YYYY-MM-DD`; an unknown date (zero or negative) has no text.

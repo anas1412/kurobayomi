@@ -3,8 +3,11 @@
 //! GUI states apply on OK: the completion rule of a status write, the watching and completion rule of a progress write,
 //! and the score index that rejects a string that is not on the list.
 
-use kuro_track::picker::{NumberPicker, StatusPicker, StatusRow, progress_range};
+use kuro_track::picker::{NumberPicker, progress_range};
+#[cfg(test)]
+use kuro_track::picker::{StatusPicker, StatusRow};
 
+#[cfg(test)]
 /// The status picker opened on `current`, in the tracker's order (behaviour 8.2).
 pub fn status_picker(rows: Vec<StatusRow>, current: i64) -> StatusPicker {
     StatusPicker::new(rows, current)
@@ -21,6 +24,7 @@ pub fn progress_max(total: i64) -> i64 {
     *progress_range(total).end()
 }
 
+#[cfg(test)]
 /// What a status write stores beside the status (behaviour 3.2): a completed status with a known total sets the
 /// progress to the total.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,11 +34,13 @@ pub struct StatusWrite {
     pub progress: Option<i64>,
 }
 
+#[cfg(test)]
 pub fn status_write(status: i64, completion: i64, total: i64) -> StatusWrite {
     let progress = (status == completion && total != 0).then_some(total);
     StatusWrite { status, progress }
 }
 
+#[cfg(test)]
 /// What a progress write stores beside the progress (behaviour 3.3, `T-TRK-1`, E-TRK-6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProgressWrite {
@@ -44,6 +50,7 @@ pub struct ProgressWrite {
     pub finish_ms: Option<i64>,
 }
 
+#[cfg(test)]
 /// Plain form of `kuro_track::remote::set_last_episode_seen`, over ids so it can be tested without a tracker. An
 /// unstarted entry moves to watching unless it is being rewatched; reaching the total completes it and stamps the
 /// finish date.

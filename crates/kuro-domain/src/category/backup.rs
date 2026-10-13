@@ -85,7 +85,7 @@ pub fn remap_preference_sets(
         let set = store.pref::<BTreeSet<String>>(key, BTreeSet::new());
         let current: Vec<i64> = set.get().iter().filter_map(|s| s.parse().ok()).collect();
         let merged = remap_ids(&current, backup_ids, backup_names, &[manga_by_name, anime_by_name]);
-        set.set(merged.iter().map(i64::to_string).collect());
+        let _ = set.set(merged.iter().map(i64::to_string).collect());
     }
 }
 
@@ -114,13 +114,13 @@ pub fn startup_cleanup(store: &PrefStore, lib: &LibraryPrefs, known_manga: &BTre
             .cloned()
             .collect();
         if kept.len() != current.len() {
-            set.set(kept);
+            let _ = set.set(kept);
         }
     }
     for default in [&lib.default_manga_category, &lib.default_anime_category] {
         let id = i64::from(default.get());
         if default.is_set() && id >= 1 && !is_known(id, known_manga, known_anime) {
-            default.delete();
+            let _ = default.delete();
         }
     }
 }
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn remap_preference_sets_writes_back_only_the_keys_in_the_backup() {
         let store = PrefStore::in_memory();
-        store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(BTreeSet::from(["5".to_owned()]));
+        let _ = store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(BTreeSet::from(["5".to_owned()]));
         let backup_sets = BTreeMap::from([("library_update_categories".to_owned(), vec![7])]);
         let backup_names = BTreeMap::from([(7, "Read".to_owned())]);
         let manga = BTreeMap::from([("Read".to_owned(), 21)]);
@@ -211,14 +211,14 @@ mod tests {
         let lib = LibraryPrefs::new(store.clone());
         let manga: BTreeSet<i64> = [1, 2].into_iter().collect();
         let anime: BTreeSet<i64> = [3].into_iter().collect();
-        store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(
+        let _ = store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(
             ["0", "1", "3", "9", "x"].into_iter().map(str::to_owned).collect(),
         );
-        store.pref::<BTreeSet<String>>("download_new_anime_categories_exclude", BTreeSet::new()).set(
+        let _ = store.pref::<BTreeSet<String>>("download_new_anime_categories_exclude", BTreeSet::new()).set(
             ["9"].into_iter().map(str::to_owned).collect(),
         );
-        lib.default_manga_category.set(9);
-        lib.default_anime_category.set(3);
+        let _ = lib.default_manga_category.set(9);
+        let _ = lib.default_anime_category.set(3);
         startup_cleanup(&store, &lib, &manga, &anime);
         let update = store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new());
         assert_eq!(update.get(), BTreeSet::from(["0".to_owned(), "1".to_owned(), "3".to_owned()]));

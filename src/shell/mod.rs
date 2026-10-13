@@ -55,7 +55,6 @@ pub mod desktop_labels;
 #[allow(dead_code)]
 pub mod language;
 #[cfg(test)]
-mod manual_checklist;
 #[allow(dead_code)]
 pub mod player_result;
 pub mod library_catalogue;

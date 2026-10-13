@@ -160,6 +160,7 @@ impl Tracker {
         }
     }
 
+    #[cfg(test)]
     /// Whether the stored row is seen, after the saves so far.
     pub fn seen(&self) -> bool {
         self.stored.done

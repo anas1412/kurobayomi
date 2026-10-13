@@ -22,6 +22,7 @@ pub mod verify;
 pub mod wire;
 
 #[cfg(test)]
+#[allow(dead_code)] // the sandbox test target includes this file and uses the rest of it
 mod test_guest;
 
 mod bindings {

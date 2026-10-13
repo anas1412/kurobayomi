@@ -10,7 +10,10 @@
 
 pub mod register;
 
-/// `(task, dropped, replacement, loss, names that must not appear in the code of src/)`.
+#[cfg(test)]
+/// `(task, dropped, replacement, loss, names that must not appear in the code of src/)`. The text fields are the record of
+/// the decision for people (the docs carry the same rows); only `task` and `absent` are read by the tests.
+#[allow(dead_code)]
 pub struct Decision {
     pub task: &'static str,
     pub dropped: &'static str,
@@ -29,6 +32,7 @@ const fn d(
     Decision { task, dropped, replacement, loss, absent }
 }
 
+#[cfg(test)]
 pub const DECISIONS: &[Decision] = &[
     d("T-26a-120", "foreground service declaration of the library update job", "the resident process or the systemd timer", "nothing beyond background running when the app is closed in mode A without the portal", &["ForegroundInfo", "setForeground", "FOREGROUND_SERVICE", "foreground_service_type"]),
     d("T-26a-121", "notification channels and the deprecated channel cleanup", "freedesktop urgency per kind and one notification switch (T-26a-036)", "per-channel system settings", &["createNotificationChannel", "create_notification_channel", "deleteNotificationChannel", "NotificationChannelId"]),

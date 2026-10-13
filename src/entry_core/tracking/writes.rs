@@ -13,9 +13,9 @@ pub enum Edit {
     /// Epoch milliseconds of local midnight, or `0` to remove the date (E-DATE-3).
     StartDate(i64),
     FinishDate(i64),
-    Private(bool),
 }
 
+#[cfg(test)]
 /// The banner of a write that failed: it names the service that was captured when the write started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WriteFailure {
@@ -23,16 +23,19 @@ pub struct WriteFailure {
     pub reason: String,
 }
 
+#[cfg(test)]
 pub fn write_failure(service: &str, reason: &str) -> WriteFailure {
     WriteFailure { service: service.to_owned(), reason: reason.to_owned() }
 }
 
+#[cfg(test)]
 /// The private toggle needs a bound row and a tracker that supports private tracking. It never runs without a track
 /// (E-TRK-1, `no_track_hides_private_toggle`).
 pub fn private_toggle_allowed(bound: bool, supports_private: bool) -> bool {
     bound && supports_private
 }
 
+#[cfg(test)]
 /// Applies a write to a fresh copy of the row, read after the picker closed (`T-TRK-11`, D-1). The local row changes
 /// only when the remote write succeeded (E-TRK-15): on failure the caller gets the banner and the old row stays.
 pub fn commit<T: Clone>(

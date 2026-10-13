@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn from_units_maps_both_kinds_and_the_waiting_flag() {
         use crate::unit::fixtures::queued;
-        let mut manga = queued(Kind::Manga, 1, 10, 5);
+        let manga = queued(Kind::Manga, 1, 10, 5);
         manga.progress.set_pages(3, 12);
         manga.progress.set_percent(25);
         let mut anime = queued(Kind::Anime, 2, 20, 6);

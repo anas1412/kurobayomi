@@ -68,7 +68,7 @@ fn flag(store: &PrefStore, key: &'static str, default: bool) -> bool {
 }
 
 fn put_long(store: &PrefStore, key: &'static str, value: i64) {
-    store.pref::<i64>(key, 0).set(value);
+    let _ = store.pref::<i64>(key, 0).set(value);
 }
 
 /// The default item word of a kind (unified layout), as the preferences describe it. The two kinds read their own
@@ -244,7 +244,7 @@ pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static st
     put_long(store, SEASON_SORT, flags & se::SORT_MASK);
     put_long(store, SEASON_SORT_DIRECTION, flags & se::SORT_DIR_MASK);
     put_long(store, SEASON_GRID_MODE, (flags & se::GRID_DISPLAY_MODE_MASK) >> se::GRID_DISPLAY_MODE_SHIFT);
-    store.pref::<i32>(SEASON_GRID_SIZE, 0).set(((flags & se::GRID_DISPLAY_SIZE_MASK) >> se::GRID_DISPLAY_SIZE_SHIFT) as i32);
+    let _ = store.pref::<i32>(SEASON_GRID_SIZE, 0).set(((flags & se::GRID_DISPLAY_SIZE_MASK) >> se::GRID_DISPLAY_SIZE_SHIFT) as i32);
     for (key, overlay) in [
         (SEASON_DOWNLOAD_OVERLAY, SeasonOverlay::Downloaded),
         (SEASON_UNSEEN_OVERLAY, SeasonOverlay::Unseen),
@@ -252,7 +252,7 @@ pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static st
         (SEASON_LANG_OVERLAY, SeasonOverlay::Language),
         (SEASON_CONTINUE_OVERLAY, SeasonOverlay::Continue),
     ] {
-        store.pref::<bool>(key, false).set(flags & overlay.mask() != 0);
+        let _ = store.pref::<bool>(key, false).set(flags & overlay.mask() != 0);
     }
     put_long(store, SEASON_DISPLAY, flags & se::DISPLAY_MODE_MASK);
     "updated_default_season_settings"

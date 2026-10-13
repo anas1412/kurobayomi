@@ -18,6 +18,7 @@ use super::ids;
 use super::notify::{Op, Post, Target};
 use super::router::AppAction;
 
+#[cfg(test)]
 /// The prompt title (`update_check_notification_update_available` in the English catalogue).
 pub const PROMPT_TITLE: &str = "New version available!";
 /// The title of a download with no known version.
@@ -36,6 +37,7 @@ pub enum Phase {
     WaitingForNetwork,
 }
 
+#[cfg(test)]
 /// The prompt for `version`: default tap opens the release page, "Download" starts the download and "What's new" opens
 /// the release page too.
 pub fn prompt(version: &str, release_url: &str, download_url: &str, sha256: Option<&str>) -> Post {
@@ -56,13 +58,16 @@ pub fn prompt(version: &str, release_url: &str, download_url: &str, sha256: Opti
     }
 }
 
+#[cfg(test)]
 /// One check at a time (E-U10, test U10): [`SingleFlight::begin`] hands out a guard to one caller at a time.
 #[derive(Default)]
 pub struct SingleFlight(std::sync::atomic::AtomicBool);
 
+#[cfg(test)]
 /// Held for the length of a check; dropping it lets the next check begin.
 pub struct CheckGuard<'a>(&'a SingleFlight);
 
+#[cfg(test)]
 impl SingleFlight {
     pub const fn new() -> Self {
         Self(std::sync::atomic::AtomicBool::new(false))
@@ -75,15 +80,14 @@ impl SingleFlight {
     }
 }
 
+#[cfg(test)]
 impl Drop for CheckGuard<'_> {
     fn drop(&mut self) {
         self.0.0.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
-/// The app's one check slot: every check of the app (the About row, the startup check) begins here.
-pub static CHECK: SingleFlight = SingleFlight::new();
-
+#[cfg(test)]
 /// Posts the prompt of a `NewUpdate` result, once per call. Needs the guard of the check that found the release, so a
 /// second check cannot post while the first is still running. `post` is the notifier (`notify::post` in the app).
 pub fn announce(

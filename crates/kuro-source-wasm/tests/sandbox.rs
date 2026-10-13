@@ -14,6 +14,7 @@
 //! | `unknown_export_fails_load` (W7) | `a_package_without_invoke_fails_with_the_missing_export_text` |
 
 #[path = "../src/test_guest.rs"]
+#[allow(dead_code)] // another test target includes this file and uses the rest of it
 mod test_guest;
 
 use std::time::{Duration, Instant};

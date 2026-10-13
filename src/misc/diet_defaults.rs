@@ -15,7 +15,6 @@ pub const READER_OVERLAY_NEW_USER: bool = true;
 pub const READER_NAVIGATION_MODE: i32 = 0;
 pub const READER_NAVIGATE_PAN: bool = true;
 pub const READER_LANDSCAPE_ZOOM: bool = true;
-pub const READER_WEBTOON_CROP_BORDERS: bool = false;
 pub const READER_WEBTOON_SIDE_PADDING: i32 = 0;
 pub const READER_WEBTOON_DISABLE_ZOOM_OUT: bool = false;
 pub const READER_WEBTOON_DOUBLE_TAP_ZOOM: bool = true;
@@ -26,7 +25,6 @@ pub const READER_WEBTOON_DUAL_PAGE_SPLIT: bool = false;
 pub const READER_WEBTOON_DUAL_PAGE_INVERT: bool = false;
 pub const READER_WEBTOON_DUAL_PAGE_ROTATE: bool = false;
 pub const READER_WEBTOON_DUAL_PAGE_ROTATE_INVERT: bool = false;
-pub const READER_SHOW_PAGE_NUMBER: bool = true;
 pub const READER_SHOW_READING_MODE: bool = true;
 pub const READER_FULLSCREEN: bool = false;
 pub const READER_KEEP_SCREEN_ON: bool = true;
@@ -78,7 +76,6 @@ pub const ENTRY_TRACK_ON_ADDING: bool = true;
 
 // Browse and migration.
 pub const BROWSE_HIDE_IN_LIBRARY: bool = false;
-pub const BROWSE_EXTENSION_UPDATES_COUNT: i32 = 0;
 pub const MIGRATE_FLAGS_ALL: i32 = i32::MAX;
 /// The last source opened in Browse is not remembered (the setting is cut): -1 is "none".
 pub const BROWSE_LAST_USED_SOURCE: i64 = -1;

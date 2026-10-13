@@ -88,7 +88,7 @@ impl StorageManager {
             return Ok(());
         }
         create_tree(path)?;
-        self.pref.set(STANDARD.encode(path_bytes(path)));
+        let _ = self.pref.set(STANDARD.encode(path_bytes(path)));
         self.changes.send_modify(|count| *count += 1);
         Ok(())
     }

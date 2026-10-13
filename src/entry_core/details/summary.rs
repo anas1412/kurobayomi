@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 
+#[cfg(test)]
 /// Lines a collapsed summary shows.
 pub const COLLAPSED_LINES: i32 = 3;
 

@@ -174,14 +174,14 @@ mod tests {
         let pref = store.pref("n", 1i32);
         let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().expect("runtime");
         rt.block_on(async {
-            pref.set(5);
+            let _ = pref.set(5);
             let mut stream = pref_stream(&pref);
             assert_eq!(*stream.borrow_and_update(), 5, "the current value comes first");
-            pref.set(6);
+            let _ = pref.set(6);
             tokio::time::timeout(TEST_WAIT, stream.changed()).await.expect("waited").expect("open");
             assert_eq!(*stream.borrow_and_update(), 6);
-            pref.set(6);
-            pref.set(7);
+            let _ = pref.set(6);
+            let _ = pref.set(7);
             tokio::time::timeout(TEST_WAIT, stream.changed()).await.expect("waited").expect("open");
             assert_eq!(*stream.borrow_and_update(), 7);
         });

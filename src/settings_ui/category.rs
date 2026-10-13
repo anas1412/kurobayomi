@@ -1,5 +1,6 @@
 //! Include and exclude summary of category sets (task T-47a-005).
 // Not reachable from `route.rs` yet: the include/exclude summary is for the update-category rows, which are still spec rows.
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 /// A library category as the settings need it: its stored id, display name and sort order.
@@ -10,6 +11,7 @@ pub struct Category {
     pub order: i64,
 }
 
+#[cfg(test)]
 /// The sorted categories whose ids are in `ids`. Ids that match no category (deleted ones) are dropped.
 fn resolve<'a>(ids: &BTreeSet<String>, categories: &'a [Category]) -> Vec<&'a Category> {
     let mut found: Vec<&Category> = categories
@@ -20,6 +22,7 @@ fn resolve<'a>(ids: &BTreeSet<String>, categories: &'a [Category]) -> Vec<&'a Ca
     found
 }
 
+#[cfg(test)]
 /// `"Include: <inc>\nExclude: <exc>"` for the include and exclude id sets (Kotlin `Commons.kt` `categoryLabel`).
 pub fn label(include: &BTreeSet<String>, exclude: &BTreeSet<String>, categories: &[Category]) -> String {
     let included = resolve(include, categories);

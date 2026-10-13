@@ -18,7 +18,6 @@ pub fn wants_updates_json(args: &[String]) -> bool {
 
 /// Where the feed reads from; the platform directories unless the flags override them.
 struct Dirs {
-    config_file: PathBuf,
     db: PathBuf,
     covers: PathBuf,
 }
@@ -29,7 +28,6 @@ struct Parsed {
     cols: u32,
     db: Option<PathBuf>,
     cover_cache: Option<PathBuf>,
-    scale: u32,
     now_ms: Option<i64>,
 }
 
@@ -43,7 +41,7 @@ fn ranged(flag: &str, v: &str, lo: u32, hi: u32) -> Result<u32, FeedError> {
 
 fn parse(args: &[String]) -> Result<Parsed, FeedError> {
     let (mut kind, mut rows, mut cols) = (None, grid::DEFAULT_ROWS, grid::DEFAULT_COLS);
-    let (mut db, mut cache, mut scale, mut now_ms) = (None, None, cover::DEFAULT_SCALE, None);
+    let (mut db, mut cache, mut now_ms) = (None, None, None);
     let mut it = args.iter().map(String::as_str);
     while let Some(arg) = it.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -61,7 +59,10 @@ fn parse(args: &[String]) -> Result<Parsed, FeedError> {
             }
             "--rows" => rows = ranged(flag, value()?, 1, grid::MAX_ROWS)?,
             "--cols" => cols = ranged(flag, value()?, 1, grid::MAX_COLS)?,
-            "--device-scale" => scale = ranged(flag, value()?, 1, 4)?,
+            // the applet still passes the device scale; the covers are drawn by the applet now, so only the range is checked
+            "--device-scale" => {
+                ranged(flag, value()?, 1, 4)?;
+            }
             "--db" => db = Some(PathBuf::from(value()?)),
             "--cover-cache" => cache = Some(PathBuf::from(value()?)),
             "--now-ms" => {
@@ -72,14 +73,13 @@ fn parse(args: &[String]) -> Result<Parsed, FeedError> {
         }
     }
     let kind = kind.ok_or_else(|| usage("--kind <manga|anime> is required"))?;
-    Ok(Parsed { kind, rows, cols, db, cover_cache: cache, scale, now_ms })
+    Ok(Parsed { kind, rows, cols, db, cover_cache: cache, now_ms })
 }
 
 fn run_feed(args: &[String], paths: Result<&dyn Paths, String>, now: i64) -> Result<String, FeedError> {
     let p = parse(args)?;
     let paths = paths.map_err(FeedError::Prefs)?;
     let dirs = Dirs {
-        config_file: kuro_prefs::toml_backend::config_file(&paths.config_dir()),
         db: p.db.unwrap_or_else(|| kuro_db::schema_unified::db_path(&paths.data_dir())),
         covers: p.cover_cache.unwrap_or_else(|| paths.widget_covers_dir()),
     };
@@ -136,9 +136,9 @@ mod tests {
     #[test]
     fn parsing_defaults_and_bounds() {
         let p = parse(&args("--updates-json --kind manga")).unwrap();
-        assert_eq!((p.rows, p.cols, p.scale), (2, 4, 2));
+        assert_eq!((p.rows, p.cols), (2, 4));
         let p = parse(&args("--updates-json --kind=anime --rows=3 --cols 1 --device-scale 4 --now-ms 7")).unwrap();
-        assert_eq!((p.kind, p.rows, p.cols, p.scale, p.now_ms), (Kind::Anime, 3, 1, 4, Some(7)));
+        assert_eq!((p.kind, p.rows, p.cols, p.now_ms), (Kind::Anime, 3, 1, Some(7)));
         for bad in [
             "--updates-json",
             "--updates-json --kind comics",

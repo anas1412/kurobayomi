@@ -666,7 +666,7 @@ fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
 
 /// The file of a downloaded episode of an online source. Such an episode plays from its file, online or not. The disk is
 /// asked once (a folder lookup), on the GTK thread, as the local episodes' open is.
-pub(super) fn downloaded_media(episode_id: i64) -> Option<Media> {
+fn downloaded_media(episode_id: i64) -> Option<Media> {
     if !crate::data::is_installed() {
         return None;
     }

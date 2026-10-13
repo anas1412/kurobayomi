@@ -5,9 +5,11 @@
 
 use serde_json::Value;
 
+#[cfg(test)]
 /// The `(episode, airing_at_seconds)` a lookup gives when nothing is known (`T-AIR-2`).
 pub const UNKNOWN: (i32, i64) = (1, 0);
 
+#[cfg(test)]
 /// The trackers the countdown can read from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tracker {
@@ -17,6 +19,7 @@ pub enum Tracker {
     Other,
 }
 
+#[cfg(test)]
 /// The service that answers, after the tracker items are checked in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -25,6 +28,7 @@ pub enum Source {
     Simkl,
 }
 
+#[cfg(test)]
 /// The first tracker item that is one of the three and has a track row answers (`T-AIR-1`). `items` is each tracker item
 /// in order, with whether it has a track. `None` means no binding, which gives [`UNKNOWN`].
 pub fn pick_source(items: &[(Tracker, bool)]) -> Option<Source> {
@@ -36,11 +40,13 @@ pub fn pick_source(items: &[(Tracker, bool)]) -> Option<Source> {
     })
 }
 
+#[cfg(test)]
 /// A completed entry keeps its stored airing data on an automatic update; a manual refresh always looks again (A-6).
 pub fn keeps_stored(completed: bool, manual: bool) -> bool {
     completed && !manual
 }
 
+#[cfg(test)]
 /// The episode and airing time out of an AniList `Media` reply. A `null` next episode, a missing field or a broken reply
 /// gives [`UNKNOWN`] for the missing part: episode 1 and time 0 (`T-AIR-2`, `T-AIR-3`).
 pub fn parse_airing(body: &str) -> (i32, i64) {
@@ -51,6 +57,7 @@ pub fn parse_airing(body: &str) -> (i32, i64) {
     (episode, airing_at)
 }
 
+#[cfg(test)]
 /// The AniList id out of a MAL-id lookup reply, or 0 when there is none.
 pub fn parse_anilist_id(body: &str) -> i64 {
     serde_json::from_str::<Value>(body)
@@ -59,6 +66,7 @@ pub fn parse_anilist_id(body: &str) -> i64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 /// A MAL lookup counts only when the server answered with a success status (`T-AIR-9`).
 pub fn http_ok(status: u16) -> bool {
     (200..300).contains(&status)

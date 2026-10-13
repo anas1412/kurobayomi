@@ -1,18 +1,21 @@
 //! Cover thumbnails for the widgets (T-50a-013, T-50a-014). The app renders a rounded 58:87 thumbnail per cover into
 //! the widget cover cache; the CLI only looks the file up and never downloads, decodes or writes (T-50a-016).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
+#[cfg(test)]
 use image::{DynamicImage, RgbaImage, imageops::FilterType};
 
 use super::UpdateRow;
 
+#[cfg(test)]
 pub const COVER_W_DP: f64 = 58.0;
+#[cfg(test)]
 pub const COVER_H_DP: f64 = 87.0;
+#[cfg(test)]
 pub const INNER_RADIUS_DP: f64 = 12.0;
-pub const CARD_RADIUS_DP: f64 = 16.0;
-/// Device scale used when the caller gives none: 2 gives 116 x 174 px thumbnails.
-pub const DEFAULT_SCALE: u32 = 2;
 
 /// File stem of a cover's thumbnail: SHA-256 of `<thumbnail url>|<cover last modified>`, so a changed cover is
 /// rendered again.
@@ -31,11 +34,13 @@ pub fn cached_path(cache_dir: &Path, row: &UpdateRow) -> Option<String> {
     path.is_file().then(|| path.to_str().map(str::to_owned)).flatten()
 }
 
+#[cfg(test)]
 /// Pixel size of a thumbnail at a device scale.
 pub fn thumb_size(scale: u32) -> (u32, u32) {
     ((COVER_W_DP * f64::from(scale)).round() as u32, (COVER_H_DP * f64::from(scale)).round() as u32)
 }
 
+#[cfg(test)]
 /// Centre-crops to the cover aspect, resizes, and bakes a rounded alpha mask of radius 12 x `scale`.
 pub fn render(src: &DynamicImage, scale: u32) -> RgbaImage {
     let (w, h) = thumb_size(scale);
@@ -53,16 +58,19 @@ pub fn render(src: &DynamicImage, scale: u32) -> RgbaImage {
     out
 }
 
+#[cfg(test)]
 /// Where a local cover lives: a `file://` URL. Other schemes (`content://`, `http`) have no local file for the
 /// renderer, so those rows keep the placeholder (E-27).
 pub fn local_source(url: &str) -> Option<PathBuf> {
     url.strip_prefix("file://").filter(|p| p.starts_with('/')).map(PathBuf::from)
 }
 
+#[cfg(test)]
 /// Why a thumbnail was not written.
 #[derive(Debug)]
 pub struct ThumbError(pub String);
 
+#[cfg(test)]
 /// Renders one cover into `cache_dir` through a temp file and a rename. `Ok(None)` when the URL has no local source.
 pub fn render_one(cache_dir: &Path, url: &str, last_modified: i64, scale: u32) -> Result<Option<PathBuf>, ThumbError> {
     let Some(src_path) = local_source(url) else { return Ok(None) };
@@ -80,6 +88,7 @@ pub fn render_one(cache_dir: &Path, url: &str, last_modified: i64, scale: u32) -
     Ok(Some(dest))
 }
 
+#[cfg(test)]
 /// Renders every `(url, last_modified)` job. Each failure is passed to `log` as exactly one line; returns how many
 /// thumbnails were written.
 pub fn render_all(cache_dir: &Path, jobs: &[(String, i64)], scale: u32, log: &mut dyn FnMut(&str)) -> usize {
@@ -92,11 +101,6 @@ pub fn render_all(cache_dir: &Path, jobs: &[(String, i64)], scale: u32, log: &mu
         }
     }
     written
-}
-
-/// The app's logger for thumbnail failures.
-pub fn log_failure(line: &str) {
-    tracing::warn!("{line}");
 }
 
 #[cfg(test)]

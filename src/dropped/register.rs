@@ -5,6 +5,7 @@
 //! cannot drift. The tests compare the table with the key list of `plans/11-app-migrations/p1-data-and-config.md`
 //! section 2: every legacy key the plan calls "ignored" is here, and no converted or typed key is.
 
+#[cfg(test)]
 /// What kind of leftover an entry names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DropKind {
@@ -18,6 +19,7 @@ pub enum DropKind {
     WorkTag,
 }
 
+#[cfg(test)]
 impl DropKind {
     /// The word the import report prints in front of the name.
     pub const fn label(self) -> &'static str {
@@ -30,6 +32,7 @@ impl DropKind {
     }
 }
 
+#[cfg(test)]
 /// One thing that is not carried over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DropEntry {
@@ -43,14 +46,20 @@ const fn entry(pattern: &'static str, kind: DropKind, task: &'static str, reason
     DropEntry { pattern, kind, task, reason }
 }
 
+#[cfg(test)]
 const CACHE: &str = "Android cache folder; covers and pages are fetched again when needed";
+#[cfg(test)]
 const MAL: &str = "MyAnimeList login is OAuth here; log in again if the tracker asks";
+#[cfg(test)]
 const JOB: &str = "Android job tag; the in-app scheduler owns library updates and backups";
+#[cfg(test)]
 const APP_STATE: &str = "app state of the old install; this install keeps its own";
+#[cfg(test)]
 const TRACKER_LOGIN: &str = "tracker logins live in the keyring, not in imported settings";
 
 use DropKind::{Directory, File, Key, WorkTag};
 
+#[cfg(test)]
 /// The register. Exact entries come first, so `pref_mangasync_1` is reported as a MyAnimeList login and not as a
 /// generic tracker key.
 pub const REGISTER: &[DropEntry] = &[
@@ -90,6 +99,7 @@ pub const REGISTER: &[DropEntry] = &[
     entry("pref_hwdec", Key, "T-11a-029", "removed upstream in step 123; mpv picks the decoder"),
 ];
 
+#[cfg(test)]
 fn matches(pattern: &str, name: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(start) => name.starts_with(start),
@@ -97,11 +107,13 @@ fn matches(pattern: &str, name: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 /// The entry that drops `name`, if any. An exact entry wins over a prefix entry.
 pub fn lookup(name: &str) -> Option<&'static DropEntry> {
     REGISTER.iter().find(|e| e.pattern == name).or_else(|| REGISTER.iter().find(|e| e.pattern.ends_with('*') && matches(e.pattern, name)))
 }
 
+#[cfg(test)]
 /// One line of the import report.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DroppedKey {
@@ -110,6 +122,7 @@ pub struct DroppedKey {
     pub reason: &'static str,
 }
 
+#[cfg(test)]
 /// The keys of an imported legacy map that are dropped, sorted by key, one line each. Keys that are converted or kept
 /// are not listed.
 pub fn report<'a>(keys: impl IntoIterator<Item = &'a str>) -> Vec<DroppedKey> {

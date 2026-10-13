@@ -2,7 +2,9 @@
 //! These numbers appear nowhere else in `src/`; the applet package holds a copy in `contents/code/grid.js`
 //! that a test here keeps in step.
 
+#[cfg(test)]
 pub const CELL_W_DP: f64 = 64.0;
+#[cfg(test)]
 pub const CELL_H_DP: f64 = 95.0;
 pub const MAX_ROWS: u32 = 10;
 pub const MAX_COLS: u32 = 10;
@@ -14,6 +16,7 @@ pub const DB_LIMIT: usize = 500;
 /// How many calendar months back the feed looks.
 pub const WINDOW_MONTHS: u32 = 3;
 
+#[cfg(test)]
 /// Rows and columns that fit a size in dp. `pad_*` is the space the layout keeps at the top and bottom.
 /// A negative or tiny height gives one row (no panic).
 pub fn rows_cols(width: f64, height: f64, pad_top: f64, pad_bottom: f64) -> (u32, u32) {

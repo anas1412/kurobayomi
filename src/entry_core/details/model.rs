@@ -261,6 +261,7 @@ impl EntryModel {
         }
     }
 
+    #[cfg(test)]
     /// One row per processed episode, in list order.
     pub fn rows(&self) -> Vec<RowItem> {
         self.processed().iter().map(|ep| self.row_of(ep)).collect()

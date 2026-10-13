@@ -10,7 +10,6 @@ mod cli;
 // the thumbnail renderer is called by the cover loader, which does not exist yet
 mod feed;
 // No WebView host shows the window yet (T-12a-017 needs WebKitGTK).
-mod cloudflare_window;
 mod data;
 mod downloads;
 mod entry;
@@ -54,6 +53,7 @@ mod pref_model;
 mod browse;
 mod shell;
 mod util;
+#[cfg(test)]
 mod dropped;
 
 use gtk::prelude::*;

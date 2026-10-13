@@ -178,11 +178,6 @@ fn downloads_page() -> Option<Built> {
     built(page::body(&tree).widget, toolbar("settings_downloads"))
 }
 
-/// A player page of loose typed rows, with the page toolbar.
-fn loose_page(id: &str, rows: Vec<PreferenceItem>) -> Option<Built> {
-    built(page::body(&loose(rows)).widget, toolbar(id))
-}
-
 /// The rows of a settings screen for the search index: the spec rows, with this module's typed rows merged in.
 pub fn tree(id: &str) -> Vec<Preference> {
     let prefs = prefs();
@@ -195,11 +190,6 @@ fn repo_counts() -> browse::RepoCounts {
     let app = crate::data::app();
     let repos = SourcePrefs::new(app.base.store().clone()).manga_extension_repos.get().len() as i64;
     browse::RepoCounts { repos }
-}
-
-/// A page of loose typed rows: the spec page has no group titles on these rows, and the typed rows cover all of them.
-fn loose(rows: Vec<PreferenceItem>) -> Vec<Preference> {
-    rows.into_iter().map(rows::item).collect()
 }
 
 /// [`tree`] over the given preferences and category lists.

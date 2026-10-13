@@ -36,6 +36,7 @@ pub fn artist_row(author: Option<&str>, artist: Option<&str>) -> Option<String> 
     }
 }
 
+#[cfg(test)]
 /// Status icon name for `SManga` status values 0..6. 0 and unknown values use the block icon.
 pub fn status_icon(status: i64) -> &'static str {
     match status {
@@ -49,6 +50,7 @@ pub fn status_icon(status: i64) -> &'static str {
     }
 }
 
+#[cfg(test)]
 /// Status text for `SManga` status values 0..6 (`ongoing`, `completed`, ...). 0 and unknown values are "Unknown".
 pub fn status_text(status: i64) -> String {
     tr(match status {

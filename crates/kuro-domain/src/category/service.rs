@@ -238,7 +238,7 @@ impl CategoryService {
             out
         })
         .await?;
-        forget_category(self.prefs.store(), &self.prefs, self.kind(), id);
+        let _ = forget_category(self.prefs.store(), &self.prefs, self.kind(), id);
         Ok(())
     }
 
@@ -281,7 +281,7 @@ impl CategoryService {
             set_random_sort_seed(self.kind(), draw_seed());
         }
         let serialized = sort.serialize(kind);
-        write_sort_prefs(&self.prefs, self.kind(), &serialized, true);
+        let _ = write_sort_prefs(&self.prefs, self.kind(), &serialized, true);
         let db = self.repo.db().clone();
         tokio::task::spawn_blocking(move || write_all_flags(&db, kind, flags)).await.map_err(DomainError::Join)??;
         Ok(())
@@ -298,7 +298,7 @@ impl CategoryService {
 
 /// `SetXDisplayMode`: one global key for both kinds.
 pub fn set_display_mode(prefs: &LibraryPrefs, mode: LibraryDisplayMode) {
-    prefs.display_mode.set(mode);
+    let _ = prefs.display_mode.set(mode);
 }
 
 /// Applies one update inside a write transaction. A `None` field keeps the stored value.

@@ -208,7 +208,7 @@ impl SourceToggles {
         let _guard = self.lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut set = pref.get();
         let result = change(&mut set);
-        pref.set(set);
+        let _ = pref.set(set);
         result
     }
 }

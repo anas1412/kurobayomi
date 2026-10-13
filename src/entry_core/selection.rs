@@ -9,8 +9,6 @@ use std::collections::BTreeSet;
 /// How a toggle was made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pick {
-    /// A program changed the selection (no anchors move).
-    Programmatic,
     /// A plain tap, a Ctrl-click or Space.
     Tap,
     /// A long press, a right click, a Shift-click or Shift+Space. Selecting it extends a range.
@@ -76,19 +74,23 @@ impl Selection {
         self.toggle(view, id, selected, pick);
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.ids.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
 
+    #[cfg(test)]
     /// Selected chapter ids in ascending order.
     pub fn ids(&self) -> impl Iterator<Item = i64> + '_ {
         self.ids.iter().copied()
     }
 
+    #[cfg(test)]
     /// Drops selected ids that no longer exist (a refresh removed the chapter). Keeps the rest.
     pub fn retain_existing(&mut self, existing: &[i64]) {
         self.ids.retain(|id| existing.contains(id));
@@ -220,9 +222,13 @@ impl Selection {
 pub enum Command {
     Tap,
     LongPress,
+    #[cfg(test)]
     SelectAll,
+    #[cfg(test)]
     Invert,
+    #[cfg(test)]
     ClearSelection,
+    #[cfg(test)]
     CloseDialog,
 }
 
@@ -233,6 +239,7 @@ pub struct Mods {
     pub ctrl: bool,
 }
 
+#[cfg(test)]
 /// The keys the details page reacts to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -242,6 +249,7 @@ pub enum Key {
     Letter(char),
 }
 
+#[cfg(test)]
 /// Keyboard map (`p2-ui-parity.md` 6). `in_selection` is whether selection mode is on; `dialog_open` is whether
 /// a dialog is showing (Escape closes the dialog first).
 pub fn key_command(key: Key, mods: Mods, in_selection: bool, dialog_open: bool) -> Option<Command> {

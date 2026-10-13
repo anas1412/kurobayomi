@@ -9,9 +9,7 @@ use kuro_data::DataError;
 pub enum DetailsError {
     EpisodeNotFound(i64),
     AnimeNotFound(i64),
-    SourceUnavailable(i64),
     /// The quality (hoster and video) options of an episode failed; the text is the cause.
-    Quality(String),
     /// A read or write of the anime database failed.
     Data(DataError),
     Db(rusqlite::Error),
@@ -24,8 +22,6 @@ impl DetailsError {
         match self {
             Self::EpisodeNotFound(_) => "This episode is no longer in the library".to_owned(),
             Self::AnimeNotFound(_) => "This anime is no longer in the library".to_owned(),
-            Self::SourceUnavailable(_) => "The source of this anime is not available".to_owned(),
-            Self::Quality(_) => "No available videos".to_owned(),
             Self::Data(_) | Self::Db(_) | Self::Io(_) => "Something went wrong while reading this entry".to_owned(),
         }
     }
@@ -42,8 +38,6 @@ impl fmt::Display for DetailsError {
         match self {
             Self::EpisodeNotFound(id) => write!(f, "episode {id} not found"),
             Self::AnimeNotFound(id) => write!(f, "anime {id} not found"),
-            Self::SourceUnavailable(id) => write!(f, "source {id} unavailable"),
-            Self::Quality(detail) => write!(f, "quality: {detail}"),
             Self::Data(error) => write!(f, "data: {error}"),
             Self::Db(error) => write!(f, "db: {error}"),
             Self::Io(error) => write!(f, "io: {error}"),
@@ -97,8 +91,6 @@ mod tests {
         let all = [
             DetailsError::EpisodeNotFound(1),
             DetailsError::AnimeNotFound(2),
-            DetailsError::SourceUnavailable(3),
-            DetailsError::Quality("no hoster".into()),
             DetailsError::Data(DataError::NotFound),
             DetailsError::Db(rusqlite::Error::QueryReturnedNoRows),
             DetailsError::Io(std::io::Error::other("disk")),
@@ -119,6 +111,6 @@ mod tests {
 
     #[test]
     fn record_returns_the_same_error() {
-        assert!(matches!(DetailsError::SourceUnavailable(9).record(), DetailsError::SourceUnavailable(9)));
+        assert!(matches!(DetailsError::AnimeNotFound(9).record(), DetailsError::AnimeNotFound(9)));
     }
 }

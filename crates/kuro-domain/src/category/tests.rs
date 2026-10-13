@@ -44,7 +44,7 @@ async fn create_numbers_orders_and_takes_the_global_sort_as_flags() {
 #[tokio::test]
 async fn create_with_a_changed_global_sort_copies_it() {
     let (_d, svc, prefs) = service(Kind::Manga);
-    prefs.manga_sorting_mode.set(SortSetting("LAST_READ,DESCENDING".into()));
+    let _ = prefs.manga_sorting_mode.set(SortSetting("LAST_READ,DESCENDING".into()));
     assert_eq!(svc.create("A").await.unwrap().flags, 0x04);
 }
 
@@ -169,11 +169,11 @@ async fn delete_renumbers_every_category_and_cleans_the_preference_sets() {
     let set_of = |key: &'static str| prefs.store().pref::<BTreeSet<String>>(key, BTreeSet::new());
     let update = set_of("library_update_categories");
     let update_exclude = set_of("library_update_categories_exclude");
-    update.set(ids(&[a.id, c.id]));
-    update_exclude.set(ids(&[a.id, b.id]));
-    prefs.default_manga_category.set(a.id as i32);
+    let _ = update.set(ids(&[a.id, c.id]));
+    let _ = update_exclude.set(ids(&[a.id, b.id]));
+    let _ = prefs.default_manga_category.set(a.id as i32);
     let download_new = prefs.store().pref::<BTreeSet<String>>("download_new_categories", BTreeSet::new());
-    download_new.set(ids(&[a.id]));
+    let _ = download_new.set(ids(&[a.id]));
     svc.delete(a.id).await.unwrap();
     assert_eq!(user_ids(&svc), vec![b.id, c.id]);
     assert_eq!(names(&svc).iter().map(|(_, _, o)| *o).collect::<Vec<_>>(), vec![0, 1, 2], "system row takes index 0");
@@ -249,8 +249,8 @@ async fn reset_writes_the_global_sort_to_every_category() {
     let (_d2, anime, prefs2) = service(Kind::Anime);
     manga.create("M").await.unwrap();
     anime.create("A").await.unwrap();
-    prefs.manga_sorting_mode.set(SortSetting("DATE_ADDED,DESCENDING".into()));
-    prefs2.anime_sorting_mode.set(SortSetting("LAST_SEEN,ASCENDING".into()));
+    let _ = prefs.manga_sorting_mode.set(SortSetting("DATE_ADDED,DESCENDING".into()));
+    let _ = prefs2.anime_sorting_mode.set(SortSetting("LAST_SEEN,ASCENDING".into()));
     manga.reset_category_flags().await.unwrap();
     anime.reset_category_flags().await.unwrap();
     assert!(manga.repo().all().unwrap().iter().all(|c| c.flags == LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending }.flag()));
@@ -261,7 +261,7 @@ async fn reset_writes_the_global_sort_to_every_category() {
 fn initial_flags_follow_the_global_sort_and_display_mode_is_one_key() {
     let (_d, svc, prefs) = service(Kind::Manga);
     assert_eq!(svc.initial_flags(), 0x40);
-    prefs.manga_sorting_mode.set(SortSetting("UNREAD_COUNT,DESCENDING".into()));
+    let _ = prefs.manga_sorting_mode.set(SortSetting("UNREAD_COUNT,DESCENDING".into()));
     assert_eq!(svc.initial_flags(), 0x0C);
     set_display_mode(&prefs, LibraryDisplayMode::List);
     assert_eq!(prefs.display_mode.get(), LibraryDisplayMode::List);

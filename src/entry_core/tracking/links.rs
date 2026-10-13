@@ -4,11 +4,13 @@
 
 use kuro_track::sheet::copy_link;
 
+#[cfg(test)]
 /// Whether the open and copy actions show for `url`.
 pub fn actions_shown(url: &str) -> bool {
     !url.trim().is_empty()
 }
 
+#[cfg(test)]
 /// The clipboard text of the copy action, or `None` for a blank link (nothing is copied).
 pub fn clipboard_text(url: &str) -> Option<String> {
     copy_link(url).map(|(text, _)| text)

@@ -8,7 +8,9 @@
 use std::sync::{Arc, OnceLock};
 
 use argon2::password_hash::phc::PasswordHash;
-use argon2::password_hash::{Error as HashError, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::{Error as HashError, PasswordVerifier};
+#[cfg(test)]
+use argon2::password_hash::PasswordHasher;
 use argon2::Argon2;
 use gtk::prelude::*;
 use kuro_platform::secrets::SecretStore;
@@ -17,12 +19,18 @@ use crate::pref_model::widgets::dialog;
 
 pub const CONFIRM_LOCK_CHANGE: &str = "Authenticate to confirm change";
 pub const UNLOCK_BUTTON: &str = "Unlock";
+#[cfg(test)]
 pub const SET_BUTTON: &str = "Set passphrase";
+#[cfg(test)]
 pub const SET_TITLE: &str = "Set an unlock passphrase";
+#[cfg(test)]
 pub const SET_SUBTITLE: &str = "The app asks for it before changing the lock, the NSFW setting and the lock delay.";
 pub const WRONG_PASSPHRASE: &str = "Wrong passphrase";
+#[cfg(test)]
 pub const TOO_SHORT: &str = "Use at least 4 characters";
+#[cfg(test)]
 pub const MISMATCH: &str = "The two passphrases differ";
+#[cfg(test)]
 pub const MIN_LENGTH: usize = 4;
 
 const SERVICE: &str = "kurobayomi-applock";
@@ -41,6 +49,7 @@ impl<'a> Passphrase<'a> {
         self.0.get(SERVICE, ACCOUNT).map(|hash| hash.is_some()).map_err(|e| e.to_string())
     }
 
+    #[cfg(test)]
     pub fn set(&self, passphrase: &str) -> Result<(), String> {
         let hash = Argon2::default().hash_password(passphrase.as_bytes()).map_err(|e| e.to_string())?;
         self.0.set(SERVICE, ACCOUNT, &hash.to_string()).map_err(|e| e.to_string())
@@ -57,11 +66,13 @@ impl<'a> Passphrase<'a> {
         }
     }
 
+    #[cfg(test)]
     pub fn clear(&self) -> Result<(), String> {
         self.0.delete(SERVICE, ACCOUNT).map_err(|e| e.to_string())
     }
 }
 
+#[cfg(test)]
 /// The rule for a new passphrase and its repeat.
 pub fn check_new(passphrase: &str, repeat: &str) -> Result<(), &'static str> {
     if passphrase.chars().count() < MIN_LENGTH {
@@ -180,6 +191,7 @@ pub async fn confirm(title: &str, subtitle: &str) -> bool {
     rx.recv().await.unwrap_or(false)
 }
 
+#[cfg(test)]
 /// The dialog that sets the passphrase. True once it is stored, false when cancelled.
 async fn create() -> Result<bool, String> {
     let Some(parent) = parent() else { return Ok(false) };
@@ -224,6 +236,7 @@ async fn create() -> Result<bool, String> {
     rx.recv().await.unwrap_or(Ok(false))
 }
 
+#[cfg(test)]
 /// The veto of the Require unlock switch: on sets the passphrase (or unlocks, when one is already set), off needs an
 /// unlock and then removes the passphrase. `Ok(false)` keeps the switch where it was.
 pub async fn set_lock(title: &str, on: bool) -> Result<bool, String> {

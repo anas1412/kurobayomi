@@ -5,15 +5,13 @@
 use kuro_i18n::{MsgKey, tr};
 use kuro_source::SourceError;
 
-use crate::browse::errors::{GENERIC, OFFLINE, Trouble, plain_message, says};
+use crate::browse::errors::{GENERIC, Trouble, plain_message, says};
 
 /// A failure from the source fetch or the store. The variants are the cases `formattedMessage` distinguishes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DetailError {
     /// An HTTP status code.
     Http(i64),
-    /// `UnknownHostException`. `host` is the exception message (the host name).
-    UnknownHost { online: bool, host: String },
     /// `NoChaptersException`: the source returned no chapters for a non-local manga.
     NoChapters,
     /// The source extension is not installed.
@@ -50,8 +48,6 @@ impl DetailError {
     pub fn user_message(&self) -> String {
         match self {
             Self::Http(_) => says("This source", Trouble::Broken),
-            Self::UnknownHost { online: false, .. } => OFFLINE.to_owned(),
-            Self::UnknownHost { online: true, .. } => says("This source", Trouble::Broken),
             Self::Plain(text) => text.clone(),
             Self::NoChapters => tr(MsgKey::no_results_found),
             Self::SourceNotInstalled => tr(MsgKey::loader_not_implemented_error),
@@ -102,14 +98,6 @@ mod tests {
     fn http_103_is_ignored_others_are_not() {
         assert!(DetailError::Http(103).is_ignored());
         assert!(!DetailError::Http(500).is_ignored());
-    }
-
-    #[test]
-    fn unknown_host_offline_and_online() {
-        let off = DetailError::UnknownHost { online: false, host: "x".into() };
-        assert_eq!(off.user_message(), "You're offline. Check your connection and try again.");
-        let on = DetailError::UnknownHost { online: true, host: "example.org".into() };
-        assert!(!on.user_message().contains("example.org"), "the host name stays in the log");
     }
 
     #[test]

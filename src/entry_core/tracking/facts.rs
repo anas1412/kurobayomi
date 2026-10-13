@@ -87,6 +87,7 @@ pub fn summarize(facts: &[TrackerFacts], bound: &[i64]) -> Summary {
     }
 }
 
+#[cfg(test)]
 /// What the record of a bound row shows, read off the tracker and the record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecordShown {
@@ -96,6 +97,7 @@ pub struct RecordShown {
     pub finish_date: bool,
 }
 
+#[cfg(test)]
 /// Which actions a row offers (UI parity 4.1, E-TRK-1). An unbound row offers only "Add tracking"; a bound row never
 /// reads a missing record, so every action on it is gated by the record it has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,6 +112,7 @@ pub struct RowActions {
     pub menu: bool,
 }
 
+#[cfg(test)]
 /// `record` is `None` for an unbound row. The private toggle needs both a record and a tracker that supports it
 /// (E-TRK-1).
 pub fn row_actions(record: Option<RecordShown>, supports_private: bool) -> RowActions {

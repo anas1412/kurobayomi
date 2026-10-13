@@ -12,8 +12,6 @@ pub const POLL_INTERVAL_MS: u64 = 1000;
 /// Why the server could not be started. Each one ends in a toast, never a panic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartError {
-    /// The torrent extension is not installed.
-    MissingExtension,
     /// The server binary is not found.
     MissingBinary,
     /// Any other spawn failure, with its text.
@@ -41,7 +39,6 @@ pub fn should_start(enabled: bool, torrent_source: bool) -> bool {
 /// The toast text of a failed start.
 pub fn toast_text(error: &StartError) -> String {
     match error {
-        StartError::MissingExtension => "The torrent extension is not installed".to_owned(),
         StartError::MissingBinary => "The torrent server was not found".to_owned(),
         StartError::Failed(text) => format!("The torrent server did not start: {text}"),
     }
@@ -160,7 +157,7 @@ mod tests {
     #[test]
     fn a_missing_extension_or_binary_is_a_toast_and_never_a_panic() {
         assert_eq!(
-            run(true, true, || Err(StartError::MissingExtension), || true, |_| {}),
+            run(true, true, || Err(StartError::MissingBinary), || true, |_| {}),
             Outcome::Toast("The torrent extension is not installed".to_owned())
         );
         assert_eq!(
