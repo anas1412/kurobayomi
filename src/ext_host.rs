@@ -97,12 +97,16 @@ fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
 }
 
 /// The download folder names of every installed source (T-17a-048), as (anime, manga): `Name (LANG)` for the anime
-/// sources, and the extension names for the manga packages, whose sources the manga registry does not list. Both come
-/// from the one folder naming of the download layout.
+/// packages, the extension names for the manga packages, and the same `Name (LANG)` for every loaded repository source of
+/// either kind, so none of their folders is reported as an orphan. All come from the one folder naming of the download layout.
 fn download_folder_names(state: &ExtensionState, manga: &Snapshot) -> (Vec<String>, Vec<String>) {
+    use kuro_platform::kind::Kind;
+    let loaded = |kind: Kind| -> Vec<String> {
+        crate::browse::directory::current(kind).sources().iter().map(|row| Layout::source_dir_name(&row.source.name, &row.source.lang)).collect()
+    };
     let anime = state.installed().values().flat_map(|ext| &ext.sources).map(|s| Layout::source_dir_name(&s.name, &s.lang));
     let manga = manga.installed.values().map(|ext| Layout::source_dir_name(&ext.name, ""));
-    (anime.collect(), manga.collect())
+    (anime.chain(loaded(Kind::Anime)).collect(), manga.chain(loaded(Kind::Manga)).collect())
 }
 
 /// Logs the download folders that match no installed source, once the first anime scan is in. Nothing is deleted.
