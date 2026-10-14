@@ -346,3 +346,19 @@ listview.kb-item-list > row:focus {
 .navigation-sidebar {
   background-color: transparent;
 }
+
+/* The status dot of a repo source's row (browse/sources_page.rs): green works, orange blocked for now, red broken. */
+.kb-status {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 999px;
+}
+.kb-status-active {
+  background-color: @success_color;
+}
+.kb-status-blocked {
+  background-color: @warning_color;
+}
+.kb-status-broken {
+  background-color: @error_color;
+}

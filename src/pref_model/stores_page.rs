@@ -424,7 +424,7 @@ impl<T: Keyed + Send + 'static> Inner<T> {
         h.append(&tag);
         let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
         text.set_hexpand(true);
-        let name = gtk::Label::builder().label(&card.name).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let name = gtk::Label::builder().label(&card.name).xalign(0.5).ellipsize(gtk::pango::EllipsizeMode::End).build();
         // a long name keeps its full text in the tooltip
         name.set_tooltip_text(Some(&card.name));
         text.append(&name);

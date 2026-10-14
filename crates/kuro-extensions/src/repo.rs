@@ -44,11 +44,40 @@ pub struct Entry {
     /// The SHA-256 of the icon PNG, in hex. An icon is saved only when its bytes match this.
     #[serde(rename = "iconSha256", default)]
     pub icon_sha256: Option<String>,
+    /// Whether the source works, as the repository last checked it. Missing or unknown means active.
+    #[serde(default, skip_serializing_if = "Status::is_active")]
+    pub status: Status,
+}
+
+/// A source's state as its repository reports it: the Browse row shows it as a coloured dot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    /// The site blocks the app for now (Cloudflare, a region block, a domain move).
+    Blocked,
+    /// The source no longer works and needs fixing.
+    Broken,
+    /// Works. Last, so an unknown value reads as this one.
+    #[default]
+    #[serde(other)]
+    Active,
+}
+
+impl Status {
+    pub fn is_active(&self) -> bool {
+        *self == Status::Active
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Index {
     pub version: u32,
+    /// The repository's name, shown on its card instead of the link. Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The repository's web page (its source code), opened by the card's globe button. Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website: Option<String>,
     pub sources: Vec<Entry>,
 }
 
@@ -428,6 +457,14 @@ mod tests {
         std::fs::write(cached_path(dir.path(), source), b"changed").expect("overwrite source");
         assert_eq!(read_source(dir.path(), source), None, "a changed copy is not used");
         assert!(checked_at(dir.path()).is_some(), "the index file dates the last check");
+    }
+
+    #[test]
+    fn a_status_is_read_and_a_missing_or_unknown_one_is_active() {
+        let with = |status: &str| entry("x", "manga", "en").replace("\"version\"", &format!("\"status\":\"{status}\",\"version\""));
+        let index = parse_index(&index_of(&[entry("a", "manga", "en"), with("blocked").replace("\"x\"", "\"b\""), with("broken").replace("\"x\"", "\"c\""), with("later").replace("\"x\"", "\"d\"")])).expect("valid");
+        let statuses: Vec<Status> = index.sources.iter().map(|e| e.status).collect();
+        assert_eq!(statuses, [Status::Active, Status::Blocked, Status::Broken, Status::Active]);
     }
 
     #[test]

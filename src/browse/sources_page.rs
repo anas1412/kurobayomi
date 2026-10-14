@@ -182,6 +182,9 @@ impl Inner {
             (icon, file, home)
         };
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        if let Some(status) = crate::recipe_sources::status(source.id) {
+            actions.append(&status_dot(status));
+        }
         if shows_latest(&source) {
             let latest = gtk::Button::with_label(&tr(MsgKey::latest));
             latest.add_css_class("flat");
@@ -208,6 +211,19 @@ impl Inner {
             move || menu.upgrade().map_or_else(Vec::new, |inner| row_menu(&inner.nav, id, home.clone())),
         )
     }
+}
+
+/// The dot of a repo source's status: green when it works, orange when its site blocks the app for now, red when broken.
+fn status_dot(status: kuro_extensions::repo::Status) -> gtk::Box {
+    use kuro_extensions::repo::Status;
+    let (class, text) = match status {
+        Status::Active => ("kb-status-active", "Working"),
+        Status::Blocked => ("kb-status-blocked", "Temporarily blocked by the site"),
+        Status::Broken => ("kb-status-broken", "Broken: waiting for a fix"),
+    };
+    let dot = gtk::Box::builder().valign(gtk::Align::Center).margin_end(6).css_classes(["kb-status", class]).tooltip_text(text).build();
+    dot.update_property(&[gtk::accessible::Property::Label(text)]);
+    dot
 }
 
 /// The right-click menu of a source row: Open (its Popular listing), and Open website when the source has a site.

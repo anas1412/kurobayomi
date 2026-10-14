@@ -96,7 +96,7 @@ impl Ops<RepoLink> for RepoOps {
     }
 
     fn card(&self, repo: &RepoLink) -> Card {
-        Card { key: repo.0.clone(), name: repo.0.clone(), website: String::new(), discord: None, copy: repo.0.clone(), note: None }
+        repo_card(&repo.0, crate::recipe_sources::saved_index(&repo.0).as_ref())
     }
 
     /// Fetches the index and every source it lists, then saves the link. Nothing is saved when any of it fails.
@@ -150,6 +150,14 @@ impl Ops<RepoLink> for RepoOps {
         crate::recipe_sources::forget_link(key);
         crate::recipe_sources::reload();
     }
+}
+
+/// A repo's card: the name and web page its saved index gives, or the link itself before the index is saved or when the
+/// index names none. The copy button always copies the link.
+fn repo_card(link: &str, index: Option<&kuro_extensions::repo::Index>) -> Card {
+    let name = index.and_then(|i| i.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| link.to_owned());
+    let website = index.and_then(|i| i.website.clone()).filter(|w| w.starts_with("https://")).unwrap_or_default();
+    Card { key: link.to_owned(), name, website, discord: None, copy: link.to_owned(), note: None }
 }
 
 /// The body of the delete dialog for a repo: it names the base URL only.
@@ -219,6 +227,18 @@ mod tests {
         assert_eq!(card.copy, "https://a.test/index.min.json");
         assert_eq!(card.discord, None);
         assert_eq!(repo_remove_body("A", "https://a.test/index.min.json"), "Do you wish to delete the repo \"https://a.test/index.min.json\"?");
+    }
+
+    #[test]
+    fn the_repo_card_shows_the_index_name_and_website() {
+        let link = "https://a.test/index.min.json";
+        let named = kuro_extensions::repo::parse_index(r#"{"version":1,"name":"My Repo","website":"https://github.com/a/b","sources":[]}"#).expect("valid");
+        let card = repo_card(link, Some(&named));
+        assert_eq!((card.name.as_str(), card.website.as_str(), card.copy.as_str()), ("My Repo", "https://github.com/a/b", link));
+        let bare = kuro_extensions::repo::parse_index(r#"{"version":1,"website":"javascript:x","sources":[]}"#).expect("valid");
+        let card = repo_card(link, Some(&bare));
+        assert_eq!((card.name.as_str(), card.website.as_str()), (link, ""), "no name: the link; a non-https page: no globe");
+        assert_eq!(repo_card(link, None).name, link);
     }
 
     #[test]

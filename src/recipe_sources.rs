@@ -76,6 +76,11 @@ fn repo_root() -> Option<PathBuf> {
     PATHS.get().map(|paths| paths.repo_sources_dir())
 }
 
+/// The saved index of a repo link, when it has one.
+pub fn saved_index(link: &str) -> Option<repo::Index> {
+    repo::read_index(&repo::link_dir(&repo_root()?, link))
+}
+
 /// The client the repo links are fetched with. It is built once and shared.
 pub fn repo_http() -> reqwest::Client {
     static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
@@ -300,6 +305,8 @@ fn load_sources() -> Vec<String> {
     let mut plugins = Vec::new();
     // the saved icon of each repo package ("scraper.<id>" or "repo.<id>"), as the rows name their packages
     let mut icons: HashMap<String, PathBuf> = HashMap::new();
+    // the status each repo package's index gives it, keyed like `icons`
+    let mut statuses: HashMap<String, repo::Status> = HashMap::new();
     for link in &links {
         let dir = repo::link_dir(&root, link);
         let Some(index) = repo::read_index(&dir) else {
@@ -318,6 +325,7 @@ fn load_sources() -> Vec<String> {
                 if let Some(path) = icon {
                     icons.insert(format!("repo.{}", entry.id), path);
                 }
+                statuses.insert(format!("repo.{}", entry.id), entry.status);
                 plugins.push((entry.id.clone(), entry.kind, entry.hosts.clone(), bytes));
                 continue;
             }
@@ -329,6 +337,7 @@ fn load_sources() -> Vec<String> {
                     if let Some(path) = icon {
                         icons.insert(package_of(&recipe), path);
                     }
+                    statuses.insert(package_of(&recipe), entry.status);
                     recipes.push(recipe);
                 }
                 Err(reason) => {
@@ -377,6 +386,8 @@ fn load_sources() -> Vec<String> {
     let icon_paths: HashMap<i64, PathBuf> = rows.iter().filter_map(|row| Some((row.source.id, icons.get(&row.package)?.clone()))).collect();
     *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
     *ICON_PATHS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(icon_paths);
+    let statuses: HashMap<i64, repo::Status> = rows.iter().filter_map(|row| Some((row.source.id, *statuses.get(&row.package)?))).collect();
+    *STATUSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(statuses);
     install(Kind::Manga, manga);
     let runnable = anime.anime.iter().map(|(source, row)| (Catalogue::Anime(Arc::clone(source)), row.clone())).collect();
     install(Kind::Anime, Catalogues::new(Kind::Anime, runnable));
@@ -420,6 +431,13 @@ static IMAGE_HEADERS: Mutex<Option<HashMap<i64, HeaderMap>>> = Mutex::new(None);
 
 /// The saved PNG icon of each repo source, by source id. Set by each load with the rows of the repo sources.
 static ICON_PATHS: Mutex<Option<HashMap<i64, PathBuf>>> = Mutex::new(None);
+
+static STATUSES: Mutex<Option<HashMap<i64, repo::Status>>> = Mutex::new(None);
+
+/// The status a repo source's index gives it; `None` for a source outside any repo.
+pub fn status(source_id: i64) -> Option<repo::Status> {
+    STATUSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref()?.get(&source_id).copied()
+}
 
 /// The saved PNG icon of a repo source (recipe or plug-in), `None` for a source without one: its row keeps the letter tile.
 pub fn icon_path(source_id: i64) -> Option<PathBuf> {
