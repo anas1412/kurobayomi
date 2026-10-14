@@ -8,7 +8,6 @@
 //! (`src/shell/tabs.rs`, `TabState::back`), which has to remember the origin tab when the manga page opens.
 //!
 //! - Other screens can fill the search box ([`search_library`] and [`inject_search`], B-1.3).
-//! - The sidebar hides while entries are selected ([`selecting`] and [`on_selection_change`], B-1.4).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -39,11 +38,8 @@ use crate::screens::Built;
 
 thread_local! {
     static VIEWS: RefCell<Vec<(Kind, LibraryView)>> = const { RefCell::new(Vec::new()) };
-    /// Bit 0: the anime view is selecting. Bit 1: the manga view is.
-    static SELECTING: Cell<u8> = const { Cell::new(0) };
-    /// The kinds whose database watch is bound (same bits as `SELECTING`): one watch serves every view of a kind.
+    /// The kinds whose database watch is bound (one bit per kind): one watch serves every view of a kind.
     static WATCHED: Cell<u8> = const { Cell::new(0) };
-    static LISTENER: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
     /// Searches injected before the view of their kind was built; each is applied when that view mounts.
     static PENDING_SEARCH: RefCell<Vec<(Kind, String)>> = const { RefCell::new(Vec::new()) };
     /// What the refresh button does (the update runner in `crate::misc` registers here).
@@ -76,24 +72,6 @@ const fn bit(kind: Kind) -> u8 {
     match kind {
         Kind::Anime => 1,
         Kind::Manga => 2,
-    }
-}
-
-/// Whether any library view is in selection mode. The shell hides its sidebar while this holds.
-pub fn selecting() -> bool {
-    SELECTING.with(Cell::get) != 0
-}
-
-/// Registers the shell's reaction to selection mode starting or ending. Replaces an earlier one.
-pub fn on_selection_change(listener: impl Fn() + 'static) {
-    LISTENER.with(|l| *l.borrow_mut() = Some(Rc::new(listener)));
-}
-
-fn set_selecting(kind: Kind, on: bool) {
-    SELECTING.with(|s| s.set(if on { s.get() | bit(kind) } else { s.get() & !bit(kind) }));
-    let listener = LISTENER.with(|l| l.borrow().clone());
-    if let Some(listener) = listener {
-        listener();
     }
 }
 
@@ -291,7 +269,6 @@ fn nav(kind: Kind, db: Arc<Db>) -> Nav {
         delete,
         global_search: Rc::new(move |query| open_global_search(kind, query)),
         edit_categories: Rc::new(|| crate::ui::open("categories")),
-        selecting: Rc::new(move |on| set_selecting(kind, on)),
         update: Rc::new(move |category| match UPDATE_HOST.with(|h| h.borrow().clone()) {
             Some(host) => (host.start)(kind, category),
             None => {
@@ -499,22 +476,6 @@ mod tests {
         let path = dir.path().join("test.db");
         let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         (dir, Arc::new(Db::new(&path, writer).expect("manga db handle")))
-    }
-
-    #[test]
-    fn selection_mode_of_either_kind_is_reported_to_the_shell() {
-        let calls = Rc::new(Cell::new(0));
-        let seen = calls.clone();
-        on_selection_change(move || seen.set(seen.get() + 1));
-        assert!(!selecting());
-        set_selecting(Kind::Anime, true);
-        set_selecting(Kind::Manga, true);
-        assert!(selecting());
-        set_selecting(Kind::Anime, false);
-        assert!(selecting(), "the manga view is still selecting");
-        set_selecting(Kind::Manga, false);
-        assert!(!selecting());
-        assert_eq!(calls.get(), 4);
     }
 
     #[test]

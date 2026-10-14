@@ -43,6 +43,17 @@ pub fn push(page: &impl IsA<gtk::Widget>) {
     stack.set_visible_child(page);
 }
 
+/// Shows `page` in place of the page on show: the page below it stays below, so Back leaves to that one. The replaced page
+/// goes once the transition is done. A root page is never replaced.
+pub fn replace(page: &impl IsA<gtk::Widget>) {
+    let stack = nav().0;
+    let replaced = stack.visible_child().filter(|cur| cur.prev_sibling().is_some());
+    push(page);
+    if let Some(cur) = replaced {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || stack.remove(&cur));
+    }
+}
+
 pub fn pop() {
     let stack = nav().0;
     let Some(cur) = stack.visible_child() else { return };

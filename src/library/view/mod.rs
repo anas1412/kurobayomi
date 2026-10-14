@@ -75,8 +75,6 @@ pub struct Nav {
     pub delete: Rc<dyn Fn(Vec<i64>)>,
     pub global_search: Rc<dyn Fn(&str)>,
     pub edit_categories: Rc<dyn Fn()>,
-    /// Told when selection mode starts or ends; the shell hides its sidebar while it is on (B-1.4).
-    pub selecting: Rc<dyn Fn(bool)>,
     /// Starts an update pass of one category (`Some(id)`); `false` when a pass of this kind is already running.
     pub update: Rc<dyn Fn(Option<i64>) -> bool>,
     /// Whether a pass of this kind is running now; the refresh button shows it.
@@ -117,8 +115,10 @@ struct Inner {
     query: Option<String>,
     search_turn: u64,
     selection: Selection,
-    /// The last value sent to `Nav::selecting`.
-    selecting_shown: bool,
+    /// What the grid shows now: the entry id of each cell (`None` for the global search row) and the ids that were
+    /// selected. A selection change then rebinds only the cards whose selected state changed, not every card.
+    shown_ids: Vec<Option<i64>>,
+    shown_selected: std::collections::HashSet<i64>,
     /// The view options menu button of the page header; its dot shows while a filter is on (T-37a-056).
     options: options::Options,
     /// The logged-in trackers of the last load, so a render never asks the secret store again.
@@ -248,7 +248,8 @@ impl LibraryView {
             query: None,
             search_turn: 0,
             selection: Selection::default(),
-            selecting_shown: false,
+            shown_ids: Vec::new(),
+            shown_selected: std::collections::HashSet::new(),
             options,
             logged_in: BTreeSet::new(),
             last_resume: HashMap::new(),
@@ -725,6 +726,12 @@ fn active_index(st: &Inner) -> usize {
 
 /// Redraws the toolbar, tabs, grid, empty state and selection bar from the current state.
 fn render(inner: &Rc<RefCell<Inner>>) {
+    render_with(inner, false);
+}
+
+/// `render`; with `selection_only` the grid keeps its cards and only those whose selected state changed are rebound, so
+/// starting or changing a selection does not reload every cover.
+fn render_with(inner: &Rc<RefCell<Inner>>, selection_only: bool) {
     let weak = Rc::downgrade(inner);
     let view = {
         let st = inner.borrow();
@@ -829,8 +836,28 @@ fn render(inner: &Rc<RefCell<Inner>>) {
 
     apply_columns(inner);
     show_mode_view(inner);
-    let objects: Vec<glib::BoxedAnyObject> = view.grid_cells.iter().cloned().map(glib::BoxedAnyObject::new).collect();
-    store.splice(0, store.n_items(), objects.as_slice());
+    let ids: Vec<Option<i64>> = view.grid_cells.iter().map(|cell| if let Cell::Item(item) = cell { Some(item.row.id) } else { None }).collect();
+    let selected: std::collections::HashSet<i64> = inner.borrow().selection.ids().iter().copied().collect();
+    let (same_cards, before) = {
+        let st = inner.borrow();
+        (selection_only && st.shown_ids == ids && store.n_items() as usize == ids.len(), st.shown_selected.clone())
+    };
+    if same_cards {
+        for (position, id) in ids.iter().enumerate() {
+            if id.is_some_and(|id| selected.contains(&id) != before.contains(&id)) {
+                // a new object at the position, so the grid rebinds this card (the same object would keep its widget)
+                store.splice(position as u32, 1, &[glib::BoxedAnyObject::new(view.grid_cells[position].clone())]);
+            }
+        }
+    } else {
+        let objects: Vec<glib::BoxedAnyObject> = view.grid_cells.iter().cloned().map(glib::BoxedAnyObject::new).collect();
+        store.splice(0, store.n_items(), objects.as_slice());
+    }
+    {
+        let mut st = inner.borrow_mut();
+        st.shown_ids = ids;
+        st.shown_selected = selected;
+    }
     let has_items = !view.items.is_empty();
     scroller.set_visible(has_items);
     let welcome_shown = !has_items && view.empty_action == Some(actions::EmptyLibraryAction::AddRepository);
@@ -851,15 +878,6 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     sel_header.set_visible(view.bar_open);
     download.set_visible(view.download_visible);
     options::Options::sync(inner);
-    let changed = {
-        let mut st = inner.borrow_mut();
-        let changed = st.selecting_shown != view.bar_open;
-        st.selecting_shown = view.bar_open;
-        changed.then(|| st.nav.selecting.clone())
-    };
-    if let Some(notify) = changed {
-        notify(view.bar_open);
-    }
 }
 
 /// Puts the list or the grid in the scroller for the display mode.
@@ -948,7 +966,7 @@ fn select_with(inner: &Rc<RefCell<Inner>>, change: impl FnOnce(&mut Selection, &
             st.built.as_ref().and_then(|b| b.pages.get(index)).map_or(&[], |p| p.items.as_slice());
         change(&mut st.selection, page);
     }
-    render(inner);
+    render_with(inner, true);
 }
 
 /// Queues the downloads of the selected entries with one amount of the Download menu, then clears the selection.
@@ -1275,7 +1293,6 @@ pub(crate) fn test_nav() -> Nav {
         delete: Rc::new(|_| {}),
         global_search: Rc::new(|_| {}),
         edit_categories: Rc::new(|| {}),
-        selecting: Rc::new(|_| {}),
         update: Rc::new(|_| true),
         update_running: Rc::new(|| false),
     }
@@ -1315,9 +1332,7 @@ mod tests {
         crate::testing::with_display(|| {
             let ctx = glib::MainContext::default();
             let _owner = ctx.acquire().expect("main context");
-            let selecting_calls: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
-            let seen = selecting_calls.clone();
-            let (_dir, view) = test_view(Nav { selecting: Rc::new(move |on| seen.borrow_mut().push(on)), ..test_nav() });
+            let (_dir, view) = test_view(test_nav());
             let inner = view.inner.clone();
             assert!(pump_until(|| inner.borrow().built.is_some()), "the worker reply arrives");
             assert_eq!(inner.borrow().store.n_items(), 1, "one cover for the one entry");
@@ -1332,8 +1347,6 @@ mod tests {
             select_with(&inner, |sel, _| sel.clear());
             assert!(!inner.borrow().bar.reveals_child());
             assert!(inner.borrow().search.is_visible() && inner.borrow().refresh_button.is_visible() && !inner.borrow().sel_header.is_visible());
-
-            assert_eq!(*selecting_calls.borrow(), vec![true, false], "the shell hears selection start and end once each (B-1.4)");
 
             // B-1.3: a query from outside fills the box, and B-6.4: the global row is the first cell while it matches
             view.set_query("Berserk");

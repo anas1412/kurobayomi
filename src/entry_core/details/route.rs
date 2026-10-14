@@ -96,6 +96,12 @@ pub fn open_kind(kind: Kind, entry_id: i64) {
     ui::push(&page_for(kind, entry_id));
 }
 
+/// The entry page in place of the page on show (the reader): Back then leaves to the page that opened the reader, not
+/// into the chapter that was being read.
+pub fn replace_with(kind: Kind, entry_id: i64) {
+    ui::replace(&page_for(kind, entry_id));
+}
+
 /// The page for the `anime_entry_details` screen id. Without a target there is no row to show, so it is the page of a
 /// row that does not exist: the "not found" state with a Back button.
 pub fn build() -> GBox {

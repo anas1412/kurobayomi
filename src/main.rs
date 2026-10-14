@@ -288,10 +288,8 @@ fn build_window(app: &gtk::Application) {
             // the bottom bar belongs to the tab pages
             let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
             let shown = shell::layout::visibility(chrome, immersive, on_tabs);
-            // the sidebar also hides while library entries are selected (B-1.4)
-            let selecting = library::mount::selecting();
-            sidebar.set_visible(shown.sidebar && !selecting);
-            sep.set_visible(shown.sidebar && !selecting);
+            sidebar.set_visible(shown.sidebar);
+            sep.set_visible(shown.sidebar);
             bottom.set_visible(shown.bottom_bar);
         }
     };
@@ -310,7 +308,6 @@ fn build_window(app: &gtk::Application) {
     window_size::watch(&win);
     theme::attach_window(&win);
     local_flow::ui::attach(&win);
-    library::mount::on_selection_change(refresh.clone());
     refresh();
     win.present();
     schedule_crash_test();
