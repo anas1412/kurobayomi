@@ -146,6 +146,17 @@ pub(crate) fn text_veto(pref: &Pref<String>, can_be_blank: bool, validate: fn(&s
     })
 }
 
+/// The one auto-hide switch of the reader and the player (`auto_hide_bars`): both settings pages show this row.
+pub fn auto_hide_bars(base: &kuro_prefs::base::BasePrefs) -> PreferenceItem {
+    switch_with(
+        "Hide the bars automatically",
+        Some("While reading or watching, the top bar and the controls get out of the way"),
+        &base.auto_hide_bars,
+        true,
+        bind::accept(),
+    )
+}
+
 pub fn switch(title: &str, pref: &Pref<bool>, enabled: bool) -> PreferenceItem {
     switch_with(title, None, pref, enabled, bind::accept())
 }

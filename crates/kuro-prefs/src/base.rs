@@ -21,6 +21,8 @@ define_prefs! {
         last_kind: String = "__APP_STATE_last_kind" => String::from("anime");
         // the user took the AppImage out of the applications menu (About), so it does not add itself again
         appimage_menu_removed: bool = "__APP_STATE_appimage_menu_removed" => false;
+        // the reader's and the player's bars hide by themselves while reading or watching (off by default)
+        auto_hide_bars: bool = "auto_hide_bars" => false;
     }
 }
 
@@ -47,6 +49,7 @@ mod tests {
                 ("check_app_updates", "check_app_updates"),
                 ("last_kind", "__APP_STATE_last_kind"),
                 ("appimage_menu_removed", "__APP_STATE_appimage_menu_removed"),
+                ("auto_hide_bars", "auto_hide_bars"),
             ]
         );
         assert_eq!(BasePrefs::TABLE, "base");

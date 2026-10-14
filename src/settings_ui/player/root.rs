@@ -66,6 +66,7 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
             language::language_row("Audio language", &audio),
             volume_row(&p.player_volume_value),
             switch("Autoplay next episode", &p.autoplay_enabled, true),
+            crate::settings_ui::rows::auto_hide_bars(&prefs.base),
         ],
     )];
     tree
@@ -94,12 +95,12 @@ mod tests {
     use kuro_prefs::store::PrefStore;
 
     #[test]
-    fn the_root_holds_the_four_kept_settings_first() {
+    fn the_root_holds_the_kept_settings_and_auto_hide() {
         let prefs = Prefs::in_memory();
         let tree = page_rows(&prefs);
         let Preference::Group(first) = &tree[0] else { panic!("group") };
         let titles: Vec<&str> = first.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, ["Subtitle language", "Audio language", VOLUME_TITLE, "Autoplay next episode"]);
+        assert_eq!(titles, ["Subtitle language", "Audio language", VOLUME_TITLE, "Autoplay next episode", "Hide the bars automatically"]);
     }
 
     #[test]

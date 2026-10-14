@@ -189,22 +189,6 @@ fn app_menu() -> gtk::MenuButton {
 }
 
 /// The small icon beside the panel title while Incognito mode is on. It follows the state of `app.incognito`.
-fn incognito_icon() -> gtk::Image {
-    let icon = gtk::Image::builder().icon_name(crate::incognito::ICON).tooltip_text(tr(MsgKey::pref_incognito_mode)).visible(false).build();
-    let Some(action) = gio::Application::default().and_then(|app| app.lookup_action(crate::incognito::TOGGLE_NAME)) else { return icon };
-    let follow = |icon: &gtk::Image, action: &gio::Action| icon.set_visible(action.state().and_then(|s| s.get::<bool>()).unwrap_or(false));
-    follow(&icon, &action);
-    let weak = icon.downgrade();
-    action.connect_state_notify(move |action| {
-        if let Some(icon) = weak.upgrade() {
-            follow(&icon, action);
-        }
-    });
-    icon
-}
-
-/// The panel title: the app's name, with the incognito icon beside it while Incognito mode is on. Not a menu: the app's
-/// own items (Incognito, Keyboard shortcuts, Help, About) are rows at the bottom of the panel.
 /// The panel's title: the app's name, and on a nightly build a small "nightly" under it (a property of the build, not part
 /// of the name; it also leaves the header room for the search, the menu and the Incognito icon).
 fn title() -> GBox {
@@ -216,7 +200,6 @@ fn title() -> GBox {
         names.append(&gtk::Label::builder().label("nightly").css_classes(["kb-subtitle", "dim-label"]).build());
     }
     title.append(&names);
-    title.append(&incognito_icon());
     title
 }
 

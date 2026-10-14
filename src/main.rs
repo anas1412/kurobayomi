@@ -262,16 +262,14 @@ fn build_window(app: &gtk::Application) {
     overlay.set_child(Some(&outer));
     net_client::set_toaster(toast::attach(&overlay));
     win.set_child(Some(&overlay));
-    // the app-state banners above everything: indexing, downloaded only, incognito (T-36a-018). The incognito module
-    // keeps the actions and the notification; the banner is this one.
+    // the app-state banners above everything: indexing and downloaded only (T-36a-018)
     let banners = std::rc::Rc::new(shell::banners::Banners::new());
     outer.prepend(&banners.widget);
     {
-        let (index, downloaded_only, incognito) = (host.download_service().map(|d| d.index().clone()), base.downloaded_only.clone(), base.incognito_mode.clone());
+        let (index, downloaded_only) = (host.download_service().map(|d| d.index().clone()), base.downloaded_only.clone());
         shell::banners::watch(banners, move || shell::banners::BannerState {
             indexing: index.as_ref().is_some_and(|index| index.checking_indicator_visible()),
             downloaded_only: downloaded_only.get(),
-            incognito: incognito.get(),
         });
     }
     // the sources the screens read (repository sources), then the source gate they wait on

@@ -1,4 +1,5 @@
-//! App-state banners above the content: indexing, downloaded-only and incognito, in that order (T-36a-018).
+//! App-state banners above the content: indexing and downloaded-only, in that order (T-36a-018). Incognito has no banner
+//! (user, 2026-10-14): the panel's Incognito switch shows it.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -15,7 +16,6 @@ pub const POLL_MS: u64 = 300;
 pub struct BannerState {
     pub indexing: bool,
     pub downloaded_only: bool,
-    pub incognito: bool,
 }
 
 /// One banner. Declaration order is the display order, top to bottom.
@@ -23,18 +23,16 @@ pub struct BannerState {
 pub enum BannerKind {
     Indexing,
     DownloadedOnly,
-    Incognito,
 }
 
 impl BannerKind {
-    pub const ALL: [BannerKind; 3] = [BannerKind::Indexing, BannerKind::DownloadedOnly, BannerKind::Incognito];
+    pub const ALL: [BannerKind; 2] = [BannerKind::Indexing, BannerKind::DownloadedOnly];
 
-    /// The label text key (`download_notifier_cache_renewal`, `label_downloaded_only`, `pref_incognito_mode`).
+    /// The label text key (`download_notifier_cache_renewal`, `label_downloaded_only`).
     pub fn text(self) -> String {
         tr(match self {
             Self::Indexing => MsgKey::download_notifier_cache_renewal,
             Self::DownloadedOnly => MsgKey::label_downloaded_only,
-            Self::Incognito => MsgKey::pref_incognito_mode,
         })
     }
 
@@ -42,7 +40,6 @@ impl BannerKind {
         match self {
             Self::Indexing => state.indexing,
             Self::DownloadedOnly => state.downloaded_only,
-            Self::Incognito => state.incognito,
         }
     }
 }
@@ -106,9 +103,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn banner_texts_are_the_three_catalogue_strings() {
+    fn banner_texts_are_the_two_catalogue_strings() {
         assert_eq!(BannerKind::Indexing.text(), tr(MsgKey::download_notifier_cache_renewal));
         assert_eq!(BannerKind::DownloadedOnly.text(), tr(MsgKey::label_downloaded_only));
-        assert_eq!(BannerKind::Incognito.text(), tr(MsgKey::pref_incognito_mode));
     }
 }

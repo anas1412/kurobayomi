@@ -48,7 +48,10 @@ pub fn layout_rows(r: &ReaderPrefs) -> Vec<Preference> {
 
 /// The reader settings page: the default reading mode, then [`layout_rows`]. Every row is kept.
 pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
-    let mut tree = vec![item(int_choice("Default reading mode", &prefs.reader.default_reading_mode, &READING_MODES, true))];
+    let mut tree = vec![
+        item(int_choice("Default reading mode", &prefs.reader.default_reading_mode, &READING_MODES, true)),
+        item(crate::settings_ui::rows::auto_hide_bars(&prefs.base)),
+    ];
     tree.extend(layout_rows(&prefs.reader));
     tree
 }
@@ -67,11 +70,11 @@ mod tests {
     }
 
     #[test]
-    fn the_page_has_the_top_row_then_display_and_paged_groups() {
+    fn the_page_has_the_top_rows_then_display_and_paged_groups() {
         let prefs = Prefs::in_memory();
         let tree = rows_all(&prefs);
-        assert_eq!(tree.len(), 3);
-        assert!(matches!(tree[0], Preference::Item(_)));
+        assert_eq!(tree.len(), 4);
+        assert!(matches!(tree[0], Preference::Item(_)) && matches!(tree[1], Preference::Item(_)), "the reading mode, then auto-hide");
         assert_eq!(group_titles(&tree), ["Display", "Paged"]);
     }
 
@@ -79,7 +82,7 @@ mod tests {
     fn the_paged_group_holds_the_four_kept_layout_rows() {
         let prefs = Prefs::in_memory();
         let tree = rows_all(&prefs);
-        let Preference::Group(paged) = &tree[2] else { panic!("the Paged group") };
+        let Preference::Group(paged) = &tree[3] else { panic!("the Paged group") };
         let titles: Vec<&str> = paged.items.iter().map(|i| i.title()).collect();
         assert_eq!(titles, ["Scale type", "Zoom start position", "Crop borders", "Split wide pages"]);
     }

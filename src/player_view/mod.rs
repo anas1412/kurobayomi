@@ -4,6 +4,7 @@
 //! file is widget wiring. Main thread only.
 
 mod after_seen;
+mod auto_hide;
 mod controls;
 mod gl;
 mod menu;
@@ -313,7 +314,6 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
 
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&area));
-    overlay.add_overlay(&bar);
     overlay.add_overlay(skip.widget());
     // shown from the first frame until mpv knows the duration: the stream, its audio and its subtitles take a moment
     let loading = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).valign(gtk::Align::Center).width_request(48).height_request(48).can_target(false).build();
@@ -344,7 +344,9 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     header.pack_end(&quality);
     // the buttons packed here came after page_header::header made its pass, so they need their own
     crate::ui::no_sticky_focus(&header);
-    page.append(&header);
+    // the bars hide by themselves while the video plays (`auto_hide`); with the setting off the header sits above it
+    let enabled = crate::data::is_installed() && crate::data::app().base.auto_hide_bars.get();
+    let hiding = auto_hide::AutoHide::attach(enabled, &page, &overlay, &header, &bar, &area);
     page.append(&overlay);
     watch_fullscreen(&page, &header);
 
@@ -433,7 +435,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
         controls::Parts { page: &page, area: &area, bar: &bar, previous: &previous, next: &next, quality: &quality, speed: &speed, chapters: &chapters },
         shared,
     );
-    start_ticks(&page, &two_lines, &play, &seek, &time, &volume, &loading, &skip, shared);
+    start_ticks(&page, &two_lines, &hiding, &play, &seek, &time, &volume, &loading, &skip, shared);
     page
 }
 
@@ -750,12 +752,13 @@ fn remember_volume(playback: &Playback) {
 /// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due and refreshes the controls and the skip
 /// button. A failed file is a toast, and the end of an episode plays the next one when autoplay is on. The header hides
 /// only in fullscreen (`watch_fullscreen`). The timer stops once the page is gone or closed.
-fn start_ticks(page: &gtk::Box, title: &page_header::TwoLineTitle, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, skip: &skip_button::Ui, shared: &Shared) {
+fn start_ticks(page: &gtk::Box, title: &page_header::TwoLineTitle, hiding: &Rc<auto_hide::AutoHide>, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, skip: &skip_button::Ui, shared: &Shared) {
     let loading = loading.clone();
     let opened = std::time::Instant::now();
     let page = page.downgrade();
     // the title follows the episode (the next one plays in place)
     let (title_bar, shown_title) = (title.clone(), RefCell::new(shared.borrow().media.title.clone()));
+    let hiding = Rc::clone(hiding);
     let play = play.clone();
     let seek = seek.clone();
     let time = time.clone();
@@ -819,6 +822,7 @@ fn start_ticks(page: &gtk::Box, title: &page_header::TwoLineTitle, play: &gtk::B
             *shown_title.borrow_mut() = title;
         }
         play.set_icon_name(if snapshot.paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" });
+        hiding.tick(snapshot.paused);
         // loading until mpv knows the duration; an idle mpv after the first seconds means the load failed, so stop
         let idle = shared.borrow().playback.mpv().get_flag("idle-active") == Some(true);
         let waiting = snapshot.duration_s <= 0.0 && !(idle && opened.elapsed() > std::time::Duration::from_secs(3));

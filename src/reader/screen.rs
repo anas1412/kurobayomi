@@ -662,6 +662,8 @@ struct Screen {
     /// The id of the chapter the top bar shows, `-1` before the first build.
     shown_chapter: Cell<i64>,
     top: gtk::Revealer,
+    /// The bars hide by themselves (`auto_hide_bars`, read when the reader opens).
+    auto_hide: bool,
     bottom: gtk::Revealer,
     navigator: Rc<Navigator>,
     /// Until then a hide request from a viewer is ignored: the slider and the chapter buttons move the pages, and
@@ -751,8 +753,16 @@ pub fn open_with(
     // it goes on the page layer, so the reader's sheets still open above it
     bottom.set_valign(gtk::Align::End);
     page_layer.add_overlay(&bottom);
+    // with auto-hide (`auto_hide_bars`) the top bar floats over the pages too, so hiding it never moves them; without it
+    // the bar sits above the pages and never covers one
+    let auto_hide = auto_hide_bars();
     let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    column.append(&top);
+    if auto_hide {
+        top.set_valign(gtk::Align::Start);
+        page_layer.add_overlay(&top);
+    } else {
+        column.append(&top);
+    }
     column.append(sheet.root());
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.set_widget_name("screen:reader");
@@ -784,6 +794,7 @@ pub fn open_with(
         shown_chapter: Cell::new(-1),
         top,
         bottom,
+        auto_hide,
         navigator: Rc::clone(&navigator),
         keep_menu_until: Cell::new(None),
         menu_actions: chrome::menu_actions(core.reading_mode(), core.crop_on(), menu_handlers(me)),
@@ -837,6 +848,17 @@ pub fn open_with(
         keys.connect_key_pressed(move |_, key, _, state| handle_key(&screen, key, state));
     }
     root.add_controller(keys);
+    // with auto-hide, the mouse at the top edge brings the bars back
+    if screen.auto_hide {
+        let motion = gtk::EventControllerMotion::new();
+        let weak = Rc::downgrade(&screen);
+        motion.connect_motion(move |_, _, y| {
+            if let Some(screen) = weak.upgrade().filter(|s| y < TOP_EDGE_PX && !s.ui.borrow().menu_visible) {
+                set_menu(&screen, true);
+            }
+        });
+        root.add_controller(motion);
+    }
     {
         let screen = Rc::clone(&screen);
         root.connect_map(move |root| {
@@ -930,11 +952,20 @@ fn apply_fullscreen(screen: &Screen, menu_visible: bool) {
     }
 }
 
+/// How close to the top the mouse brings the hidden bars back, in pixels.
+const TOP_EDGE_PX: f64 = 8.0;
+
+/// Whether the reader's and the player's bars hide by themselves (`auto_hide_bars`, off by default).
+fn auto_hide_bars() -> bool {
+    crate::data::is_installed() && crate::data::app().base.auto_hide_bars.get()
+}
+
 fn set_menu(screen: &Screen, visible: bool) {
     screen.ui.borrow_mut().set_menu_visible(visible);
     screen.menu_open.set(visible);
-    // the top bar (back, title, chapter, bookmark, menu) is always shown; only the bottom bar follows the menu
-    screen.top.set_reveal_child(true);
+    // with auto-hide the top bar follows the menu as the bottom bar does (a tap in the middle, a page turn); without it
+    // the top bar stays
+    screen.top.set_reveal_child(visible || !screen.auto_hide);
     screen.bottom.set_reveal_child(visible);
     refresh(screen);
 }
