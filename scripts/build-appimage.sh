@@ -129,6 +129,11 @@ if grep -qa "$wk_dir" "$appdir"/usr/lib/libwebkitgtk-6.0.so*; then
     exit 1
 fi
 echo 'cd "$APPDIR/usr"' >> "$hook"
+# WebKit starts its helpers inside a bubblewrap sandbox that needs bwrap and xdg-dbus-proxy from the host and the helper
+# folder at its own path: neither holds here (the folder is rewritten to a relative path, and a host may lack the tools), and
+# a failed launch aborts the whole app ("bwrap: Can't mkdir parents ...", "Failed to fully launch dbus-proxy"). So inside the
+# AppImage the helpers start directly. The pages only pass the browser check of sites the user installed sources for.
+echo 'export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1' >> "$hook"
 
 # GTK's gstreamer media module links the host's gstreamer, which fails against the bundled glib on newer distros (an
 # "undefined symbol" warning at start); the app plays video through libmpv, so the module is not needed
