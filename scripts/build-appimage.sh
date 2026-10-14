@@ -2,9 +2,11 @@
 # Packs a built kurobayomi binary into an AppImage: GTK 4 (through linuxdeploy's GTK plugin), libmpv and the other shared
 # libraries travel inside it.
 #
-# Usage: [CHANNEL=nightly] scripts/build-appimage.sh BINARY OUTPUT.AppImage
+# Usage: [CHANNEL=nightly] [FFMPEG_PREFIX=DIR] scripts/build-appimage.sh BINARY OUTPUT.AppImage
 # CHANNEL=nightly packs the Nightly app: its own app id, name and gold icon, and it leaves the file types and links to the
-# stable app. Without it the stable app is packed.
+# stable app. Without it the stable app is packed. FFMPEG_PREFIX names a decode-only FFmpeg built by
+# scripts/build-ffmpeg.sh, bundled in place of the system's (whose encoder libraries are about 33 MiB of the AppImage).
+# The binary's debug info is left out of the AppImage and written next to it as OUTPUT without .AppImage, plus .debug.
 # Needs the libraries the binary links (libgtk-4, libmpv, ...) installed on this machine: they are what gets bundled, so
 # build on the oldest distro you want the AppImage to run on (CI uses Ubuntu 24.04, the first with GTK 4.14).
 set -euo pipefail
@@ -44,6 +46,14 @@ fetch appimagetool https://github.com/AppImage/appimagetool/releases/download/1.
 # the app's files, laid out like an install into /usr
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" "$appdir/usr/share/mime/packages"
 install -m755 "$bin" "$appdir/usr/bin/kurobayomi"
+# The debug info was about 51 of the AppImage's MiB. It moves to its own file, which the binary names (a debug link), so
+# a debugger or addr2line given that file turns a crash report's addresses back into files and lines; the report itself
+# still names the functions (the symbol table stays).
+debug="${out%.AppImage}.debug"
+mkdir -p "$(dirname "$debug")"
+objcopy --only-keep-debug --compress-debug-sections=zstd "$appdir/usr/bin/kurobayomi" "$debug"
+strip --strip-debug "$appdir/usr/bin/kurobayomi"
+objcopy --add-gnu-debuglink="$debug" "$appdir/usr/bin/kurobayomi"
 # every size and the SVG, into the one folder desktops read (the nightly's folder has another name in the source)
 mkdir -p "$appdir/usr/share/icons"
 cp -r "$icons/." "$appdir/usr/share/icons/"
@@ -61,7 +71,13 @@ fi
 mkdir -p "$work/bin"
 ln -s "$tools/linuxdeploy-plugin-gtk.sh" "$work/bin/linuxdeploy-plugin-gtk.sh"
 export PATH="$work/bin:$PATH" APPIMAGE_EXTRACT_AND_RUN=1 DEPLOY_GTK_VERSION=4 NO_STRIP=1
-# NO_STRIP keeps file and line numbers in the app's crash reports
+# NO_STRIP: linuxdeploy would strip the symbol table too, and the crash reports name functions from it (the debug info
+# is already split off above)
+if [ -n "${FFMPEG_PREFIX:-}" ]; then
+    # linuxdeploy finds libraries through LD_LIBRARY_PATH first, so it bundles this FFmpeg rather than the system's
+    [ -f "$FFMPEG_PREFIX/lib/libavcodec.so.60" ] || { echo "no libavcodec.so.60 in $FFMPEG_PREFIX/lib" >&2; exit 1; }
+    export LD_LIBRARY_PATH="$FFMPEG_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 "$tools/linuxdeploy" --appdir "$appdir" --plugin gtk \
     --executable "$appdir/usr/bin/kurobayomi" \
@@ -144,11 +160,22 @@ if command -v dpkg >/dev/null; then
 else
     echo "warning: dpkg not found, the licence texts of the bundled libraries are not included" >&2
 fi
+if [ -n "${FFMPEG_PREFIX:-}" ]; then
+    # the bundled FFmpeg is ours, not a package's: its licence and where its source and build flags are
+    cp -r "$FFMPEG_PREFIX/share/licenses/ffmpeg" "$lic/libraries/ffmpeg"
+    # and it really is the one bundled: none of the system FFmpeg's encoder libraries came along
+    if ls "$appdir"/usr/lib/libx265.so* "$appdir"/usr/lib/libSvtAv1Enc.so* >/dev/null 2>&1; then
+        echo "the system FFmpeg was bundled instead of $FFMPEG_PREFIX" >&2
+        exit 1
+    fi
+fi
 
 mkdir -p "$(dirname "$out")"
 # update information for AppImage updaters (Gear Lever, AppImageUpdate, ...): they fetch only the changed blocks of the
 # newest file of the channel. appimagetool runs zsyncmake, which writes the .zsync file into the current folder, so run it
 # in the output folder to get it next to the AppImage.
-(cd "$(dirname "$out")" && ARCH=x86_64 "$tools/appimagetool" --no-appstream -u "$update_info" "$appdir" "$(basename "$out")")
+# zstd in 1 MiB blocks at level 19 instead of 128 KiB at the default level: about 8% smaller (level 22 gave nothing more)
+squash=(--mksquashfs-opt -b --mksquashfs-opt 1M --mksquashfs-opt -Xcompression-level --mksquashfs-opt 19)
+(cd "$(dirname "$out")" && ARCH=x86_64 "$tools/appimagetool" --no-appstream "${squash[@]}" -u "$update_info" "$appdir" "$(basename "$out")")
 [ -f "$out.zsync" ] || { echo "no $out.zsync was written (is zsyncmake installed?)" >&2; exit 1; }
 echo "built $out ($(du -h "$out" | cut -f1)) and $out.zsync"

@@ -55,7 +55,8 @@ jobs:
         run: |
           mkdir -p ~/apt-archives/partial
           sudo apt-get update
-          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf dconf-gsettings-backend desktop-file-utils file zsync
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf dconf-gsettings-backend desktop-file-utils file zsync \
+            nasm libgnutls28-dev libxml2-dev libva-dev libvdpau-dev libdrm-dev zlib1g-dev libbz2-dev
 
       - name: Update Rust
         run: rustup update stable
@@ -70,12 +71,33 @@ jobs:
           KB_UPDATE_REPOSITORY: anas1412/kurobayomi
         run: cargo build --release --locked --features updater
 
+      # A decode-only FFmpeg replaces Ubuntu's in the AppImage (scripts/build-ffmpeg.sh says why); built once and kept
+      # until the script changes
+      - name: Cache the FFmpeg build
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+
+      - name: Build FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: scripts/build-ffmpeg.sh ~/ffmpeg
+
       - name: Pack the AppImage
         run: |
-          scripts/build-appimage.sh target/release/kurobayomi target/appimage/Kurobayomi-x86_64.AppImage
+          FFMPEG_PREFIX=~/ffmpeg scripts/build-appimage.sh target/release/kurobayomi target/appimage/Kurobayomi-x86_64.AppImage
           cd target/appimage
           sha256sum Kurobayomi-x86_64.AppImage > SHA256SUMS
           cat SHA256SUMS
+
+      # the binary's debug info, left out of the AppImage: with it addr2line turns a crash report's addresses into files
+      # and lines
+      - name: Keep the debug info
+        uses: actions/upload-artifact@v4
+        with:
+          name: kurobayomi-${{ env.VERSION }}-debug
+          path: target/appimage/*.debug
 
       - name: Offer the AppImage as a download (manual runs only)
         if: github.ref_type != 'tag'
