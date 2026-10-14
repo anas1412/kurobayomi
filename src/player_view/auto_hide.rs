@@ -1,4 +1,4 @@
-//! The player's bars hide by themselves (user, 2026-10-14; `auto_hide_bars`, off by default): while a video plays, the
+//! The player's bars hide by themselves (user, 2026-10-14; `auto_hide_bars`, on by default): while a video plays, the
 //! top bar, the control bar and the cursor fade out after [`IDLE`] without the mouse, a click or a key, and come back on
 //! any of them. They stay while paused or while one of their menus is open. Both bars float over the video, so
 //! hiding them never resizes it. With the setting off the header sits above the video and nothing hides.

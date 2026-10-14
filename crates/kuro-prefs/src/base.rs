@@ -22,7 +22,7 @@ define_prefs! {
         // the user took the AppImage out of the applications menu (About), so it does not add itself again
         appimage_menu_removed: bool = "__APP_STATE_appimage_menu_removed" => false;
         // the reader's and the player's bars hide by themselves while reading or watching (off by default)
-        auto_hide_bars: bool = "auto_hide_bars" => false;
+        auto_hide_bars: bool = "auto_hide_bars" => true;
     }
 }
 

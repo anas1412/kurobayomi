@@ -848,12 +848,13 @@ pub fn open_with(
         keys.connect_key_pressed(move |_, key, _, state| handle_key(&screen, key, state));
     }
     root.add_controller(keys);
-    // with auto-hide, the mouse at the top edge brings the bars back
+    // with auto-hide, the mouse at the top or the bottom edge (where the bars live) brings the bars back
     if screen.auto_hide {
         let motion = gtk::EventControllerMotion::new();
-        let weak = Rc::downgrade(&screen);
+        let (weak, area) = (Rc::downgrade(&screen), root.clone());
         motion.connect_motion(move |_, _, y| {
-            if let Some(screen) = weak.upgrade().filter(|s| y < TOP_EDGE_PX && !s.ui.borrow().menu_visible) {
+            let at_edge = at_bar_edge(y, f64::from(area.height()));
+            if let Some(screen) = weak.upgrade().filter(|s| at_edge && !s.ui.borrow().menu_visible) {
                 set_menu(&screen, true);
             }
         });
@@ -952,8 +953,13 @@ fn apply_fullscreen(screen: &Screen, menu_visible: bool) {
     }
 }
 
-/// How close to the top the mouse brings the hidden bars back, in pixels.
-const TOP_EDGE_PX: f64 = 8.0;
+/// How close to the top or bottom edge the pointer brings the hidden bars back, in pixels.
+const EDGE_PX: f64 = 8.0;
+
+/// Whether a pointer at `y` in an area `height` tall is at the top or the bottom edge, where the bars come back.
+fn at_bar_edge(y: f64, height: f64) -> bool {
+    y < EDGE_PX || (height > 0.0 && y > height - EDGE_PX)
+}
 
 /// Whether the reader's and the player's bars hide by themselves (`auto_hide_bars`, off by default).
 fn auto_hide_bars() -> bool {
@@ -2015,6 +2021,13 @@ mod tests {
     }
 
     /// Hiding and showing the bottom bar must not grow the window: the page area's minimum height stays small.
+    #[test]
+    fn the_bars_come_back_at_the_top_and_the_bottom_edge_only() {
+        assert!(at_bar_edge(2.0, 800.0) && at_bar_edge(796.0, 800.0));
+        assert!(!at_bar_edge(400.0, 800.0));
+        assert!(!at_bar_edge(400.0, 0.0), "no size yet: only the top edge counts");
+    }
+
     #[test]
     fn toggling_the_menu_does_not_grow_the_window() {
         crate::testing::with_display(|| {

@@ -282,7 +282,7 @@ define_prefs! {
     "check_app_updates", Normal, Bool, true, "base", "check_app_updates";
     "__APP_STATE_last_kind", AppState, Str, "anime", "base", "last_kind";
     "__APP_STATE_appimage_menu_removed", AppState, Bool, false, "base", "appimage_menu_removed";
-    "auto_hide_bars", Normal, Bool, false, "base", "auto_hide_bars";
+    "auto_hide_bars", Normal, Bool, true, "base", "auto_hide_bars";
 }
 
 /// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
