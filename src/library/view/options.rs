@@ -77,10 +77,19 @@ pub fn set(prefs: &LibraryPrefs, kind: Kind, show: Show, on: bool, logged_in: &B
     keys(prefs, kind, show, logged_in).iter().try_for_each(|p| p.set(state))
 }
 
-/// The "Sort by" radios of a kind, in its declaration order. Tracker score is offered only with a tracker logged in;
-/// airing time exists for anime only (through `SortType::types`).
+/// Sort types the menu does not offer: HIDDEN ON PURPOSE (user, 2026-10-14: "useless"). Only the menu rows are gone. The
+/// sort types, their labels and the stored values still exist, so a sort saved earlier keeps working; to bring one back,
+/// remove it from this list. Noted in CLAUDE.md.
+const HIDDEN_SORTS: [SortType; 4] = [SortType::TotalItems, SortType::ItemFetchDate, SortType::AiringTime, SortType::Random];
+
+/// Whether the menu offers the "Reverse order" check. HIDDEN ON PURPOSE (user, 2026-10-14), like [`HIDDEN_SORTS`]: the
+/// direction a sort has is kept, and picking another sort keeps it.
+const OFFER_REVERSE: bool = false;
+
+/// The "Sort by" radios of a kind, in its declaration order, without the [`HIDDEN_SORTS`]. Tracker score is offered only
+/// with a tracker logged in.
 pub fn sort_rows(kind: Kind, has_tracker: bool) -> Vec<SortType> {
-    SortType::types(kind).iter().copied().filter(|ty| has_tracker || *ty != SortType::TrackerMean).collect()
+    SortType::types(kind).iter().copied().filter(|ty| !HIDDEN_SORTS.contains(ty) && (has_tracker || *ty != SortType::TrackerMean)).collect()
 }
 
 /// The radio title from the string table (the labels differ between manga and anime).
@@ -180,7 +189,9 @@ fn sections(kind: Kind, has_tracker: bool) -> Vec<Section> {
     let show = Show::ALL.into_iter().filter(|s| has_tracker || *s != Show::Tracked).map(|s| Item::toggle(s.action(), s.label(kind))).collect();
     let mut sort: Vec<Item> =
         sort_rows(kind, has_tracker).into_iter().filter_map(|ty| ty.token(kind).map(|token| Item::radio("sort", token, tr(sort_label(kind, ty))))).collect();
-    sort.push(Item::toggle("reverse", "Reverse order"));
+    if OFFER_REVERSE {
+        sort.push(Item::toggle("reverse", "Reverse order"));
+    }
     vec![
         Section::filter("Show only", show),
         Section::new("Sort by", sort),
@@ -355,11 +366,14 @@ mod tests {
     }
 
     #[test]
-    fn tracker_score_needs_a_tracker_and_airing_time_is_anime_only() {
+    fn tracker_score_needs_a_tracker_and_the_hidden_sorts_are_never_offered() {
         assert!(!sort_rows(Kind::Manga, false).contains(&SortType::TrackerMean));
         assert!(sort_rows(Kind::Manga, true).contains(&SortType::TrackerMean));
-        assert!(sort_rows(Kind::Anime, false).contains(&SortType::AiringTime));
-        assert!(!sort_rows(Kind::Manga, true).contains(&SortType::AiringTime));
+        for kind in [Kind::Manga, Kind::Anime] {
+            for hidden in HIDDEN_SORTS {
+                assert!(!sort_rows(kind, true).contains(&hidden), "{kind:?} {hidden:?} is hidden on purpose");
+            }
+        }
     }
 
     #[test]

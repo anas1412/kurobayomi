@@ -117,3 +117,9 @@ How the nightly works:
 - Shelly cannot read embedded update info, so it needs a one-time `shelly sync appimage Kurobayomi <download url> StaticUrl`; the URL is `https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage`.
 - GTK stays at 4.14 (`v4_14`). Lowering it to 4.6 gave 86 compile errors (file dialogs, launchers, accessibility API, picture content fit); older distros are a job for a Flatpak.
 - `scripts/build-appimage.sh` cannot run on Arch (linuxdeploy's GTK plugin expects the Ubuntu folder layout); test it in an Ubuntu 24.04 container.
+
+## Hidden on purpose (user, 2026-10-14: "useless, hide them and note that we hid them")
+
+These things exist in the code but the UI does not offer them. Bring one back only when the user asks.
+
+- **Library "Sort by" menu** (`src/library/view/options.rs`, both kinds): Total episodes/chapters, Episode/Chapter fetch date, Airing time and Random (`HIDDEN_SORTS`), and the "Reverse order" check (`OFFER_REVERSE`). The sort types, their labels and any stored sort stay valid, so a sort saved earlier still applies; the menu just shows no radio for a hidden one. The episode list of an entry page keeps its own Reverse order (it is that list's main control).
