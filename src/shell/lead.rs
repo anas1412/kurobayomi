@@ -47,8 +47,14 @@ pub fn place(page: Option<&gtk::Widget>, wide: bool) {
             parent.remove(&slot);
         }
         if first { home.prepend(&slot) } else { home.append(&slot) }
+        // the page being left still fades out on screen: it must not flash its slots back in its own header
+        home.set_visible(!wide);
     }
-    let Some(lead) = page.filter(|_| wide).and_then(lead_of) else { return };
+    let Some(lead) = page.and_then(lead_of) else { return };
+    lead.set_visible(true);
+    if !wide {
+        return;
+    }
     let (search_host, menu_host) = hosts();
     for (class, host, first) in [(crate::ui::LEAD_SEARCH, search_host, true), (crate::ui::LEAD_MENU, menu_host, false)] {
         let mut child = lead.first_child();
@@ -83,6 +89,12 @@ mod tests {
             place(Some(page.upcast_ref()), false);
             assert!(search.is_ancestor(&lead) && menu.is_ancestor(&lead), "back home");
             assert!(lead.first_child().expect("a slot").has_css_class(crate::ui::LEAD_SEARCH), "the search first again");
+            place(Some(page.upcast_ref()), true);
+            let other = GBox::new(gtk::Orientation::Vertical, 0);
+            place(Some(other.upcast_ref()), true);
+            assert!(search.is_ancestor(&lead) && !lead.is_visible(), "a page left while wide keeps its slots hidden");
+            place(Some(page.upcast_ref()), false);
+            assert!(lead.is_visible(), "shown again once it is the page on screen");
             place(None, true);
             assert!(search.is_ancestor(&lead), "no page on screen: nothing moves");
         });
