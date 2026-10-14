@@ -34,7 +34,7 @@ pub struct SourceHeader {
     pub bar: gtk::HeaderBar,
     pub search: gtk::ToggleButton,
     pub display: ViewOptions,
-    pub overflow: gtk::MenuButton,
+    pub overflow: Option<gtk::MenuButton>,
 }
 
 pub fn build(deps: HeaderDeps) -> SourceHeader {
@@ -45,7 +45,9 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
     bar.pack_start(&back_button(Rc::clone(&deps.on_back)));
 
     let overflow = overflow_menu(&deps);
-    bar.pack_end(&overflow);
+    if let Some(menu) = &overflow {
+        bar.pack_end(menu);
+    }
 
     let display = display_menu(&deps);
     bar.pack_end(&display.widget);
@@ -91,17 +93,15 @@ fn display_menu(deps: &HeaderDeps) -> ViewOptions {
     menu
 }
 
-fn overflow_menu(deps: &HeaderDeps) -> gtk::MenuButton {
-    let items = overflow_items(deps.is_local, deps.configurable);
-    let labels: Vec<String> = items.iter().map(|item| overflow_label(*item)).collect();
-    let on_overflow = Rc::clone(&deps.on_overflow);
-    let button = crate::ui::menu_button(&labels, move |label| {
-        if let Some(item) = items.iter().find(|item| overflow_label(**item) == label) {
-            on_overflow(*item);
-        }
-    });
-    button.set_tooltip_text(Some(&tr(MsgKey::action_menu_overflow_description)));
-    button
+fn overflow_menu(deps: &HeaderDeps) -> Option<gtk::MenuButton> {
+    let entries = overflow_items(deps.is_local, deps.configurable)
+        .into_iter()
+        .map(|item| {
+            let on_overflow = Rc::clone(&deps.on_overflow);
+            crate::ui::MenuEntry::new(overflow_label(item), move || on_overflow(item))
+        })
+        .collect();
+    crate::ui::menu_button(vec![entries])
 }
 
 #[cfg(test)]

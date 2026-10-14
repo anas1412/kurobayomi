@@ -85,6 +85,14 @@ pub struct Nav {
 }
 
 /// Starts an update of the active category and says what happened: the refresh button and F5 (T-37a-035).
+/// The whole-library pass behind the refresh button and the menu: no category, with the toast of its scope (T-37a-035).
+fn update_whole_library(inner: &Rc<RefCell<Inner>>) {
+    let update = inner.borrow().nav.update.clone();
+    let started = update(None);
+    crate::toast::notify_for(&actions::update_toast(actions::UpdateScope::Library, !started), crate::library::TOAST_TIME);
+    sync_refresh_button(inner);
+}
+
 fn refresh_active(inner: &Rc<RefCell<Inner>>) {
     let (update, category) = {
         let st = inner.borrow();
@@ -172,7 +180,7 @@ impl LibraryView {
         search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
         // the page header sizes it (`ui::page` clamps a search entry to `ui::SEARCH_WIDTH`)
         search.set_hexpand(true);
-        let refresh_button = crate::ui::icon_button("view-refresh-symbolic", &tr(MsgKey::action_update_category));
+        let refresh_button = crate::ui::icon_button("view-refresh-symbolic", &tr(MsgKey::action_update_library));
         let options = options::Options::new(deps.kind);
 
         let tabs = tabs::TabStrip::new();
@@ -318,13 +326,14 @@ impl LibraryView {
         submit(&self.inner);
     }
 
-    /// The header menu's "Update library": a pass over the whole library (no category), with the toast of its scope
-    /// (T-37a-035).
-    pub fn update_library(&self) {
-        let update = self.inner.borrow().nav.update.clone();
-        let started = update(None);
-        crate::toast::notify_for(&actions::update_toast(actions::UpdateScope::Library, !started), crate::library::TOAST_TIME);
-        sync_refresh_button(&self.inner);
+    /// The header menu's "Update category": a pass over the category on show.
+    pub fn update_category(&self) {
+        refresh_active(&self.inner);
+    }
+
+    /// How many categories the library shows tabs for.
+    pub fn category_count(&self) -> usize {
+        self.inner.borrow().built.as_ref().map_or(0, |built| built.pages.len())
     }
 
     /// How many cells the grid shows. Test-only.
@@ -512,15 +521,15 @@ impl LibraryView {
         });
     }
 
-    /// The refresh button (T-26a-102): starts a pass of the active category, says so in a toast, and stays busy
-    /// while a pass of this kind runs.
+    /// The refresh button (T-26a-102): starts a pass of the whole library, says so in a toast, and stays busy
+    /// while a pass of this kind runs. The F5 shortcut keeps updating the active category only.
     fn wire_refresh(&self, weak: &Weak<RefCell<Inner>>) {
         let button = self.inner.borrow().refresh_button.clone();
         sync_refresh_button(&self.inner);
         let weak_click = weak.clone();
         button.connect_clicked(move |_| {
             let Some(inner) = weak_click.upgrade() else { return };
-            refresh_active(&inner);
+            update_whole_library(&inner);
         });
         // a pass that ends, or one started elsewhere, changes the button without a click
         let weak_poll = weak.clone();

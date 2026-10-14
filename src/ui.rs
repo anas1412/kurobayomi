@@ -567,24 +567,98 @@ pub fn popover_menu(rows: impl FnOnce(&gtk::Popover) -> Vec<Button>) -> gtk::Pop
     popover
 }
 
-/// The app's one "more" menu: a native menu of plain entries (the look of the view-options and library menus) on a button
-/// with the one overflow icon. Choosing an entry runs `on(label)`.
-pub fn menu_button(entries: &[String], on: impl Fn(&str) + Clone + 'static) -> gtk::MenuButton {
-    let (model, group) = (gtk::gio::Menu::new(), gtk::gio::SimpleActionGroup::new());
-    for (i, entry) in entries.iter().enumerate() {
-        let (name, on, label) = (format!("e{i}"), on.clone(), entry.clone());
-        let action = gtk::gio::SimpleAction::new(&name, None);
-        action.connect_activate(move |_, _| on(&label));
-        group.add_action(&action);
-        model.append(Some(entry.as_str()), Some(&format!("more.{name}")));
+/// One entry of a "more" menu. `when` hides the entry while it returns false, asked each time the menu opens.
+pub struct MenuEntry {
+    label: String,
+    run: std::rc::Rc<dyn Fn()>,
+    visible: Option<std::rc::Rc<dyn Fn() -> bool>>,
+}
+
+impl MenuEntry {
+    pub fn new(label: impl Into<String>, run: impl Fn() + 'static) -> Self {
+        Self { label: label.into(), run: std::rc::Rc::new(run), visible: None }
     }
-    let button = quiet_menu(gtk::MenuButton::builder().icon_name(OVERFLOW_ICON).menu_model(&model).tooltip_text("More").build());
-    button.insert_action_group("more", Some(&group));
-    button
+
+    pub fn when(mut self, visible: impl Fn() -> bool + 'static) -> Self {
+        self.visible = Some(std::rc::Rc::new(visible));
+        self
+    }
 }
 
 /// The icon of every page's "more" menu.
 pub const OVERFLOW_ICON: &str = "view-more-symbolic";
+
+/// The app's one "more" menu: a native menu (the look of the view-options menu) on a button with the one overflow icon.
+/// `sections` are separated by a line. An entry that is not visible when the menu opens is hidden. `None` when there is
+/// nothing to show, so a page never gets a menu that does nothing.
+pub fn menu_button(sections: Vec<Vec<MenuEntry>>) -> Option<gtk::MenuButton> {
+    let (model, group) = (gtk::gio::Menu::new(), gtk::gio::SimpleActionGroup::new());
+    let mut conditional = Vec::new();
+    let mut n = 0;
+    for entries in sections.into_iter().filter(|section| !section.is_empty()) {
+        let part = gtk::gio::Menu::new();
+        for entry in entries {
+            let name = format!("e{n}");
+            n += 1;
+            let action = gtk::gio::SimpleAction::new(&name, None);
+            let run = entry.run;
+            action.connect_activate(move |_, _| run());
+            group.add_action(&action);
+            let item = gtk::gio::MenuItem::new(Some(entry.label.as_str()), Some(&format!("more.{name}")));
+            if let Some(visible) = entry.visible {
+                // a disabled action hides its item
+                item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
+                action.set_enabled(visible());
+                conditional.push((action, visible));
+            }
+            part.append_item(&item);
+        }
+        model.append_section(None, &part);
+    }
+    if n == 0 {
+        return None;
+    }
+    let button = quiet_menu(gtk::MenuButton::builder().icon_name(OVERFLOW_ICON).menu_model(&model).tooltip_text("More").build());
+    button.update_property(&[gtk::accessible::Property::Label("More")]);
+    button.insert_action_group("more", Some(&group));
+    if !conditional.is_empty() {
+        button.connect_active_notify(move |_| {
+            for (action, visible) in &conditional {
+                action.set_enabled(visible());
+            }
+        });
+    }
+    Some(button)
+}
+
+/// What a main page puts in its header, left to right: search, refresh, the page's own buttons, sort/filter, and the
+/// "more" menu last. Every page builds its row here, so the order and the buttons mean the same everywhere and only the
+/// contents differ.
+#[derive(Default)]
+pub struct HeaderActions {
+    /// The page's search entry; `ui::page` turns it into the shared search toggle.
+    pub search: Option<gtk::SearchEntry>,
+    /// Updates what the page shows (the whole library, the way it is meant everywhere).
+    pub refresh: Option<gtk::Widget>,
+    /// Buttons that only this page has.
+    pub extra: Vec<gtk::Widget>,
+    /// Sort, filter and display options, for a page with a list to shape.
+    pub options: Option<gtk::Widget>,
+    /// The "more" menu: everything else the page can do, in sections.
+    pub menu: Vec<Vec<MenuEntry>>,
+}
+
+impl HeaderActions {
+    pub fn widgets(self) -> Vec<gtk::Widget> {
+        let mut row: Vec<gtk::Widget> = Vec::new();
+        row.extend(self.search.map(|s| s.upcast()));
+        row.extend(self.refresh);
+        row.extend(self.extra);
+        row.extend(self.options);
+        row.extend(menu_button(self.menu).map(|m| m.upcast()));
+        row
+    }
+}
 
 // ---------- spec items ----------
 
@@ -954,12 +1028,17 @@ pub fn toolbar(s: &Screen) -> Vec<gtk::Widget> {
         });
         out.push(b.upcast());
     }
-    if !s.menu.is_empty() {
-        let id = s.id.clone();
-        out.push(menu_button(&s.menu, move |l| {
-            resolve(&id, l);
-        }).upcast());
-    }
+    let entries: Vec<MenuEntry> = s
+        .menu
+        .iter()
+        .map(|label| {
+            let (id, label) = (s.id.clone(), label.clone());
+            MenuEntry::new(label.clone(), move || {
+                resolve(&id, &label);
+            })
+        })
+        .collect();
+    out.extend(menu_button(vec![entries]).map(|menu| menu.upcast::<gtk::Widget>()));
     out
 }
 

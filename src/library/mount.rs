@@ -416,54 +416,24 @@ pub fn build(kind: Kind) -> Option<Built> {
     if let Some(query) = pending.last() {
         view.set_query(query);
     }
-    let menu = header_menu(kind, &view);
     // the view options button carries its own dot while a filter is on (T-37a-056)
     let (search, refresh, options) = view.controls();
-    Some(Built { content: view.widget(), end: vec![search.upcast(), refresh.upcast(), options, menu.upcast()] })
+    let end = crate::ui::HeaderActions { search: Some(search), refresh: Some(refresh.upcast()), options: Some(options), menu: menu_sections(kind, &view), ..Default::default() }.widgets();
+    Some(Built { content: view.widget(), end })
 }
 
-/// The labels of the header menu, section by section: the library update, the local folders, the categories. How the
-/// covers are filtered, sorted and shown is the view options button's.
-pub fn menu_sections(kind: Kind) -> [Vec<(String, &'static str)>; 3] {
+/// The header menu's sections: the category update (only with more than one category; the refresh button updates the whole
+/// library), the local folders, the categories. How the covers are filtered, sorted and shown is the view options button's.
+fn menu_sections(kind: Kind, view: &LibraryView) -> Vec<Vec<crate::ui::MenuEntry>> {
+    use crate::ui::MenuEntry;
     let what = kind.as_str();
-    [
-        vec![(tr(MsgKey::action_update_library), "update-library")],
-        vec![(format!("Add local {what} folder…"), "add-local"), (format!("Rescan local {what} folders"), "rescan-local")],
-        vec![(tr(MsgKey::categories), "categories")],
-    ]
-}
-
-/// The one header menu: a `GtkPopoverMenu` over the actions of a `lib` group on the button.
-fn header_menu(kind: Kind, view: &LibraryView) -> gtk::MenuButton {
-    let model = gtk::gio::Menu::new();
-    for section in menu_sections(kind) {
-        let part = gtk::gio::Menu::new();
-        for (label, action) in section {
-            part.append(Some(&label), Some(&format!("lib.{action}")));
-        }
-        model.append_section(None, &part);
-    }
-    let button = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name(crate::ui::OVERFLOW_ICON).menu_model(&model).tooltip_text("Library menu").build());
-    button.update_property(&[gtk::accessible::Property::Label("Library menu")]);
-    button.insert_action_group("lib", Some(&menu_actions(kind, view)));
-    button
-}
-
-/// The `lib` actions behind the header menu's items.
-fn menu_actions(kind: Kind, view: &LibraryView) -> gtk::gio::SimpleActionGroup {
-    let group = gtk::gio::SimpleActionGroup::new();
-    let add = |name: &str, run: Box<dyn Fn()>| {
-        let action = gtk::gio::SimpleAction::new(name, None);
-        action.connect_activate(move |_, _| run());
-        group.add_action(&action);
-    };
-    let v = view.clone();
-    add("update-library", Box::new(move || v.update_library()));
     let (folder, rescan) = local_folder_actions(kind);
-    add("add-local", folder);
-    add("rescan-local", rescan);
-    add("categories", Box::new(|| crate::ui::open("categories")));
-    group
+    let (update, count) = (view.clone(), view.clone());
+    vec![
+        vec![MenuEntry::new(tr(MsgKey::action_update_category), move || update.update_category()).when(move || count.category_count() > 1)],
+        vec![MenuEntry::new(format!("Add local {what} folder…"), folder), MenuEntry::new(format!("Rescan local {what} folders"), rescan)],
+        vec![MenuEntry::new(tr(MsgKey::categories), || crate::ui::open("categories"))],
+    ]
 }
 
 /// Add-folder and rescan, from the local folder module, for `kind`.
@@ -617,44 +587,25 @@ mod tests {
     }
 
     #[test]
-    fn the_header_menu_holds_only_the_library_actions_once_each() {
-        for kind in [Kind::Anime, Kind::Manga] {
-            let sections = menu_sections(kind);
-            let actions: Vec<&str> = sections.iter().flatten().map(|(_, a)| *a).collect();
-            assert_eq!(actions, ["update-library", "add-local", "rescan-local", "categories"]);
-            let labels: Vec<&str> = sections.iter().flatten().map(|(l, _)| l.as_str()).collect();
-            assert!(!labels.iter().any(|l| l.contains("Update category")), "the header refresh button is the only category update");
-        }
-        assert_eq!(menu_sections(Kind::Anime)[1][0].0, "Add local anime folder…");
-        assert_eq!(menu_sections(Kind::Manga)[1][1].0, "Rescan local manga folders");
-        assert_eq!(menu_sections(Kind::Manga)[2][0].0, "Categories");
-    }
-
-    #[test]
     fn an_unknown_source_shows_its_id_and_no_language() {
         let (_dir, db) = test_db();
         assert_eq!(source_info(&db, Kind::Manga, 42), SourceInfo { name: "42".into(), language: String::new() });
     }
 
+    /// The header menu: the category update (hidden with one category, because the refresh button updates the whole
+    /// library), the local folders and the categories, and the folder items reach the local flow.
     #[test]
-    fn the_real_header_menu_registers_every_action_and_reaches_the_local_flow() {
+    fn the_header_menu_holds_the_library_actions_once_each_and_reaches_the_local_flow() {
         crate::testing::with_display(|| {
             let (_dir, view) = crate::library::view::test_view(crate::library::view::test_nav());
             for (kind, word) in [(Kind::Manga, "manga"), (Kind::Anime, "anime")] {
-                let group = menu_actions(kind, &view);
-                let mut names: Vec<String> = group.list_actions().iter().map(|n| n.to_string()).collect();
-                names.sort();
-                assert_eq!(names, ["add-local", "categories", "rescan-local", "update-library"]);
-                for section in menu_sections(kind) {
-                    for (_, action) in section {
-                        assert!(group.has_action(action), "the menu item lib.{action} has an action");
-                    }
-                }
+                let menu = crate::ui::menu_button(menu_sections(kind, &view)).expect("the library has a menu");
+                let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("a menu"));
+                assert_eq!(labels, [tr(MsgKey::action_update_category), format!("Add local {word} folder…"), format!("Rescan local {word} folders"), tr(MsgKey::categories)]);
+                assert!(!labels.iter().any(|l| l.contains("Update library")), "the refresh button is the only library update");
                 LOCAL_CALLS.with(|c| *c.borrow_mut() = Some(Vec::new()));
-                // through the real button, so the group must be inserted under `lib`
-                let button = header_menu(kind, &view);
-                button.activate_action("lib.add-local", None).expect("lib.add-local");
-                button.activate_action("lib.rescan-local", None).expect("lib.rescan-local");
+                menu.activate_action("more.e1", None).expect("the add item");
+                menu.activate_action("more.e2", None).expect("the rescan item");
                 let calls = LOCAL_CALLS.with(|c| c.borrow_mut().take()).unwrap_or_default();
                 assert_eq!(calls, [format!("{word} add"), format!("{word} rescan")]);
             }

@@ -236,8 +236,9 @@ fn downloads() -> Option<Built> {
 }
 
 fn downloads_view(kind: Kind) -> Built {
-    if let Some((page, search)) = crate::downloads::queue_page::page(kind) {
-        return Built { content: scrolled(&page).upcast(), end: vec![search.upcast()] };
+    if let Some((page, search, menu)) = crate::downloads::queue_page::page(kind) {
+        let end = crate::ui::HeaderActions { search: Some(search), menu: vec![menu], ..Default::default() }.widgets();
+        return Built { content: scrolled(&page).upcast(), end };
     }
     let library = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::label_library));
     library.connect_clicked(|_| open("library"));

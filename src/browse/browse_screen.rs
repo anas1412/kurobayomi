@@ -444,21 +444,11 @@ pub(crate) mod tests {
             let shown = browse(&page);
             assert!(shown.latest.is_some(), "{kind:?}: the source states it supports latest");
             assert!(pump_until(|| shown.listing.loaded_count() > 0), "{kind:?}: the listing loads");
-            let popover = shown.header.overflow.popover().expect("overflow popover");
-            let mut found = Vec::new();
-            fn buttons(widget: &gtk::Widget, out: &mut Vec<gtk::Button>) {
-                if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-                    out.push(button.clone());
-                }
-                let mut child = widget.first_child();
-                while let Some(next) = child {
-                    buttons(&next, out);
-                    child = next.next_sibling();
-                }
-            }
-            buttons(popover.child().expect("child").upcast_ref(), &mut found);
+            let overflow = shown.header.overflow.as_ref().expect("the overflow menu");
+            let labels = crate::widgets::view_options::menu_labels(&overflow.menu_model().expect("a menu"));
             let label = tr(MsgKey::action_open_in_web_view);
-            found.iter().find(|b| b.label().as_deref() == Some(label.as_str())).expect("item").emit_clicked();
+            let item = labels.iter().position(|l| *l == label).expect("item");
+            overflow.activate_action(&format!("more.e{item}"), None).expect("the item's action");
             assert_eq!(*rig.log.borrow(), ["webview https://src.example Src42"], "{kind:?}");
         }
     }

@@ -1,4 +1,4 @@
-//! The download queue page (lane D): one kind's queue as a list, with Pause or Resume for it,
+//! The download queue page (lane D): one kind's queue as a list, with Pause or Resume and Clear in the header menu,
 //! Clear, and the shared download button on each row (a click cancels, or retries a failed row). The commands go to the
 //! one download service (`Downloads`), and the rows come from its snapshot. A unit whose source is not installed is an
 //! ordinary row that reads "Waiting for source". A row's right-click menu offers Cancel, Retry (a failed row), Move to
@@ -27,38 +27,21 @@ use crate::widgets::download_button::{DownloadButton, Request};
 /// How often the page checks the queue.
 const REFRESH: Duration = Duration::from_secs(1);
 
-/// The queue page of one kind and its title search for the page header, or `None` when the app runs no download
-/// service (the Download tab then shows its empty state).
-pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry)> {
+/// The queue page of one kind, its title search and its "more" menu entries (Pause or Resume, Clear queue) for the page
+/// header, or `None` when the app runs no download service (the Download tab then shows its empty state).
+pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry, Vec<crate::ui::MenuEntry>)> {
     let downloads = live::downloads()?;
     let column = crate::ui::column();
-    // the shared top row of a page (`ui::pill_row`), as the library's categories
-    let actions = crate::ui::pill_row();
-    let toggle = gtk::Button::new();
-    let clear = gtk::Button::with_label("Clear");
-    actions.append(&toggle);
-    actions.append(&clear);
     let list = crate::ui::boxed_list();
     // the app's empty state (icon, line), as the library and history show theirs
     let (empty, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", &[]);
     empty.set_vexpand(true);
-    column.append(&actions);
     column.append(&list);
     column.append(&empty);
     let search = crate::ui::list_search(&list);
 
-    let page = Page { kind, downloads: downloads.clone(), toggle: toggle.clone(), actions: actions.clone(), list, empty, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
-    let on_toggle = page.clone();
-    toggle.connect_clicked(move |_| {
-        if running(&on_toggle.downloads, kind) {
-            on_toggle.downloads.pause(kind);
-        } else {
-            on_toggle.downloads.start(kind);
-        }
-        on_toggle.draw();
-    });
-    let on_clear = downloads.clone();
-    clear.connect_clicked(move |_| on_clear.clear(kind));
+    let page = Page { kind, downloads: downloads.clone(), list, empty, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
+    let menu = menu_entries(&downloads, kind);
 
     page.draw();
     live::follow(&column, {
@@ -78,7 +61,7 @@ pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry)> {
         refresh.draw();
         glib::ControlFlow::Continue
     });
-    Some((column.upcast(), search))
+    Some((column.upcast(), search, menu))
 }
 
 /// The state the page draws: the service and the widgets that change.
@@ -86,9 +69,6 @@ pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry)> {
 struct Page {
     kind: Kind,
     downloads: Downloads,
-    toggle: gtk::Button,
-    /// Resume or Pause and Clear: hidden while nothing is queued.
-    actions: gtk::Box,
     list: gtk::ListBox,
     empty: gtk::Box,
     /// The key of the rows last drawn. The list is rebuilt only when it changes.
@@ -99,7 +79,6 @@ struct Page {
 
 impl Page {
     fn draw(&self) {
-        self.toggle.set_label(if running(&self.downloads, self.kind) { "Pause" } else { "Resume" });
         let model = lane_model(&self.downloads, self.kind);
         let items = model.flat();
         let key: String = items.iter().map(row_key).collect::<Vec<_>>().join("|");
@@ -112,7 +91,6 @@ impl Page {
         }
         self.buttons.borrow_mut().clear();
         let empty = items.is_empty();
-        self.actions.set_visible(!empty);
         self.empty.set_visible(empty);
         self.list.set_visible(!empty);
         for item in items {
@@ -175,6 +153,19 @@ fn move_item(downloads: &Downloads, kind: Kind, id: i64, top: bool) {
 /// Whether `kind`'s lane is running.
 fn running(downloads: &Downloads, kind: Kind) -> bool {
     downloads.snapshot().run(kind) == RunState::Running
+}
+
+/// The header menu: Pause while the lane runs, Resume while it does not, and Clear queue. The menu is never empty, even
+/// with nothing queued.
+fn menu_entries(downloads: &Downloads, kind: Kind) -> Vec<crate::ui::MenuEntry> {
+    use crate::ui::MenuEntry;
+    let (pause, resume, clear) = (downloads.clone(), downloads.clone(), downloads.clone());
+    let (when_pause, when_resume) = (downloads.clone(), downloads.clone());
+    vec![
+        MenuEntry::new("Pause downloads", move || pause.pause(kind)).when(move || running(&when_pause, kind)),
+        MenuEntry::new("Resume downloads", move || resume.start(kind)).when(move || !running(&when_resume, kind)),
+        MenuEntry::new("Clear queue", move || clear.clear(kind)),
+    ]
 }
 
 /// What one row shows, as a key: a change of any of these rebuilds the list.

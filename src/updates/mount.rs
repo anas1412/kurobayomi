@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::prelude::*;
-use gtk::{Box as GBox, Orientation as O};
+use gtk::Box as GBox;
 use kuro_platform::kind::Kind;
 use gtk::glib;
 use kuro_i18n::{MsgKey, tr};
@@ -64,10 +64,10 @@ pub fn history() -> Option<Built> {
     }
     let (anime, manga) = (HistoryScreen::new(Kind::Anime), HistoryScreen::new(Kind::Manga));
     let view = |screen: &Rc<HistoryScreen>| {
-        let clear = crate::ui::icon_button("edit-clear-all-symbolic", &tr(MsgKey::pref_clear_history));
         let target = Rc::clone(screen);
-        clear.connect_clicked(move |_| target.ask_clear());
-        Built { content: screen.widget().clone().upcast(), end: vec![screen.search().clone().upcast(), clear.upcast()] }
+        let menu = vec![vec![crate::ui::MenuEntry::new(tr(MsgKey::pref_clear_history), move || target.ask_clear())]];
+        let end = crate::ui::HeaderActions { search: Some(screen.search().clone()), menu, ..Default::default() }.widgets();
+        Built { content: screen.widget().clone().upcast(), end }
     };
     let (page, _) = tab_page([view(&anime), view(&manga)]);
     HISTORY.with(|h| *h.borrow_mut() = vec![anime, manga]);
@@ -103,33 +103,29 @@ pub fn updates() -> Option<Built> {
     let mut refresh: Vec<gtk::Button> = Vec::new();
     let views = screens.each_ref().map(|screen| {
         let kind = screen.kind();
-        let mut end: Vec<gtk::Widget> = Vec::new();
+        let mut actions = crate::ui::HeaderActions::default();
         for item in &spec.toolbar {
-            let button = if item.label == UPDATE_LIBRARY {
+            if item.label == UPDATE_LIBRARY {
                 let button = crate::ui::icon_button(&item.icon, &item.label);
                 button.connect_clicked(move |button| update_library(button, kind));
                 refresh.push(button.clone());
-                button
+                actions.refresh = Some(button.upcast());
             } else if item.label == VIEW_UPCOMING {
-                // each kind has its own Upcoming page, as in the source (the anime tab opens the anime one); the
-                // calendar alone does not say what it opens, so the button carries a word
-                let button = labelled_button(&item.icon, &tr(MsgKey::label_upcoming), &item.label);
-                button.connect_clicked(move |_| {
+                // each kind has its own Upcoming page, as in the source (the anime tab opens the anime one)
+                actions.menu.push(vec![crate::ui::MenuEntry::new(tr(MsgKey::label_upcoming), move || {
                     UPCOMING_KIND.with(|k| k.set(kind));
                     crate::ui::open("upcoming");
-                });
-                button
+                })]);
             } else {
                 let button = crate::ui::icon_button(&item.icon, &item.label);
                 let label = item.label.clone();
                 button.connect_clicked(move |_| {
                     crate::ui::resolve("updates", &label);
                 });
-                button
-            };
-            end.push(button.upcast());
+                actions.extra.push(button.upcast());
+            }
         }
-        Built { content: screen.widget().clone().upcast(), end }
+        Built { content: screen.widget().clone().upcast(), end: actions.widgets() }
     });
     let (page, stack) = tab_page(views);
     page.connect_map(|_| reset_new_updates());
@@ -161,15 +157,6 @@ pub fn updates() -> Option<Built> {
 }
 
 /// A header button with an icon and a word; `tip` is the longer tooltip.
-fn labelled_button(icon: &str, label: &str, tip: &str) -> gtk::Button {
-    let content = GBox::new(O::Horizontal, crate::library::layout::SPACE_S);
-    content.append(&gtk::Image::from_icon_name(icon));
-    content.append(&gtk::Label::new(Some(label)));
-    let button = gtk::Button::builder().child(&content).tooltip_text(tip).build();
-    button.update_property(&[gtk::accessible::Property::Label(tip)]);
-    button
-}
-
 /// Clears the two new-updates counters (T-42b-020).
 fn reset_new_updates() {
     let library = &data::app().library;

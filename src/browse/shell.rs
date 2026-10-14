@@ -61,8 +61,15 @@ impl BrowseShell {
 
         let inner = Rc::new(Inner { stack, search: gtk::SearchEntry::new(), deps });
         // the shared header row: the Anime | Manga switch at the start, the search toggle and the actions at the end, the bar under it
-        let mut end: Vec<gtk::Widget> = vec![inner.search.clone().upcast(), gtk::StackSwitcher::builder().stack(&inner.stack).build().upcast()];
-        end.extend(inner.header_actions());
+        let (options, menu) = inner.header_actions();
+        let end = crate::ui::HeaderActions {
+            search: Some(inner.search.clone()),
+            extra: vec![gtk::StackSwitcher::builder().stack(&inner.stack).build().upcast()],
+            options: Some(options),
+            menu,
+            ..Default::default()
+        }
+        .widgets();
         let root = crate::ui::page("", &inner.stack, end, false);
         keep_alive(&root, &inner);
 
@@ -157,7 +164,8 @@ impl Inner {
         self.close_search();
     }
 
-    fn header_actions(self: &Rc<Self>) -> Vec<gtk::Widget> {
+    /// The filter button and the "more" menu entries of the header (the shared row is `ui::HeaderActions`).
+    fn header_actions(self: &Rc<Self>) -> (gtk::Widget, Vec<Vec<crate::ui::MenuEntry>>) {
         let filter = crate::ui::icon_button("view-sort-descending-symbolic", &tr(MsgKey::action_filter));
         let weak = Rc::downgrade(self);
         filter.connect_clicked(move |_| {
@@ -166,18 +174,20 @@ impl Inner {
             }
         });
 
-        let entries = vec![tr(MsgKey::action_global_search), tr(MsgKey::label_extension_repos)];
-        let weak = Rc::downgrade(self);
-        let menu = crate::ui::menu_button(&entries, move |label| {
-            let Some(inner) = weak.upgrade() else { return };
-            if label == tr(MsgKey::action_global_search) {
-                (inner.deps.on_route)(reselect_route(inner.visible()));
-            } else {
-                (inner.deps.on_repos)(inner.visible().kind());
-            }
-        });
-        menu.set_tooltip_text(Some(&tr(MsgKey::action_menu)));
-        vec![filter.upcast(), menu.upcast()]
+        let (global, repos) = (Rc::downgrade(self), Rc::downgrade(self));
+        let entries = vec![
+            crate::ui::MenuEntry::new(tr(MsgKey::action_global_search), move || {
+                if let Some(inner) = global.upgrade() {
+                    (inner.deps.on_route)(reselect_route(inner.visible()));
+                }
+            }),
+            crate::ui::MenuEntry::new(tr(MsgKey::label_extension_repos), move || {
+                if let Some(inner) = repos.upgrade() {
+                    (inner.deps.on_repos)(inner.visible().kind());
+                }
+            }),
+        ];
+        (filter.upcast(), vec![entries])
     }
 }
 
@@ -293,12 +303,11 @@ pub(crate) mod tests {
         let mut all = Vec::new();
         walk(shell.root.upcast_ref(), &mut all);
         let menu = all.iter().find_map(|w| w.downcast_ref::<gtk::MenuButton>().cloned()).expect("the header menu");
-        let mut entries = Vec::new();
-        walk(menu.popover().expect("the menu").upcast_ref(), &mut entries);
+        let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("the menu"));
         let press = |key: MsgKey| {
             let label = tr(key);
-            let entry = entries.iter().find_map(|w| w.downcast_ref::<gtk::Button>().filter(|b| b.label().as_deref() == Some(label.as_str())).cloned());
-            entry.unwrap_or_else(|| panic!("no menu entry {label}")).emit_clicked();
+            let item = labels.iter().position(|l| *l == label).unwrap_or_else(|| panic!("no menu entry {label}"));
+            menu.activate_action(&format!("more.e{item}"), None).expect("the entry's action");
         };
         shell.inner.select(BrowsePage::MangaSources);
         press(MsgKey::action_global_search);
