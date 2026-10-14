@@ -14,7 +14,7 @@ use gtk::glib;
 #[cfg(test)]
 use gtk::glib::translate::IntoGlib;
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Label, ListBoxRow, Orientation as O};
+use gtk::{Align, Box as GBox, Label, ListBoxRow, Orientation as O};
 use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
@@ -321,16 +321,14 @@ fn open_entry(kind: Kind, id: i64) {
     }
 }
 
-/// The help button: opens the Upcoming guide in the default browser.
-fn help_button() -> Button {
-    let button = crate::ui::icon_button("help-browser-symbolic", &tr(MsgKey::upcoming_guide));
-    button.connect_clicked(|_| {
+/// The "more" menu: the Upcoming guide, which opens in the default browser.
+fn help_menu() -> Vec<Vec<crate::ui::MenuEntry>> {
+    vec![vec![crate::ui::MenuEntry::new(tr(MsgKey::upcoming_guide), || {
         crate::ui::open_link(layout::help_url(), Some(crate::ui::window().upcast_ref()));
-    });
-    button
+    })]]
 }
 
-/// The navigation page of one kind: the title Upcoming, the back arrow, the help button, and Escape that goes back. `None`
+/// The navigation page of one kind: the title Upcoming, the back arrow, the guide in the more menu, and Escape that goes back. `None`
 /// before the app data is open.
 pub fn build(kind: Kind) -> Option<GBox> {
     if !data::is_installed() {
@@ -343,7 +341,7 @@ pub fn build(kind: Kind) -> Option<GBox> {
 
 /// The navigation page around a screen, and the owner that keeps the screen alive until the page is destroyed.
 fn assemble(screen: Rc<UpcomingPage>) -> GBox {
-    let page = crate::ui::page(&tr(MsgKey::label_upcoming), &screen.root, vec![help_button().upcast()], true);
+    let page = crate::ui::page(&tr(MsgKey::label_upcoming), &screen.root, crate::ui::HeaderActions { menu: help_menu(), ..Default::default() }.widgets(), true);
     crate::ui::tag(&page, "upcoming");
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed(|_, key, _, _| {
@@ -528,9 +526,10 @@ mod tests {
     }
 
     #[test]
-    fn upcoming_page_help_button_has_the_guide_tooltip() {
+    fn upcoming_page_help_entry_is_the_guide() {
         crate::testing::with_display(|| {
-            assert_eq!(help_button().tooltip_text().as_deref(), Some("Upcoming Guide"));
+            let menu = crate::ui::menu_button(help_menu()).expect("the page has a menu");
+            assert_eq!(crate::widgets::view_options::menu_labels(&menu.menu_model().expect("a menu")), ["Upcoming Guide"]);
             assert_eq!(layout::help_url(), "https://aniyomi.org/docs/faq/updates/upcoming");
         });
     }

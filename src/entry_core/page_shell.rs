@@ -38,6 +38,8 @@ pub struct ItemHeaderRow {
     pub row: gtk::Widget,
     pub count: Label,
     pub missing: Label,
+    /// "Download all", at the right end of the row; the page shows it for an entry that can queue downloads.
+    pub download_all: Button,
 }
 
 pub fn item_header_row() -> ItemHeaderRow {
@@ -49,9 +51,11 @@ pub fn item_header_row() -> ItemHeaderRow {
     // the inset of a card (`list_view`), so the count lines up with the first row
     row.set_margin_start(16);
     row.set_margin_end(16);
+    let download_all = Button::builder().label("Download all").css_classes(["flat"]).valign(gtk::Align::Center).visible(false).build();
     row.append(&count);
     row.append(&missing);
-    ItemHeaderRow { row: crate::clamp::clamp(&row, crate::ui::PAGE_WIDTH).upcast(), count, missing }
+    row.append(&download_all);
+    ItemHeaderRow { row: crate::clamp::clamp(&row, crate::ui::PAGE_WIDTH).upcast(), count, missing, download_all }
 }
 
 /// The Start or Resume button: the play icon and its label. The page places it over the list.

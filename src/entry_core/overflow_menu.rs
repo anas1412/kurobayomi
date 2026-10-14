@@ -1,13 +1,12 @@
 //! The overflow menu ("⋮") of the manga page and the anime page, one for both (T-39a-075, T-39a-057). Upstream:
-//! `EntryToolbar.kt` (the order: change intro length, Refresh, edit categories, Migrate, Share, Open in browser, Settings)
-//! and the screens' conditions: a favorite for the category item, Migrate and the intro length; episodes for the intro
-//! length; an HTTP source for Share and Open in browser; a configurable source for Settings. The model is pure; the
-//! popover, the address copy and the browser launch are the shared widgets the two pages call.
+//! `EntryToolbar.kt` (the order: change intro length, edit categories, Migrate, Share, Open in browser, Settings; Refresh
+//! is the header button, not a menu item) and the screens' conditions: a favorite for the category item, Migrate and the
+//! intro length; episodes for the intro length; an HTTP source for Share and Open in browser; a configurable source for
+//! Settings. The model is pure; the menu entries are built by the page, and the address copy and the browser launch are
+//! the shared helpers the two pages call.
 
 use gtk::prelude::*;
 use kuro_i18n::{Arg, MsgKey, tr, trf};
-
-use crate::entry_core::page_shell::plain_row;
 
 /// Whether Open in browser may launch this address: an `http` or `https` one only.
 pub fn can_launch(url: &str) -> bool {
@@ -20,7 +19,6 @@ pub fn can_launch(url: &str) -> bool {
 pub enum Item {
     /// The skip-intro length of an anime's episodes.
     ChangeIntro,
-    Refresh,
     EditCategories,
     Migrate,
     Share,
@@ -38,13 +36,12 @@ pub struct Entry {
     pub configurable_source: bool,
 }
 
-/// The items the menu shows for `entry`. Refresh is always there.
+/// The items the menu shows for `entry`; none for a plain entry.
 pub fn items(entry: Entry) -> Vec<Item> {
     let mut items = Vec::new();
     if entry.favorite && entry.has_intro_length {
         items.push(Item::ChangeIntro);
     }
-    items.push(Item::Refresh);
     if entry.favorite {
         items.push(Item::EditCategories);
         items.push(Item::Migrate);
@@ -63,28 +60,11 @@ pub fn items(entry: Entry) -> Vec<Item> {
 pub fn label(item: Item) -> String {
     tr(match item {
         Item::ChangeIntro => MsgKey::action_change_intro_length,
-        Item::Refresh => MsgKey::action_webview_refresh,
         Item::EditCategories => MsgKey::action_edit_categories,
         Item::Migrate => MsgKey::action_migrate,
         Item::Share => MsgKey::action_share,
         Item::OpenInBrowser => MsgKey::action_open_in_browser,
         Item::Settings => MsgKey::action_settings,
-    })
-}
-
-/// The menu as a popover of flat rows, built each time it opens so the items follow the entry. Refresh is greyed while
-/// one runs (one refresh at a time). `on_pick` runs with the chosen item.
-pub fn popover(entry: Entry, refreshing: bool, on_pick: impl Fn(Item) + Clone + 'static) -> gtk::Popover {
-    crate::ui::popover_menu(|popover| {
-        items(entry)
-            .into_iter()
-            .map(|item| {
-                let on_pick = on_pick.clone();
-                let row = plain_row(&label(item), popover, move |_| on_pick(item));
-                row.set_sensitive(item != Item::Refresh || !refreshing);
-                row
-            })
-            .collect()
     })
 }
 
@@ -113,32 +93,32 @@ mod tests {
     }
 
     #[test]
-    fn a_plain_entry_offers_refresh_only() {
-        assert_eq!(items(entry(false, true, false, false)), vec![Item::Refresh]);
-        assert_eq!(items(entry(false, false, false, false)), vec![Item::Refresh]);
+    fn a_plain_entry_offers_nothing() {
+        assert_eq!(items(entry(false, true, false, false)), vec![]);
+        assert_eq!(items(entry(false, false, false, false)), vec![]);
     }
 
     #[test]
     fn a_favorite_with_an_intro_length_offers_the_library_items_in_android_order() {
         assert_eq!(
             items(entry(true, true, true, true)),
-            vec![Item::ChangeIntro, Item::Refresh, Item::EditCategories, Item::Migrate, Item::Share, Item::OpenInBrowser, Item::Settings],
+            vec![Item::ChangeIntro, Item::EditCategories, Item::Migrate, Item::Share, Item::OpenInBrowser, Item::Settings],
         );
     }
 
     #[test]
     fn a_manga_and_a_season_entry_never_offer_the_intro_length() {
-        assert_eq!(items(entry(true, false, false, false)), vec![Item::Refresh, Item::EditCategories, Item::Migrate]);
+        assert_eq!(items(entry(true, false, false, false)), vec![Item::EditCategories, Item::Migrate]);
         assert_eq!(
             items(entry(true, false, true, true)),
-            vec![Item::Refresh, Item::EditCategories, Item::Migrate, Item::Share, Item::OpenInBrowser, Item::Settings],
+            vec![Item::EditCategories, Item::Migrate, Item::Share, Item::OpenInBrowser, Item::Settings],
         );
     }
 
     #[test]
     fn settings_shows_only_for_a_configurable_source_and_share_and_open_only_for_http() {
-        assert_eq!(items(entry(false, true, false, true)), vec![Item::Refresh, Item::Settings]);
-        assert_eq!(items(entry(false, true, true, false)), vec![Item::Refresh, Item::Share, Item::OpenInBrowser]);
+        assert_eq!(items(entry(false, true, false, true)), vec![Item::Settings]);
+        assert_eq!(items(entry(false, true, true, false)), vec![Item::Share, Item::OpenInBrowser]);
     }
 
     #[test]

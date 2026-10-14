@@ -35,7 +35,7 @@ use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
 use super::download_backend::EntryDownloads;
 use super::dispatch::{bottom_cmds, menu_cmds};
 use super::details_error::{DetailsError, required};
-use crate::entry_core::download_menu::{self, DownloadAmount, menu_visible};
+use crate::entry_core::download_menu::{DownloadAmount, menu_visible};
 use super::intro_dialog;
 use super::torrent_server;
 use crate::entry_core::overflow_menu::{self, Entry as OverflowEntry, Item as OverflowItem};
@@ -153,7 +153,10 @@ struct View {
     env: Env,
     show_airing: bool,
     refresh_button: Button,
-    download_menu: gtk::MenuButton,
+    /// "Download all", in the head of the list (not a menu): queues every unseen or unread item.
+    download_all: Button,
+    /// The "more" menu of the top bar; hidden while it has nothing to offer.
+    overflow_button: Option<gtk::MenuButton>,
     bottom: gtk::Revealer,
     bottom_row: GBox,
     stack: gtk::Stack,
@@ -224,12 +227,30 @@ fn torrent_enabled(prefs: &PrefStore) -> bool {
     prefs.pref::<bool>("pref_torrserver_enable", false).get()
 }
 
+/// The "more" menu of the top bar: its entries read the entry on show each time the menu opens, so the items follow it.
+fn overflow_sections(late: &Rc<RefCell<Weak<View>>>) -> Vec<Vec<crate::ui::MenuEntry>> {
+    let entry = |item: OverflowItem| {
+        let (run, shown) = (Rc::clone(late), Rc::clone(late));
+        crate::ui::MenuEntry::new(overflow_menu::label(item), move || {
+            if let Some(view) = run.borrow().upgrade() {
+                view.run_overflow(item);
+            }
+        })
+        .when(move || shown.borrow().upgrade().is_some_and(|view| view.overflow_items().contains(&item)))
+    };
+    vec![
+        vec![entry(OverflowItem::ChangeIntro), entry(OverflowItem::EditCategories), entry(OverflowItem::Migrate)],
+        vec![entry(OverflowItem::Share), entry(OverflowItem::OpenInBrowser)],
+        vec![entry(OverflowItem::Settings)],
+    ]
+}
+
 fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let kind = env.kind;
     let stack = page_shell::state_stack();
 
     // the list head: the item header row, the refresh spinner and the empty line
-    let page_shell::ItemHeaderRow { row: header_row, count, missing } = page_shell::item_header_row();
+    let page_shell::ItemHeaderRow { row: header_row, count, missing, download_all } = page_shell::item_header_row();
     // the refresh spinner of the list head: inline size, spinning only while a refresh runs
     let spinner = ui::loading(ui::LoadSize::Inline);
     spinner.set_spinning(false);
@@ -403,12 +424,16 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     let (episode_spec, season_spec) = (list_options::item_spec(kind), list_options::season_spec());
     let options = ViewOptions::new(list_options::TOOLTIP, &episode_spec.sections());
     let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
-    // the Download menu: shown for an entry that is not local, when the app can queue downloads
-    let download_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).visible(false).build());
-    // the overflow menu: the items `overflow::items` gives for this entry and its source (T-39a-075)
-    let overflow_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name(crate::ui::OVERFLOW_ICON).tooltip_text(tr(MsgKey::action_menu_overflow_description)).build());
-    let toolbar: Vec<gtk::Widget> =
-        vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), options.widget.clone().upcast(), overflow_menu.clone().upcast()];
+    // the header row every page shares (`ui::HeaderActions`); the "more" menu holds the items `overflow_menu::items` gives
+    // for this entry and its source (T-39a-075), and Download all is in the head of the list
+    let toolbar = crate::ui::HeaderActions {
+        refresh: Some(refresh_button.clone().upcast()),
+        options: Some(options.widget.clone().upcast()),
+        menu: overflow_sections(&late),
+        ..Default::default()
+    }
+    .widgets();
+    let overflow_button = toolbar.iter().find_map(|w| w.downcast_ref::<gtk::MenuButton>().cloned());
     let page = ui::page("", &stack, toolbar.clone(), false);
     ui::tag(&page, if kind.is_anime() { "anime_entry_details" } else { "manga_entry_details" });
     let (header, title, back) = page_shell::header_with_back(&page);
@@ -420,7 +445,8 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
         env,
         show_airing,
         refresh_button: refresh_button.clone(),
-        download_menu: download_menu.clone(),
+        download_all: download_all.clone(),
+        overflow_button,
         bottom,
         bottom_row,
         stack,
@@ -500,22 +526,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
             }
         },
     );
-    download_menu.set_create_popup_func({
-        let weak = weak.clone();
-        move |button| {
-            if let Some(view) = weak.upgrade() {
-                button.set_popover(Some(&view.download_popover()));
-            }
-        }
-    });
-    overflow_menu.set_create_popup_func({
-        let weak = weak.clone();
-        move |button| {
-            if let Some(view) = weak.upgrade() {
-                button.set_popover(Some(&view.overflow_popover()));
-            }
-        }
-    });
+    download_all.connect_clicked(on_view(|v| v.run_download(DownloadAmount::AllUnread)));
     *late.borrow_mut() = weak.clone();
     fab.connect_clicked(on_view(View::open_next));
     back.connect_clicked(on_view(|v| {
@@ -800,7 +811,10 @@ impl View {
         ));
         // a local or stub source has no downloads to queue (`isLocalOrStub`, T-39b-059)
         let local_or_stub = m.is_local() || self.env.backend.source_info(m.entry.source).stub;
-        self.download_menu.set_visible(menu_visible(local_or_stub, self.env.backend.has_download_handler()));
+        self.download_all.set_visible(menu_visible(local_or_stub, self.env.backend.has_download_handler()));
+        if let Some(button) = &self.overflow_button {
+            button.set_visible(!self.overflow_items().is_empty());
+        }
         // the button stays while nothing is selected, and is disabled when no episode is unseen (T-EPS-NEXT-1)
         let fab = m.fab();
         self.fab.set_visible(!m.selection.is_active());
@@ -1179,37 +1193,28 @@ impl View {
         *self.seasons_shown.borrow_mut() = Some(key);
     }
 
-    /// The overflow menu (`overflow_menu`). Built each time it opens, so the items follow the entry.
-    fn overflow_popover(self: &Rc<Self>) -> gtk::Popover {
-        let entry = {
-            let model = self.model.borrow();
-            model.as_ref().filter(|m| m.accepts_dispatch()).map(|m| {
-                let source = m.entry.source;
-                (
-                    OverflowEntry {
-                        favorite: m.entry.favorite,
-                        has_intro_length: m.entry.fetch_type() == FetchType::Episodes,
-                        http_source: self.env.backend.is_http_source(source),
-                        configurable_source: self.env.backend.is_configurable_source(source),
-                    },
-                    m.flow.refreshing,
-                )
-            })
-        };
-        let Some((entry, refreshing)) = entry else { return gtk::Popover::new() };
-        let weak = Rc::downgrade(self);
-        overflow_menu::popover(entry, refreshing, move |item| {
-            let Some(view) = weak.upgrade() else { return };
-            match item {
-                OverflowItem::ChangeIntro => view.open_intro_length(),
-                OverflowItem::Refresh => view.refresh(),
-                OverflowItem::EditCategories => view.open_categories(),
-                OverflowItem::Migrate => view.migrate(),
-                OverflowItem::Share => view.share(),
-                OverflowItem::OpenInBrowser => view.open_in_browser(),
-                OverflowItem::Settings => view.open_source_preferences(),
-            }
+    /// The items the "more" menu offers for the entry on show (`overflow_menu::items`); none before the entry loads.
+    fn overflow_items(&self) -> Vec<OverflowItem> {
+        let model = self.model.borrow();
+        let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return Vec::new() };
+        let source = m.entry.source;
+        overflow_menu::items(OverflowEntry {
+            favorite: m.entry.favorite,
+            has_intro_length: m.entry.fetch_type() == FetchType::Episodes,
+            http_source: self.env.backend.is_http_source(source),
+            configurable_source: self.env.backend.is_configurable_source(source),
         })
+    }
+
+    fn run_overflow(self: &Rc<Self>, item: OverflowItem) {
+        match item {
+            OverflowItem::ChangeIntro => self.open_intro_length(),
+            OverflowItem::EditCategories => self.open_categories(),
+            OverflowItem::Migrate => self.migrate(),
+            OverflowItem::Share => self.share(),
+            OverflowItem::OpenInBrowser => self.open_in_browser(),
+            OverflowItem::Settings => self.open_source_preferences(),
+        }
     }
 
     /// Change intro length (T-39a-075): the wheel of the entry's skip-intro length. OK stores it through the runner.
@@ -1265,16 +1270,7 @@ impl View {
         }
     }
 
-    /// The Download menu (`download_menu`): the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
-    fn download_popover(self: &Rc<Self>) -> gtk::Popover {
-        let weak = Rc::downgrade(self);
-        download_menu::popover(self.env.kind, move |amount| {
-            if let Some(view) = weak.upgrade() {
-                view.run_download(amount);
-            }
-        })
-    }
-
+    /// Download all (`download_menu::targets`): queues every unseen or unread item of the displayed list.
     fn run_download(&self, amount: DownloadAmount) {
         let (entry_id, ids) = {
             let model = self.model.borrow();
@@ -1823,9 +1819,14 @@ mod tests {
             assert!(labels.iter().any(|t| t == "Tracking"), "the tracking button has its callback");
             let webview = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == "WebView").and_then(|l| l.ancestor(Button::static_type()));
             assert!(webview.is_some_and(|b| !b.is_visible()), "WebView shows for an HTTP source only");
-            let download = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Download")).expect("the Download menu exists");
-            assert!(!download.is_visible(), "no download handler, no Download menu");
+            let download = buttons.iter().find(|b| b.label().as_deref() == Some("Download all")).expect("the Download all button exists");
+            assert!(!download.is_visible(), "no download handler, no Download all");
             assert!(buttons.iter().any(|b| b.tooltip_text().as_deref() == Some("Refresh") && b.is_sensitive()), "the refresh button");
+            for menu in descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::MenuButton>().ok()) {
+                if let Some(model) = menu.menu_model() {
+                    assert!(!crate::widgets::view_options::menu_labels(&model).iter().any(|l| l == "Refresh"), "Refresh is the header button, not a menu item");
+                }
+            }
             let fab = buttons.iter().find(|b| b.has_css_class("pill")).expect("the FAB");
             assert!(fab.is_visible() && fab.is_sensitive(), "an unseen episode exists");
             let (min, _, _, _) = page.measure(gtk::Orientation::Horizontal, -1);
