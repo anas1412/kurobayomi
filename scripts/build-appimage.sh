@@ -63,6 +63,16 @@ export PATH="$work/bin:$PATH" APPIMAGE_EXTRACT_AND_RUN=1 DEPLOY_GTK_VERSION=4 NO
     --desktop-file "$appdir/usr/share/applications/$id.desktop" \
     --icon-file "$icons/hicolor/256x256/apps/$id.png" --icon-filename "$id"
 
+# The GTK plugin's launcher hook forces `GTK_THEME=Adwaita:<light|dark>` (so the app ignores the user's GTK theme) and
+# `GDK_BACKEND=x11` (so it runs through XWayland on a Wayland desktop). Both are removed: the app follows the user's theme
+# and uses the session's own display protocol. The check fails the build if a plugin update brings either line back.
+hook="$appdir/apprun-hooks/linuxdeploy-plugin-gtk.sh"
+sed -i -e '/^COLOR_SCHEME=/,/^APPIMAGE_GTK_THEME=/d' -e '/^export GTK_THEME=/d' -e '/^export GDK_BACKEND=/d' "$hook"
+if grep -qE '^export (GTK_THEME|GDK_BACKEND)=|APPIMAGE_GTK_THEME' "$hook"; then
+    echo "the AppRun hook still forces a theme or a display backend: $hook" >&2
+    exit 1
+fi
+
 # GTK's gstreamer media module links the host's gstreamer, which fails against the bundled glib on newer distros (an
 # "undefined symbol" warning at start); the app plays video through libmpv, so the module is not needed
 rm -rf "$appdir"/usr/lib/gtk-4.0/*/media
