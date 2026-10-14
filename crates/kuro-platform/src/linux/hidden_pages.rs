@@ -9,7 +9,7 @@ use std::time::Instant;
 use webkit6::glib;
 use webkit6::prelude::*;
 
-use crate::hidden_pages::{ANSWER_TIMEOUT, FETCH_JS, HiddenPages, IDLE_CLOSE, READY_TIMEOUT, idle_sites, is_check_page, origin_of, still_challenged};
+use crate::hidden_pages::{ANSWER_TIMEOUT, FETCH_JS, HiddenPages, IDLE_CLOSE, READY_TIMEOUT, idle_sites, is_check_page, origin_of, still_challenged, url_of};
 
 /// The pages, with the folders their cookies and cache are kept in.
 pub struct WebKitPages {
@@ -47,6 +47,19 @@ thread_local! {
     static SWEEPING: Cell<bool> = const { Cell::new(false) };
 }
 
+/// The page's settings: no camera, microphone or WebRTC. Pages are only there to pass a site's browser check, and a
+/// site's script that looks for capture devices must not wake the desktop's camera portal (a permission prompt).
+fn quiet_settings() -> webkit6::Settings {
+    let settings = webkit6::Settings::new();
+    settings.set_enable_media_stream(false);
+    settings.set_enable_mediasource(false);
+    settings.set_enable_webrtc(false);
+    settings.set_enable_webaudio(false);
+    settings.set_enable_media(false);
+    settings.set_media_playback_requires_user_gesture(true);
+    settings
+}
+
 /// Notes a use of `origin`'s page and keeps a once-a-minute sweep running while any page is open.
 fn touch(origin: &str) {
     USED.with(|used| used.borrow_mut().insert(origin.to_owned(), Instant::now()));
@@ -71,8 +84,9 @@ async fn fetch_in_page(data: &Path, cache: &Path, request_json: &str) -> Result<
     let origin = origin_of(request_json)?;
     touch(&origin);
     let mut answer = String::new();
+    let target = url_of(request_json)?;
     for reload in [false, true] {
-        let view = page_for(&origin, data, cache, reload).await?;
+        let view = page_for(&origin, &target, data, cache, reload).await?;
         let args = glib::VariantDict::new(None);
         args.insert("req", request_json);
         let value = view
@@ -87,9 +101,10 @@ async fn fetch_in_page(data: &Path, cache: &Path, request_json: &str) -> Result<
     Ok(answer)
 }
 
-/// The page of `origin`, past the site's check. A new page, or one asked to `reload`, loads the site's front page and
-/// waits until it is no longer the check.
-async fn page_for(origin: &str, data: &Path, cache: &Path, reload: bool) -> Result<webkit6::WebView, String> {
+/// The page of `origin`, past the site's check. A new page loads the site's front page and waits until it is no longer
+/// the check. A page asked to `reload` (its first answer was still the check) loads `target`, the address asked for:
+/// a site may check only some of its paths, and only a page load of the checked path can pass it.
+async fn page_for(origin: &str, target: &str, data: &Path, cache: &Path, reload: bool) -> Result<webkit6::WebView, String> {
     if let Some(view) = VIEWS.with(|views| views.borrow().get(origin).cloned()).filter(|_| !reload) {
         return Ok(view);
     }
@@ -99,7 +114,12 @@ async fn page_for(origin: &str, data: &Path, cache: &Path, reload: bool) -> Resu
                 .get_or_insert_with(|| webkit6::NetworkSession::new(data.to_str(), cache.to_str()))
                 .clone()
         });
-        let view = webkit6::WebView::builder().network_session(&session).build();
+        let view = webkit6::WebView::builder().network_session(&session).settings(&quiet_settings()).build();
+        // a hidden page never gets to ask for anything (camera, microphone, location, notifications...)
+        view.connect_permission_request(|_, request| {
+            request.deny();
+            true
+        });
         VIEWS.with(|views| views.borrow_mut().insert(origin.to_owned(), view.clone()));
         view
     });
@@ -114,7 +134,7 @@ async fn page_for(origin: &str, data: &Path, cache: &Path, reload: bool) -> Resu
         let _ = tx.try_send(Err(format!("the site could not be opened ({uri}): {error}")));
         false
     });
-    view.load_uri(&format!("{origin}/"));
+    view.load_uri(&if reload { target.to_owned() } else { format!("{origin}/") });
     let outcome = match glib::future_with_timeout(READY_TIMEOUT, rx.recv()).await {
         Ok(Ok(result)) => result,
         _ => Err("the site's browser check did not clear".to_owned()),

@@ -70,10 +70,15 @@ struct Target {
     url: String,
 }
 
+/// The address a request goes to.
+pub fn url_of(request_json: &str) -> Result<String, String> {
+    let target: Target = serde_json::from_str(request_json).map_err(|e| format!("invalid request: {e}"))?;
+    url::Url::parse(&target.url).map(|u| u.to_string()).map_err(|e| format!("invalid url: {e}"))
+}
+
 /// The site a request goes to: its scheme, host and port.
 pub fn origin_of(request_json: &str) -> Result<String, String> {
-    let target: Target = serde_json::from_str(request_json).map_err(|e| format!("invalid request: {e}"))?;
-    let url = url::Url::parse(&target.url).map_err(|e| format!("invalid url: {e}"))?;
+    let url = url::Url::parse(&url_of(request_json)?).map_err(|e| format!("invalid url: {e}"))?;
     Ok(url.origin().ascii_serialization())
 }
 
