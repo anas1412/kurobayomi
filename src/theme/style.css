@@ -85,6 +85,12 @@ window.kb-dialog.csd {
   font-weight: 600;
   color: alpha(@theme_fg_color, 0.7);
 }
+/* The default theme of GTK 4.14 and 4.16 puts a 12 px margin on every box inside a grid (newer GTK does not), which costs a
+   column and widens every gap. The grids size their own cells (widgets::cover_grid), so that margin is removed and a
+   grid lays out the same on every GTK version. */
+gridview box {
+  margin: 0;
+}
 .kb-library-grid {
   background: none;
   padding: 8px 12px;
