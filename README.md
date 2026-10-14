@@ -6,6 +6,13 @@
 
 <p align="center">Watch anime and read manga on the Linux desktop.</p>
 
+<p align="center">
+  <a href="https://github.com/anas1412/kurobayomi/releases"><img src="https://img.shields.io/github/downloads/anas1412/kurobayomi/total?label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/anas1412/kurobayomi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/anas1412/kurobayomi/ci.yml?branch=main&label=CI" alt="CI"></a>
+  <a href="https://github.com/anas1412/kurobayomi/releases/tag/nightly"><img src="https://img.shields.io/github/actions/workflow/status/anas1412/kurobayomi/appimage.yml?branch=main&label=nightly" alt="Nightly build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/anas1412/kurobayomi" alt="Licence"></a>
+</p>
+
 Kurobayomi is a native desktop app, written in Rust with GTK4, that follows the model of
 [Aniyomi](https://github.com/aniyomiorg/aniyomi): a library, a reader, a video player, sources you add yourself, and
 progress tracking. It follows your GTK theme and draws its own icons, so it looks right on any desktop.
