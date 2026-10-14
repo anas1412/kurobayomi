@@ -73,6 +73,12 @@ fn on_key_activate(row: &gtk::ListBoxRow, run: impl Fn() + 'static) {
     row.add_controller(key);
 }
 
+/// The rows whose entry title holds `query`, ignoring case; every row for an empty query.
+fn matching(rows: &[FeedRow], query: &str) -> Vec<FeedRow> {
+    let query = query.trim().to_lowercase();
+    rows.iter().filter(|r| query.is_empty() || r.row.entry_title.to_lowercase().contains(&query)).cloned().collect()
+}
+
 pub struct UpdatesScreen {
     kind: Kind,
     root: GBox,
@@ -97,6 +103,9 @@ pub struct UpdatesScreen {
     external_downloader: bool,
     refresh_pending: std::cell::Cell<bool>,
     invalidate_pending: std::cell::Cell<bool>,
+    /// The search entry of the page header (`mount::updates`), like History's: it filters the feed by entry title.
+    search: gtk::SearchEntry,
+    query: RefCell<String>,
 }
 
 impl UpdatesScreen {
@@ -151,6 +160,8 @@ impl UpdatesScreen {
                 download_watch: RefCell::default(),
                 disk: RefCell::default(),
                 index: RefCell::default(),
+                search: gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search_hint)).hexpand(true).build(),
+                query: RefCell::default(),
                 external_downloader: diet::DOWNLOAD_USE_EXTERNAL,
                 refresh_pending: std::cell::Cell::new(false),
                 invalidate_pending: std::cell::Cell::new(false),
@@ -178,6 +189,16 @@ impl UpdatesScreen {
             }
         });
         screen.root.add_controller(keys);
+        let weak = Rc::downgrade(&screen);
+        screen.search.connect_search_changed(move |entry| {
+            if let Some(screen) = weak.upgrade() {
+                let text = entry.text().to_string();
+                if *screen.query.borrow() != text {
+                    *screen.query.borrow_mut() = text;
+                    screen.render();
+                }
+            }
+        });
         screen.start();
         screen.watch_downloads();
         screen.watch_last_updated();
@@ -203,6 +224,11 @@ impl UpdatesScreen {
     /// Shows `text` on the shared toast layer for the usual toast time.
     pub fn show_toast(&self, text: &str) {
         crate::toast::notify_for(text, Duration::from_millis(TOAST_MS));
+    }
+
+    /// The search entry of this kind, for the page header.
+    pub fn search(&self) -> &gtk::SearchEntry {
+        &self.search
     }
 
     pub fn widget(&self) -> &GBox {
@@ -317,11 +343,17 @@ impl UpdatesScreen {
         self.pages.show(&page);
     }
 
-    fn fill(self: &Rc<Self>, rows: &[FeedRow], mode: bool) {
+    fn fill(self: &Rc<Self>, all: &[FeedRow], mode: bool) {
         while let Some(child) = self.col.first_child() {
             child.unparent();
         }
         self.col.append(&last_updated_label());
+        let query = self.query.borrow().clone();
+        let shown = matching(all, &query);
+        let rows = &shown[..];
+        if rows.is_empty() && !all.is_empty() {
+            self.col.append(&crate::ui::dim(&tr(MsgKey::no_results_found)));
+        }
         let items = feed::layout(
             rows,
             &Local,
@@ -349,7 +381,7 @@ impl UpdatesScreen {
                 }
             }
         }
-        if let Some(footer) = updates_page::limit_footer(rows.len()) {
+        if let Some(footer) = updates_page::limit_footer(all.len()) {
             self.col.append(&crate::ui::dim(footer));
         }
     }
@@ -813,6 +845,41 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    fn titled(title: &str) -> FeedRow {
+        use kuro_domain::updates::model::UpdateRow;
+        FeedRow {
+            row: UpdateRow {
+                kind: kuro_platform::kind::Kind::Manga,
+                entry_id: 1,
+                entry_title: title.into(),
+                item_id: 1,
+                item_name: "Chapter 1".into(),
+                scanlator: None,
+                done: false,
+                bookmark: false,
+                fillermark: false,
+                progress: 0,
+                total_seconds: 0,
+                source_id: 1,
+                date_fetch: 0,
+                date_upload: 0,
+                thumbnail_url: None,
+                cover_last_modified: 0,
+            },
+            selected: false,
+            download: crate::updates::feed::NOT_DOWNLOADED,
+        }
+    }
+
+    #[test]
+    fn the_search_keeps_the_rows_whose_title_holds_the_text_ignoring_case() {
+        let rows = [titled("One Piece"), titled("Naruto"), titled("Piece of Cake")];
+        let names = |q: &str| matching(&rows, q).into_iter().map(|r| r.row.entry_title).collect::<Vec<_>>();
+        assert_eq!(names(""), ["One Piece", "Naruto", "Piece of Cake"], "no text: every row");
+        assert_eq!(names("  PIECE "), ["One Piece", "Piece of Cake"]);
+        assert!(names("bleach").is_empty());
+    }
 
     #[test]
     fn enter_and_space_on_an_updates_row_run_its_tap_once_each_and_other_keys_do_not() {

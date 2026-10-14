@@ -96,7 +96,8 @@ pub fn upcoming() -> Option<GBox> {
     crate::updates::upcoming::page::build(UPCOMING_KIND.with(|k| k.get()))
 }
 
-/// The Updates page: both kinds under the spec toolbar. There is no search field. `None` before the app data is open.
+/// The Updates page: both kinds under the spec toolbar, each with a search that filters its feed by entry title (as History
+/// and the Library have one). `None` before the app data is open.
 /// The new-updates counters reset when the page is shown and when it is left (T-42b-020).
 pub fn updates() -> Option<Built> {
     if !crate::data::is_installed() {
@@ -109,7 +110,7 @@ pub fn updates() -> Option<Built> {
     let mut refresh: Vec<gtk::Button> = Vec::new();
     let views = screens.each_ref().map(|screen| {
         let kind = screen.kind();
-        let mut actions = crate::ui::HeaderActions::default();
+        let mut actions = crate::ui::HeaderActions { search: Some(screen.search().clone()), ..Default::default() };
         for item in &spec.toolbar {
             if item.label == UPDATE_LIBRARY {
                 let button = crate::ui::refresh_button(&item.label);
