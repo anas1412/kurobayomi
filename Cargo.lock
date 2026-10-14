@@ -3637,6 +3637,7 @@ dependencies = [
  "directories",
  "futures-util",
  "gio",
+ "gtk4",
  "keyring",
  "regex",
  "rustix 1.1.5",
@@ -3649,6 +3650,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "webkit6",
  "zbus 5.13.2",
 ]
 
@@ -3870,7 +3872,6 @@ dependencies = [
  "toml_edit 0.25.16+spec-1.1.0",
  "tracing",
  "url",
- "webkit6",
 ]
 
 [[package]]

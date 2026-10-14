@@ -76,6 +76,15 @@ fn repo_root() -> Option<PathBuf> {
     PATHS.get().map(|paths| paths.repo_sources_dir())
 }
 
+/// The platform's hidden pages, as the plug-in host asks for them.
+struct PlatformPages(Arc<dyn kuro_platform::hidden_pages::HiddenPages>);
+
+impl kuro_source_wasm::bridge::PageFetch for PlatformPages {
+    fn fetch(&self, request_json: &str) -> Result<String, String> {
+        self.0.fetch(request_json)
+    }
+}
+
 /// The saved index of a repo link, when it has one.
 pub fn saved_index(link: &str) -> Option<repo::Index> {
     repo::read_index(&repo::link_dir(&repo_root()?, link))
@@ -498,9 +507,10 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
         }
     });
     kuro_extensions::instantiate::set_compile_cache_dir(paths.wasm_cache_dir());
-    // a site that answers the plug-ins with a browser check is reached through a hidden page (`page_fetch`)
-    let (webkit_data, webkit_cache) = (kuro_platform::webview::data::webkit_data_dir(paths.as_ref()), kuro_platform::webview::data::webkit_cache_dir(paths.as_ref()));
-    kuro_source_wasm::bridge::set_page_fetch(Arc::new(crate::page_fetch::WebKitPages::new(webkit_data, webkit_cache)));
+    // a site that answers the plug-ins with a browser check is reached through a hidden page (`kuro_platform::hidden_pages`)
+    if let Some(pages) = kuro_platform::hidden_pages::hidden_pages(paths.as_ref()) {
+        kuro_source_wasm::bridge::set_page_fetch(Arc::new(PlatformPages(pages)));
+    }
     reload();
     let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
     schedule_daily_check(&links);

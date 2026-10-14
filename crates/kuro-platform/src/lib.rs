@@ -92,6 +92,7 @@ pub mod process;
 pub mod self_update;
 pub mod secrets;
 #[cfg(unix)]
+pub mod hidden_pages;
 pub mod single_instance;
 pub mod sort;
 pub mod system;

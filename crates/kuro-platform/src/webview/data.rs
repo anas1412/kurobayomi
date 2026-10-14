@@ -8,12 +8,12 @@ use crate::paths::Paths;
 
 /// The WebKit data directory under the app data dir (`paths.data()/webkit`).
 pub fn webkit_data_dir(paths: &dyn Paths) -> PathBuf {
-    paths.data_dir().join("webkit")
+    paths.web_pages_data_dir()
 }
 
 /// The WebKit cache directory under the app cache dir (`paths.cache()/webkit`).
 pub fn webkit_cache_dir(paths: &dyn Paths) -> PathBuf {
-    paths.cache_dir().join("webkit")
+    paths.web_pages_cache_dir()
 }
 
 /// Deletes the WebKit data and cache directories. A directory that does not exist yet is not an error.

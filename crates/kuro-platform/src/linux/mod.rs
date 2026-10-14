@@ -2,6 +2,7 @@
 
 pub mod appearance;
 pub mod device;
+pub mod hidden_pages;
 pub mod idle;
 pub mod launcher;
 pub mod media;

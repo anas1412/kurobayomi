@@ -38,7 +38,7 @@ jobs:
         # libmpv-dev: kuro-player links libmpv. desktop-file-utils: tests run desktop-file-validate. Ubuntu 24.04 ships GTK 4.14, which is what the gtk4 v4_14 feature targets.
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libdav1d-dev libmpv-dev ripgrep desktop-file-utils libxml2-utils
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev ripgrep desktop-file-utils libxml2-utils
 
       - name: Update Rust
         run: rustup update stable

@@ -45,7 +45,7 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libdav1d-dev libmpv-dev dconf-gsettings-backend desktop-file-utils file zsync
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf dconf-gsettings-backend desktop-file-utils file zsync
 
       - name: Update Rust
         run: rustup update stable

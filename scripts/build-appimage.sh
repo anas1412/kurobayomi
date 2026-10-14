@@ -88,6 +88,32 @@ mkdir -p "$appdir/usr/lib/gio/modules"
 cp "$dconf_module" "$appdir/usr/lib/gio/modules/"
 echo 'export GIO_EXTRA_MODULES="$APPDIR/usr/lib/gio/modules${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"' >> "$hook"
 
+# WebKitGTK (the hidden pages that pass Cloudflare's browser check, `src/page_fetch.rs`) starts helper programs
+# (WebKitWebProcess, WebKitNetworkProcess) from a folder whose absolute path is compiled into the library. Inside an
+# AppImage that folder is elsewhere, so, as Tauri does, the helpers travel in the AppImage, the path in the library is
+# rewritten to the same-length relative path `././/lib/...`, and the launcher starts the app from `$APPDIR/usr`, where that
+# relative path resolves. The helpers find the bundled libraries through their rpath.
+wk_dir=/usr/lib/x86_64-linux-gnu/webkitgtk-6.0
+[ -d "$wk_dir" ] || { echo "missing $wk_dir: install libwebkitgtk-6.0-dev" >&2; exit 1; }
+mkdir -p "$appdir/usr/lib/x86_64-linux-gnu"
+cp -a "$wk_dir" "$appdir/usr/lib/x86_64-linux-gnu/"
+"$tools/linuxdeploy" --appdir "$appdir" --deploy-deps-only "$appdir/usr/lib/x86_64-linux-gnu/webkitgtk-6.0"
+for helper in "$appdir"/usr/lib/x86_64-linux-gnu/webkitgtk-6.0/WebKit*Process; do
+    patchelf --set-rpath '$ORIGIN/../..' "$helper"
+done
+patched=0
+for lib in "$appdir"/usr/lib/libwebkitgtk-6.0.so*; do
+    [ -f "$lib" ] && [ ! -L "$lib" ] || continue
+    sed -i "s|$wk_dir|././/lib/x86_64-linux-gnu/webkitgtk-6.0|g" "$lib"
+    patched=$((patched + 1))
+done
+[ "$patched" -gt 0 ] || { echo "libwebkitgtk-6.0 was not bundled" >&2; exit 1; }
+if grep -qa "$wk_dir" "$appdir"/usr/lib/libwebkitgtk-6.0.so*; then
+    echo "libwebkitgtk-6.0 still names $wk_dir" >&2
+    exit 1
+fi
+echo 'cd "$APPDIR/usr"' >> "$hook"
+
 # GTK's gstreamer media module links the host's gstreamer, which fails against the bundled glib on newer distros (an
 # "undefined symbol" warning at start); the app plays video through libmpv, so the module is not needed
 rm -rf "$appdir"/usr/lib/gtk-4.0/*/media

@@ -72,6 +72,15 @@ pub trait Paths {
     fn repo_sources_dir(&self) -> PathBuf {
         self.cache_dir().join("repo-sources")
     }
+    /// The cookies and storage of the hidden web pages that pass a site's browser check (`hidden_pages`), kept so a
+    /// later run usually starts past the check.
+    fn web_pages_data_dir(&self) -> PathBuf {
+        self.data_dir().join("webkit")
+    }
+    /// The disk cache of those hidden pages.
+    fn web_pages_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("webkit")
+    }
     /// Compiled WASM plug-ins, one file per plug-in build. Deleting the folder only makes the next start compile again.
     fn wasm_cache_dir(&self) -> PathBuf {
         self.cache_dir().join("wasm-components")
@@ -228,6 +237,8 @@ mod role_tests {
         assert_eq!(p.scrapers_dir(), PathBuf::from("/d/scrapers"));
         assert_eq!(p.repo_sources_dir(), PathBuf::from("/k/repo-sources"));
         assert_eq!(p.wasm_cache_dir(), PathBuf::from("/k/wasm-components"));
+        assert_eq!(p.web_pages_data_dir(), PathBuf::from("/d/webkit"));
+        assert_eq!(p.web_pages_cache_dir(), PathBuf::from("/k/webkit"));
         assert_eq!(p.extension_icons_dir(), PathBuf::from("/k/extensions/icons"));
         assert_eq!(p.anime_extension_icons_dir(), PathBuf::from("/k/ext-icons"));
         assert_eq!(p.extension_download_dir(), PathBuf::from("/k/ext-download"));

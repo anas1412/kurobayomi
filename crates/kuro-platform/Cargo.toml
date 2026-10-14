@@ -32,6 +32,9 @@ keyring = { workspace = true, optional = true }
 rustix = { version = "1", features = ["fs"] }
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
 zbus = "5.13.2"
+webkit6 = "0.6"
+# webkit6 needs GTK's 4.10+ API switched on; the app does that too (v4_14), this keeps the crate building on its own
+gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time", "net", "io-util"] }

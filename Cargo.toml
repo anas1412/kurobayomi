@@ -48,7 +48,6 @@ regex = { workspace = true }
 argon2 = "0.6.0"
 tracing = { workspace = true }
 toml_edit = { workspace = true }
-webkit6 = "0.6"
 kuro-source-wasm = { path = "crates/kuro-source-wasm" }
 url = { workspace = true }
 

@@ -30,7 +30,6 @@ mod incognito;
 mod open_link;
 mod player_view;
 mod reader;
-mod page_fetch;
 mod recipe_sources;
 mod reporter;
 mod screens;
