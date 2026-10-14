@@ -72,6 +72,7 @@
 //! Traits: [`paths::Paths`] (directories) and [`secrets::SecretStore`] (credentials).
 //! Linux implementations: [`linux::LinuxPaths`] and [`linux::SecretService`].
 
+pub mod channel;
 pub mod deep_link;
 pub mod device;
 pub mod dropped;
@@ -88,6 +89,7 @@ pub mod opener;
 pub mod paths;
 pub mod power_network;
 pub mod process;
+pub mod self_update;
 pub mod secrets;
 #[cfg(unix)]
 pub mod single_instance;

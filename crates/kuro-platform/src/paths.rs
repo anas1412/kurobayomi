@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 /// The folder in the home folder that holds the app's files when the user has not picked another one.
-pub const STORAGE_DIR_NAME: &str = "Kurobayomi";
+pub const STORAGE_DIR_NAME: &str = if crate::channel::NIGHTLY { "Kurobayomi-Nightly" } else { "Kurobayomi" };
 
 /// Directories the app reads and writes, resolved for the current platform.
 pub trait Paths {

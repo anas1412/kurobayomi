@@ -22,11 +22,11 @@ use kuro_platform::kind::Kind;
 
 #[cfg(test)]
 pub const DESKTOP_ID: &str = "io.github.anas1412.Kurobayomi.desktop";
-pub const BUS_NAME: &str = "io.github.anas1412.Kurobayomi.SearchProvider";
+pub const BUS_NAME: &str = if crate::channel::NIGHTLY { "io.github.anas1412.Kurobayomi.Nightly.SearchProvider" } else { "io.github.anas1412.Kurobayomi.SearchProvider" };
 pub const OBJECT_PATH: &str = "/io/github/anas1412/Kurobayomi/SearchProvider";
 pub const INTERFACE: &str = "org.gnome.Shell.SearchProvider2";
 /// The icon name shown beside each result.
-pub const ICON: &str = "io.github.anas1412.Kurobayomi";
+pub const ICON: &str = crate::channel::APP_ID;
 /// Most results one search returns.
 pub const MAX_RESULTS: usize = 20;
 

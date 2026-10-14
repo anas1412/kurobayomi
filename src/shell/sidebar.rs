@@ -191,7 +191,7 @@ fn incognito_icon() -> gtk::Image {
 /// own items (Incognito, Keyboard shortcuts, Help, About) are rows at the bottom of the panel.
 fn title() -> GBox {
     let title = GBox::new(O::Horizontal, 6);
-    title.append(&gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build());
+    title.append(&gtk::Label::builder().label(crate::channel::APP_NAME).css_classes(["title"]).build());
     title.append(&incognito_icon());
     title
 }

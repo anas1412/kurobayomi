@@ -7,7 +7,7 @@ use directories::{ProjectDirs, UserDirs};
 use crate::paths::Paths;
 
 /// XDG directory name (`~/.config/kurobayomi` and so on), lowercase as plans/ARCHITECTURE.md says.
-const XDG_APP_DIR: &str = "kurobayomi";
+const XDG_APP_DIR: &str = if crate::channel::NIGHTLY { "kurobayomi-nightly" } else { "kurobayomi" };
 
 /// Base directories that [`LinuxPaths`] derives every other path from.
 #[derive(Debug, Clone, PartialEq, Eq)]

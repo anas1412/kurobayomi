@@ -140,6 +140,9 @@ pub struct NavEntry {
 
 /// The About subtitle (T-47a-003): `Kurobayomi Stable <version>` in a release build, `Debug <commit>` in any other.
 fn about_subtitle() -> String {
+    if crate::channel::NIGHTLY {
+        return format!("{} {}", crate::channel::APP_NAME, crate::channel::short_commit());
+    }
     let info = &*kuro_core::app_info::APP_INFO;
     crate::settings_ui::menu::about_subtitle("Kurobayomi", info.build_type == "release", env!("CARGO_PKG_VERSION"), info.git_sha)
 }

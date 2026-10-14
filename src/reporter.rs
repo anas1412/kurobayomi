@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use gtk::prelude::*;
 use gtk::{Align, Justification, Orientation as O, gio, glib, pango};
 
-const APP_ID: &str = "io.github.anas1412.Kurobayomi";
+const APP_ID: &str = crate::channel::APP_ID;
 const REPORTER_ID: &str = "io.github.anas1412.Kurobayomi.CrashReporter";
 const NO_DETAILS: &str = "No crash details available";
 const SUBTITLE: &str = "Kurobayomi ran into an unexpected error. Share the crash logs when you report the problem.";

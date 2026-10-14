@@ -15,7 +15,6 @@ matches=$(rg --line-number --no-heading --color never --hidden \
     --glob '!shots/**' \
     --glob '!Cargo.lock' \
     --glob '!scripts/check-platform-boundary.sh' \
-    --glob '!scripts/trim-bundle.sh' \
     --glob '!scripts/build-appimage.sh' \
     --glob '!CONTRIBUTING.md' \
     -e "$pattern" .) || status=$?

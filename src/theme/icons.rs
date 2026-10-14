@@ -11,7 +11,7 @@ use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
 /// The application id, also the icon name of the full-colour app icon.
-pub const APP_ID: &str = "io.github.anas1412.Kurobayomi";
+pub const APP_ID: &str = crate::channel::APP_ID;
 
 /// The bundled icon theme root: `scalable/actions/`, `scalable/apps/` and `symbolic/apps/` below it.
 pub const ICON_RESOURCE_PATH: &str = "/io/github/anas1412/Kurobayomi/icons";
@@ -174,7 +174,7 @@ impl Icon {
             Icon::TextShadow => "kb-text-shadow-symbolic",
             Icon::FontFamily => "kb-font-family-symbolic",
             Icon::Logo => APP_ID,
-            Icon::LogoSymbolic => "io.github.anas1412.Kurobayomi-symbolic",
+            Icon::LogoSymbolic => crate::channel::APP_ID_SYMBOLIC,
             Icon::LogoShadow => "kb-logo-shadow",
         }
     }

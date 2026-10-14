@@ -1,0 +1,78 @@
+name: Nightly AppImage
+
+# Every push to main that passes the CI tests builds the AppImage and updates the one release called "nightly" (a rolling
+# prerelease: no version tags). The file name never changes, so one fixed download address always serves the newest build
+# (Shelly's StaticUrl update check watches that address); the commit hash is in the release title and notes. Stable builds
+# are tagged releases and have their own workflow.
+on:
+  # runs after the CI workflow finished, and only when its tests passed
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# a newer build replaces one that is still running
+concurrency:
+  group: nightly-appimage
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  # the commit that passed CI, or the current one for a manual run
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  appimage:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    # The AppImage bundles this machine's libraries, so it runs on distros with glibc 2.39 or newer. Ubuntu 24.04 is also
+    # the first with GTK 4.14, which the gtk4 v4_14 feature needs.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libdav1d-dev libmpv-dev desktop-file-utils file zsync
+
+      - name: Update Rust
+        run: rustup update stable
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        # the commit and the channel are baked in: the self-updater compares them with the nightly release
+        env:
+          KB_COMMIT: ${{ env.SHA }}
+          KB_CHANNEL: nightly
+        run: cargo build --release --locked
+
+      - name: Pack the AppImage
+        env:
+          CHANNEL: nightly
+        run: |
+          echo "APPIMAGE=target/appimage/Kurobayomi-nightly-x86_64.AppImage" >> "$GITHUB_ENV"
+          scripts/build-appimage.sh target/release/kurobayomi target/appimage/Kurobayomi-nightly-x86_64.AppImage
+
+      - name: Update the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short="$(git rev-parse --short=8 HEAD)"
+          # the tag moves to this commit; the release itself stays, so there is never a moment without one
+          git tag -f nightly "$SHA"
+          git push -f origin refs/tags/nightly
+          if gh release view nightly >/dev/null 2>&1; then
+            # files first, notes last: the app reads the commit from the notes, so it never sees a new commit with an old file
+            gh release upload nightly "$APPIMAGE" "$APPIMAGE.zsync" --clobber
+            gh release edit nightly --prerelease --title "Nightly ($short)" --notes "Built from commit $SHA."
+          else
+            gh release create nightly "$APPIMAGE" "$APPIMAGE.zsync" --target "$SHA" --prerelease \
+              --title "Nightly ($short)" --notes "Built from commit $SHA."
+          fi

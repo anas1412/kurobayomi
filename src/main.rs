@@ -1,4 +1,6 @@
 mod app_update;
+mod appimage_update;
+mod channel;
 mod backup_host;
 mod backup_run;
 mod backup_schedule;
@@ -123,7 +125,7 @@ fn main() -> glib::ExitCode {
 
     // a second launch is forwarded to the running instance by GApplication; dev variables run a window of their own
     let unique = kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok());
-    let app = gtk::Application::builder().application_id("io.github.anas1412.Kurobayomi").flags(shell::launch::app_flags(unique)).build();
+    let app = gtk::Application::builder().application_id(channel::APP_ID).flags(shell::launch::app_flags(unique)).build();
     shell::launch::connect(&app);
     // the preferences get up to 2 s to reach the disk when the application shuts down (T-02a-038)
     app.connect_shutdown(|_| {
@@ -204,7 +206,7 @@ fn build_window(app: &gtk::Application) {
     shell::Shell::build(theme::startup).build_widget().expect("the theme was applied by Shell::build");
     let win = gtk::ApplicationWindow::builder()
         .application(app)
-        .title("Kurobayomi")
+        .title(channel::APP_NAME)
         .default_width(1180)
         .default_height(780)
         .build();
@@ -318,6 +320,7 @@ fn build_window(app: &gtk::Application) {
         startup::clear_chapter_cache_on_launch(crate::misc::diet_defaults::LIBRARY_AUTO_CLEAR_CHAPTER_CACHE, kuro_images::platform::chapter_cache_dir(&paths));
     }
     app_update::startup();
+    appimage_update::startup();
     // requests that arrived before the window: --action, --search, --open and opened files
     shell::launch::window_built(app, &win);
     // the desktop search provider serves library titles while the app runs (T-53a-066)

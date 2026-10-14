@@ -32,6 +32,9 @@ pub const MODEL_TITLE: &str = "Device model";
 /// The Version subtitle: `Stable <version> (<build time>)` in a release, `Debug <sha> (<build time>)` in a debug build.
 pub fn version_subtitle() -> String {
     let info = &*APP_INFO;
+    if crate::channel::NIGHTLY {
+        return format!("Nightly {} ({})", crate::channel::short_commit(), info.build_time);
+    }
     format!("{} ({})", version_text(info.build_type, &info.version_name, info.git_sha), info.build_time)
 }
 

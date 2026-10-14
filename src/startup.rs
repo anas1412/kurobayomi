@@ -134,7 +134,7 @@ pub fn clear_chapter_cache_on_launch(enabled: bool, cache_dir: PathBuf) -> Optio
 /// destroys it after presenting the main window.
 pub fn splash_window(app: &gtk::Application) -> gtk::Window {
     let spinner = crate::ui::loading(crate::ui::LoadSize::Page);
-    let name = gtk::Label::builder().label("Kurobayomi").css_classes(["title-2"]).build();
+    let name = gtk::Label::builder().label(crate::channel::APP_NAME).css_classes(["title-2"]).build();
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
     for widget in [name.upcast_ref::<gtk::Widget>(), spinner.upcast_ref()] {
         column.append(widget);
