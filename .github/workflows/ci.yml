@@ -33,12 +33,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Downloading the packages from the runner's mirror took about 4 minutes: the .deb files are kept between runs, and
+      # apt only fetches what changed since. Editing this file starts a fresh cache.
+      - name: Cache the downloaded packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives/*.deb
+          key: apt-ci-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-ci-
+
       - name: Install system packages
         # libdav1d-dev: image's avif-native feature builds dav1d-sys, which needs dav1d.pc.
         # libmpv-dev: kuro-player links libmpv. desktop-file-utils: tests run desktop-file-validate. Ubuntu 24.04 ships GTK 4.14, which is what the gtk4 v4_14 feature targets.
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev ripgrep desktop-file-utils libxml2-utils
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev ripgrep desktop-file-utils libxml2-utils
 
       - name: Update Rust
         run: rustup update stable

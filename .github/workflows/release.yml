@@ -42,19 +42,26 @@ jobs:
           [ "$passed" -ge 1 ] || { echo "no successful CI run for $GITHUB_SHA: run the CI workflow on it first (it can be started by hand)" >&2; exit 1; }
           scripts/release-notes.sh "$VERSION" > release-notes.md
 
+      # Downloading the packages from the runner's mirror took about 4 minutes: the .deb files are kept between runs, and
+      # apt only fetches what changed since. Editing this file starts a fresh cache.
+      - name: Cache the downloaded packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives/*.deb
+          key: apt-release-${{ hashFiles('.github/workflows/release.yml') }}
+          restore-keys: apt-release-
+
       - name: Install system packages
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf dconf-gsettings-backend desktop-file-utils file zsync
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf dconf-gsettings-backend desktop-file-utils file zsync
 
       - name: Update Rust
         run: rustup update stable
 
       - name: Cache the build
         uses: Swatinem/rust-cache@v2
-        with:
-          # the nightly workflow builds the same dependencies in release mode: one cache for both
-          shared-key: appimage
 
       - name: Build
         # the stable build has no KB_CHANNEL (it is not a nightly); the release checker of the About page is on and reads
