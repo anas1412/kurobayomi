@@ -287,13 +287,16 @@ fn build_window(app: &gtk::Application) {
 
     // reader/player are immersive: no sidebar or tab bar while they're on screen
     let refresh = {
-        let (win, nav) = (win.clone(), nav.clone());
+        let (win, nav, tabs) = (win.clone(), nav.clone(), tabs.clone());
         move || {
             let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
             let (width, _) = window_size::size_of(&win);
             let chrome = shell::layout::chrome_for(width, win.is_maximized());
             let shown = shell::layout::visibility(chrome, immersive);
             sidebar.set_visible(shown.sidebar);
+            // the open tab's menu and search sit in the sidebar's header while it shows that tab
+            let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
+            shell::lead::place(tabs.visible_child().as_ref(), shown.sidebar && on_tabs);
             sep.set_visible(shown.sidebar);
             bottom.set_visible(shown.bottom_bar);
         }

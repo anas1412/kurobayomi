@@ -260,6 +260,13 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
     header.set_title_widget(Some(&centre));
     if back {
         header.pack_start(&back_button());
+    } else {
+        // a tab page leads with its search toggle and its ⋮ menu
+        let search = bar.as_ref().map(|_| end.remove(0));
+        let menu = end.iter().position(|w| w.has_css_class(MORE_MENU)).map(|i| end.remove(i));
+        if search.is_some() || menu.is_some() {
+            pack_lead(&header, search.as_ref(), menu.as_ref());
+        }
     }
     let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.into_iter().partition(|w| w.is::<gtk::StackSwitcher>());
     let mut narrow_rows = Vec::new();
@@ -706,6 +713,7 @@ pub fn menu_button(sections: Vec<Vec<MenuEntry>>) -> Option<gtk::MenuButton> {
     }
     let button = quiet_menu(gtk::MenuButton::builder().icon_name(OVERFLOW_ICON).menu_model(&model).tooltip_text("More").build());
     button.update_property(&[gtk::accessible::Property::Label("More")]);
+    button.add_css_class(MORE_MENU);
     button.insert_action_group("more", Some(&group));
     if !conditional.is_empty() {
         button.connect_active_notify(move |_| {
@@ -715,6 +723,32 @@ pub fn menu_button(sections: Vec<Vec<MenuEntry>>) -> Option<gtk::MenuButton> {
         });
     }
     Some(button)
+}
+
+/// The css class of a page's ⋮ menu ([`menu_button`]), so a tab page can lead its header with it.
+pub const MORE_MENU: &str = "kb-more";
+/// The box at the start of a tab page's header that holds its two lead slots: the search toggle, then the ⋮ menu.
+pub const LEAD: &str = "kb-lead";
+/// The lead slot of the search toggle.
+pub const LEAD_SEARCH: &str = "kb-lead-search";
+/// The lead slot of the ⋮ menu.
+pub const LEAD_MENU: &str = "kb-lead-menu";
+
+/// Leads a tab page's header with its search toggle and its ⋮ menu (user, 2026-10-14). In a narrow window they stay here;
+/// with the sidebar showing, the shell moves both into the sidebar's header around the app name, the search before it and
+/// the menu after it (`shell::lead`). Call before anything else is packed at the start.
+pub fn pack_lead(header: &gtk::HeaderBar, search: Option<&gtk::Widget>, menu: Option<&gtk::Widget>) {
+    let lead = GBox::new(O::Horizontal, 4);
+    lead.add_css_class(LEAD);
+    for (widget, class) in [(search, LEAD_SEARCH), (menu, LEAD_MENU)] {
+        if let Some(widget) = widget {
+            let slot = GBox::new(O::Horizontal, 0);
+            slot.add_css_class(class);
+            slot.append(widget);
+            lead.append(&slot);
+        }
+    }
+    header.pack_start(&lead);
 }
 
 /// What a main page puts in its header, left to right: search, refresh, the page's own buttons, sort/filter, and the

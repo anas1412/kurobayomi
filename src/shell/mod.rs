@@ -17,6 +17,7 @@ pub mod host;
 pub mod launch;
 pub mod kind_choice;
 pub mod layout;
+pub mod lead;
 // the stack-based navigator is replaced in the window by `ui::push`; it stays for the route table
 pub mod nav;
 // the installed desktop, MIME and icon files in `data/`; the module holds their tests

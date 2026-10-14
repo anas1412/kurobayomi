@@ -148,17 +148,33 @@ fn open_help() {
 
 /// A menu button with the app menu: Incognito mode (the `app.incognito` check item), then Keyboard shortcuts, Help and
 /// About, whose actions (`appmenu.*`) live on the button itself.
+/// The name of the Incognito switch, in the panel and in the narrow window's menu.
+const INCOGNITO_LABEL: &str = "Incognito";
+
+/// The app's own pages under the places, in the panel and in the narrow window's menu: icon, label, action name, opener.
+fn app_pages() -> [(&'static str, String, &'static str, fn()); 4] {
+    [
+        ("input-keyboard-symbolic", "Keyboard shortcuts".to_owned(), "shortcuts", crate::entry_core::shortcut_help_view::open),
+        ("help-browser-symbolic", tr(MsgKey::label_help), "help", open_help),
+        ("help-about-symbolic", tr(MsgKey::pref_category_about), "about", open_about),
+        ("emblem-system-symbolic", tr(MsgKey::label_settings), "settings", open_settings),
+    ]
+}
+
+/// The app menu (☰) of the narrow window's bar.
+fn app_menu_button() -> gtk::MenuButton {
+    let menu = app_menu();
+    menu.set_icon_name("open-menu-symbolic");
+    menu.set_tooltip_text(Some(&tr(MsgKey::action_menu)));
+    menu
+}
+
 fn app_menu() -> gtk::MenuButton {
     let toggles = gio::Menu::new();
-    toggles.append(Some(&tr(MsgKey::pref_incognito_mode)), Some(crate::incognito::TOGGLE_ACTION));
+    toggles.append(Some(INCOGNITO_LABEL), Some(crate::incognito::TOGGLE_ACTION));
     let pages = gio::Menu::new();
     let actions = gio::SimpleActionGroup::new();
-    let entries: [(String, &str, fn()); 3] = [
-        ("Keyboard shortcuts".to_owned(), "shortcuts", crate::entry_core::shortcut_help_view::open),
-        (tr(MsgKey::label_help), "help", open_help),
-        (tr(MsgKey::pref_category_about), "about", open_about),
-    ];
-    for (label, name, run) in entries {
+    for (_, label, name, run) in app_pages() {
         pages.append(Some(&label), Some(&format!("appmenu.{name}")));
         let action = gio::SimpleAction::new(name, None);
         action.connect_activate(move |_, _| run());
@@ -205,19 +221,14 @@ fn bottom_rows() -> gtk::ListBox {
     list.set_margin_bottom(rail::PAD_V);
     // the switch is bound to app.incognito, so it shows the state and flips it like the menu item did
     let switch = gtk::Switch::builder().valign(gtk::Align::Center).action_name(crate::incognito::TOGGLE_ACTION).build();
-    let incognito = nav_row(crate::incognito::ICON, &tr(MsgKey::pref_incognito_mode), &[switch.upcast_ref()]);
+    let incognito = nav_row(crate::incognito::ICON, INCOGNITO_LABEL, &[switch.upcast_ref()]);
     list.append(&incognito);
-    let rows: [(&str, String, fn()); 4] = [
-        ("input-keyboard-symbolic", "Keyboard shortcuts".to_owned(), crate::entry_core::shortcut_help_view::open),
-        ("help-browser-symbolic", tr(MsgKey::label_help), open_help),
-        ("help-about-symbolic", tr(MsgKey::pref_category_about), open_about),
-        ("emblem-system-symbolic", tr(MsgKey::label_settings), open_settings),
-    ];
-    let runs: Vec<fn()> = rows.iter().map(|(_, _, run)| *run).collect();
+    let rows = app_pages();
+    let runs: Vec<fn()> = rows.iter().map(|(_, _, _, run)| *run).collect();
     // the About row turns a spinner while the app updates itself, then carries the "New" pill while an update notice is
     // unseen (`whats_new`)
     let (update_spinner, update_pill) = (crate::appimage_update::busy_spinner(), crate::whats_new::pill());
-    for (icon, label, _) in rows {
+    for (icon, label, _, _) in rows {
         let extra: &[&gtk::Widget] = if icon == "help-about-symbolic" { &[update_spinner.upcast_ref(), update_pill.upcast_ref()] } else { &[] };
         list.append(&nav_row(icon, &label, extra));
     }
@@ -244,6 +255,10 @@ pub fn build(tabs: &gtk::Stack) -> GBox {
     let header = ui::header_bar();
     header.set_decoration_layout(Some(&ui::decoration(true)));
     header.set_title_widget(Some(&title()));
+    // the open tab's search before the app name and its ⋮ menu after it (`lead`)
+    let (search_host, menu_host) = super::lead::hosts();
+    header.pack_start(&search_host);
+    header.pack_end(&menu_host);
     ui::no_sticky_focus(&header);
 
     let list = gtk::ListBox::new();
@@ -289,7 +304,8 @@ pub fn build(tabs: &gtk::Stack) -> GBox {
     b
 }
 
-/// The narrow window's bar: the same items as the panel. The places switch the tab pages, then Settings and the app menu.
+/// The narrow window's bar: the same items as the panel. The places switch the tab pages, then the app menu (Incognito,
+/// Keyboard shortcuts, Help, About and Settings).
 pub fn bottom_bar(tabs: &gtk::Stack) -> GBox {
     let bar = GBox::new(O::Horizontal, 6);
     bar.add_css_class("kb-bottom-bar");
@@ -303,14 +319,8 @@ pub fn bottom_bar(tabs: &gtk::Stack) -> GBox {
     leave.connect_pressed(|_, _, _, _| ui::pop_to_root());
     switcher.add_controller(leave);
     bar.append(&switcher);
-    let settings = ui::icon_button("emblem-system-symbolic", &tr(MsgKey::label_settings));
-    settings.add_css_class("flat");
-    settings.connect_clicked(|_| open_settings());
-    bar.append(&settings);
-    let menu = app_menu();
-    menu.set_icon_name("open-menu-symbolic");
-    menu.set_tooltip_text(Some(&tr(MsgKey::action_menu)));
-    bar.append(&menu);
+    // Settings is in the menu with the app's other pages
+    bar.append(&app_menu_button());
     ui::no_sticky_focus(&bar);
     bar
 }
@@ -344,17 +354,17 @@ mod tests {
     }
 
     #[test]
-    fn the_panel_has_the_places_and_the_app_rows_at_the_bottom_and_no_menu() {
+    fn the_panel_has_the_places_and_the_app_rows_at_the_bottom() {
         crate::testing::with_display(|| {
             let panel = build(&gtk::Stack::new());
             let texts = labels(panel.upcast_ref());
-            let wanted = [tr(MsgKey::pref_incognito_mode), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about)];
+            let wanted = [INCOGNITO_LABEL.to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about)];
             for title in ["Library", "Browse", "Updates", "History", "Downloads", "Settings", "Kurobayomi"].map(str::to_owned).iter().chain(&wanted) {
                 assert!(texts.iter().any(|l| l == title), "{title}");
             }
             assert!(!texts.iter().any(|l| l == "More"), "More is gone");
             let all = crate::screens::alone::descendants(panel.upcast_ref());
-            assert!(!all.iter().any(|w| w.is::<gtk::MenuButton>()), "the title is plain, not a drop-down");
+            assert!(!all.iter().any(|w| w.is::<gtk::MenuButton>()), "no menu of its own: the open page's ⋮ comes in beside the title");
             assert!(all.iter().any(|w| w.downcast_ref::<gtk::Switch>().is_some_and(|s| s.action_name().as_deref() == Some(crate::incognito::TOGGLE_ACTION))), "Incognito has a switch");
             let downloads = all
                 .iter()
@@ -366,13 +376,22 @@ mod tests {
     }
 
     #[test]
-    fn the_bottom_bar_has_the_places_settings_and_the_app_menu() {
+    fn the_bottom_bar_has_the_places_and_the_app_menu_with_settings_in_it() {
         crate::testing::with_display(|| {
             let bar = bottom_bar(&gtk::Stack::new());
             let all = crate::screens::alone::descendants(bar.upcast_ref());
             assert_eq!(all.iter().filter(|w| w.is::<gtk::StackSwitcher>()).count(), 1);
-            assert!(all.iter().any(|w| w.downcast_ref::<gtk::Button>().is_some_and(|b| b.icon_name().as_deref() == Some("emblem-system-symbolic"))), "Settings");
-            assert_eq!(all.iter().filter(|w| w.is::<gtk::MenuButton>()).count(), 1, "the app menu");
+            let menus: Vec<_> = all.iter().filter_map(|w| w.downcast_ref::<gtk::MenuButton>()).collect();
+            assert_eq!(menus.len(), 1, "the app menu, and no separate Settings button");
+            let model = menus[0].menu_model().expect("a menu model");
+            let mut labels = Vec::new();
+            for section in 0..model.n_items() {
+                let Some(part) = model.item_link(section, "section") else { continue };
+                for i in 0..part.n_items() {
+                    labels.extend(part.item_attribute_value(i, "label", None).and_then(|v| v.get::<String>()));
+                }
+            }
+            assert_eq!(labels, [INCOGNITO_LABEL.to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about), tr(MsgKey::label_settings)]);
         });
     }
 }
