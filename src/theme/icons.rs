@@ -49,6 +49,8 @@ pub enum Icon {
     LibraryManga,
     UpdatesTab,
     Compass,
+    /// The Browse tab: a globe with a search lens (Material `travel_explore`, user 2026-10-14).
+    BrowseTab,
     DownloadCircle,
     DoneMarkPrevious,
     OverflowVertical,
@@ -74,7 +76,7 @@ pub enum Icon {
 impl Icon {
     #[cfg(test)]
     /// Every variant, in declaration order.
-    pub const ALL: [Icon; 48] = [
+    pub const ALL: [Icon; 49] = [
         Icon::Close,
         Icon::Play,
         Icon::Pause,
@@ -104,6 +106,7 @@ impl Icon {
         Icon::LibraryManga,
         Icon::UpdatesTab,
         Icon::Compass,
+        Icon::BrowseTab,
         Icon::DownloadCircle,
         Icon::DoneMarkPrevious,
         Icon::OverflowVertical,
@@ -157,6 +160,7 @@ impl Icon {
             Icon::LibraryManga => "kb-library-symbolic",
             Icon::UpdatesTab => "kb-updates-outline-symbolic",
             Icon::Compass => "kb-compass-symbolic",
+            Icon::BrowseTab => "kb-travel-explore-symbolic",
             Icon::DownloadCircle => "kb-download-circle-symbolic",
             Icon::DoneMarkPrevious => "kb-done-previous-symbolic",
             Icon::OverflowVertical => "kb-overflow-vertical-symbolic",
@@ -192,6 +196,7 @@ impl Icon {
             Icon::LibraryManga => "scalable/actions/kb-library-symbolic.svg",
             Icon::UpdatesTab => "scalable/actions/kb-updates-outline-symbolic.svg",
             Icon::Compass => "scalable/actions/kb-compass-symbolic.svg",
+            Icon::BrowseTab => "scalable/actions/kb-travel-explore-symbolic.svg",
             Icon::DownloadCircle => "scalable/actions/kb-download-circle-symbolic.svg",
             Icon::DoneMarkPrevious => "scalable/actions/kb-done-previous-symbolic.svg",
             Icon::OverflowVertical => "scalable/actions/kb-overflow-vertical-symbolic.svg",
@@ -294,7 +299,7 @@ pub const SHORTCUT_ICONS: [(&str, &str); 5] = [
     ("animelib", Icon::AnimeLibraryFilled.name()),
     ("updates", Icon::UpdatesTab.name()),
     ("history", Icon::HistoryTab.name()),
-    ("browse", Icon::Compass.name()),
+    ("browse", Icon::BrowseTab.name()),
 ];
 
 #[cfg(test)]
@@ -454,7 +459,7 @@ mod tests {
         assert_eq!(shortcut_icon_name("animelib"), Some("kb-animelibrary-filled-symbolic"));
         assert_eq!(shortcut_icon_name("updates"), Some("kb-updates-outline-symbolic"));
         assert_eq!(shortcut_icon_name("history"), Some("document-open-recent-symbolic"));
-        assert_eq!(shortcut_icon_name("browse"), Some("kb-compass-symbolic"));
+        assert_eq!(shortcut_icon_name("browse"), Some("kb-travel-explore-symbolic"));
         assert_eq!(shortcut_icon_name("show_recently_updated"), None);
     }
 

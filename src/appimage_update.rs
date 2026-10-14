@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gtk::glib;
+use gtk::prelude::*;
 use sha2::{Digest, Sha256};
 
 const USER_AGENT: &str = concat!("kurobayomi/", env!("CARGO_PKG_VERSION"));
@@ -257,6 +258,19 @@ fn set(next: Status) {
         *w = kept;
         w.extend(added);
     });
+}
+
+/// A small spinner that turns while the self-update checks or downloads, for any place that shows it is busy (the
+/// sidebar's About row).
+pub fn busy_spinner() -> gtk::Spinner {
+    let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+    let weak = spinner.downgrade();
+    watch(move |status| {
+        let Some(spinner) = weak.upgrade() else { return false };
+        spinner.set_visible(status.busy());
+        true
+    });
+    spinner
 }
 
 /// Checks and, when there is a newer release, updates, on a worker thread; the [`Status`] follows each step. Does
