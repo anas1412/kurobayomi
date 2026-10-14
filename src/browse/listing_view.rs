@@ -73,10 +73,8 @@ struct Inner {
     toast_dismissed: Cell<bool>,
     /// Whether a toast was raised (the toast itself lives in the shared layer).
     toast_shown: Cell<bool>,
-    /// The cover width the grid cells were last built for.
     stack: gtk::Stack,
     error_slot: gtk::Box,
-    items_stack: gtk::Stack,
     /// The loading row under the items while the next page loads (the paging spinner).
     footer: gtk::Box,
     store: gtk::gio::ListStore,
@@ -123,10 +121,9 @@ impl ListingView {
         let list = gtk::ListView::new(Some(selection), None::<gtk::ListItemFactory>);
         list.set_single_click_activate(true);
 
-        let items_stack = gtk::Stack::new();
-        items_stack.add_named(&grid, Some("grid"));
-        items_stack.add_named(&list, Some("list"));
-        let scroller = gtk::ScrolledWindow::builder().child(&items_stack).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        // the grid or the list is the scroller's own child (never inside a Stack): a scrollable that is wrapped in a viewport
+        // gets its whole natural height, builds every row at once, and GTK 4.14 then spreads rows over that height
+        let scroller = gtk::ScrolledWindow::builder().child(&grid).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
 
         let error_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let stub = super::look::empty_state(
@@ -173,7 +170,6 @@ impl ListingView {
             deps,
             stack,
             error_slot,
-            items_stack,
             footer,
             store,
             grid,
@@ -471,10 +467,10 @@ impl Inner {
         });
         if mode == LibraryDisplayMode::List {
             self.list.set_factory(Some(&factory));
-            self.items_stack.set_visible_child_name("list");
+            self.scroller.set_child(Some(&self.list));
         } else {
             self.grid.set_factory(Some(&factory));
-            self.items_stack.set_visible_child_name("grid");
+            self.scroller.set_child(Some(&self.grid));
         }
     }
 
@@ -780,11 +776,11 @@ pub(crate) mod tests {
     fn the_display_mode_picks_the_grid_or_the_list_and_activation_opens_the_entry() {
         let rig = rig(vec![items(&["a", "b"], false)], true, false, false);
         assert!(pump(|| rig.view.inner.store.n_items() == 2));
-        assert_eq!(rig.view.inner.items_stack.visible_child_name().as_deref(), Some("grid"), "compact grid is the default");
+        assert_eq!(rig.view.inner.scroller.child().as_ref(), Some(rig.view.inner.grid.upcast_ref()), "compact grid is the default");
         rig.view.set_display_mode(LibraryDisplayMode::List);
-        assert_eq!(rig.view.inner.items_stack.visible_child_name().as_deref(), Some("list"));
+        assert_eq!(rig.view.inner.scroller.child().as_ref(), Some(rig.view.inner.list.upcast_ref()));
         rig.view.set_display_mode(LibraryDisplayMode::CoverOnlyGrid);
-        assert_eq!(rig.view.inner.items_stack.visible_child_name().as_deref(), Some("grid"));
+        assert_eq!(rig.view.inner.scroller.child().as_ref(), Some(rig.view.inner.grid.upcast_ref()));
         rig.view.inner.grid.emit_by_name::<()>("activate", &[&1_u32]);
         assert_eq!(*rig.opened.borrow(), ["b"]);
     }
