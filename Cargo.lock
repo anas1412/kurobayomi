@@ -3855,7 +3855,6 @@ dependencies = [
  "kuro-prefs",
  "kuro-source",
  "kuro-source-scrape",
- "kuro-source-wasm",
  "kuro-testkit",
  "kuro-track",
  "libc",

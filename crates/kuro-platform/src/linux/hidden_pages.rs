@@ -3,6 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -45,6 +46,8 @@ thread_local! {
     static SESSION: RefCell<Option<webkit6::NetworkSession>> = const { RefCell::new(None) };
     static USED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
     static SWEEPING: Cell<bool> = const { Cell::new(false) };
+    /// One turn at a time to load each site's page.
+    static LOADING: RefCell<HashMap<String, Rc<futures_util::lock::Mutex<()>>>> = RefCell::new(HashMap::new());
 }
 
 /// The page's settings: no camera, microphone or WebRTC. Pages are only there to pass a site's browser check, and a
@@ -82,33 +85,45 @@ fn touch(origin: &str) {
 
 async fn fetch_in_page(data: &Path, cache: &Path, request_json: &str) -> Result<String, String> {
     let origin = origin_of(request_json)?;
-    touch(&origin);
-    let mut answer = String::new();
     let target = url_of(request_json)?;
+    touch(&origin);
+    let mut last = Err("the site's hidden page did not answer".to_owned());
     for reload in [false, true] {
         let view = page_for(&origin, &target, data, cache, reload).await?;
         let args = glib::VariantDict::new(None);
         args.insert("req", request_json);
-        let value = view
+        let sent = view
             .call_async_javascript_function_future(FETCH_JS, Some(&args.end()), None, None)
             .await
-            .map_err(|e| format!("the site's hidden page failed the request: {e}"))?;
-        answer = value.to_str().to_string();
-        if !still_challenged(&answer) {
+            .map(|value| value.to_str().to_string())
+            .map_err(|e| format!("the site's hidden page failed the request: {e}"));
+        let done = matches!(&sent, Ok(answer) if !still_challenged(answer));
+        last = sent;
+        if done {
             break;
         }
     }
-    Ok(answer)
+    last
 }
 
-/// The page of `origin`, past the site's check. A new page loads the site's front page and waits until it is no longer
-/// the check. A page asked to `reload` (its first answer was still the check) loads `target`, the address asked for:
-/// a site may check only some of its paths, and only a page load of the checked path can pass it.
+/// The origin (`scheme://host[:port]`) of the page a view shows now.
+fn origin_of_view(view: &webkit6::WebView) -> Option<String> {
+    url::Url::parse(&view.uri()?).ok().map(|u| u.origin().ascii_serialization())
+}
+
+/// The page of `origin`, ready to run a `fetch` of `target` (an address of that site): on the site's own origin and past
+/// its check. A new page loads the site's front page; when that lands on another origin (an image host's front page may
+/// redirect elsewhere, and a page may not read an answer from another origin) or the check is still up (`reload`), it loads
+/// `target` itself. One caller at a time loads a site's page, so the callers that come together wait for it instead of
+/// running on a page that is still loading.
 async fn page_for(origin: &str, target: &str, data: &Path, cache: &Path, reload: bool) -> Result<webkit6::WebView, String> {
-    if let Some(view) = VIEWS.with(|views| views.borrow().get(origin).cloned()).filter(|_| !reload) {
-        return Ok(view);
+    let lock = LOADING.with(|loading| Rc::clone(loading.borrow_mut().entry(origin.to_owned()).or_default()));
+    let _turn = lock.lock().await;
+    let existing = VIEWS.with(|views| views.borrow().get(origin).cloned());
+    if let Some(view) = existing.as_ref().filter(|view| !reload && origin_of_view(view).as_deref() == Some(origin)) {
+        return Ok(view.clone());
     }
-    let view = VIEWS.with(|views| views.borrow().get(origin).cloned()).unwrap_or_else(|| {
+    let view = existing.unwrap_or_else(|| {
         let session = SESSION.with(|s| {
             s.borrow_mut()
                 .get_or_insert_with(|| webkit6::NetworkSession::new(data.to_str(), cache.to_str()))
@@ -123,6 +138,18 @@ async fn page_for(origin: &str, target: &str, data: &Path, cache: &Path, reload:
         VIEWS.with(|views| views.borrow_mut().insert(origin.to_owned(), view.clone()));
         view
     });
+    let front = format!("{origin}/");
+    if reload || view.uri().is_none() {
+        load(&view, if reload { target } else { &front }).await?;
+    }
+    if origin_of_view(&view).as_deref() != Some(origin) {
+        load(&view, target).await?;
+    }
+    Ok(view)
+}
+
+/// Loads `uri` in `view` and waits until the load is finished and the page is not the site's browser check.
+async fn load(view: &webkit6::WebView, uri: &str) -> Result<(), String> {
     let (tx, rx) = async_channel::bounded::<Result<(), String>>(1);
     let ready = tx.clone();
     let loaded = view.connect_load_changed(move |view, event| {
@@ -134,12 +161,12 @@ async fn page_for(origin: &str, target: &str, data: &Path, cache: &Path, reload:
         let _ = tx.try_send(Err(format!("the site could not be opened ({uri}): {error}")));
         false
     });
-    view.load_uri(&if reload { target.to_owned() } else { format!("{origin}/") });
+    view.load_uri(uri);
     let outcome = match glib::future_with_timeout(READY_TIMEOUT, rx.recv()).await {
         Ok(Ok(result)) => result,
         _ => Err("the site's browser check did not clear".to_owned()),
     };
     view.disconnect(loaded);
     view.disconnect(failed);
-    outcome.map(|()| view)
+    outcome
 }

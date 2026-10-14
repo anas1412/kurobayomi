@@ -10,6 +10,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use http::header::{HeaderMap, SERVER, USER_AGENT};
 use http::StatusCode;
+use kuro_platform::hidden_pages::HiddenPages;
 use kuro_platform::toast::{ToastLength, Toaster};
 use kuro_platform::webview::{SolveFailure, SolveOutcome, SolveRequest, WebViewHost};
 use tokio::sync::{Semaphore, watch};
@@ -232,6 +233,7 @@ pub struct CloudflareInterceptor {
     toaster: Toaster,
     jar: CookieJar,
     solves: Arc<SolveCoordinator>,
+    pages: Option<Arc<dyn HiddenPages>>,
 }
 
 impl CloudflareInterceptor {
@@ -241,8 +243,67 @@ impl CloudflareInterceptor {
             toaster,
             jar,
             solves: Arc::new(SolveCoordinator::new()),
+            pages: None,
         }
     }
+
+    /// Sends a challenged request from a hidden page of its site instead of solving the check for the app's own client:
+    /// the pass is tied to the browser that earned it (its TLS fingerprint), so the app's client cannot reuse it. Only a
+    /// page that cannot answer falls back to the solve through [`WebViewHost`].
+    pub fn with_hidden_pages(mut self, pages: Option<Arc<dyn HiddenPages>>) -> Self {
+        self.pages = pages;
+        self
+    }
+}
+
+/// The answer of a hidden page (`kuro_platform::hidden_pages`): the status, headers and final address of the page's
+/// own `fetch`, with the body as text or base64.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageAnswer {
+    status: u16,
+    #[serde(default)]
+    headers: Vec<(String, String)>,
+    url: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    body_encoding: Option<String>,
+}
+
+/// The request as the hidden page takes it. `None` when its body is not text (a page sends text bodies only).
+fn page_request(req: &Request) -> Option<String> {
+    let body = match &req.body {
+        crate::request::Body::Empty => None,
+        crate::request::Body::Bytes { data, .. } => Some(std::str::from_utf8(data).ok()?.to_owned()),
+        _ => return None,
+    };
+    // the headers a page can set: its own browser sends the user agent, the encodings and the connection, and the cache
+    // directive of the app's client only means something to that client
+    let skipped = ["user-agent", "cache-control", "pragma", "accept-encoding", "connection", "host", "content-length", "cookie", "origin"];
+    let headers: Vec<(&str, &str)> = req.headers.iter().filter(|(n, _)| !skipped.contains(&n.as_str())).filter_map(|(n, v)| Some((n.as_str(), v.to_str().ok()?))).collect();
+    serde_json::to_string(&serde_json::json!({ "method": req.method.as_str(), "url": req.url.as_str(), "headers": headers, "body": body })).ok()
+}
+
+/// The response of a page's answer. The page's `fetch` has already decoded the body, so the headers that describe its
+/// encoding and length are left out.
+fn response_of(answer: &str) -> Option<Response> {
+    use base64::Engine as _;
+    let answer: PageAnswer = serde_json::from_str(answer).ok()?;
+    let bytes = match answer.body_encoding.as_deref() {
+        Some("base64") => base64::engine::general_purpose::STANDARD.decode(&answer.body).ok()?,
+        _ => answer.body.into_bytes(),
+    };
+    let mut headers = HeaderMap::new();
+    for (name, value) in &answer.headers {
+        if ["content-encoding", "content-length", "transfer-encoding"].contains(&name.to_ascii_lowercase().as_str()) {
+            continue;
+        }
+        if let (Ok(name), Ok(value)) = (http::header::HeaderName::from_bytes(name.as_bytes()), http::HeaderValue::from_str(value)) {
+            headers.append(name, value);
+        }
+    }
+    Some(Response::new(StatusCode::from_u16(answer.status).ok()?, headers, Url::parse(&answer.url).ok()?, body_from_chunks(&[&bytes[..]])))
 }
 
 #[async_trait]
@@ -252,6 +313,21 @@ impl Interceptor for CloudflareInterceptor {
         let response = chain.proceed(req).await?;
         if !is_challenge(response.status, &response.headers) {
             return Ok(response);
+        }
+        if let (Some(pages), Some(json)) = (&self.pages, page_request(&retry)) {
+            let pages = Arc::clone(pages);
+            let sent = json.chars().take(400).collect::<String>();
+            // the page works on the window's thread and the call waits for it, so it runs off the async workers
+            let answer = tokio::select! {
+                biased;
+                _ = retry.opts.cancel.cancelled() => return Err(NetError::Canceled),
+                answer = tokio::task::spawn_blocking(move || pages.fetch(&json)) => answer.map_err(|e| e.to_string()).and_then(|r| r),
+            };
+            match answer.as_deref().map(|a| response_of(a).ok_or("the page's answer did not read")) {
+                Ok(Ok(page_response)) => return Ok(page_response),
+                Ok(Err(why)) => tracing::warn!(url = %retry.url, why, "the hidden page could not answer; the check is solved the other way"),
+                Err(why) => tracing::warn!(url = %retry.url, why = %why, request = %sent, "the hidden page could not answer; the check is solved the other way"),
+            }
         }
         if !self.webview.available() {
             self.toaster.show(WEBKIT_MISSING_TEXT, ToastLength::Long);
@@ -410,6 +486,70 @@ mod tests {
         }
         .build();
         (client, jar)
+    }
+
+    /// A hidden page that answers with a fixed JSON, or fails; it counts its calls and keeps the last request.
+    struct FakePages {
+        answer: Result<String, String>,
+        calls: AtomicUsize,
+        last: Mutex<String>,
+    }
+
+    impl HiddenPages for FakePages {
+        fn fetch(&self, request_json: &str) -> Result<String, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last.lock().unwrap() = request_json.to_owned();
+            self.answer.clone()
+        }
+    }
+
+    fn client_with_pages(webview: Arc<dyn WebViewHost>, pages: Arc<FakePages>, dir: &std::path::Path) -> crate::NetworkClient {
+        let jar = CookieJar::load(dir.join("cookies.json"));
+        let transport = Arc::new(Transport::new(TransportLimits::default(), jar.provider()).unwrap());
+        let (toaster, _feed) = toast_channel();
+        let chain: Vec<Arc<dyn Interceptor>> = vec![Arc::new(CloudflareInterceptor::new(webview, toaster, jar.clone()).with_hidden_pages(Some(pages)))];
+        ClientBuilder { chain, cloudflare: true, transport, cookies: jar, user_agent: crate::client::fixed_user_agent("") }.build()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hidden_page_answers_the_challenge_and_the_solve_is_not_asked() {
+        let server = challenge_server_for(None).await;
+        let dir = tempfile::tempdir().unwrap();
+        let webview = FakeWebView::new(cleared(), Duration::from_millis(10));
+        use base64::Engine as _;
+        let body = base64::engine::general_purpose::STANDARD.encode(b"\x00\xffimage");
+        let pages = Arc::new(FakePages {
+            answer: Ok(format!(r#"{{"status":200,"headers":[["content-type","image/webp"],["content-encoding","gzip"]],"url":"{}/x","body":"{body}","bodyEncoding":"base64"}}"#, server.uri())),
+            calls: AtomicUsize::new(0),
+            last: Mutex::new(String::new()),
+        });
+        let client = client_with_pages(webview.clone(), pages.clone(), dir.path());
+        let mut request = request::get(&format!("{}/x", server.uri())).unwrap();
+        request.headers.insert("referer", "https://site.test/".parse().unwrap());
+        let resp = client.execute(request).await.unwrap();
+        assert_eq!(resp.status, StatusCode::OK);
+        assert_eq!(resp.headers.get("content-type").unwrap(), "image/webp");
+        assert!(resp.headers.get("content-encoding").is_none(), "the page already decoded the body");
+        assert_eq!(&resp.bytes().await.unwrap()[..], b"\x00\xffimage");
+        assert_eq!(pages.calls.load(Ordering::SeqCst), 1);
+        let sent = pages.last.lock().unwrap().clone();
+        assert!(sent.contains(r#"["referer","https://site.test/"]"#), "the headers a page can set travel with it");
+        assert!(!sent.contains("user-agent") && !sent.contains("cache-control"), "{sent}");
+        assert_eq!(webview.solves.load(Ordering::SeqCst), 0, "the system browser was not asked");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1, "no retry from the app's own client");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_page_that_cannot_answer_falls_back_to_the_solve() {
+        let server = challenge_server_for(Some(1)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let webview = FakeWebView::new(cleared(), Duration::from_millis(10));
+        let pages = Arc::new(FakePages { answer: Err("no engine".into()), calls: AtomicUsize::new(0), last: Mutex::new(String::new()) });
+        let client = client_with_pages(webview.clone(), pages.clone(), dir.path());
+        let resp = client.execute(request::get(&format!("{}/", server.uri())).unwrap()).await.unwrap();
+        assert_eq!(resp.status, StatusCode::OK);
+        assert_eq!(pages.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(webview.solves.load(Ordering::SeqCst), 1);
     }
 
     /// A Cloudflare challenge for the first `challenges` requests, then a plain 200. `None` means always a challenge.

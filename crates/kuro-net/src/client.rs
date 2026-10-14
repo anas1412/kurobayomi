@@ -78,6 +78,18 @@ impl NetworkClient {
         webview: Arc<dyn WebViewHost>,
         toaster: Toaster,
     ) -> Result<Self, NetError> {
+        Self::with_cookies_and_pages(prefs, cookies, webview, toaster, None)
+    }
+
+    /// As [`NetworkClient::with_cookies`], with the hidden pages a Cloudflare check is answered through when the platform
+    /// has them (`kuro_platform::hidden_pages`), ahead of the solve through `webview`.
+    pub fn with_cookies_and_pages(
+        prefs: &NetworkPrefs,
+        cookies: CookieJar,
+        webview: Arc<dyn WebViewHost>,
+        toaster: Toaster,
+        pages: Option<Arc<dyn kuro_platform::hidden_pages::HiddenPages>>,
+    ) -> Result<Self, NetError> {
         let settings = NetworkSettings::from_prefs(prefs);
         let doh = DohProvider::from_pref(settings.doh_provider)
             .map(|provider| DohResolver::new(provider, &settings.default_user_agent))
@@ -92,7 +104,7 @@ impl NetworkClient {
         let chain: Vec<Arc<dyn Interceptor>> = vec![
             Arc::new(UncaughtExceptionInterceptor),
             Arc::new(UserAgentInterceptor::new(move || ua()).with_domain_defaults(cookies.clone())),
-            Arc::new(CloudflareInterceptor::new(webview, toaster, cookies.clone())),
+            Arc::new(CloudflareInterceptor::new(webview, toaster, cookies.clone()).with_hidden_pages(pages)),
         ];
         Ok(ClientBuilder {
             chain,
@@ -129,7 +141,7 @@ impl NetworkClient {
         let webview = embedded
             .filter(|view| view.available())
             .unwrap_or_else(|| Arc::new(BrowserHost::new(opener, paths.cookies_import_file())));
-        Self::with_cookies(prefs, cookies, webview, toaster)
+        Self::with_cookies_and_pages(prefs, cookies, webview, toaster, kuro_platform::hidden_pages::hidden_pages(paths))
     }
 
     /// A copy of this client's chain, to add interceptors to. The original client is not changed.

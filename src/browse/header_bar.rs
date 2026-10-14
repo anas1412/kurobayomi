@@ -46,8 +46,9 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
     let bar = crate::ui::header_bar();
     bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
     // an Inscription, not a Label: an ellipsized label still needs the width of "…", which kept the window from 360 px
-    let chars = u32::try_from(deps.source_name.chars().count()).unwrap_or(u32::MAX);
-    let title = gtk::Inscription::builder().text(&deps.source_name).css_classes(["title"]).min_chars(0).nat_chars(chars).text_overflow(gtk::InscriptionOverflow::EllipsizeEnd).valign(gtk::Align::Center).build();
+    // the natural width counts average-width characters, so a name of wide letters ("AnimePahe") needs more than its count
+    let chars = u32::try_from(deps.source_name.chars().count()).unwrap_or(u32::MAX).saturating_mul(3) / 2 + 1;
+    let title = gtk::Inscription::builder().text(&deps.source_name).css_classes(["title"]).min_chars(0).nat_chars(chars).xalign(0.5).text_overflow(gtk::InscriptionOverflow::EllipsizeEnd).valign(gtk::Align::Center).build();
     // with too little room the name would shrink to a lone "…": it is hidden then (it keeps its place)
     title.add_tick_callback(|title, _| {
         title.set_opacity(if title.width() < TITLE_MIN_PX { 0.0 } else { 1.0 });
