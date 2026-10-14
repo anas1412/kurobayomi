@@ -116,11 +116,11 @@ impl Default for ReaderExtras {
 }
 
 /// The crop button after a toggle: the new value, the icon that reflects it and the toast text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CropView {
     pub value: bool,
     pub icon: &'static str,
-    pub toast: &'static str,
+    pub toast: String,
 }
 
 pub const CROP_ICON_ON: &str = "image-crop-symbolic";
@@ -133,7 +133,7 @@ pub fn crop_icon(on: bool) -> &'static str {
 
 /// The toast for a failed adjacent load. A blank message never gives an empty toast (E-TOAST-1).
 pub fn failure_toast(message: &str) -> String {
-    if message.trim().is_empty() { strings::UNKNOWN_ERROR.to_owned() } else { message.to_owned() }
+    if message.trim().is_empty() { strings::unknown_error().to_owned() } else { message.to_owned() }
 }
 
 /// Resolves once the source manager has finished initialising. `false` when it went away without doing so.
@@ -251,7 +251,7 @@ impl ReaderCore {
         let chapter = Rc::clone(&opened.chapters[opened.index]);
         load_chapter(&chapter, || (self.deps.build)(&chapter), preserve).map_err(|failure| match failure {
             LoadFailure::Failed(error) => error,
-            LoadFailure::Cancelled => LoadError::new(strings::UNKNOWN_ERROR),
+            LoadFailure::Cancelled => LoadError::new(strings::unknown_error()),
         })?;
         if let (Some(page), Some(pages)) = (start.page_index, chapter.pages()) {
             // a restored page is where the viewer opens, kept inside the chapter
@@ -356,35 +356,35 @@ impl ReaderCore {
 
     /// The toast after a local manga's cover write. The new thumbnail and its time go on the manga row, which the library
     /// reads its cover from.
-    pub fn local_cover_result(&self, written: Result<kuro_local::images::CoverWrite, String>) -> &'static str {
-        let Ok(cover) = written else { return strings::NOTIFICATION_COVER_UPDATE_FAILED };
+    pub fn local_cover_result(&self, written: Result<kuro_local::images::CoverWrite, String>) -> String {
+        let Ok(cover) = written else { return strings::notification_cover_update_failed() };
         let update = EntryUpdate {
             thumbnail_url: Some(cover.thumbnail_url),
             cover_last_modified: Some(cover.cover_last_modified),
             ..EntryUpdate::new(self.deps.manga_id)
         };
         match EntryRepo::new(Arc::clone(&self.deps.db)).update(&update) {
-            Ok(()) => strings::COVER_UPDATED,
-            Err(_) => strings::NOTIFICATION_COVER_UPDATE_FAILED,
+            Ok(()) => strings::cover_updated(),
+            Err(_) => strings::notification_cover_update_failed(),
         }
     }
 
     /// The toast after a cover write (T-43a-058). The cover is written first, then the library check (E-COVER-1).
-    pub fn cover_result(&self, written: Result<(), String>) -> &'static str {
+    pub fn cover_result(&self, written: Result<(), String>) -> String {
         if written.is_err() {
-            return strings::NOTIFICATION_COVER_UPDATE_FAILED;
+            return strings::notification_cover_update_failed();
         }
         let manga = match EntryRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id) {
             Ok(manga) => manga,
-            Err(_) => return strings::NOTIFICATION_COVER_UPDATE_FAILED,
+            Err(_) => return strings::notification_cover_update_failed(),
         };
         if !manga.favorite {
-            return strings::NOTIFICATION_FIRST_ADD_TO_LIBRARY;
+            return strings::notification_first_add_to_library();
         }
         let update = EntryUpdate { id: self.deps.manga_id, cover_last_modified: Some(history_rules::now_ms()), ..Default::default() };
         match EntryRepo::new(Arc::clone(&self.deps.db)).update(&update) {
-            Ok(()) => strings::COVER_UPDATED,
-            Err(_) => strings::NOTIFICATION_COVER_UPDATE_FAILED,
+            Ok(()) => strings::cover_updated(),
+            Err(_) => strings::notification_cover_update_failed(),
         }
     }
 
@@ -1045,7 +1045,7 @@ fn run_page_action(screen: &Rc<Screen>, page: &Rc<ReaderPage>, action: page_acti
 }
 
 fn warn_unknown(screen: &Screen) {
-    screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+    screen.toaster.show(strings::unknown_error(), ToastLength::Short);
 }
 
 /// Where a page's bytes are, for an action that runs now. A page that is not `Ready` gives `None` and nothing is
@@ -1070,7 +1070,7 @@ fn copy_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
         match (texture, gtk::gdk::Display::default()) {
             (Some(texture), Some(display)) => display.clipboard().set_texture(&texture),
             _ => {
-                toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+                toaster.show(strings::unknown_error(), ToastLength::Short);
             }
         }
     });
@@ -1111,7 +1111,7 @@ fn share_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
             (Ok(path), Some(app)) => saved_notice::show_shared(&app, &message, &path),
             (Ok(_), None) => {}
             (Err(_), _) => {
-                toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+                toaster.show(strings::unknown_error(), ToastLength::Short);
             }
         }
     });
@@ -1124,7 +1124,7 @@ fn set_cover(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
     }
     let Some(window) = window_of(screen) else { return };
     let (weak, page) = (Rc::downgrade(screen), Rc::clone(page));
-    sheet::confirm(&window, strings::CONFIRM_SET_IMAGE_AS_COVER, move || {
+    sheet::confirm(&window, &strings::confirm_set_image_as_cover(), move || {
         let Some(s) = weak.upgrade() else { return };
         // checked again now that the confirm has been answered
         let Some(source) = ready_source(&s, &page) else { return };
@@ -1224,7 +1224,7 @@ fn start(screen: &Rc<Screen>) {
             glib::timeout_future(std::time::Duration::ZERO).await;
             screen.core.initial_load()
         } else {
-            Err(LoadError::new(strings::UNKNOWN_ERROR))
+            Err(LoadError::new(strings::unknown_error()))
         };
         match result {
             Ok(()) => {
@@ -1396,7 +1396,7 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
         on_bookmark: Box::new(move || {
             let Some(screen) = bookmark.upgrade() else { return };
             if let Some(Err(_)) = screen.core.toggle_bookmark() {
-                screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+                screen.toaster.show(strings::unknown_error(), ToastLength::Short);
             }
             // the bar is rebuilt after the click has finished, so its icon and label follow the new state
             glib::idle_add_local_once(move || rebuild_top_bar(&screen));
@@ -1445,7 +1445,7 @@ fn menu_handlers(me: &Weak<Screen>) -> MenuHandlers {
         on_set_cover: run(me, |screen| match screen.core.visible_page() {
             Some(page) => set_cover(screen, &page),
             None => {
-                screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+                screen.toaster.show(strings::unknown_error(), ToastLength::Short);
             }
         }),
     }
@@ -1455,7 +1455,7 @@ fn menu_handlers(me: &Weak<Screen>) -> MenuHandlers {
 fn chapter_web_url(screen: &Screen) -> Option<String> {
     let url = screen.core.chapter_url().and_then(|u| chrome::web_url(&u));
     if url.is_none() {
-        screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+        screen.toaster.show(strings::unknown_error(), ToastLength::Short);
     }
     url
 }
@@ -1817,11 +1817,11 @@ mod tests {
         assert_eq!(core.mode(), ReadingMode::LeftToRight);
         assert!(!core.crop_on());
         let on = core.toggle_crop();
-        assert_eq!(on, CropView { value: true, icon: CROP_ICON_ON, toast: "On" });
+        assert_eq!(on, CropView { value: true, icon: CROP_ICON_ON, toast: "On".to_string() });
         assert!(core.deps.prefs.crop_borders.get());
         assert!(core.crop_on());
         let off = core.toggle_crop();
-        assert_eq!(off, CropView { value: false, icon: CROP_ICON_OFF, toast: "Off" });
+        assert_eq!(off, CropView { value: false, icon: CROP_ICON_OFF, toast: "Off".to_string() });
         assert!(!core.deps.prefs.crop_borders.get());
     }
 

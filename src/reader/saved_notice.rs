@@ -100,9 +100,9 @@ fn on_file(name: &str, path: &Path) -> Target {
 pub fn saved_post(path: &Path, thumbnail: Option<Vec<u8>>) -> Post {
     Post {
         id: PICTURE_NOTICE_ID.to_owned(),
-        title: strings::PICTURE_SAVED.to_owned(),
+        title: strings::picture_saved().to_owned(),
         tap: Some(on_file(OPEN_ACTION, path)),
-        buttons: vec![(strings::ACTION_SHARE.to_owned(), on_file(SHARE_ACTION, path))],
+        buttons: vec![(strings::action_share().to_owned(), on_file(SHARE_ACTION, path))],
         icon: thumbnail,
         ..Post::default()
     }
@@ -119,7 +119,7 @@ pub fn shared_post(text: &str, path: &Path) -> Post {
     Post {
         id: SHARE_NOTICE_ID.to_owned(),
         title: text.to_owned(),
-        buttons: vec![(strings::ACTION_SHOW_IN_FILE_MANAGER.to_owned(), on_file(REVEAL_ACTION, path))],
+        buttons: vec![(strings::action_show_in_file_manager().to_owned(), on_file(REVEAL_ACTION, path))],
         ..Post::default()
     }
 }
@@ -139,8 +139,8 @@ pub fn open_with_default(path: &Path) -> std::io::Result<()> {
 pub fn show_failed(_app: &gtk::Application, message: Option<&str>) {
     notify::post(Post {
         id: PICTURE_NOTICE_ID.to_owned(),
-        title: strings::DOWNLOAD_NOTIFIER_TITLE_ERROR.to_owned(),
-        body: Some(message.filter(|m| !m.trim().is_empty()).unwrap_or(strings::UNKNOWN_ERROR).to_owned()),
+        title: strings::download_notifier_title_error().to_owned(),
+        body: Some(message.filter(|m| !m.trim().is_empty()).unwrap_or(&strings::unknown_error()).to_owned()),
         ..Post::default()
     });
 }

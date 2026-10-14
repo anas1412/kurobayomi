@@ -76,7 +76,7 @@ pub fn initial_index(ids: &[i64], requested: i64) -> Result<usize, String> {
 pub fn list_error_message(error: &ListError) -> String {
     match error {
         ListError::ChapterNotFound(id) => strings::requested_chapter_not_found(*id),
-        ListError::CurrentChapterMissing => strings::CHAPTER_NOT_DOWNLOADED.to_owned(),
+        ListError::CurrentChapterMissing => strings::chapter_not_downloaded().to_owned(),
     }
 }
 
@@ -95,7 +95,7 @@ pub fn open_list(
     opts: impl FnOnce(&Entry) -> ListOptions,
     is_downloaded: impl Fn(&Item) -> bool,
 ) -> Result<OpenedList, String> {
-    let manga = EntryRepo::new(Arc::clone(&db)).by_id(manga_id).map_err(|_| strings::UNKNOWN_ERR.to_owned())?;
+    let manga = EntryRepo::new(Arc::clone(&db)).by_id(manga_id).map_err(|_| strings::unknown_err().to_owned())?;
     let all = ItemRepo::new(db).by_entry_id(manga_id, true).map_err(|e| e.to_string())?;
     let list = build_reader_list(&all, requested, &opts(&manga), is_downloaded).map_err(|e| list_error_message(&e))?;
     let ids: Vec<i64> = list.iter().map(|c| c.id).collect();

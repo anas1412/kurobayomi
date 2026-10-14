@@ -4309,3 +4309,30 @@ browse_check_sources = Check for new and updated sources
 
 # source: kurobayomi
 downloads_check_files = Check the downloaded files again
+
+# source: kurobayomi
+reader_unknown_err = Unknown err
+
+# source: kurobayomi
+reader_chapter_not_downloaded = The chapter is not downloaded. Turn off downloaded-only mode or download it first.
+
+# source: kurobayomi
+reader_action_show_in_file_manager = Show in file manager
+
+# source: kurobayomi
+reader_custom_brightness_unavailable = Custom brightness is not available on this display
+
+# source: kurobayomi
+reader_menu_reader_settings = Reader settings…
+
+# source: kurobayomi
+reader_cutout_dropped_note = Show content in cutout area is not used on Linux: there is no display cutout.
+
+# source: kurobayomi
+reader_volume_keys_media_caveat = The desktop can take the volume keys before the reader gets them. Page Up, Page Down and Space always turn pages.
+
+# source: kurobayomi
+reader_pref_restore_after_crash = Restore the chapter and page after a crash
+
+# source: kurobayomi
+reader_requested_chapter_not_found = Requested chapter of id { NUMBER($arg1, useGrouping: "false") } not found in chapter list

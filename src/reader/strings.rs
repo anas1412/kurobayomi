@@ -1,200 +1,582 @@
-//! English reader strings keyed by the upstream message keys (`p1-behavior.md` section 20, T-43a-061).
-//! Format arguments are plain function parameters, so the `%1$s` and `%d` placeholders become `format!`.
+//! Reader strings keyed by the upstream message keys (`p1-behavior.md` section 20, T-43a-061). Each one reads the string
+//! table, so it follows the active language; the arguments of the formatted ones are plain function parameters.
 //! Strings marked "text not re-read" in section 20 are kept as the spec gives them and must be verified.
 
-pub const PAGE_LIST_EMPTY_ERROR: &str = "No pages found";
-pub const LOADER_NOT_IMPLEMENTED_ERROR: &str = "Source not found";
+use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
+
+pub fn page_list_empty_error() -> String {
+    tr(MsgKey::page_list_empty_error)
+}
+
+pub fn loader_not_implemented_error() -> String {
+    tr(MsgKey::loader_not_implemented_error)
+}
+
 /// A literal in `ReaderActivity.kt:181`, not a localised key.
-pub const UNKNOWN_ERR: &str = "Unknown err";
-pub const UNKNOWN_ERROR: &str = "Unknown error";
+pub fn unknown_err() -> String {
+    tr(MsgKey::reader_unknown_err)
+}
+
+pub fn unknown_error() -> String {
+    tr(MsgKey::unknown_error)
+}
+
 /// The downloaded-only card text (E-LIST-2 proposal). The card shows it as is, without the load-failure prefix.
-pub const CHAPTER_NOT_DOWNLOADED: &str = "The chapter is not downloaded. Turn off downloaded-only mode or download it first.";
-pub const DOWNLOAD_NOTIFIER_TITLE_ERROR: &str = "Error";
-pub const LOADING: &str = "Loading…";
-pub const ON: &str = "On";
-pub const OFF: &str = "Off";
-pub const RETRY: &str = "Retry";
-pub const CLOSE: &str = "Close";
+pub fn chapter_not_downloaded() -> String {
+    tr(MsgKey::reader_chapter_not_downloaded)
+}
 
-pub const TRANSITION_PREVIOUS: &str = "Previous:";
-pub const TRANSITION_NEXT: &str = "Next:";
-pub const TRANSITION_FINISHED: &str = "Finished:";
-pub const TRANSITION_CURRENT: &str = "Current:";
-pub const TRANSITION_NO_PREVIOUS: &str = "There's no previous chapter";
-pub const TRANSITION_NO_NEXT: &str = "There's no next chapter";
+pub fn download_notifier_title_error() -> String {
+    tr(MsgKey::download_notifier_title_error)
+}
+
+pub fn loading() -> String {
+    tr(MsgKey::loading)
+}
+
+pub fn on() -> String {
+    tr(MsgKey::on)
+}
+
+pub fn off() -> String {
+    tr(MsgKey::off)
+}
+
+pub fn retry() -> String {
+    tr(MsgKey::action_retry)
+}
+
+pub fn close() -> String {
+    tr(MsgKey::action_close)
+}
+
+
+pub fn transition_previous() -> String {
+    tr(MsgKey::transition_previous)
+}
+
+pub fn transition_next() -> String {
+    tr(MsgKey::transition_next)
+}
+
+pub fn transition_finished() -> String {
+    tr(MsgKey::transition_finished)
+}
+
+pub fn transition_current() -> String {
+    tr(MsgKey::transition_current)
+}
+
+pub fn transition_no_previous() -> String {
+    tr(MsgKey::transition_no_previous)
+}
+
+pub fn transition_no_next() -> String {
+    tr(MsgKey::transition_no_next)
+}
+
 /// `transition_pages_loading`: the status line while the adjacent chapter loads (B§11.3).
-pub const TRANSITION_PAGES_LOADING: &str = "Loading pages…";
-pub const LABEL_DOWNLOADED: &str = "Downloaded";
+pub fn transition_pages_loading() -> String {
+    tr(MsgKey::transition_pages_loading)
+}
 
-pub const PICTURE_SAVED: &str = "Picture saved";
-pub const COVER_UPDATED: &str = "Cover updated";
-pub const NOTIFICATION_FIRST_ADD_TO_LIBRARY: &str = "Please add the entry to your library before doing this";
-pub const NOTIFICATION_COVER_UPDATE_FAILED: &str = "Failed to update cover";
-pub const SET_AS_COVER: &str = "Set as cover";
-pub const CONFIRM_SET_IMAGE_AS_COVER: &str = "Use this image as cover art?";
-pub const ACTION_OK: &str = "OK";
-pub const ACTION_CANCEL: &str = "Cancel";
-pub const ACTION_SAVE: &str = "Save";
-pub const ACTION_SHARE: &str = "Share";
+pub fn label_downloaded() -> String {
+    tr(MsgKey::label_downloaded)
+}
+
+
+pub fn picture_saved() -> String {
+    tr(MsgKey::picture_saved)
+}
+
+pub fn cover_updated() -> String {
+    tr(MsgKey::cover_updated)
+}
+
+pub fn notification_first_add_to_library() -> String {
+    tr(MsgKey::notification_first_add_to_library)
+}
+
+pub fn notification_cover_update_failed() -> String {
+    tr(MsgKey::notification_cover_update_failed)
+}
+
+pub fn set_as_cover() -> String {
+    tr(MsgKey::set_as_cover)
+}
+
+pub fn confirm_set_image_as_cover() -> String {
+    tr(MsgKey::confirm_set_image_as_cover)
+}
+
+pub fn action_ok() -> String {
+    tr(MsgKey::action_ok)
+}
+
+pub fn action_cancel() -> String {
+    tr(MsgKey::action_cancel)
+}
+
+pub fn action_save() -> String {
+    tr(MsgKey::action_save)
+}
+
+pub fn action_share() -> String {
+    tr(MsgKey::action_share)
+}
+
 /// The button of the share notice: shows the shared picture in the file manager (T-43a-056).
-pub const ACTION_SHOW_IN_FILE_MANAGER: &str = "Show in file manager";
-pub const ACTION_COPY_TO_CLIPBOARD: &str = "Copy to clipboard";
+pub fn action_show_in_file_manager() -> String {
+    tr(MsgKey::reader_action_show_in_file_manager)
+}
 
-pub const ACTION_BOOKMARK: &str = "Bookmark chapter";
-pub const ACTION_REMOVE_BOOKMARK: &str = "Unbookmark chapter";
-pub const ACTION_OPEN_IN_BROWSER: &str = "Open in browser";
-pub const ACTION_NEXT_CHAPTER: &str = "Next chapter";
-pub const ACTION_PREVIOUS_CHAPTER: &str = "Previous chapter";
-pub const VIEWER: &str = "Reading mode";
-pub const PREF_CROP_BORDERS: &str = "Crop borders";
-pub const ACTION_SETTINGS: &str = "Settings";
+pub fn action_copy_to_clipboard() -> String {
+    tr(MsgKey::action_copy_to_clipboard)
+}
 
-pub const LABEL_DEFAULT: &str = "Default";
+
+pub fn action_bookmark() -> String {
+    tr(MsgKey::action_bookmark)
+}
+
+pub fn action_remove_bookmark() -> String {
+    tr(MsgKey::action_remove_bookmark)
+}
+
+pub fn action_open_in_browser() -> String {
+    tr(MsgKey::action_open_in_browser)
+}
+
+pub fn action_next_chapter() -> String {
+    tr(MsgKey::action_next_chapter)
+}
+
+pub fn action_previous_chapter() -> String {
+    tr(MsgKey::action_previous_chapter)
+}
+
+pub fn viewer() -> String {
+    tr(MsgKey::viewer)
+}
+
+pub fn pref_crop_borders() -> String {
+    tr(MsgKey::pref_crop_borders)
+}
+
+pub fn action_settings() -> String {
+    tr(MsgKey::action_settings)
+}
+
+
+pub fn label_default() -> String {
+    tr(MsgKey::label_default)
+}
+
 /// PROPOSAL (E-BRIGHT-2): shown when a positive custom brightness is asked for, since there is no backlight control.
-pub const CUSTOM_BRIGHTNESS_UNAVAILABLE: &str = "Custom brightness is not available on this display";
+pub fn custom_brightness_unavailable() -> String {
+    tr(MsgKey::reader_custom_brightness_unavailable)
+}
+
 /// The accessible name and tooltip of the top bar overflow button (the Kotlin content description, in English).
-pub const OVERFLOW_MENU: &str = "More";
-pub const MENU_READER_SETTINGS: &str = "Reader settings…";
+pub fn overflow_menu() -> String {
+    tr(MsgKey::player_sheets_more_title)
+}
+
+pub fn menu_reader_settings() -> String {
+    tr(MsgKey::reader_menu_reader_settings)
+}
+
 
 pub fn name_collision_suffix(n: u32) -> String {
     format!(" ({n})")
 }
 
-pub const PREF_CATEGORY_READING_MODE: &str = "Reading mode";
-pub const CUSTOM_FILTER: &str = "Custom filter";
-pub const PREF_CATEGORY_FOR_THIS_SERIES: &str = "For this series";
-pub const PAGER_VIEWER: &str = "Paged";
-pub const WEBTOON_VIEWER: &str = "Long strip";
-pub const PREF_VIEWER_NAV: &str = "Tap zones";
-pub const PREF_READ_WITH_TAPPING_INVERTED: &str = "Invert tap zones";
-pub const PREF_IMAGE_SCALE_TYPE: &str = "Scale type";
-pub const PREF_ZOOM_START: &str = "Zoom start position";
-pub const PREF_LANDSCAPE_ZOOM: &str = "Automatically zoom into wide images";
-pub const PREF_NAVIGATE_PAN: &str = "Pan wide images";
-pub const PREF_DUAL_PAGE_INVERT: &str = "Invert split page placement";
-pub const PREF_PAGE_ROTATE: &str = "Rotate wide pages to fit";
-pub const PREF_PAGE_ROTATE_INVERT: &str = "Flip orientation of rotated wide pages";
-pub const PREF_WEBTOON_SIDE_PADDING: &str = "Side padding";
-pub const PREF_DOUBLE_TAP_ZOOM: &str = "Double tap to zoom";
-pub const PREF_WEBTOON_DISABLE_ZOOM_OUT: &str = "Disable zoom out";
-pub const PREF_SHOW_PAGE_NUMBER: &str = "Show page number";
-pub const PREF_FULLSCREEN: &str = "Fullscreen";
+pub fn pref_category_reading_mode() -> String {
+    tr(MsgKey::pref_category_reading_mode)
+}
+
+pub fn custom_filter() -> String {
+    tr(MsgKey::custom_filter)
+}
+
+pub fn pref_category_for_this_series() -> String {
+    tr(MsgKey::pref_category_for_this_series)
+}
+
+pub fn pager_viewer() -> String {
+    tr(MsgKey::pager_viewer)
+}
+
+pub fn webtoon_viewer() -> String {
+    tr(MsgKey::webtoon_viewer)
+}
+
+pub fn pref_viewer_nav() -> String {
+    tr(MsgKey::pref_viewer_nav)
+}
+
+pub fn pref_read_with_tapping_inverted() -> String {
+    tr(MsgKey::pref_read_with_tapping_inverted)
+}
+
+pub fn pref_image_scale_type() -> String {
+    tr(MsgKey::pref_image_scale_type)
+}
+
+pub fn pref_zoom_start() -> String {
+    tr(MsgKey::pref_zoom_start)
+}
+
+pub fn pref_landscape_zoom() -> String {
+    tr(MsgKey::pref_landscape_zoom)
+}
+
+pub fn pref_navigate_pan() -> String {
+    tr(MsgKey::pref_navigate_pan)
+}
+
+pub fn pref_dual_page_invert() -> String {
+    tr(MsgKey::pref_dual_page_invert)
+}
+
+pub fn pref_page_rotate() -> String {
+    tr(MsgKey::pref_page_rotate)
+}
+
+pub fn pref_page_rotate_invert() -> String {
+    tr(MsgKey::pref_page_rotate_invert)
+}
+
+pub fn pref_webtoon_side_padding() -> String {
+    tr(MsgKey::pref_webtoon_side_padding)
+}
+
+pub fn pref_double_tap_zoom() -> String {
+    tr(MsgKey::pref_double_tap_zoom)
+}
+
+pub fn pref_webtoon_disable_zoom_out() -> String {
+    tr(MsgKey::pref_webtoon_disable_zoom_out)
+}
+
+pub fn pref_show_page_number() -> String {
+    tr(MsgKey::pref_show_page_number)
+}
+
+pub fn pref_fullscreen() -> String {
+    tr(MsgKey::pref_fullscreen)
+}
+
 /// The help line that records the dropped cutout setting on Linux (T-43b-050). The key stays in the store.
-pub const CUTOUT_DROPPED_NOTE: &str = "Show content in cutout area is not used on Linux: there is no display cutout.";
-pub const PREF_KEEP_SCREEN_ON: &str = "Keep screen on";
-pub const PREF_READ_WITH_LONG_TAP: &str = "Show actions on long tap";
-pub const PREF_ALWAYS_SHOW_CHAPTER_TRANSITION: &str = "Always show chapter transition";
-pub const PREF_PAGE_TRANSITIONS: &str = "Animate page transitions";
-pub const PREF_SKIP_READ_CHAPTERS: &str = "Skip chapters marked read";
-pub const PREF_SKIP_FILTERED_CHAPTERS: &str = "Skip filtered chapters";
-pub const PREF_SKIP_DUPE_CHAPTERS: &str = "Skip duplicate chapters";
-pub const PREF_PRESERVE_READING_POSITION: &str = "Preserve reading position on read chapters";
-pub const PREF_READ_WITH_VOLUME_KEYS: &str = "Volume keys";
-pub const PREF_READ_WITH_VOLUME_KEYS_INVERTED: &str = "Invert volume keys";
+pub fn cutout_dropped_note() -> String {
+    tr(MsgKey::reader_cutout_dropped_note)
+}
+
+pub fn pref_keep_screen_on() -> String {
+    tr(MsgKey::pref_keep_screen_on)
+}
+
+pub fn pref_read_with_long_tap() -> String {
+    tr(MsgKey::pref_read_with_long_tap)
+}
+
+pub fn pref_always_show_chapter_transition() -> String {
+    tr(MsgKey::pref_always_show_chapter_transition)
+}
+
+pub fn pref_page_transitions() -> String {
+    tr(MsgKey::pref_page_transitions)
+}
+
+pub fn pref_skip_read_chapters() -> String {
+    tr(MsgKey::pref_skip_read_chapters)
+}
+
+pub fn pref_skip_filtered_chapters() -> String {
+    tr(MsgKey::pref_skip_filtered_chapters)
+}
+
+pub fn pref_skip_dupe_chapters() -> String {
+    tr(MsgKey::pref_skip_dupe_chapters)
+}
+
+pub fn pref_preserve_reading_position() -> String {
+    tr(MsgKey::pref_preserve_reading_position)
+}
+
+pub fn pref_read_with_volume_keys() -> String {
+    tr(MsgKey::pref_read_with_volume_keys)
+}
+
+pub fn pref_read_with_volume_keys_inverted() -> String {
+    tr(MsgKey::pref_read_with_volume_keys_inverted)
+}
+
 /// Under the volume key rows: the desktop can take the media keys before the reader sees them (E-25 caveat, the
 /// catalogue's drop note). PageUp, PageDown and Space always page, so nothing is lost by it.
-pub const VOLUME_KEYS_MEDIA_CAVEAT: &str = "The desktop can take the volume keys before the reader gets them. Page Up, Page Down and Space always turn pages.";
-pub const PREF_DOUBLE_TAP_ANIM_SPEED: &str = "Double tap animation speed";
-pub const DOUBLE_TAP_ANIM_SPEED_0: &str = "No animation";
-pub const DOUBLE_TAP_ANIM_SPEED_NORMAL: &str = "Normal";
-pub const DOUBLE_TAP_ANIM_SPEED_FAST: &str = "Fast";
-pub const PREF_HIDE_THRESHOLD: &str = "Sensitivity for hiding menu on scroll";
-pub const PREF_HIGHEST: &str = "Highest";
-pub const PREF_HIGH: &str = "High";
-pub const PREF_LOW: &str = "Low";
-pub const PREF_LOWEST: &str = "Lowest";
+pub fn volume_keys_media_caveat() -> String {
+    tr(MsgKey::reader_volume_keys_media_caveat)
+}
+
+pub fn pref_double_tap_anim_speed() -> String {
+    tr(MsgKey::pref_double_tap_anim_speed)
+}
+
+pub fn double_tap_anim_speed_0() -> String {
+    tr(MsgKey::double_tap_anim_speed_0)
+}
+
+pub fn double_tap_anim_speed_normal() -> String {
+    tr(MsgKey::double_tap_anim_speed_normal)
+}
+
+pub fn double_tap_anim_speed_fast() -> String {
+    tr(MsgKey::double_tap_anim_speed_fast)
+}
+
+pub fn pref_hide_threshold() -> String {
+    tr(MsgKey::pref_hide_threshold)
+}
+
+pub fn pref_highest() -> String {
+    tr(MsgKey::pref_highest)
+}
+
+pub fn pref_high() -> String {
+    tr(MsgKey::pref_high)
+}
+
+pub fn pref_low() -> String {
+    tr(MsgKey::pref_low)
+}
+
+pub fn pref_lowest() -> String {
+    tr(MsgKey::pref_lowest)
+}
+
 /// Kurobayomi only (T-43a-039): the switch of the crash restore.
-pub const PREF_RESTORE_AFTER_CRASH: &str = "Restore the chapter and page after a crash";
-pub const PREF_FLASH_PAGE: &str = "Flash on page change";
-pub const PREF_FLASH_DURATION: &str = "Flash duration";
-pub const PREF_FLASH_PAGE_INTERVAL: &str = "Flash every";
-pub const PREF_FLASH_WITH: &str = "Flash with";
-pub const PREF_FLASH_STYLE_BLACK: &str = "Black";
-pub const PREF_FLASH_STYLE_WHITE: &str = "White";
-pub const PREF_FLASH_STYLE_WHITE_BLACK: &str = "White and Black";
-pub const PREF_CUSTOM_BRIGHTNESS: &str = "Custom brightness";
-pub const PREF_CUSTOM_COLOR_FILTER: &str = "Custom color filter";
+pub fn pref_restore_after_crash() -> String {
+    tr(MsgKey::reader_pref_restore_after_crash)
+}
+
+pub fn pref_flash_page() -> String {
+    tr(MsgKey::pref_flash_page)
+}
+
+pub fn pref_flash_duration() -> String {
+    tr(MsgKey::pref_flash_duration)
+}
+
+pub fn pref_flash_page_interval() -> String {
+    tr(MsgKey::pref_flash_page_interval)
+}
+
+pub fn pref_flash_with() -> String {
+    tr(MsgKey::pref_flash_with)
+}
+
+pub fn pref_flash_style_black() -> String {
+    tr(MsgKey::pref_flash_style_black)
+}
+
+pub fn pref_flash_style_white() -> String {
+    tr(MsgKey::pref_flash_style_white)
+}
+
+pub fn pref_flash_style_white_black() -> String {
+    tr(MsgKey::pref_flash_style_white_black)
+}
+
+pub fn pref_custom_brightness() -> String {
+    tr(MsgKey::pref_custom_brightness)
+}
+
+pub fn pref_custom_color_filter() -> String {
+    tr(MsgKey::pref_custom_color_filter)
+}
+
 // The four colour labels were not re-read from strings.xml; verify before release (T-43a-061).
-pub const COLOR_FILTER_R_VALUE: &str = "Red";
-pub const COLOR_FILTER_G_VALUE: &str = "Green";
-pub const COLOR_FILTER_B_VALUE: &str = "Blue";
-pub const COLOR_FILTER_A_VALUE: &str = "Alpha";
-pub const PREF_COLOR_FILTER_MODE: &str = "Color filter blend mode";
-pub const FILTER_MODE_MULTIPLY: &str = "Multiply";
-pub const FILTER_MODE_SCREEN: &str = "Screen";
-pub const FILTER_MODE_OVERLAY: &str = "Overlay";
-pub const FILTER_MODE_LIGHTEN: &str = "Dodge / Lighten";
-pub const FILTER_MODE_DARKEN: &str = "Burn / Darken";
-pub const PREF_GRAYSCALE: &str = "Grayscale";
-pub const PREF_INVERTED_COLORS: &str = "Inverted";
-pub const TAPPING_INVERTED_NONE: &str = "None";
-pub const TAPPING_INVERTED_HORIZONTAL: &str = "Horizontal";
-pub const TAPPING_INVERTED_VERTICAL: &str = "Vertical";
-pub const TAPPING_INVERTED_BOTH: &str = "Both";
-pub const L_NAV: &str = "L shaped";
-pub const KINDLISH_NAV: &str = "Kindle-ish";
-pub const EDGE_NAV: &str = "Edge";
-pub const RIGHT_AND_LEFT_NAV: &str = "Right and Left";
-pub const DISABLED_NAV: &str = "Disabled";
-pub const SCALE_TYPE_FIT_SCREEN: &str = "Fit screen";
-pub const SCALE_TYPE_STRETCH: &str = "Stretch";
-pub const SCALE_TYPE_FIT_WIDTH: &str = "Fit width";
-pub const SCALE_TYPE_FIT_HEIGHT: &str = "Fit height";
-pub const SCALE_TYPE_ORIGINAL_SIZE: &str = "Original size";
-pub const SCALE_TYPE_SMART_FIT: &str = "Smart fit";
-pub const ZOOM_START_AUTOMATIC: &str = "Automatic";
-pub const ZOOM_START_LEFT: &str = "Left";
-pub const ZOOM_START_RIGHT: &str = "Right";
-pub const ZOOM_START_CENTER: &str = "Center";
+pub fn color_filter_r_value() -> String {
+    tr(MsgKey::color_filter_r_value)
+}
+
+pub fn color_filter_g_value() -> String {
+    tr(MsgKey::color_filter_g_value)
+}
+
+pub fn color_filter_b_value() -> String {
+    tr(MsgKey::color_filter_b_value)
+}
+
+pub fn color_filter_a_value() -> String {
+    tr(MsgKey::color_filter_a_value)
+}
+
+pub fn pref_color_filter_mode() -> String {
+    tr(MsgKey::pref_color_filter_mode)
+}
+
+pub fn filter_mode_multiply() -> String {
+    tr(MsgKey::filter_mode_multiply)
+}
+
+pub fn filter_mode_screen() -> String {
+    tr(MsgKey::filter_mode_screen)
+}
+
+pub fn filter_mode_overlay() -> String {
+    tr(MsgKey::filter_mode_overlay)
+}
+
+pub fn filter_mode_lighten() -> String {
+    tr(MsgKey::filter_mode_lighten)
+}
+
+pub fn filter_mode_darken() -> String {
+    tr(MsgKey::filter_mode_darken)
+}
+
+pub fn pref_grayscale() -> String {
+    tr(MsgKey::pref_grayscale)
+}
+
+pub fn pref_inverted_colors() -> String {
+    tr(MsgKey::pref_inverted_colors)
+}
+
+pub fn tapping_inverted_none() -> String {
+    tr(MsgKey::tapping_inverted_none)
+}
+
+pub fn tapping_inverted_horizontal() -> String {
+    tr(MsgKey::tapping_inverted_horizontal)
+}
+
+pub fn tapping_inverted_vertical() -> String {
+    tr(MsgKey::tapping_inverted_vertical)
+}
+
+pub fn tapping_inverted_both() -> String {
+    tr(MsgKey::tapping_inverted_both)
+}
+
+pub fn l_nav() -> String {
+    tr(MsgKey::l_nav)
+}
+
+pub fn kindlish_nav() -> String {
+    tr(MsgKey::kindlish_nav)
+}
+
+pub fn edge_nav() -> String {
+    tr(MsgKey::edge_nav)
+}
+
+pub fn right_and_left_nav() -> String {
+    tr(MsgKey::right_and_left_nav)
+}
+
+pub fn disabled_nav() -> String {
+    tr(MsgKey::disabled_nav)
+}
+
+pub fn scale_type_fit_screen() -> String {
+    tr(MsgKey::scale_type_fit_screen)
+}
+
+pub fn scale_type_stretch() -> String {
+    tr(MsgKey::scale_type_stretch)
+}
+
+pub fn scale_type_fit_width() -> String {
+    tr(MsgKey::scale_type_fit_width)
+}
+
+pub fn scale_type_fit_height() -> String {
+    tr(MsgKey::scale_type_fit_height)
+}
+
+pub fn scale_type_original_size() -> String {
+    tr(MsgKey::scale_type_original_size)
+}
+
+pub fn scale_type_smart_fit() -> String {
+    tr(MsgKey::scale_type_smart_fit)
+}
+
+pub fn zoom_start_automatic() -> String {
+    tr(MsgKey::zoom_start_automatic)
+}
+
+pub fn zoom_start_left() -> String {
+    tr(MsgKey::zoom_start_left)
+}
+
+pub fn zoom_start_right() -> String {
+    tr(MsgKey::zoom_start_right)
+}
+
+pub fn zoom_start_center() -> String {
+    tr(MsgKey::zoom_start_center)
+}
+
 
 // The four paged names match the base `strings.xml` of the upstream app (G-34 closed).
-pub const LEFT_TO_RIGHT_VIEWER: &str = "Paged, left to right";
-pub const RIGHT_TO_LEFT_VIEWER: &str = "Paged, right to left";
-pub const VERTICAL_VIEWER: &str = "Paged, vertical";
-pub const VERTICAL_PLUS_VIEWER: &str = "Long strip with gaps";
+pub fn left_to_right_viewer() -> String {
+    tr(MsgKey::left_to_right_viewer)
+}
+
+pub fn right_to_left_viewer() -> String {
+    tr(MsgKey::right_to_left_viewer)
+}
+
+pub fn vertical_viewer() -> String {
+    tr(MsgKey::vertical_viewer)
+}
+
+pub fn vertical_plus_viewer() -> String {
+    tr(MsgKey::vertical_plus_viewer)
+}
+
 
 /// `Source not installed: %1$s` (`source_not_installed`).
 pub fn source_not_installed(source: &str) -> String {
-    format!("Source not installed: {source}")
+    trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(source))])
 }
 
 /// `Failed to load pages: %s`, the initial load error card (T-43a-024).
 pub fn failed_to_load_pages(message: &str) -> String {
-    format!("Failed to load pages: {message}")
+    trf(MsgKey::transition_pages_error, &[("arg1", Arg::Str(message))])
 }
 
 /// `Requested chapter of id %d not found in chapter list` (`ReaderViewModel.kt:158-159`).
 pub fn requested_chapter_not_found(id: i64) -> String {
-    format!("Requested chapter of id {id} not found in chapter list")
+    trf(MsgKey::reader_requested_chapter_not_found, &[("arg1", Arg::Int(id))])
 }
 
 /// `missing_chapters_warning` (plural): one and other forms.
 pub fn missing_chapters_warning(count: i32) -> String {
-    if count == 1 {
-        format!("Skipping {count} chapter, either the source is missing it or it has been filtered out")
-    } else {
-        format!("Skipping {count} chapters, either the source is missing them or they have been filtered out")
-    }
+    tr_plural(MsgKey::missing_chapters_warning, i64::from(count), &[])
 }
 
 /// `pref_pages` (plural): "1 page" or "%1$s pages".
 pub fn pages(count: i32) -> String {
-    if count == 1 { "1 page".to_owned() } else { format!("{count} pages") }
+    tr_plural(MsgKey::pref_pages, i64::from(count), &[])
 }
 
 /// `pref_flash_duration_summary`: "%1$s ms".
 pub fn flash_duration_summary(millis: i32) -> String {
-    format!("{millis} ms")
+    trf(MsgKey::pref_flash_duration_summary, &[("arg1", Arg::Int(i64::from(millis)))])
 }
 
 /// `share_page_info`: "manga: chapter, page n".
 pub fn share_page_info(manga: &str, chapter: &str, page: i32) -> String {
-    format!("{manga}: {chapter}, page {page}")
+    trf(MsgKey::share_page_info, &[("arg1", Arg::Str(manga)), ("arg2", Arg::Str(chapter)), ("arg3", Arg::Int(i64::from(page)))])
 }
 
 /// `On` or `Off`, shown by the crop toast and the reading-mode toast.
-pub fn on_off(value: bool) -> &'static str {
-    if value { ON } else { OFF }
+pub fn on_off(value: bool) -> String {
+    if value { on() } else { off() }
 }
 
 #[cfg(test)]
@@ -203,29 +585,29 @@ mod tests {
 
     #[test]
     fn the_reading_mode_names_match_the_base_strings() {
-        assert_eq!(VERTICAL_PLUS_VIEWER, "Long strip with gaps");
-        assert_eq!(WEBTOON_VIEWER, "Long strip");
+        assert_eq!(vertical_plus_viewer(), "Long strip with gaps");
+        assert_eq!(webtoon_viewer(), "Long strip");
     }
 
     #[test]
     fn the_menu_entries_for_the_moved_bottom_bar_actions() {
-        assert_eq!(MENU_READER_SETTINGS, "Reader settings…");
-        assert_eq!(PREF_CROP_BORDERS, "Crop borders");
+        assert_eq!(menu_reader_settings(), "Reader settings…");
+        assert_eq!(pref_crop_borders(), "Crop borders");
     }
 
     #[test]
     fn proposal_messages_match_the_spec_text() {
-        assert_eq!(CHAPTER_NOT_DOWNLOADED, "The chapter is not downloaded. Turn off downloaded-only mode or download it first.");
-        assert_eq!(UNKNOWN_ERROR, "Unknown error");
-        assert_eq!(CUSTOM_BRIGHTNESS_UNAVAILABLE, "Custom brightness is not available on this display");
+        assert_eq!(chapter_not_downloaded(), "The chapter is not downloaded. Turn off downloaded-only mode or download it first.");
+        assert_eq!(unknown_error(), "Unknown error");
+        assert_eq!(custom_brightness_unavailable(), "Custom brightness is not available on this display");
         assert_eq!(name_collision_suffix(2), " (2)");
         assert_eq!(name_collision_suffix(10), " (10)");
     }
 
     #[test]
     fn transition_and_error_strings_match_the_upstream_text() {
-        assert_eq!(PAGE_LIST_EMPTY_ERROR, "No pages found");
-        assert_eq!(TRANSITION_NO_NEXT, "There's no next chapter");
+        assert_eq!(page_list_empty_error(), "No pages found");
+        assert_eq!(transition_no_next(), "There's no next chapter");
         assert_eq!(source_not_installed("Foo"), "Source not installed: Foo");
         assert_eq!(failed_to_load_pages("No pages found"), "Failed to load pages: No pages found");
     }

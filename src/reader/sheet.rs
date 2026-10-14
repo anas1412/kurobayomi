@@ -144,12 +144,12 @@ fn first_focusable(root: &gtk::Widget) -> Option<gtk::Widget> {
 /// nothing.
 pub fn confirm(parent: &impl IsA<gtk::Window>, message: &str, on_ok: impl FnOnce() + 'static) {
     let on_ok = std::cell::Cell::new(Some(on_ok));
-    let ok = DialogButton::new(strings::ACTION_OK, Role::Suggested, move || {
+    let ok = DialogButton::new(strings::action_ok(), Role::Suggested, move || {
         if let Some(on_ok) = on_ok.take() {
             on_ok();
         }
     });
-    let dialog = crate::ui::dialog(message, &gtk::Box::new(gtk::Orientation::Vertical, 0), 360, vec![DialogButton::cancel(strings::ACTION_CANCEL), ok]);
+    let dialog = crate::ui::dialog(message, &gtk::Box::new(gtk::Orientation::Vertical, 0), 360, vec![DialogButton::cancel(strings::action_cancel()), ok]);
     dialog.set_transient_for(Some(parent.as_ref()));
     dialog.present();
 }

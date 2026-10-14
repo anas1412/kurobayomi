@@ -31,12 +31,12 @@ fn mode_row(mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) -> PreferenceIt
         }
         async move { result.map(|_| true) }
     });
-    PreferenceItem::BasicList { common: ItemCommon::bound(strings::VIEWER), value: mode.flag_value().to_string(), entries, on_change }
+    PreferenceItem::BasicList { common: ItemCommon::bound(strings::viewer()), value: mode.flag_value().to_string(), entries, on_change }
 }
 
 /// The rows of the page: this manga's reading mode, then the shared Display and Paged groups.
 pub fn page_rows(prefs: &ReaderPrefs, mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) -> Vec<Preference> {
-    let mut rows = vec![group(strings::PREF_CATEGORY_FOR_THIS_SERIES, vec![mode_row(mode, on_mode)])];
+    let mut rows = vec![group(&strings::pref_category_for_this_series(), vec![mode_row(mode, on_mode)])];
     rows.extend(layout_rows(prefs));
     rows
 }
@@ -49,7 +49,7 @@ pub fn open(parent: &impl IsA<gtk::Window>, prefs: &ReaderPrefs, mode: ReadingMo
     body.scrolled.set_vexpand(false);
     body.scrolled.set_propagate_natural_height(true);
     body.scrolled.set_max_content_height(max_height);
-    let window = crate::ui::dialog(strings::ACTION_SETTINGS, &body.widget, 420, vec![DialogButton::new("Close", Role::Suggested, || {})]);
+    let window = crate::ui::dialog(&strings::action_settings(), &body.widget, 420, vec![DialogButton::new("Close", Role::Suggested, || {})]);
     window.set_transient_for(Some(parent));
     window.present();
 }

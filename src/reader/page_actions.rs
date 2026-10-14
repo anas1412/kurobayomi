@@ -20,12 +20,12 @@ pub enum Action {
 /// The actions in the order the sheet shows them.
 pub const ACTIONS: [Action; 4] = [Action::SetCover, Action::Copy, Action::Share, Action::Save];
 
-pub fn label(action: Action) -> &'static str {
+pub fn label(action: Action) -> String {
     match action {
-        Action::SetCover => strings::SET_AS_COVER,
-        Action::Copy => strings::ACTION_COPY_TO_CLIPBOARD,
-        Action::Share => strings::ACTION_SHARE,
-        Action::Save => strings::ACTION_SAVE,
+        Action::SetCover => strings::set_as_cover(),
+        Action::Copy => strings::action_copy_to_clipboard(),
+        Action::Share => strings::action_share(),
+        Action::Save => strings::action_save(),
     }
 }
 
@@ -49,7 +49,7 @@ pub fn build(on_action: Rc<dyn Fn(Action)>) -> gtk::Box {
     column.set_margin_top(12);
     column.set_margin_bottom(12);
     for action in ACTIONS {
-        let button = gtk::Button::with_label(label(action));
+        let button = gtk::Button::with_label(&label(action));
         button.add_css_class("flat");
         let on_action = Rc::clone(&on_action);
         button.connect_clicked(move |_| on_action(action));
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn four_actions_in_order_with_copy_share_and_save_closing_the_sheet() {
-        let labels: Vec<&str> = ACTIONS.iter().map(|a| label(*a)).collect();
+        let labels: Vec<String> = ACTIONS.iter().map(|a| label(*a)).collect();
         assert_eq!(labels, ["Set as cover", "Copy to clipboard", "Share", "Save"]);
         assert!(!closes_sheet(Action::SetCover));
         assert!(closes_sheet(Action::Copy) && closes_sheet(Action::Share) && closes_sheet(Action::Save));

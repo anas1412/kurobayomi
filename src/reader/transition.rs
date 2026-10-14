@@ -21,7 +21,7 @@ use super::strings;
 /// One chapter in a block: its header, name, scanlator and download state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChapterLine {
-    pub header: &'static str,
+    pub header: String,
     pub name: String,
     pub scanlator: Option<String>,
     pub downloaded: bool,
@@ -31,7 +31,7 @@ pub struct ChapterLine {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Slot {
     Chapter(ChapterLine),
-    NoChapter(&'static str),
+    NoChapter(String),
 }
 
 /// The whole card. `gap` is the missing-chapter count between the two chapters.
@@ -52,7 +52,7 @@ impl Content {
     }
 }
 
-fn line(header: &'static str, chapter: &Item, downloaded: bool) -> ChapterLine {
+fn line(header: String, chapter: &Item, downloaded: bool) -> ChapterLine {
     ChapterLine {
         header,
         name: chapter.name.clone(),
@@ -68,18 +68,18 @@ pub fn content(transition: &ChapterTransition, from_downloaded: bool, to_downloa
     match transition {
         ChapterTransition::Prev { .. } => Content {
             top: match to {
-                Some(to) => Slot::Chapter(line(strings::TRANSITION_PREVIOUS, to, to_downloaded)),
-                None => Slot::NoChapter(strings::TRANSITION_NO_PREVIOUS),
+                Some(to) => Slot::Chapter(line(strings::transition_previous(), to, to_downloaded)),
+                None => Slot::NoChapter(strings::transition_no_previous()),
             },
-            bottom: Slot::Chapter(line(strings::TRANSITION_CURRENT, from, from_downloaded)),
+            bottom: Slot::Chapter(line(strings::transition_current(), from, from_downloaded)),
             // calculateChapterGap(currChapter, goingToChapter)
             gap: item_gap(Some(from), to),
         },
         ChapterTransition::Next { .. } => Content {
-            top: Slot::Chapter(line(strings::TRANSITION_FINISHED, from, from_downloaded)),
+            top: Slot::Chapter(line(strings::transition_finished(), from, from_downloaded)),
             bottom: match to {
-                Some(to) => Slot::Chapter(line(strings::TRANSITION_NEXT, to, to_downloaded)),
-                None => Slot::NoChapter(strings::TRANSITION_NO_NEXT),
+                Some(to) => Slot::Chapter(line(strings::transition_next(), to, to_downloaded)),
+                None => Slot::NoChapter(strings::transition_no_next()),
             },
             // calculateChapterGap(goingToChapter, currChapter)
             gap: item_gap(to, Some(from)),
@@ -170,7 +170,7 @@ fn slot_widget(slot: &Slot) -> gtk::Widget {
 fn chapter_text(line: &ChapterLine) -> gtk::Box {
     let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
     block.set_halign(gtk::Align::Center);
-    let header = gtk::Label::new(Some(line.header));
+    let header = gtk::Label::new(Some(&line.header));
     header.add_css_class("title-4");
     block.append(&header);
 
@@ -178,8 +178,8 @@ fn chapter_text(line: &ChapterLine) -> gtk::Box {
     name_row.set_halign(gtk::Align::Center);
     if line.downloaded {
         let check = gtk::Image::from_icon_name("emblem-ok-symbolic");
-        check.set_tooltip_text(Some(strings::LABEL_DOWNLOADED));
-        check.update_property(&[gtk::accessible::Property::Label(strings::LABEL_DOWNLOADED)]);
+        check.set_tooltip_text(Some(&strings::label_downloaded()));
+        check.update_property(&[gtk::accessible::Property::Label(&strings::label_downloaded())]);
         name_row.append(&check);
     }
     let name = gtk::Label::new(Some(&line.name));
@@ -247,7 +247,7 @@ pub fn going_to_downloaded(manga_is_local: bool, to: Option<&Item>, lookup: impl
 pub fn status_text(state: &ChapterState) -> Option<String> {
     match state {
         ChapterState::Wait | ChapterState::Loaded(_) => None,
-        ChapterState::Loading => Some(strings::TRANSITION_PAGES_LOADING.to_owned()),
+        ChapterState::Loading => Some(strings::transition_pages_loading().to_owned()),
         ChapterState::Error(e) => Some(strings::failed_to_load_pages(&e.message)),
     }
 }
@@ -290,7 +290,7 @@ pub fn status_box(state: &ChapterState, on_retry: Rc<dyn Fn()>) -> Option<gtk::B
     label.set_justify(gtk::Justification::Center);
     column.append(&label);
     if matches!(state, ChapterState::Error(_)) {
-        let retry = gtk::Button::with_label(strings::RETRY);
+        let retry = gtk::Button::with_label(&strings::retry());
         retry.set_halign(gtk::Align::Center);
         retry.connect_clicked(move |_| on_retry());
         column.append(&retry);
@@ -320,8 +320,8 @@ mod tests {
         let to = chapter(1, 1.0, "One", None);
         let t = ChapterTransition::Prev { from, to: Some(to) };
         let c = content(&t, false, true);
-        assert_eq!(c.top, Slot::Chapter(ChapterLine { header: "Previous:", name: "One".into(), scanlator: None, downloaded: true }));
-        assert_eq!(c.bottom, Slot::Chapter(ChapterLine { header: "Current:", name: "Two".into(), scanlator: Some("S".into()), downloaded: false }));
+        assert_eq!(c.top, Slot::Chapter(ChapterLine { header: "Previous:".to_string(), name: "One".into(), scanlator: None, downloaded: true }));
+        assert_eq!(c.bottom, Slot::Chapter(ChapterLine { header: "Current:".to_string(), name: "Two".into(), scanlator: Some("S".into()), downloaded: false }));
         assert_eq!(c.gap, 0);
         assert_eq!(c.gap_warning(), None);
     }
@@ -340,9 +340,9 @@ mod tests {
     fn a_missing_target_shows_the_no_chapter_text_in_its_slot() {
         let from = chapter(2, 2.0, "Two", None);
         let prev = ChapterTransition::Prev { from: Rc::clone(&from), to: None };
-        assert_eq!(content(&prev, false, false).top, Slot::NoChapter("There's no previous chapter"));
+        assert_eq!(content(&prev, false, false).top, Slot::NoChapter("There's no previous chapter".to_string()));
         let next = ChapterTransition::Next { from, to: None };
-        assert_eq!(content(&next, false, false).bottom, Slot::NoChapter("There's no next chapter"));
+        assert_eq!(content(&next, false, false).bottom, Slot::NoChapter("There's no next chapter".to_string()));
     }
 
     #[test]

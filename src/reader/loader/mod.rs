@@ -171,7 +171,7 @@ pub fn choose_loader(inputs: LoaderInputs) -> Result<Loader, LoadError> {
             Ok(Loader::Http(http::HttpLoader::new(source, manga_id, chapter_url, cache)))
         }
         (None, SourceKind::Stub(name)) => Err(LoadError::new(strings::source_not_installed(&name))),
-        _ => Err(LoadError::new(strings::LOADER_NOT_IMPLEMENTED_ERROR)),
+        _ => Err(LoadError::new(strings::loader_not_implemented_error())),
     }
 }
 
@@ -217,7 +217,7 @@ pub fn load_chapter(
     };
     if pages.is_empty() {
         drop(loader);
-        return fail(chapter, LoadFailure::Failed(LoadError::new(strings::PAGE_LIST_EMPTY_ERROR)));
+        return fail(chapter, LoadFailure::Failed(LoadError::new(strings::page_list_empty_error())));
     }
     let read = chapter.read.get();
     let last_page_read = chapter.last_page_read.get();

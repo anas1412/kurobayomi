@@ -38,11 +38,11 @@ pub fn horizontal_padding(window_width: i32, window_height: i32) -> i32 {
 }
 
 /// One of the two chapter buttons: the action it runs, whether it is enabled, its label and its icon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ButtonPlan {
     pub step: Step,
     pub enabled: bool,
-    pub description: &'static str,
+    pub description: String,
     pub icon: &'static str,
 }
 
@@ -52,10 +52,10 @@ pub fn button_plan(rtl: bool, previous_enabled: bool, next_enabled: bool) -> [Bu
     let previous = ButtonPlan {
         step: Step::Previous,
         enabled: previous_enabled,
-        description: super::strings::ACTION_PREVIOUS_CHAPTER,
+        description: super::strings::action_previous_chapter(),
         icon: ICON_PREVIOUS,
     };
-    let next = ButtonPlan { step: Step::Next, enabled: next_enabled, description: super::strings::ACTION_NEXT_CHAPTER, icon: ICON_NEXT };
+    let next = ButtonPlan { step: Step::Next, enabled: next_enabled, description: super::strings::action_next_chapter(), icon: ICON_NEXT };
     if rtl { [next, previous] } else { [previous, next] }
 }
 
@@ -172,11 +172,11 @@ impl Navigator {
         self.root.set_margin_start(padding);
         self.root.set_margin_end(padding);
         let plan = button_plan(state.rtl, state.previous_enabled, state.next_enabled);
-        for (button, step, action) in [(&self.left, &self.left_step, plan[0]), (&self.right, &self.right_step, plan[1])] {
+        for (button, step, action) in [(&self.left, &self.left_step, &plan[0]), (&self.right, &self.right_step, &plan[1])] {
             step.set(action.step);
             button.set_icon_name(action.icon);
-            button.set_tooltip_text(Some(action.description));
-            button.update_property(&[gtk::accessible::Property::Label(action.description)]);
+            button.set_tooltip_text(Some(&action.description));
+            button.update_property(&[gtk::accessible::Property::Label(&action.description)]);
             button.set_sensitive(action.enabled && !state.loading);
         }
         self.pill.set_direction(if state.rtl { gtk::TextDirection::Rtl } else { gtk::TextDirection::Ltr });

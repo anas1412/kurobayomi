@@ -37,11 +37,11 @@ pub fn card(on_retry: impl Fn() + 'static, image_url: Option<String>) -> gtk::Bo
     message.set_justify(gtk::Justification::Center);
     message.set_wrap(true);
     root.append(&message);
-    let retry = gtk::Button::with_label(strings::RETRY);
+    let retry = gtk::Button::with_label(&strings::retry());
     retry.connect_clicked(move |_| on_retry());
     root.append(&retry);
     if can_open_in_browser(image_url.as_deref()) {
-        let open = gtk::Button::with_label(strings::ACTION_OPEN_IN_BROWSER);
+        let open = gtk::Button::with_label(&strings::action_open_in_browser());
         let url = image_url.unwrap_or_default();
         open.connect_clicked(move |button| {
             let window = button.root().and_downcast::<gtk::Window>();

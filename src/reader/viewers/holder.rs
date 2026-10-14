@@ -187,9 +187,9 @@ pub fn plain_row(text: &str) -> Row {
 pub fn page_text(base: &str, view: PageView) -> String {
     match view {
         PageView::Ready => base.to_owned(),
-        PageView::Spinner => format!("{base}\n{}", strings::LOADING),
+        PageView::Spinner => format!("{base}\n{}", strings::loading()),
         PageView::Progress(percent) => format!("{base}\n{percent}%"),
-        PageView::Error => format!("{base}\n{}", strings::DOWNLOAD_NOTIFIER_TITLE_ERROR),
+        PageView::Error => format!("{base}\n{}", strings::download_notifier_title_error()),
     }
 }
 

@@ -170,7 +170,7 @@ impl Tint {
         if let super::backlight::Outcome::Unavailable { notify: true } =
             super::backlight::apply(std::path::Path::new(super::backlight::SYSFS_ROOT), enabled, value)
         {
-            crate::toast::notify(super::strings::CUSTOM_BRIGHTNESS_UNAVAILABLE);
+            crate::toast::notify(super::strings::custom_brightness_unavailable());
         }
         let alpha = brightness_alpha(enabled, value);
         self.brightness_colour.set((0.0, 0.0, 0.0, alpha));
