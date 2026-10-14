@@ -56,6 +56,10 @@ jobs:
 
       - name: Cache the build
         uses: Swatinem/rust-cache@v2
+        with:
+          # a later step failing (the release upload) must not throw away a finished build: the next run would compile
+          # every dependency again
+          cache-on-failure: true
 
       - name: Build
         # the commit and the channel are baked in: the self-updater compares them with the nightly release
@@ -80,9 +84,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           short="$(git rev-parse --short=8 HEAD)"
-          # the tag moves to this commit; the release itself stays, so there is never a moment without one
-          git tag -f nightly "$SHA"
-          git push -f origin refs/tags/nightly
+          # the tag moves to this commit; the release itself stays, so there is never a moment without one. It is deleted
+          # and made again rather than moved: GitHub refuses to let this token move a tag across a commit that changed a
+          # workflow file, but making a tag on a commit already on main is allowed
+          git push origin :refs/tags/nightly || true
+          git push origin "$SHA:refs/tags/nightly"
           if gh release view nightly >/dev/null 2>&1; then
             # files first, notes last: the app reads the commit from the notes, so it never sees a new commit with an old file
             gh release upload nightly "$APPIMAGE" "$APPIMAGE.zsync" --clobber
