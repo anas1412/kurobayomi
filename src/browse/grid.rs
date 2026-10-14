@@ -3,13 +3,10 @@
 
 /// Padding around the grid content and between cells (B§2.7).
 pub const GRID_PADDING_PX: i32 = 8;
-pub const GRID_SPACING_PX: i32 = 4;
-/// The container carries the padding minus half a gap and every cell carries half a gap on each side, so the cells sit
-/// 4 px apart and the content 8 px from the edge (B§2.7).
-pub const CELL_MARGIN_PX: i32 = GRID_SPACING_PX / 2;
+/// The container carries the padding minus half a gap and every cell carries half a gap on each side (the shared
+/// `cover_grid::CELL_MARGIN_PX`), so the cells sit 4 px apart and the content 8 px from the edge (B§2.7).
+pub use crate::widgets::cover_grid::{CELL_MARGIN_PX, COVER_WIDTH_PX};
 pub const CONTAINER_MARGIN_PX: i32 = GRID_PADDING_PX - CELL_MARGIN_PX;
-/// Cover width of a grid cell (2:3); a list row's cover is `look::SMALL`.
-pub const COVER_WIDTH_PX: i32 = 136;
 /// Alpha of a favourite's cover; non-favourites are drawn at full strength (B§2.7, D§13).
 pub const FAVORITE_ALPHA: f64 = 0.34;
 /// Items per page and the first load's size (B§4.3).
@@ -47,26 +44,6 @@ pub fn last_visible_index(value: f64, page: f64, upper: f64, cells: usize) -> us
     (((cells as f64) * seen).ceil() as usize).saturating_sub(1).min(cells - 1)
 }
 
-/// Width of an adaptive grid cell (B-EC-18).
-pub const ADAPTIVE_CELL_PX: i32 = 128;
-
-/// The column layout of a source grid: a fixed count or adaptive cells.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GridColumns {
-    Adaptive { cell_px: i32 },
-    Fixed(i32),
-}
-
-/// The narrowest window that reads the landscape key (T-41a-050, D14).
-pub const LANDSCAPE_MIN_WIDTH_PX: i32 = 720;
-
-/// The landscape key is read when the window is at least `LANDSCAPE_MIN_WIDTH_PX` wide, else the portrait key. `0`
-/// (or any value below 1) gives adaptive cells; `n > 0` gives exactly `n` columns (B-EC-18).
-pub fn grid_columns(width: i32, portrait: i32, landscape: i32) -> GridColumns {
-    let stored = if width >= LANDSCAPE_MIN_WIDTH_PX { landscape } else { portrait };
-    if stored > 0 { GridColumns::Fixed(stored) } else { GridColumns::Adaptive { cell_px: ADAPTIVE_CELL_PX } }
-}
-
 /// The recycle guard of a grid cell (edge R10): every bind of the cell takes a new ticket, and a cover that arrives for an
 /// older bind is dropped, so a recycled cell never shows another item's picture.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -85,17 +62,6 @@ impl CoverBind {
     pub fn accepts(&self, ticket: u64) -> bool {
         ticket == self.current
     }
-}
-
-/// The width of a cover for a column layout, given the width of the container: adaptive cells are
-/// `ADAPTIVE_CELL_PX` wide and `n` columns share the container's width after its padding. Each cell keeps its half
-/// gap on both sides (B§2.7). Never below 1.
-pub fn cover_width(columns: GridColumns, container_px: i32) -> i32 {
-    let cell = match columns {
-        GridColumns::Adaptive { cell_px } => cell_px,
-        GridColumns::Fixed(n) => (container_px - 2 * CONTAINER_MARGIN_PX) / n.max(1),
-    };
-    (cell - 2 * CELL_MARGIN_PX).max(1)
 }
 
 /// The `CoverBind` of every recycled cell of one factory, keyed by the cell object (edge R10).
@@ -191,18 +157,11 @@ mod tests {
 
     #[test]
     fn grid_metrics_and_favourite_alpha_match_the_design() {
-        assert_eq!((GRID_PADDING_PX, GRID_SPACING_PX), (8, 4));
+        assert_eq!((GRID_PADDING_PX, CELL_MARGIN_PX * 2), (8, 4));
         assert_eq!(cell_alpha(true), 0.34);
         assert_eq!(cell_alpha(false), 1.0);
         assert!(badge_visible(true));
         assert!(!badge_visible(false));
-    }
-
-    #[test]
-    fn a_cover_is_as_wide_as_its_column_after_the_padding() {
-        assert_eq!(cover_width(GridColumns::Adaptive { cell_px: 128 }, 1000), 124);
-        assert_eq!(cover_width(GridColumns::Fixed(3), 3 * 100 + 2 * CONTAINER_MARGIN_PX), 96, "100 px cells minus the half gaps");
-        assert_eq!(cover_width(GridColumns::Fixed(0), 10), 1, "never zero or negative");
     }
 
     #[test]
@@ -238,20 +197,6 @@ mod tests {
         assert_eq!(last_visible_index(900.0, 100.0, 1000.0, 100), 99);
         assert_eq!(last_visible_index(2000.0, 100.0, 1000.0, 100), 99, "overscroll is clamped");
         assert_eq!(last_visible_index(0.0, 100.0, 1000.0, 0), 0);
-    }
-
-    #[test]
-    fn the_landscape_key_is_read_from_720_px_wide() {
-        assert_eq!(grid_columns(800, 3, 5), GridColumns::Fixed(5));
-        assert_eq!(grid_columns(720, 3, 5), GridColumns::Fixed(5), "720 is the first landscape width");
-        assert_eq!(grid_columns(719, 3, 5), GridColumns::Fixed(3), "one pixel narrower is portrait");
-        assert_eq!(grid_columns(600, 3, 5), GridColumns::Fixed(3), "a square window below 720 is portrait");
-    }
-
-    #[test]
-    fn zero_or_negative_columns_are_adaptive_cells_of_128_px() {
-        assert_eq!(grid_columns(800, 0, 0), GridColumns::Adaptive { cell_px: 128 });
-        assert_eq!(grid_columns(600, -2, 0), GridColumns::Adaptive { cell_px: 128 });
     }
 
     #[test]

@@ -22,7 +22,6 @@ use kuro_db::codec::FetchType;
 use kuro_domain::category::service::CategoryService;
 use kuro_platform::kind::Kind;
 use kuro_domain::library::active::clamp_page;
-use kuro_domain::library::columns::columns_for_width;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::{LibraryItem, toolbar_title};
 use kuro_i18n::{MsgKey, tr, tr_plural};
@@ -901,11 +900,9 @@ fn apply_columns(inner: &Rc<RefCell<Inner>>) {
             0 => window_width(&st.scroller),
             own => own,
         };
-        (st.grid.clone(), columns_for_width(width, diet::LIBRARY_COLUMNS, diet::LIBRARY_COLUMNS) as u32)
+        (st.grid.clone(), width)
     };
-    // never force a minimum: a forced count makes the grid demand width, so the window can only grow
-    grid.set_min_columns(1);
-    grid.set_max_columns(columns);
+    crate::widgets::cover_grid::apply_columns(&grid, columns);
 }
 
 /// Everything `render` draws, read in one borrow and applied without it.

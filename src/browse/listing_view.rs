@@ -25,7 +25,7 @@ use tokio::sync::watch;
 
 use super::content::ContentPlan;
 use super::glue::{consume_events, follow_changes, follow_ready, keep_alive, own_tasks};
-use super::grid::{COVER_WIDTH_PX, CONTAINER_MARGIN_PX, CoverBinds, GridColumns, cover_width, grid_columns, last_visible_index};
+use super::grid::{COVER_WIDTH_PX, CONTAINER_MARGIN_PX, CoverBinds, last_visible_index};
 use super::listing::{ListItem, ListedPage, Listing, PageLoader};
 use super::prefs::BrowsePrefs;
 use super::primitives::{EmptyAction, ToastAction, ToastDuration, ToastSpec, stub_source_label};
@@ -74,7 +74,6 @@ struct Inner {
     /// Whether a toast was raised (the toast itself lives in the shared layer).
     toast_shown: Cell<bool>,
     /// The cover width the grid cells were last built for.
-    cover_px: Cell<i32>,
     stack: gtk::Stack,
     error_slot: gtk::Box,
     items_stack: gtk::Stack,
@@ -171,7 +170,6 @@ impl ListingView {
             tasks: Rc::new(RefCell::new(PageTasks::new())),
             toast_dismissed: Cell::new(false),
             toast_shown: Cell::new(false),
-            cover_px: Cell::new(COVER_WIDTH_PX),
             deps,
             stack,
             error_slot,
@@ -412,37 +410,12 @@ impl Inner {
         self.pump_if_near_end();
     }
 
-    /// The columns of the grid for the width of the window (T-41a-050): the column settings are cut, so the cells are
-    /// always adaptive.
-    fn columns(&self) -> Option<(GridColumns, i32)> {
-        let viewport = self.scroller.hadjustment().page_size() as i32;
-        if viewport <= 0 {
-            return None;
-        }
-        let width = self
-            .scroller
-            .root()
-            .map(|root| root.upcast::<gtk::Widget>())
-            .map_or(viewport, |window| window.width());
-        let columns = grid_columns(width, crate::misc::diet_defaults::LIBRARY_COLUMNS, crate::misc::diet_defaults::LIBRARY_COLUMNS);
-        Some((columns, viewport))
-    }
-
+    /// The columns of the grid follow the width of the grid's own area, counted by the shared cover grid exactly as the
+    /// Library counts its own (`widgets::cover_grid`).
     fn apply_columns(self: &Rc<Self>) {
-        let Some((columns, viewport)) = self.columns() else { return };
-        match columns {
-            GridColumns::Fixed(n) => {
-                self.grid.set_min_columns(n as u32);
-                self.grid.set_max_columns(n as u32);
-            }
-            GridColumns::Adaptive { .. } => {
-                self.grid.set_min_columns(1);
-                self.grid.set_max_columns(64);
-            }
-        }
-        let px = cover_width(columns, viewport);
-        if px != self.cover_px.replace(px) {
-            self.apply_display();
+        let viewport = self.scroller.hadjustment().page_size() as i32;
+        if viewport > 0 {
+            crate::widgets::cover_grid::apply_columns(&self.grid, viewport);
         }
     }
 
@@ -451,7 +424,7 @@ impl Inner {
         let mode = self.display.get();
         let load = Rc::clone(&self.deps.load_cover);
         let menu = Rc::clone(&self.deps.menu);
-        let cover_px = self.cover_px.get();
+        let cover_px = COVER_WIDTH_PX;
         // one ticket per recycled cell: a cover that arrives after its cell was rebound is dropped (edge R10)
         let binds: Rc<RefCell<CoverBinds>> = Rc::default();
         let factory = gtk::SignalListItemFactory::new();

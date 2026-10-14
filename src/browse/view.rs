@@ -317,6 +317,10 @@ pub fn grid_cell_lines(
     for margin in [GBox::set_margin_start, GBox::set_margin_end, GBox::set_margin_top, GBox::set_margin_bottom] {
         margin(&cell, CELL_MARGIN_PX);
     }
+    // the cell is exactly as wide as its cover, whatever the title says: the grid's own measuring never decides the layout
+    // (the Library card does the same)
+    cell.set_size_request(cover_width, -1);
+    cell.set_halign(Align::Center);
     let Some(item) = item else { return cell };
     let stage = gtk::Overlay::new();
     stage.set_child(Some(&cover_widget(item, cover_width, cover_width * 3 / 2, load, guard)));
