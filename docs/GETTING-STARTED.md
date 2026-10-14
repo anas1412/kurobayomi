@@ -3,7 +3,7 @@
 Kurobayomi lets you watch anime and read manga on your computer. It comes with no sources of its own: you add a
 **repository**, a link that someone you trust gives you, and its sources show up in the app.
 
-This guide takes about five minutes.
+This guide takes about five minutes. If you do not have the app yet, see [Install](../README.md#install).
 
 ---
 
@@ -47,8 +47,9 @@ Click a source to see what it has. The **Popular** list opens first.
 
 ## 4. Search
 
-To find something, type in the search box at the top of **Browse** and press **Enter**. Kurobayomi looks through all
-your sources at once and shows the results per source.
+To find something, click the search button 🔍 next to **Kurobayomi** at the top of the sidebar (in a small window it is
+at the left of the top bar), type and press **Enter**. Kurobayomi looks through all your sources of the kind you are
+viewing (Anime or Manga) and shows the results per source.
 
 ![Search results from all sources](images/getting-started/08-search.png)
 
@@ -80,12 +81,24 @@ The sidebar also has:
 
 - **Updates**: new episodes and chapters of the titles in your library.
 - **History**: what you watched and read recently.
-- **Downloads**: shows up while something downloads, with how many are left.
-- **Settings**: the gear at the bottom of the sidebar.
+- **Downloads**: what is downloading and what is waiting; while something downloads, the sidebar shows how many are left.
 
-Incognito mode, keyboard shortcuts, help and About are in the menu on the **Kurobayomi** title.
+At the bottom of the sidebar are **Incognito** (while it is on, nothing you watch or read goes into History), **Keyboard
+shortcuts**, **Help**, **About** and **Settings**.
+
+Next to the search button, the **⋮** menu holds what the page you are on can do, for example adding a folder of your own
+files to the Library. The **Anime** and **Manga** switch is shared by every page and remembered.
+
+In a small window the sidebar becomes a bar at the bottom; Incognito, the shortcuts, Help, About and Settings are in its
+**☰** menu.
 
 ---
+
+## Updates to the app
+
+The AppImage keeps itself up to date. When it starts, it looks for a newer version and downloads it in the background;
+a message tells you when it is ready, with a **Restart** button. **About** (at the bottom of the sidebar) shows the
+download and has a button to check now. To stop the automatic check, turn off **Check for updates at startup** there.
 
 ## Where your files are saved
 

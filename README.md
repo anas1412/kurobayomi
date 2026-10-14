@@ -8,14 +8,15 @@
 
 Kurobayomi is a native desktop app, written in Rust with GTK4, that follows the model of
 [Aniyomi](https://github.com/aniyomiorg/aniyomi): a library, a reader, a video player, sources you add yourself, and
-progress tracking. It uses your GTK theme.
+progress tracking. It follows your GTK theme and draws its own icons, so it looks right on any desktop.
 
 The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
 
 ![The welcome screen](docs/images/getting-started/01-welcome.png)
 
 > **Status: early test version.** It runs, and the whole flow from adding a repository to watching or reading works, but
-> expect rough edges. There is no packaged release yet; see [Install](#install).
+> expect rough edges. A nightly AppImage is built from every change and updates itself; the first stable release is
+> coming. See [Install](#install).
 
 ## What it does
 
@@ -30,6 +31,9 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
 - **Library, Updates and History**, downloads for offline use, and AniList tracking (optional).
 - **Aniyomi and Tachiyomi backups** (`.tachibk`) restore into Kurobayomi, and `aniyomi://` / `tachiyomi://` repository
   links open it.
+- **Keeps itself up to date.** The AppImage downloads a newer version in the background and runs it after a restart;
+  About shows the progress.
+- **Fits any window size**, from a full screen down to a phone-sized 360 px: the sidebar turns into a bar at the bottom.
 
 <table>
   <tr>
@@ -42,7 +46,7 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
   </tr>
 </table>
 
-<sub>Cover art and site names are blurred in these screenshots.</sub>
+<sub>Site names, the repository link and the covers in lists are blurred in these screenshots.</sub>
 
 ## Getting started
 
@@ -50,7 +54,7 @@ The step-by-step guide, with screenshots, is in **[docs/GETTING-STARTED.md](docs
 
 1. Open the app and click **Add a source repository**.
 2. Paste the repository link.
-3. Search in **Browse**, open a title, click **Start**.
+3. Click the search button 🔍 next to **Kurobayomi**, type a title and press **Enter**, open a title, click **Start**.
 
 Downloads and backups go to `~/Kurobayomi` unless you pick another folder in Settings.
 
@@ -62,7 +66,28 @@ that lists sources; anyone can publish one. The format, the plug-in interface an
 
 ## Install
 
-A Flatpak is planned and comes first; an AppImage built by CI will follow. Until then, build it from source.
+### AppImage
+
+Download the AppImage, make it executable and run it. It carries its own libraries and needs glibc 2.39 or newer
+(Ubuntu 24.04, Fedora 40, Debian 13, Arch and newer).
+
+- **Nightly** (built from every change, may be unstable, keeps its data apart from the stable app):
+  [Kurobayomi-nightly-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage)
+- **Stable**: [Kurobayomi-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage)
+  once the first release is out.
+
+```bash
+chmod +x Kurobayomi-nightly-x86_64.AppImage
+./Kurobayomi-nightly-x86_64.AppImage
+```
+
+The AppImage updates itself: at start it looks for a newer version, downloads it in the background and runs it after a
+restart. **About** shows the progress, and **Check for updates at startup** there turns it off. AppImage managers
+(Gear Lever, AppImageLauncher) work too.
+
+A Flatpak is planned.
+
+### From source
 
 You need a recent stable Rust, GTK 4.14 or newer, and libmpv (on Arch: `pacman -S gtk4 mpv`; on Fedora:
 `dnf install gtk4-devel mpv-libs-devel`; on Ubuntu 24.04: `apt install libgtk-4-dev libmpv-dev`).
