@@ -12,10 +12,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# a newer build replaces one that is still running
+# a running build finishes (a cancelled one never saves its build cache, so the next would compile everything again); a
+# newer push waits, and replaces any older one still waiting, so the release still ends on the newest commit
 concurrency:
   group: nightly-appimage
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
