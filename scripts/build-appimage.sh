@@ -76,6 +76,16 @@ if grep -qE '^export (GTK_THEME|GDK_BACKEND)=|APPIMAGE_GTK_THEME' "$hook"; then
     exit 1
 fi
 
+# On Wayland GTK reads the user's GTK theme, icon theme and fonts through GSettings, which sees the user's settings only
+# through the dconf GIO module. The bundled GIO looks for modules in Ubuntu's folder alone (/usr/lib/x86_64-linux-gnu/gio/
+# modules), so on another distro it found none, GSettings fell back to its defaults and every theme looked like Adwaita. The
+# module travels inside the AppImage and GIO is told where (an extra folder, so a distro's own modules still load).
+dconf_module=/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so
+[ -f "$dconf_module" ] || { echo "missing $dconf_module: install dconf-gsettings-backend" >&2; exit 1; }
+mkdir -p "$appdir/usr/lib/gio/modules"
+cp "$dconf_module" "$appdir/usr/lib/gio/modules/"
+echo 'export GIO_EXTRA_MODULES="$APPDIR/usr/lib/gio/modules${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"' >> "$hook"
+
 # GTK's gstreamer media module links the host's gstreamer, which fails against the bundled glib on newer distros (an
 # "undefined symbol" warning at start); the app plays video through libmpv, so the module is not needed
 rm -rf "$appdir"/usr/lib/gtk-4.0/*/media
@@ -90,12 +100,15 @@ install -m644 "$root/LICENSE" "$root/NOTICE" "$lic/"
 cp "$data/SOURCE-OFFER.txt" "$lic/SOURCE-OFFER.txt"
 if command -v dpkg >/dev/null; then
     : > "$lic/libraries/PACKAGES.txt"
-    for lib in "$appdir"/usr/lib/*.so*; do
-        found="$(ldconfig -p | awk -v n="$(basename "$lib")" '$1 == n {print $NF; exit}')"
-        if [ -n "$found" ]; then
-            dpkg -S "$(readlink -f "$found")" 2>/dev/null | head -1 | cut -d: -f1 || true
-        fi
-    done | sort -u | while read -r pkg; do
+    {
+        for lib in "$appdir"/usr/lib/*.so*; do
+            found="$(ldconfig -p | awk -v n="$(basename "$lib")" '$1 == n {print $NF; exit}')"
+            if [ -n "$found" ]; then
+                dpkg -S "$(readlink -f "$found")" 2>/dev/null | head -1 | cut -d: -f1 || true
+            fi
+        done
+        dpkg -S "$dconf_module" 2>/dev/null | head -1 | cut -d: -f1 || true
+    } | sort -u | while read -r pkg; do
         [ -f "/usr/share/doc/$pkg/copyright" ] && cp "/usr/share/doc/$pkg/copyright" "$lic/libraries/$pkg.copyright"
         dpkg-query -W -f='${Package} ${Version}\n' "$pkg" >> "$lic/libraries/PACKAGES.txt"
     done
