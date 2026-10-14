@@ -1,9 +1,15 @@
-//! The desktop notices of an update pass (T-26a-031, T-26a-034, T-26a-035): the large-queue warning with its help link,
-//! the per-entry "new chapters / episodes" notice with its buttons, and the quiet "N update(s) failed" notice.
+//! The one desktop notifier of the app. Every notice goes out here as a [`Post`]: the update passes' notices built below
+//! (the large-queue warning, the per-entry "new chapters / episodes" notice, the "N update(s) failed" notice, the summary
+//! and the progress), the app update's, the reader's saved and shared pictures, and every notice the library crates send
+//! through the platform `Notifier` (downloads, backup and restore, incognito), which `gio_notifier` turns into a `Post`.
 //!
-//! The runner's host lives on the runtime's workers and GTK objects stay on the main thread, so a notice is a plain
-//! [`Post`] sent over a channel to [`attach`], which turns it into a `gio::Notification`. The pure mapping from a pass
-//! result to a [`Post`] is tested below; the GTK half is thin.
+//! Any thread may send; [`attach`] shows the posts on the main thread, where the one delivery applies the same rules to
+//! every notice:
+//! - a notice of a channel the user muted (`muted_notification_channels`, channels by `ids::channel`) is not shown;
+//! - the content rules (`rules::prepare`);
+//! - one notice per id: a show or withdraw within [`MIN_GAP`] of the last send of that id waits, and only the newest
+//!   waits. The freedesktop backend replaces or closes a notice by the number the server answered with, and while that
+//!   answer is on its way a second send pops up as a new notice (a restore once showed one per title).
 //!
 //! Decisions:
 //! - A notification has no timeout of its own, so a [`Post`] with one is withdrawn by a timer on the main context.
@@ -43,6 +49,8 @@ use crate::updates::download_host;
 /// What a notification button or tap does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
+    /// An application action by its detailed name (`app.cancel-restore`), with an optional string parameter.
+    Named { action: String, target: Option<String> },
     /// The entry's page; withdraws `notice` first when it is set.
     Entry { kind: Kind, id: i64, notice: Option<String> },
     Url(String),
@@ -62,9 +70,10 @@ fn kind_name(kind: Kind) -> &'static str {
 }
 
 impl Target {
-    /// The application action this target runs.
-    pub fn app_action(&self) -> AppAction {
-        match self {
+    /// The routed application action this target runs; `None` for a [`Target::Named`] action.
+    pub fn app_action(&self) -> Option<AppAction> {
+        Some(match self {
+            Self::Named { .. } => return None,
             Self::Entry { kind: Kind::Manga, id, notice } => AppAction::OpenManga { manga_id: *id, notice: notice.clone() },
             Self::Entry { kind: Kind::Anime, id, notice } => AppAction::OpenAnime { anime_id: *id, notice: notice.clone() },
             Self::Url(url) => AppAction::OpenUrl { url: url.clone() },
@@ -82,18 +91,22 @@ impl Target {
             }
             Self::OpenLog(path) => AppAction::RevealFile { path: path.into() },
             Self::Action(action) => action.clone(),
-        }
+        })
     }
 
-    /// The detailed application action name (always `app.notice`) and its JSON parameter.
-    fn action(&self) -> Option<(String, glib::Variant)> {
-        let json = self.app_action().to_target().ok()?;
-        Some((format!("app.{}", router::NOTICE_ACTION_NAME), json.to_variant()))
+    /// The detailed application action name and its parameter: `app.notice` with the routed action as JSON, or the named
+    /// action as it is.
+    fn action(&self) -> Option<(String, Option<glib::Variant>)> {
+        if let Self::Named { action, target } = self {
+            return Some((action.clone(), target.as_ref().map(|t| t.to_variant())));
+        }
+        let json = self.app_action()?.to_target().ok()?;
+        Some((format!("app.{}", router::NOTICE_ACTION_NAME), Some(json.to_variant())))
     }
 }
 
 /// One notification to show.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Post {
     pub id: String,
     pub title: String,
@@ -103,6 +116,8 @@ pub struct Post {
     pub timeout: Option<Duration>,
     pub tap: Option<Target>,
     pub buttons: Vec<(String, Target)>,
+    /// A picture for the notice (PNG bytes), the saved page's thumbnail.
+    pub icon: Option<Vec<u8>>,
 }
 
 /// The per-entry notice of an update, or `None` when the content is hidden or nothing is new (T-26a-034).
@@ -140,6 +155,7 @@ pub fn entry_post(kind: Kind, update: &EntryUpdate, hide_content: bool) -> Optio
         timeout: None,
         tap,
         buttons,
+        icon: None,
     })
 }
 
@@ -155,6 +171,7 @@ pub fn error_post(kind: Kind, failed: usize, log: Option<&Path>) -> Option<Post>
         timeout: None,
         tap: log.map(|path| Target::OpenLog(path.to_string_lossy().into_owned())),
         buttons: Vec::new(),
+        icon: None,
     })
 }
 
@@ -174,6 +191,7 @@ pub fn progress_post(kind: Kind, title: &str, body: Option<&str>) -> Post {
         timeout: None,
         tap: None,
         buttons: vec![("Cancel".to_owned(), Target::Action(cancel))],
+        icon: None,
     }
 }
 
@@ -187,6 +205,7 @@ pub fn warning_post(kind: Kind) -> Post {
         timeout: Some(Duration::from_millis(text::QUEUE_WARNING_TIMEOUT_MS)),
         tap: Some(Target::Url(text::QUEUE_WARNING_URL.to_owned())),
         buttons: Vec::new(),
+        icon: None,
     }
 }
 
@@ -205,6 +224,7 @@ pub fn summary_post(kind: Kind, summary: &text::SummaryText) -> Post {
         timeout: None,
         tap: None,
         buttons: Vec::new(),
+        icon: None,
     }
 }
 
@@ -238,6 +258,94 @@ pub fn post(post: Post) -> bool {
     send(Op::Show(post))
 }
 
+/// Removes the notice with this id. A missing id is not an error.
+pub fn withdraw(id: &str) {
+    send(Op::Withdraw(id.to_owned()));
+}
+
+/// The shortest time between two sends of one id (see the module notes).
+pub const MIN_GAP: Duration = Duration::from_secs(1);
+
+/// What happens to one id now: sent at once, or held until the gap since its last send has passed.
+#[derive(Debug, PartialEq, Eq)]
+enum Pace {
+    Now,
+    /// Wait this long; a step is already waiting when `scheduled` is false, and the new one takes its place.
+    Hold { wait: Duration, scheduled: bool },
+}
+
+/// The last send and the step waiting for each id.
+#[derive(Default)]
+struct Pacer {
+    ids: std::collections::HashMap<String, (std::time::Instant, Option<Op>)>,
+}
+
+impl Pacer {
+    fn pace(&mut self, op: Op, now: std::time::Instant) -> (Pace, Option<Op>) {
+        let id = op_id(&op).to_owned();
+        match self.ids.get_mut(&id) {
+            Some((last, waiting)) if now.duration_since(*last) < MIN_GAP => {
+                let scheduled = waiting.is_none();
+                *waiting = Some(op);
+                (Pace::Hold { wait: MIN_GAP - now.duration_since(*last), scheduled }, None)
+            }
+            _ => {
+                self.ids.insert(id, (now, None));
+                (Pace::Now, Some(op))
+            }
+        }
+    }
+
+    /// The step that waited for `id`, now due.
+    fn due(&mut self, id: &str, now: std::time::Instant) -> Option<Op> {
+        let (last, waiting) = self.ids.get_mut(id)?;
+        let op = waiting.take()?;
+        *last = now;
+        Some(op)
+    }
+}
+
+fn op_id(op: &Op) -> &str {
+    match op {
+        Op::Show(post) => &post.id,
+        Op::Withdraw(id) => id,
+    }
+}
+
+thread_local! {
+    static PACER: std::cell::RefCell<Pacer> = std::cell::RefCell::new(Pacer::default());
+}
+
+/// Applies one step on the main thread, paced per id.
+fn deliver(app: &gio::Application, op: Op) {
+    let id = op_id(&op).to_owned();
+    let (pace, now) = PACER.with(|p| p.borrow_mut().pace(op, std::time::Instant::now()));
+    match pace {
+        Pace::Now => apply(app, now.expect("sent now")),
+        Pace::Hold { wait, scheduled: true } => {
+            let app = app.clone();
+            glib::timeout_add_local_once(wait, move || {
+                if let Some(op) = PACER.with(|p| p.borrow_mut().due(&id, std::time::Instant::now())) {
+                    apply(&app, op);
+                }
+            });
+        }
+        Pace::Hold { scheduled: false, .. } => {}
+    }
+}
+
+/// True when the user muted the channel of this notice.
+fn muted(id: &str) -> bool {
+    crate::data::is_installed() && crate::data::app().base.muted_notification_channels.get().contains(ids::channel(id))
+}
+
+fn apply(app: &gio::Application, op: Op) {
+    match op {
+        Op::Show(post) if muted(&post.id) => {}
+        Op::Show(post) => show(app, &post),
+        Op::Withdraw(id) => app.withdraw_notification(&id),
+    }
+}
 
 fn show(app: &gio::Application, post: &Post) {
     let notification = gio::Notification::new(&post.title);
@@ -246,17 +354,20 @@ fn show(app: &gio::Application, post: &Post) {
         notification.set_priority(gio::NotificationPriority::Low);
     }
     if let Some((action, target)) = post.tap.as_ref().and_then(Target::action) {
-        notification.set_default_action_and_target_value(&action, Some(&target));
+        notification.set_default_action_and_target_value(&action, target.as_ref());
     }
     for (label, target) in &post.buttons {
         if let Some((action, value)) = target.action() {
-            notification.add_button_with_target_value(label, &action, Some(&value));
+            notification.add_button_with_target_value(label, &action, value.as_ref());
         }
+    }
+    if let Some(bytes) = &post.icon {
+        notification.set_icon(&gio::BytesIcon::new(&glib::Bytes::from(bytes.as_slice())));
     }
     app.send_notification(Some(&post.id), &notification);
     if let Some(timeout) = post.timeout {
         let (app, id) = (app.clone(), post.id.clone());
-        glib::timeout_add_local_once(timeout, move || app.withdraw_notification(&id));
+        glib::timeout_add_local_once(timeout, move || deliver(&app, Op::Withdraw(id)));
     }
 }
 
@@ -297,7 +408,7 @@ struct GtkHost {
 
 impl ActionHost for GtkHost {
     fn withdraw(&self, notice: &str) {
-        self.app.withdraw_notification(notice);
+        deliver(&self.app, Op::Withdraw(notice.to_owned()));
     }
 
     fn open_entry(&self, kind: Kind, id: i64) {
@@ -407,8 +518,8 @@ impl ActionHost for GtkHost {
     }
 }
 
-/// Registers `app.notice` and starts showing posted notices. Call once from the GTK main thread, with the application
-/// running. Without an application (a test run) nothing is attached and [`post`] returns `false`.
+/// Registers `app.notice` and starts showing posted notices. Call from the GTK main thread, with the application running;
+/// a second call does nothing. Without an application (a test run) nothing is attached and [`post`] returns `false`.
 pub fn attach() {
     let Some(app) = gio::Application::default() else { return };
     let (tx, rx) = async_channel::unbounded();
@@ -427,10 +538,7 @@ pub fn attach() {
     app.add_action(&action);
     glib::spawn_future_local(async move {
         while let Ok(op) = rx.recv().await {
-            match op {
-                Op::Show(post) => show(&app, &post),
-                Op::Withdraw(id) => app.withdraw_notification(&id),
-            }
+            deliver(&app, op);
         }
     });
 }
@@ -534,26 +642,46 @@ mod tests {
         assert_eq!(post.tap, Some(Target::OpenLog("/cache/update_errors.txt".to_owned())));
         let (action, value) = post.tap.expect("tap").action().expect("encodes");
         assert_eq!(action, "app.notice");
-        let action = AppAction::from_target(&value.get::<String>().expect("a string")).expect("decodes");
+        let action = AppAction::from_target(&value.expect("a parameter").get::<String>().expect("a string")).expect("decodes");
         assert_eq!(action, AppAction::RevealFile { path: "/cache/update_errors.txt".into() });
     }
 
     #[test]
     fn a_target_names_its_application_action() {
         let entry = Target::Entry { kind: Kind::Anime, id: 5, notice: Some("n".into()) };
-        assert_eq!(entry.app_action(), AppAction::OpenAnime { anime_id: 5, notice: Some("n".into()) });
-        assert_eq!(Target::Url("https://x".into()).app_action(), AppAction::OpenUrl { url: "https://x".into() });
+        assert_eq!(entry.app_action().unwrap(), AppAction::OpenAnime { anime_id: 5, notice: Some("n".into()) });
+        assert_eq!(Target::Url("https://x".into()).app_action().unwrap(), AppAction::OpenUrl { url: "https://x".into() });
         let urls = vec!["/a".to_owned()];
         let download = Target::Download { kind: Kind::Manga, entry_id: 2, urls: urls.clone(), notice_id: "n".into() };
         assert_eq!(
-            download.app_action(),
+            download.app_action().unwrap(),
             AppAction::DownloadChapters { manga_id: 2, urls: urls.clone(), notice: Some("n".into()) }
         );
         let mark = Target::MarkRead { kind: Kind::Anime, entry_id: 2, urls: urls.clone(), notice_id: "n".into() };
-        assert_eq!(mark.app_action(), AppAction::MarkEpisodesSeen { anime_id: 2, urls, notice: Some("n".into()) });
+        assert_eq!(mark.app_action().unwrap(), AppAction::MarkEpisodesSeen { anime_id: 2, urls, notice: Some("n".into()) });
         let (name, value) = mark.action().expect("encodes");
         assert_eq!(name, "app.notice", "every button goes through the one action");
-        assert!(value.get::<String>().is_some_and(|json| json.contains("mark_episodes_seen")));
+        assert!(value.and_then(|v| v.get::<String>()).is_some_and(|json| json.contains("mark_episodes_seen")));
+        let named = Target::Named { action: "app.cancel-restore".into(), target: None };
+        assert_eq!(named.app_action(), None);
+        assert_eq!(named.action(), Some(("app.cancel-restore".to_owned(), None)), "a named action goes out as it is");
+    }
+
+    #[test]
+    fn a_second_send_of_one_id_within_the_gap_waits_and_only_the_newest_waits() {
+        let mut pacer = Pacer::default();
+        let start = std::time::Instant::now();
+        let show = |text: &str| Op::Show(Post { id: "n".into(), title: text.into(), ..Post::default() });
+        assert_eq!(pacer.pace(show("1"), start).0, Pace::Now);
+        let later = start + Duration::from_millis(300);
+        assert_eq!(pacer.pace(show("2"), later).0, Pace::Hold { wait: Duration::from_millis(700), scheduled: true });
+        assert_eq!(pacer.pace(show("3"), later).0, Pace::Hold { wait: Duration::from_millis(700), scheduled: false }, "one timer");
+        assert_eq!(pacer.pace(Op::Show(Post { id: "other".into(), ..Post::default() }), later).0, Pace::Now, "ids are apart");
+        let due = start + MIN_GAP;
+        assert_eq!(pacer.due("n", due), Some(show("3")), "the newest step goes out");
+        assert_eq!(pacer.due("n", due), None);
+        assert_eq!(pacer.pace(Op::Withdraw("n".into()), due + Duration::from_millis(10)).0, Pace::Hold { wait: Duration::from_millis(990), scheduled: true }, "a withdraw right after a show waits too");
+        assert_eq!(pacer.pace(show("4"), due + MIN_GAP * 2).0, Pace::Now);
     }
 
     #[test]

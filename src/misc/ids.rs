@@ -10,8 +10,6 @@ use kuro_platform::kind::Kind;
 pub const APP_UPDATE_PROGRESS: &str = "app-update.progress";
 pub const APP_UPDATE_INSTALL: &str = "app-update.install";
 pub const APP_UPDATE_ERROR: &str = "app-update.error";
-#[cfg(test)]
-pub const SAVE_IMAGE: &str = "save-image";
 pub const LIBRARY_PROGRESS: &str = "library.progress";
 pub const LIBRARY_ERROR: &str = "library.error";
 pub const LIBRARY_SIZE_WARNING: &str = "library.size-warning";
@@ -19,6 +17,29 @@ pub const LIBRARY_SUMMARY: &str = "library.summary";
 pub const NEW_CHAPTERS: &str = "new.chapters";
 pub const NEW_EPISODES: &str = "new.episodes";
 
+/// The notices other crates own, listed here so the registry names every slot of the app.
+pub use kuro_backup::notify::{ID_AUTO_WARNING, ID_BACKUP_PROGRESS, ID_BACKUP_RESULT, ID_RESTORE_PROGRESS, ID_RESTORE_RESULT};
+pub use kuro_downloads::notify::{ANIME_ERROR_ID, ANIME_PROGRESS_ID, ANIME_WARNING_ID, MANGA_ERROR_ID, MANGA_PROGRESS_ID, MANGA_WARNING_ID};
+pub use kuro_images::notify::PICTURE_NOTICE_ID;
+pub const SHARED_PICTURE: &str = "reader-shared-picture";
+
+/// The channel (`kuro_platform::notifications::CATEGORIES`) a notice belongs to, by its id. The user mutes a channel
+/// (`muted_notification_channels`), and the one notifier (`misc::notify`) checks it here before anything is shown.
+pub fn channel(id: &str) -> &'static str {
+    let base = id.split(':').next().unwrap_or(id);
+    match base {
+        APP_UPDATE_PROGRESS | APP_UPDATE_INSTALL | APP_UPDATE_ERROR => "app_apk_update_channel",
+        LIBRARY_PROGRESS | LIBRARY_SIZE_WARNING => "library_progress_channel",
+        LIBRARY_ERROR => "library_errors_channel",
+        LIBRARY_SUMMARY | NEW_CHAPTERS | NEW_EPISODES => "new_chapters_episodes_channel",
+        MANGA_PROGRESS_ID | ANIME_PROGRESS_ID => "downloader_progress_channel",
+        MANGA_WARNING_ID | ANIME_WARNING_ID | MANGA_ERROR_ID | ANIME_ERROR_ID => "downloader_error_channel",
+        ID_BACKUP_PROGRESS | ID_RESTORE_PROGRESS => "backup_restore_progress_channel",
+        ID_BACKUP_RESULT | ID_RESTORE_RESULT | ID_AUTO_WARNING => "backup_restore_complete_channel_v2",
+        kuro_platform::incognito::CHANNEL_ID => kuro_platform::incognito::CHANNEL_ID,
+        _ => "common_channel",
+    }
+}
 
 fn kind_tag(kind: Kind) -> &'static str {
     match kind {
@@ -71,5 +92,25 @@ mod tests {
         assert!(library_size_warning(Kind::Anime).starts_with(LIBRARY_SIZE_WARNING));
         assert_ne!(library_progress(Kind::Manga), library_progress(Kind::Anime));
         assert!(library_progress(Kind::Manga).starts_with(LIBRARY_PROGRESS));
+    }
+
+    const FIXED: [&str; 22] = [
+        APP_UPDATE_PROGRESS, APP_UPDATE_INSTALL, APP_UPDATE_ERROR, LIBRARY_PROGRESS, LIBRARY_ERROR, LIBRARY_SIZE_WARNING,
+        LIBRARY_SUMMARY, NEW_CHAPTERS, NEW_EPISODES, ID_AUTO_WARNING, ID_BACKUP_PROGRESS, ID_BACKUP_RESULT,
+        ID_RESTORE_PROGRESS, ID_RESTORE_RESULT, ANIME_ERROR_ID, ANIME_PROGRESS_ID, ANIME_WARNING_ID, MANGA_ERROR_ID,
+        MANGA_PROGRESS_ID, MANGA_WARNING_ID, PICTURE_NOTICE_ID, SHARED_PICTURE,
+    ];
+
+    #[test]
+    fn every_slot_is_its_own_and_belongs_to_a_real_channel() {
+        let distinct: std::collections::BTreeSet<_> = FIXED.iter().collect();
+        assert_eq!(distinct.len(), FIXED.len(), "two producers share a slot");
+        let channels = kuro_platform::notifications::CATEGORIES.map(|c| c.channel_id);
+        for id in FIXED.iter().copied().chain([kuro_platform::incognito::notification_key().as_str()]) {
+            assert!(channels.contains(&channel(id)), "{id}");
+        }
+        assert_eq!(channel(&new_items(Kind::Anime, 3)), "new_chapters_episodes_channel", "the switch in Settings mutes these");
+        assert_eq!(channel(&library_summary(Kind::Manga)), "new_chapters_episodes_channel");
+        assert_eq!(channel(&kuro_platform::incognito::notification_key()), "incognito_mode_channel");
     }
 }

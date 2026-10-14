@@ -98,7 +98,7 @@ pub fn attach(app: &gtk::Application, win: &gtk::ApplicationWindow) -> gtk::Widg
     action.connect_activate(|_, _| request_stop());
     app.add_action(&action);
 
-    let notifier = GioNotifier::new(app, vec![(notify::ID_RESTORE_PROGRESS.to_owned(), format!("app.{CANCEL_ACTION}"))]);
+    let notifier = GioNotifier::new(app);
     BANNER.with(|b| *b.borrow_mut() = Some((banner.clone(), label)));
     let ctx = Rc::new(Ctx { notifier });
     backup_pages::set_host(BackupHost {

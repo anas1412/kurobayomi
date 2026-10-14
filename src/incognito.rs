@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 
 use gtk::prelude::*;
-use kuro_platform::incognito::{self as platform, DISABLE_ACTION};
+use kuro_platform::incognito as platform;
 use kuro_prefs::pref::Pref;
 
 use crate::gio_notifier::GioNotifier;
@@ -44,7 +44,7 @@ pub fn attach(app: &gtk::Application, incognito: Pref<bool>) {
     });
     app.add_action(&toggle);
 
-    let notifier = GioNotifier::new(app, vec![(platform::notification_key(), DISABLE_ACTION.to_owned())]);
+    let notifier = GioNotifier::new(app);
     STATE.with(|s| {
         *s.borrow_mut() = Some(State { incognito, notifier, toggle });
     });
@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn the_notification_default_action_is_the_incognito_off_action() {
-        assert_eq!(DISABLE_ACTION, "app.incognito-off");
+        assert_eq!(platform::DISABLE_ACTION, "app.incognito-off");
         assert_eq!(platform::notification_key(), "incognito_mode_channel:-701");
     }
 }

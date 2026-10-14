@@ -16,7 +16,7 @@
 //! | T-req-platform-007 | second-launch forwarding through `SingleInstance` | The app uses GApplication forwarding (`is_unique` picks the flags), which also carries the command line and files over D-Bus and works in a sandbox. `SocketInstance` stays as the fallback for a build without GApplication. |
 //! | T-req-platform-007 | external player through `ExternalPlayer` | `kuro_player::external` keeps its own argument builder: it adds title, start position, subtitle and IPC socket, which `CommandPlayer` does not carry, and it returns the child so mpv can be watched. |
 //!
-//! The Linux notifier (T-req-platform-004) is [`crate::linux::notifier`]. Channel groups, the `POST_NOTIFICATIONS`
+//! The Linux notifier (T-req-platform-004) is the app's `misc::notify`, behind [`crate::notifier::Notifier`]. Channel groups, the `POST_NOTIFICATIONS`
 //! permission and the notification colour are dropped on Linux: the portal asks for permission and freedesktop
 //! notifications have no colour.
 //!

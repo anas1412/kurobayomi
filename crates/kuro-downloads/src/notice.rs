@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use kuro_platform::notifier::Notifier;
+use kuro_platform::kind::Kind;
+use kuro_platform::notifier::{self as platform, Notifier, Tap};
 
 pub const DOWNLOADER_TITLE: &str = "Downloader";
 /// The one notice a finished download posts (user, 2026-10-12: only the end is announced, besides failures).
@@ -42,6 +43,17 @@ pub enum Action {
 }
 
 impl Action {
+    /// The click of the button on the desktop; `None` for the queue controls, which only the app's own Downloads page
+    /// offers (no progress notice is posted).
+    pub fn tap(self) -> Option<Tap> {
+        match self {
+            Self::ShowManga => Some(Tap::Downloads(Kind::Manga)),
+            Self::ShowAnime => Some(Tap::Downloads(Kind::Anime)),
+            Self::OpenHelp(url) => Some(Tap::OpenUrl(url.to_owned())),
+            Self::Pause | Self::Stop | Self::Resume | Self::CancelAll => None,
+        }
+    }
+
     /// The button text. Handled inside the app: the GUI maps each action to a desktop action, not a broadcast.
     pub fn label(self) -> &'static str {
         match self {
@@ -68,6 +80,21 @@ pub trait NotificationSink: Send + Sync {
     fn withdraw(&self, id: &'static str);
 }
 
+impl Notice {
+    /// The desktop notice: low priority, its expiry, and a button for each action the desktop can carry out.
+    pub fn desktop(&self) -> platform::Notice {
+        platform::Notice {
+            id: self.id.to_owned(),
+            title: self.title.clone(),
+            body: self.body.clone(),
+            low_priority: self.priority == Priority::Low,
+            tap: None,
+            buttons: self.actions.iter().filter_map(|a| Some((a.label().to_owned(), a.tap()?))).collect(),
+            timeout: self.expire_secs.map(|secs| std::time::Duration::from_secs(u64::from(secs))),
+        }
+    }
+}
+
 /// A [`NotificationSink`] over the platform [`Notifier`]. The text is already final: the notice builders hide names under `hide_content` ("Downloading (x/y)", empty body), so the notice goes out as built.
 /// The platform's blanket replacement (`send` with `sensitive`) is not used: it would overwrite the counts with a
 /// generic text (T-23a-043, T-24a-028).
@@ -83,10 +110,36 @@ impl NotifierSink {
 
 impl NotificationSink for NotifierSink {
     fn show(&self, notice: &Notice) {
-        self.notifier.show(notice.id, &notice.title, notice.body.as_deref());
+        self.notifier.notify(&notice.desktop());
     }
 
     fn withdraw(&self, id: &'static str) {
         self.notifier.withdraw(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_desktop_notice_keeps_priority_expiry_and_the_buttons_the_desktop_can_run() {
+        let notice = Notice {
+            id: "dl-manga-warning",
+            priority: Priority::Low,
+            title: DOWNLOADER_TITLE.into(),
+            body: Some("Large queue".into()),
+            ongoing: false,
+            actions: vec![Action::OpenHelp("https://help"), Action::Pause, Action::ShowManga],
+            expire_secs: Some(30),
+        };
+        let desktop = notice.desktop();
+        assert!(desktop.low_priority);
+        assert_eq!(desktop.timeout, Some(std::time::Duration::from_secs(30)));
+        assert_eq!(
+            desktop.buttons,
+            vec![("Help".to_owned(), Tap::OpenUrl("https://help".into())), ("Show manga".to_owned(), Tap::Downloads(Kind::Manga))],
+            "the queue controls stay in the app"
+        );
     }
 }

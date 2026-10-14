@@ -1,92 +1,90 @@
-//! `kuro_platform::notifier::Notifier` over `gio::Notification`. The trait is `Send + Sync` and GTK objects are
-//! not, so calls go through the platform's [`QueuedNotifier`] to the main context, where the application sends them.
-//! Every send goes through `show_unless_muted`, so a channel the user muted (the `muted_notification_channels`
-//! preference) never reaches the desktop, and a full [`Notice`] keeps its progress and its action buttons.
+//! `kuro_platform::notifier::Notifier` for the library crates (downloads, backup and restore, incognito). It hands every
+//! notice to the app's one notifier (`misc::notify`) as a [`Post`], so these notices pass the same mute check, content
+//! rules and pacing as all the others, and keep their clicks and buttons.
 
-use std::collections::BTreeSet;
+use kuro_platform::kind::Kind;
+use kuro_platform::notifier::{Notice, Notifier, Tap};
 
-use gtk::glib;
-use gtk::prelude::*;
-use kuro_platform::linux::notifier::{Command, QueuedNotifier, to_notification};
-use kuro_platform::notifier::{Notice, Notifier, show_unless_muted};
-use kuro_prefs::pref::Pref;
+use crate::misc::notify::{self, Post, Target};
+use crate::misc::router::AppAction;
 
-#[derive(Clone)]
-pub struct GioNotifier {
-    queue: QueuedNotifier,
-    muted: Option<Pref<BTreeSet<String>>>,
-}
-
-/// The channel of a plain `show` call: the id is `"{channel}:{n}"` (`notifications::key`), so the channel is its prefix.
-fn channel_of(id: &str) -> &str {
-    id.split(':').next().unwrap_or(id)
-}
-
-/// The notice a plain `show` call stands for. A `None` body stays hidden (an empty text has no body).
-fn plain_notice(id: &str, title: &str, body: Option<&str>) -> Notice {
-    Notice { id: id.into(), channel: channel_of(id).into(), title: title.into(), text: body.unwrap_or_default().into(), ..Notice::default() }
-}
+#[derive(Clone, Copy)]
+pub struct GioNotifier;
 
 impl GioNotifier {
-    /// `default_actions` maps a notification id to the application action its click activates.
     /// Call from the GTK main thread.
-    pub fn new(app: &gtk::Application, default_actions: Vec<(String, String)>) -> Self {
-        let (queue, rx) = QueuedNotifier::new();
-        let app = app.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(cmd) = rx.recv().await {
-                match cmd {
-                    Command::Show(spec) => {
-                        let n = to_notification(&spec);
-                        if let Some((_, action)) = default_actions.iter().find(|(i, _)| *i == spec.id) {
-                            n.set_default_action(action);
-                        }
-                        app.send_notification(Some(&spec.id), &n);
-                    }
-                    Command::Withdraw(id) => app.withdraw_notification(&id),
-                }
-            }
-        });
-        let muted = crate::data::is_installed().then(|| crate::data::app().base.muted_notification_channels.clone());
-        Self { queue, muted }
+    pub fn new(_app: &gtk::Application) -> Self {
+        notify::attach();
+        Self
     }
+}
 
-    fn muted_channels(&self) -> Vec<String> {
-        self.muted.as_ref().map(|p| p.get().into_iter().collect()).unwrap_or_default()
+/// The app's action for a click. A revealed file's folder joins the folders a reveal may show, since the app wrote it.
+fn target(tap: &Tap) -> Target {
+    match tap {
+        Tap::Reveal(path) => {
+            crate::misc::reveal::allow_folder_of(path);
+            Target::Action(AppAction::RevealFile { path: path.clone() })
+        }
+        Tap::OpenUrl(url) => Target::Url(url.clone()),
+        Tap::Downloads(Kind::Manga) => Target::Action(AppAction::OpenMangaDownloads),
+        Tap::Downloads(Kind::Anime) => Target::Action(AppAction::OpenAnimeDownloads),
+        Tap::App(action) => Target::Named { action: action.clone(), target: None },
+    }
+}
+
+/// The post for a platform notice.
+fn post(notice: &Notice) -> Post {
+    Post {
+        id: notice.id.clone(),
+        title: notice.title.clone(),
+        body: notice.body.clone(),
+        low_priority: notice.low_priority,
+        timeout: notice.timeout,
+        tap: notice.tap.as_ref().map(target),
+        buttons: notice.buttons.iter().map(|(label, tap)| (label.clone(), target(tap))).collect(),
+        icon: None,
     }
 }
 
 impl Notifier for GioNotifier {
     fn show(&self, id: &str, title: &str, body: Option<&str>) {
-        let notice = plain_notice(id, title, body);
-        let muted = self.muted_channels();
-        match body {
-            Some(_) => {
-                show_unless_muted(&self.queue, &notice, &muted);
-            }
-            // a hidden body stays `None` all the way to the desktop
-            None if !notice.is_muted(&muted) => self.queue.show(id, title, None),
-            None => {}
-        }
+        self.notify(&Notice { id: id.into(), title: title.into(), body: body.map(str::to_owned), ..Notice::default() });
     }
 
-    fn show_notice(&self, notice: &Notice) {
-        show_unless_muted(&self.queue, notice, &self.muted_channels());
+    fn notify(&self, notice: &Notice) {
+        notify::post(post(notice));
     }
 
     fn withdraw(&self, id: &str) {
-        self.queue.withdraw(id);
+        notify::withdraw(id);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
-    fn a_plain_notice_takes_its_channel_from_the_key_prefix() {
-        assert_eq!(plain_notice("incognito_mode_channel:-701", "t", None).channel, "incognito_mode_channel");
-        assert_eq!(plain_notice("restore", "t", Some("b")).channel, "restore");
-        assert_eq!(plain_notice("a:1", "t", Some("b")).text, "b");
+    fn a_platform_notice_keeps_its_clicks_buttons_priority_and_timeout() {
+        let log = PathBuf::from("/home/u/backups/a.tachibk");
+        let notice = Notice {
+            id: "kurobayomi-backup-result".into(),
+            title: "Backup created".into(),
+            body: None,
+            low_priority: true,
+            tap: Some(Tap::App("app.incognito-off".into())),
+            buttons: vec![("Open folder".into(), Tap::Reveal(log.clone())), ("Show anime".into(), Tap::Downloads(Kind::Anime))],
+            timeout: Some(Duration::from_secs(30)),
+        };
+        let post = post(&notice);
+        assert_eq!(post.tap, Some(Target::Named { action: "app.incognito-off".into(), target: None }));
+        assert_eq!(post.buttons[0].1, Target::Action(AppAction::RevealFile { path: log }));
+        assert_eq!(post.buttons[1].1, Target::Action(AppAction::OpenAnimeDownloads));
+        assert!(post.low_priority && post.body.is_none());
+        assert_eq!(post.timeout, Some(Duration::from_secs(30)));
+        assert!(crate::misc::reveal::announced_folders().contains(&PathBuf::from("/home/u/backups")), "the folder may be revealed");
     }
 }

@@ -1,7 +1,7 @@
 //! Incognito indicator (T-01a-020): the banner precedence and the persistent notification.
 //! The banner widget is GTK and lives in the GUI crate; this module holds the parts that do not need a display.
 
-use crate::notifier::Notifier;
+use crate::notifier::{Notice, Notifier, Tap};
 use crate::notifications;
 
 /// Channel that the incognito notification is posted on.
@@ -45,7 +45,14 @@ pub fn notification_key() -> String {
 pub fn sync_notification(incognito: bool, notifier: &dyn Notifier) {
     let key = notification_key();
     if incognito {
-        notifier.show(&key, TITLE, Some(DISABLE_TEXT));
+        notifier.notify(&Notice {
+            id: key,
+            title: TITLE.to_owned(),
+            body: Some(DISABLE_TEXT.to_owned()),
+            low_priority: true,
+            tap: Some(Tap::App(DISABLE_ACTION.to_owned())),
+            ..Notice::default()
+        });
     } else {
         notifier.withdraw(&key);
     }

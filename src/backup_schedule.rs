@@ -85,7 +85,7 @@ pub fn start(app: &gtk::Application) {
     let (tx, rx) = watch::channel(host.config());
     let seen = Cell::new(normalize_interval(i64::from(backup.backup_interval.get())));
     let host = Arc::new(GuiHost(host));
-    let notifier = Arc::new(crate::gio_notifier::GioNotifier::new(app, Vec::new()));
+    let notifier = Arc::new(crate::gio_notifier::GioNotifier::new(app));
     tokio::spawn(run_loop(rx, crate::pref_model::backup_pages::job_slot().clone(), Arc::clone(&host), notifier));
     crate::pref_model::bind::follow(&backup.backup_interval, || true, move |stored| reschedule(&tx, &host.0, &seen, stored));
 }

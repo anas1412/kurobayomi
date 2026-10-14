@@ -230,7 +230,7 @@ fn build_window(app: &gtk::Application) {
     // the download managers start before the tab pages, so the Downloads page shows the live queue
     let host = shell::Shell::get().expect("the shell is installed in main");
     host.migration_done();
-    host.start_downloads(std::sync::Arc::new(gio_notifier::GioNotifier::new(app, Vec::new())));
+    host.start_downloads(std::sync::Arc::new(gio_notifier::GioNotifier::new(app)));
     // `app.incognito` exists before the panel's app menu and title icon look it up
     let base = &data::app().base;
     incognito::attach(app, base.incognito_mode.clone());

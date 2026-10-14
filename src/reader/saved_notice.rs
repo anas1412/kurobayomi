@@ -2,21 +2,21 @@
 //! picture decoded to at most 720 by 1280, a default action that opens the file and a "Share" button that shares it. A
 //! save again replaces the notice (one fixed id). A failed save shows "Error" with the message, or "Unknown error".
 //!
-//! The shared notifier of the app (`gio_notifier`) sends a title and a body only, and is not the reader's to change, so
-//! the reader sends this notice itself over the application. The two actions are application actions that take the saved
-//! file's path as their parameter. The thumbnail is built on the worker thread that saved the file.
+//! The notices go out through the app's one notifier (`misc::notify`). Their actions are application actions that take the
+//! saved file's path as their parameter. The thumbnail is built on the worker thread that saved the file.
 
 use std::path::Path;
 
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_images::notify::PICTURE_NOTICE_ID;
+use crate::misc::ids::PICTURE_NOTICE_ID;
 
 use super::strings;
+use crate::misc::notify::{self, Post, Target};
 
 /// The notice after a share: one fixed id, so a share again replaces it.
-pub const SHARE_NOTICE_ID: &str = "reader-shared-picture";
+pub const SHARE_NOTICE_ID: &str = crate::misc::ids::SHARED_PICTURE;
 /// The application action of the share notice's button; its parameter is the shared file's path.
 pub const REVEAL_ACTION: &str = "reader-reveal-shared-picture";
 
@@ -87,40 +87,47 @@ pub fn application() -> Option<gtk::Application> {
 }
 
 /// Withdraws the notice of the previous save. Called when a save starts.
-pub fn clear(app: &gtk::Application) {
-    app.withdraw_notification(PICTURE_NOTICE_ID);
+pub fn clear(_app: &gtk::Application) {
+    notify::withdraw(PICTURE_NOTICE_ID);
 }
 
-/// Builds the "Picture saved" notice for a file. Public so a test can look at what it carries.
-pub fn saved_notification(path: &Path, thumbnail: Option<Vec<u8>>) -> gio::Notification {
-    let notification = gio::Notification::new(strings::PICTURE_SAVED);
-    let target = path.to_string_lossy().into_owned().to_variant();
-    notification.set_default_action_and_target_value(&format!("app.{OPEN_ACTION}"), Some(&target));
-    notification.add_button_with_target_value(strings::ACTION_SHARE, &format!("app.{SHARE_ACTION}"), Some(&target));
-    if let Some(bytes) = thumbnail {
-        notification.set_icon(&gio::BytesIcon::new(&glib::Bytes::from_owned(bytes)));
+/// The action `name` with the file's path as its parameter.
+fn on_file(name: &str, path: &Path) -> Target {
+    Target::Named { action: format!("app.{name}"), target: Some(path.to_string_lossy().into_owned()) }
+}
+
+/// The "Picture saved" notice for a file. Public so a test can look at what it carries.
+pub fn saved_post(path: &Path, thumbnail: Option<Vec<u8>>) -> Post {
+    Post {
+        id: PICTURE_NOTICE_ID.to_owned(),
+        title: strings::PICTURE_SAVED.to_owned(),
+        tap: Some(on_file(OPEN_ACTION, path)),
+        buttons: vec![(strings::ACTION_SHARE.to_owned(), on_file(SHARE_ACTION, path))],
+        icon: thumbnail,
+        ..Post::default()
     }
-    notification
 }
 
 /// Shows "Picture saved" for `path`, replacing the notice of an earlier save.
 pub fn show_saved(app: &gtk::Application, path: &Path, thumbnail: Option<Vec<u8>>) {
     install_actions(app);
-    app.send_notification(Some(PICTURE_NOTICE_ID), &saved_notification(path, thumbnail));
+    notify::post(saved_post(path, thumbnail));
 }
 
-/// Builds the share notice: the share message as its title and a "Show in file manager" button for the staged file.
-pub fn shared_notification(text: &str, path: &Path) -> gio::Notification {
-    let notification = gio::Notification::new(text);
-    let target = path.to_string_lossy().into_owned().to_variant();
-    notification.add_button_with_target_value(strings::ACTION_SHOW_IN_FILE_MANAGER, &format!("app.{REVEAL_ACTION}"), Some(&target));
-    notification
+/// The share notice: the share message as its title and a "Show in file manager" button for the staged file.
+pub fn shared_post(text: &str, path: &Path) -> Post {
+    Post {
+        id: SHARE_NOTICE_ID.to_owned(),
+        title: text.to_owned(),
+        buttons: vec![(strings::ACTION_SHOW_IN_FILE_MANAGER.to_owned(), on_file(REVEAL_ACTION, path))],
+        ..Post::default()
+    }
 }
 
 /// Shows the share notice for `path`, replacing the notice of an earlier share.
 pub fn show_shared(app: &gtk::Application, text: &str, path: &Path) {
     install_actions(app);
-    app.send_notification(Some(SHARE_NOTICE_ID), &shared_notification(text, path));
+    notify::post(shared_post(text, path));
 }
 
 /// Opens a staged file with the desktop's default handler (T-43a-056).
@@ -129,10 +136,13 @@ pub fn open_with_default(path: &Path) -> std::io::Result<()> {
 }
 
 /// Shows "Error" with the message, or "Unknown error" when there is none.
-pub fn show_failed(app: &gtk::Application, message: Option<&str>) {
-    let notification = gio::Notification::new(strings::DOWNLOAD_NOTIFIER_TITLE_ERROR);
-    notification.set_body(Some(message.filter(|m| !m.trim().is_empty()).unwrap_or(strings::UNKNOWN_ERROR)));
-    app.send_notification(Some(PICTURE_NOTICE_ID), &notification);
+pub fn show_failed(_app: &gtk::Application, message: Option<&str>) {
+    notify::post(Post {
+        id: PICTURE_NOTICE_ID.to_owned(),
+        title: strings::DOWNLOAD_NOTIFIER_TITLE_ERROR.to_owned(),
+        body: Some(message.filter(|m| !m.trim().is_empty()).unwrap_or(strings::UNKNOWN_ERROR).to_owned()),
+        ..Post::default()
+    });
 }
 
 #[cfg(test)]
@@ -141,11 +151,20 @@ mod tests {
 
     #[test]
     fn the_share_notice_carries_the_message_and_a_show_in_file_manager_button() {
-        let notification = shared_notification("Title: Ch 1, page 3", Path::new("/cache/shared_image/a.png"));
-        // GNotification has no getters; building it without a display must not panic, and the label text is a constant
-        drop(notification);
-        assert_eq!(strings::ACTION_SHOW_IN_FILE_MANAGER, "Show in file manager");
+        let path = Path::new("/cache/shared_image/a.png");
+        let post = shared_post("Title: Ch 1, page 3", path);
+        assert_eq!(post.title, "Title: Ch 1, page 3");
+        assert_eq!(post.buttons, vec![("Show in file manager".to_owned(), on_file(REVEAL_ACTION, path))]);
         assert_ne!(REVEAL_ACTION, SHARE_ACTION);
+    }
+
+    #[test]
+    fn the_saved_notice_opens_the_file_offers_share_and_shows_the_thumbnail() {
+        let path = Path::new("/pictures/page.png");
+        let post = saved_post(path, Some(vec![1, 2]));
+        assert_eq!(post.tap, Some(Target::Named { action: format!("app.{OPEN_ACTION}"), target: Some("/pictures/page.png".into()) }));
+        assert_eq!(post.buttons[0].1, on_file(SHARE_ACTION, path));
+        assert_eq!(post.icon, Some(vec![1, 2]));
     }
 
     #[test]

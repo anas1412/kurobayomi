@@ -72,6 +72,7 @@ mod tests {
             timeout: None,
             tap: None,
             buttons: (0..buttons).map(|n| (format!("b{n}"), Target::Url("https://x".into()))).collect(),
+            icon: None,
         }
     }
 

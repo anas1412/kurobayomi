@@ -1,13 +1,16 @@
 //! Backup and restore notices (area 21, T-21a-028, T-21a-029, T-21a-030; B-15, ui-parity section 3). Builders are pure:
-//! they return a `Notice` that the caller shows through `kuro_platform::notifier::Notifier`. The platform trait takes
-//! only id, title and body, so urgency, progress and action travel as data for the GTK side to attach.
+//! they return a `Notice` that the caller shows through `kuro_platform::notifier::Notifier`, with its click and its
+//! "Open folder" button ([`Notice::desktop`]).
 
 use std::path::{Path, PathBuf};
 
-use kuro_platform::notifier::{APP_NAME, Notifier, send};
+use kuro_platform::notifier::{self as platform, APP_NAME, Notifier, Tap, send};
 
 use crate::error::BackupError;
 use crate::restore::job::RestoreEnd;
+
+/// The button that shows a created backup in the file manager.
+pub const OPEN_FOLDER: &str = "Open folder";
 
 /// The body of a restore notice while `hide_notification_content` is on.
 pub const GENERIC_RESTORE_TEXT: &str = "Restore in progress";
@@ -56,14 +59,37 @@ impl Notice {
         Self { id, title: title.into(), body, urgency, action: None, progress: None, sensitive: false }
     }
 
-    /// Shows the notice. A missing daemon is the platform's failure to log; it never fails the job (E-22).
-    pub fn show(&self, notifier: &dyn Notifier) {
-        notifier.show(self.id, &self.title, self.body.as_deref());
+    /// The desktop notice: a created backup is revealed by a click and by "Open folder", an error log by a click. The
+    /// settings and cancel actions are left to their own screens.
+    pub fn desktop(&self) -> platform::Notice {
+        let (tap, buttons) = match &self.action {
+            Some(Action::ShowInFolder(path)) => (Some(Tap::Reveal(path.clone())), vec![(OPEN_FOLDER.to_owned(), Tap::Reveal(path.clone()))]),
+            Some(Action::OpenErrorLog(path)) => (Some(Tap::Reveal(path.clone())), Vec::new()),
+            Some(Action::OpenSettings | Action::CancelRestore) | None => (None, Vec::new()),
+        };
+        platform::Notice {
+            id: self.id.to_owned(),
+            title: self.title.clone(),
+            body: self.body.clone(),
+            low_priority: self.urgency == Urgency::Low,
+            tap,
+            buttons,
+            timeout: None,
+        }
     }
 
-    /// Shows the notice through `send`, so a sensitive notice loses its content when `hide_content` is set.
+    /// Shows the notice. A missing daemon is the platform's failure to log; it never fails the job (E-22).
+    pub fn show(&self, notifier: &dyn Notifier) {
+        notifier.notify(&self.desktop());
+    }
+
+    /// Shows the notice, or only the app name and a generic text when it is sensitive and `hide_content` is set.
     pub fn show_hiding(&self, notifier: &dyn Notifier, hide_content: bool) {
-        send(notifier, hide_content, self.sensitive, self.id, APP_NAME, &self.title, self.body.as_deref().unwrap_or_default(), GENERIC_RESTORE_TEXT);
+        if hide_content && self.sensitive {
+            send(notifier, hide_content, self.sensitive, self.id, APP_NAME, &self.title, "", GENERIC_RESTORE_TEXT);
+        } else {
+            self.show(notifier);
+        }
     }
 }
 
@@ -381,5 +407,21 @@ mod tests {
         assert_eq!(shown[0].0, ID_BACKUP_PROGRESS);
         assert_eq!(shown[1].1, "Restoring backup");
         assert_eq!(shown[1].2.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn a_created_backup_is_revealed_by_a_click_and_by_open_folder_and_progress_is_quiet() {
+        // T-35a-024
+        let path = Path::new("/home/u/backups/kurobayomi-2026.tachibk");
+        let created = manual_created(path).desktop();
+        let reveal = kuro_platform::notifier::Tap::Reveal(path.to_path_buf());
+        assert_eq!((created.id.as_str(), created.title.as_str()), (ID_BACKUP_RESULT, "Backup created"));
+        assert_eq!(created.tap, Some(reveal.clone()));
+        assert_eq!(created.buttons, vec![(OPEN_FOLDER.to_owned(), reveal)]);
+        assert!(!created.low_priority);
+        let progress = create_progress().desktop();
+        assert!(progress.low_priority && progress.buttons.is_empty() && progress.tap.is_none());
+        let log = Path::new("/cache/restore.txt");
+        assert_eq!(restore_done(1000, 2, 0, Some(log)).desktop().tap, Some(kuro_platform::notifier::Tap::Reveal(log.to_path_buf())));
     }
 }

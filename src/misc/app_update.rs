@@ -51,6 +51,7 @@ pub fn progress(version: Option<&str>, phase: Phase) -> Post {
         timeout: None,
         tap: None,
         buttons: vec![("Cancel".to_owned(), Target::Action(AppAction::CancelAppUpdate))],
+        icon: None,
     }
 }
 
@@ -70,6 +71,7 @@ pub fn failure(version: Option<&str>, url: &str, sha256: Option<&str>, message: 
             ),
             ("Cancel".to_owned(), Target::Action(AppAction::Dismiss { notice: ids::APP_UPDATE_ERROR.to_owned() })),
         ],
+        icon: None,
     }
 }
 
@@ -89,6 +91,7 @@ pub fn finished(path: &Path, verified: bool) -> Post {
             ("Open folder".to_owned(), reveal),
             ("Dismiss".to_owned(), Target::Action(AppAction::Dismiss { notice: ids::APP_UPDATE_INSTALL.to_owned() })),
         ],
+        icon: None,
     }
 }
 
