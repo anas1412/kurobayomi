@@ -1,0 +1,99 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds the stable AppImage and publishes it as a normal release (GitHub shows it as "Latest").
+# Nothing is published for a manual run: it builds the same AppImage from the branch you pick and offers it as a download of
+# the run, to test this pipeline without a tag. How to cut a release: docs/RELEASING.md.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    # Same runner as the nightly: the AppImage bundles its libraries, so it runs on glibc 2.39 and newer (Ubuntu 24.04+).
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read the version
+        run: |
+          version="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "(.*)"$/\1/')"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Check the tag (tag runs only)
+        if: github.ref_type == 'tag'
+        run: |
+          # the tag must name the version in Cargo.toml, sit on main, and the commit must have passed CI
+          [ "$GITHUB_REF_NAME" = "v$VERSION" ] || { echo "the tag $GITHUB_REF_NAME does not match version $VERSION in Cargo.toml" >&2; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "the tag is not on main" >&2; exit 1; }
+          passed="$(gh run list --workflow CI --commit "$GITHUB_SHA" --json conclusion --jq '[.[] | select(.conclusion == "success")] | length')"
+          [ "$passed" -ge 1 ] || { echo "no successful CI run for $GITHUB_SHA: run the CI workflow on it first (it can be started by hand)" >&2; exit 1; }
+          scripts/release-notes.sh "$VERSION" > release-notes.md
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libdav1d-dev libmpv-dev desktop-file-utils file zsync
+
+      - name: Update Rust
+        run: rustup update stable
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+        with:
+          # the nightly workflow builds the same dependencies in release mode: one cache for both
+          shared-key: appimage
+
+      - name: Build
+        # the stable build has no KB_CHANNEL (it is not a nightly); the release checker of the About page is on and reads
+        # this repository's releases
+        env:
+          KB_UPDATE_REPOSITORY: anas1412/kurobayomi
+        run: cargo build --release --locked --features updater
+
+      - name: Pack the AppImage
+        run: |
+          scripts/build-appimage.sh target/release/kurobayomi target/appimage/Kurobayomi-x86_64.AppImage
+          cd target/appimage
+          sha256sum Kurobayomi-x86_64.AppImage > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Offer the AppImage as a download (manual runs only)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v5
+        with:
+          name: Kurobayomi-${{ env.VERSION }}-test-build
+          path: |
+            target/appimage/Kurobayomi-x86_64.AppImage
+            target/appimage/Kurobayomi-x86_64.AppImage.zsync
+            target/appimage/SHA256SUMS
+          retention-days: 7
+
+      - name: Publish the release (tag runs only)
+        if: github.ref_type == 'tag'
+        run: |
+          {
+            printf '\n---\n\nBuilt from commit %s.\n\n```\n' "$GITHUB_SHA"
+            cat target/appimage/SHA256SUMS
+            printf '```\n'
+          } >> release-notes.md
+          files=(target/appimage/Kurobayomi-x86_64.AppImage target/appimage/Kurobayomi-x86_64.AppImage.zsync target/appimage/SHA256SUMS)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # a re-run of the same tag: replace the files and the notes
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "Kurobayomi $VERSION" --notes-file release-notes.md --latest
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --verify-tag --title "Kurobayomi $VERSION" --notes-file release-notes.md --latest
+          fi

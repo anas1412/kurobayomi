@@ -15,9 +15,12 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 data="$root/src/shell/data"
 id=io.github.anas1412.Kurobayomi
 icons="$data/icons"
+# what an AppImage updater (Gear Lever, AppImageUpdate, ...) follows: the nightly release, or the newest stable one
+update_info="gh-releases-zsync|anas1412|kurobayomi|latest|Kurobayomi-x86_64.AppImage.zsync"
 if [ "${CHANNEL:-stable}" = nightly ]; then
     id=$id.Nightly
     icons="$data/icons-nightly"
+    update_info="gh-releases-zsync|anas1412|kurobayomi|nightly|Kurobayomi-nightly-x86_64.AppImage.zsync"
 fi
 tools="${TOOLS_DIR:-$root/target/appimage-tools}"
 work="$(mktemp -d)"
@@ -77,11 +80,34 @@ fi
 # "undefined symbol" warning at start); the app plays video through libmpv, so the module is not needed
 rm -rf "$appdir"/usr/lib/gtk-4.0/*/media
 
+# The licences that travel with the AppImage: ours (LICENSE, NOTICE) and, for every bundled system library, the copyright file
+# of the Debian/Ubuntu package it came from, with that package's version, so the source of each library can be found
+# (SOURCE-OFFER.txt). Without dpkg (a local build on another distro) the library part is skipped with a warning; on the CI
+# runner it must find something, or the build fails.
+lic="$appdir/usr/share/licenses/kurobayomi"
+mkdir -p "$lic/libraries"
+install -m644 "$root/LICENSE" "$root/NOTICE" "$lic/"
+cp "$data/SOURCE-OFFER.txt" "$lic/SOURCE-OFFER.txt"
+if command -v dpkg >/dev/null; then
+    : > "$lic/libraries/PACKAGES.txt"
+    for lib in "$appdir"/usr/lib/*.so*; do
+        found="$(ldconfig -p | awk -v n="$(basename "$lib")" '$1 == n {print $NF; exit}')"
+        if [ -n "$found" ]; then
+            dpkg -S "$(readlink -f "$found")" 2>/dev/null | head -1 | cut -d: -f1 || true
+        fi
+    done | sort -u | while read -r pkg; do
+        [ -f "/usr/share/doc/$pkg/copyright" ] && cp "/usr/share/doc/$pkg/copyright" "$lic/libraries/$pkg.copyright"
+        dpkg-query -W -f='${Package} ${Version}\n' "$pkg" >> "$lic/libraries/PACKAGES.txt"
+    done
+    [ -s "$lic/libraries/PACKAGES.txt" ] || { echo "no bundled library could be traced to a package: the licences are missing" >&2; exit 1; }
+else
+    echo "warning: dpkg not found, the licence texts of the bundled libraries are not included" >&2
+fi
+
 mkdir -p "$(dirname "$out")"
 # update information for AppImage updaters (Gear Lever, AppImageUpdate, ...): they fetch only the changed blocks of the
-# newest nightly file. appimagetool runs zsyncmake, which writes the .zsync file into the current folder, so run it in the
-# output folder to get it next to the AppImage.
-(cd "$(dirname "$out")" && ARCH=x86_64 "$tools/appimagetool" --no-appstream \
-    -u "gh-releases-zsync|anas1412|kurobayomi|nightly|Kurobayomi-nightly-x86_64.AppImage.zsync" "$appdir" "$(basename "$out")")
+# newest file of the channel. appimagetool runs zsyncmake, which writes the .zsync file into the current folder, so run it
+# in the output folder to get it next to the AppImage.
+(cd "$(dirname "$out")" && ARCH=x86_64 "$tools/appimagetool" --no-appstream -u "$update_info" "$appdir" "$(basename "$out")")
 [ -f "$out.zsync" ] || { echo "no $out.zsync was written (is zsyncmake installed?)" >&2; exit 1; }
 echo "built $out ($(du -h "$out" | cut -f1)) and $out.zsync"

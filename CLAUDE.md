@@ -106,7 +106,7 @@ Agents in a workflow lane only read and write code (and write tests); they do NO
 
 Follow this pattern for every release and for any workflow that publishes one.
 
-**Stable** (tagged, not built yet): tag `vMAJOR.MINOR.PATCH` (semantic versioning); title "Kurobayomi X.Y.Z"; notes are that version's changelog grouped as Added, Changed, Fixed, Removed; a normal release (not a prerelease), so GitHub shows it as "Latest"; a fixed-name AppImage plus a checksum file. A stable build has no `KB_CHANNEL`.
+**Stable** (tagged; the pipeline is ready in `.github/workflows/release.yml`, no tag exists yet; steps in `docs/RELEASING.md`): tag `vMAJOR.MINOR.PATCH` (semantic versioning); title "Kurobayomi X.Y.Z"; notes are that version's changelog grouped as Added, Changed, Fixed, Removed; a normal release (not a prerelease), so GitHub shows it as "Latest"; a fixed-name AppImage plus a checksum file. A stable build has no `KB_CHANNEL`.
 
 **Nightly** (rolling, built by `.github/workflows/appimage.yml`): tag `nightly`, moved to each new build, and the one release is updated in place (files first, notes last). Title "Nightly (<8-char hash>)"; always a prerelease. The first line of the notes is exactly `Built from commit <full 40-character hash>.`: the app's self-updater (`src/appimage_update.rs`) reads the commit from it, so never change that line. Human text may follow it (a warning that nightly may be unstable and keeps separate data, then the commits since the last stable tag).
 
@@ -117,6 +117,9 @@ How the nightly works:
 - Shelly cannot read embedded update info, so it needs a one-time `shelly sync appimage Kurobayomi <download url> StaticUrl`; the URL is `https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage`.
 - GTK stays at 4.14 (`v4_14`). Lowering it to 4.6 gave 86 compile errors (file dialogs, launchers, accessibility API, picture content fit); older distros are a job for a Flatpak.
 - `scripts/build-appimage.sh` cannot run on Arch (linuxdeploy's GTK plugin expects the Ubuntu folder layout); test it in an Ubuntu 24.04 container.
+
+- **Licences ship inside every AppImage** (nightly and stable): `usr/share/licenses/kurobayomi/` has LICENSE, NOTICE, SOURCE-OFFER.txt and the copyright files of the bundled system libraries; `scripts/build-appimage.sh` fails the build when it cannot trace any library to a package. The libmpv/ffmpeg GPL question is open (see `docs/RELEASING.md`).
+- The stable `Release` workflow can be run by hand without a tag; it then only offers the AppImage as a run download.
 
 ## Hidden on purpose (user, 2026-10-14: "useless, hide them and note that we hid them")
 

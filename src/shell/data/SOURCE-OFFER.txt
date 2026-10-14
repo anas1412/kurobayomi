@@ -1,0 +1,8 @@
+Kurobayomi is free software under the Apache License 2.0 (LICENSE). Its source code is at
+https://github.com/anas1412/kurobayomi (the commit or tag of this build is in its release notes).
+
+This AppImage also carries system libraries (GTK, libmpv, ffmpeg and the libraries they use). Each one is the Debian/Ubuntu
+package listed in libraries/PACKAGES.txt (name and version), and its copyright and licence terms are in
+libraries/<package>.copyright. Many of them are LGPL or GPL. The source code of every one of them is available from the
+distribution that built it, for example with `apt source <package>` on Ubuntu or at https://packages.ubuntu.com/.
+If you cannot get a source you are entitled to, write to the project at https://github.com/anas1412/kurobayomi/issues.

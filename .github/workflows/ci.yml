@@ -13,6 +13,8 @@ on:
       - 'Cargo.lock'
       - 'scripts/**'
       - '.github/workflows/ci.yml'
+  # a manual run, so a commit that no push run covers (a docs-only commit under a release tag) can still get its CI result
+  workflow_dispatch:
   pull_request:
     paths:
       - 'crates/**'
