@@ -212,13 +212,16 @@ pub(crate) fn kind_page(views: [Built; 2], back: bool) -> GBox {
     if back {
         header.pack_start(&crate::ui::back_button());
     }
-    header.pack_start(&gtk::StackSwitcher::builder().stack(&kinds).build());
+    let switch = gtk::StackSwitcher::builder().stack(&kinds).build();
+    header.pack_start(&switch);
+    let narrow_row = crate::ui::switch_with_narrow_row(&header, &switch);
     // an empty box, not None: without a title widget GTK shows the window title
     header.set_title_widget(Some(&GBox::new(O::Horizontal, 0)));
     header.pack_end(&end);
     no_sticky_focus(&header);
     let page = GBox::new(O::Vertical, 0);
     page.append(&header);
+    page.append(&narrow_row);
     page.append(&bars);
     page.append(&kinds);
     page
@@ -443,7 +446,7 @@ mod tests {
         crate::testing::with_display(|| {
             let page = kind_page([view("anime grid"), view("manga grid")], false);
             assert!(page.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>()), "the header row comes first");
-            let bars = page.first_child().and_then(|w| w.next_sibling()).expect("the search bars follow the header");
+            let bars = page.first_child().and_then(|w| w.next_sibling()).and_then(|row| row.next_sibling()).expect("the search bars follow the header and its narrow switch row");
             assert!(bars.is::<gtk::Stack>() && bars.next_sibling().is_some_and(|w| w.next_sibling().is_none()), "then the views");
             let mut all = vec![];
             shown(page.upcast_ref(), &mut all);

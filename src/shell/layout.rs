@@ -34,15 +34,15 @@ pub struct Visibility {
     pub bottom_bar: bool,
 }
 
-/// Visibility of both chrome elements. The reader and the player are immersive: both hide. The bottom bar also hides
-/// while a page is pushed over the tab pages (`bar_allowed` is false then).
-pub fn visibility(chrome: Chrome, immersive: bool, bar_allowed: bool) -> Visibility {
+/// Visibility of both chrome elements. The reader and the player are immersive: both hide. Otherwise the bottom bar
+/// stands in for the sidebar, over pushed pages too.
+pub fn visibility(chrome: Chrome, immersive: bool) -> Visibility {
     if immersive {
         return Visibility { sidebar: false, bottom_bar: false };
     }
     match chrome {
         Chrome::Sidebar => Visibility { sidebar: true, bottom_bar: false },
-        Chrome::BottomBar => Visibility { sidebar: false, bottom_bar: bar_allowed },
+        Chrome::BottomBar => Visibility { sidebar: false, bottom_bar: true },
     }
 }
 
@@ -72,14 +72,13 @@ mod tests {
     #[test]
     fn immersive_hides_both_chrome_elements() {
         for chrome in [Chrome::Sidebar, Chrome::BottomBar] {
-            assert_eq!(visibility(chrome, true, true), Visibility { sidebar: false, bottom_bar: false });
+            assert_eq!(visibility(chrome, true), Visibility { sidebar: false, bottom_bar: false });
         }
     }
 
     #[test]
-    fn bottom_bar_hides_over_a_pushed_page_and_the_sidebar_stays() {
-        assert_eq!(visibility(Chrome::BottomBar, false, false), Visibility { sidebar: false, bottom_bar: false });
-        assert_eq!(visibility(Chrome::BottomBar, false, true), Visibility { sidebar: false, bottom_bar: true });
-        assert_eq!(visibility(Chrome::Sidebar, false, false), Visibility { sidebar: true, bottom_bar: false });
+    fn the_bottom_bar_stands_in_for_the_sidebar() {
+        assert_eq!(visibility(Chrome::BottomBar, false), Visibility { sidebar: false, bottom_bar: true });
+        assert_eq!(visibility(Chrome::Sidebar, false), Visibility { sidebar: true, bottom_bar: false });
     }
 }

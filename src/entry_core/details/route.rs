@@ -748,9 +748,13 @@ impl View {
         let resized = self.width.replace(width) != width;
         let two = two_pane(width);
         if self.two_pane.get() == Some(two) {
-            // the layout is the same, but the automatic columns of the season grid follow the width (T-39a-034)
+            // the layout is the same, but the automatic columns of the season grid follow the width (T-39a-034), and so does
+            // the header's cover in one column
             if resized && let Some(m) = self.model.borrow().as_ref() {
                 self.show_seasons(m, m.entry.fetch_type() == FetchType::Seasons);
+                if !two {
+                    self.render_info(m);
+                }
             }
             return;
         }

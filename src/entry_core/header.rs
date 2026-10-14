@@ -6,8 +6,11 @@ use kuro_platform::kind::Kind;
 
 use crate::entry_core::text::{artist_row, display_author, display_title};
 
-/// The small layout never draws the cover wider than this.
-pub const SMALL_COVER_MAX: i32 = 100;
+/// The small layout (the cover beside the text) draws the cover at this share of its column, between the two bounds: 100 px
+/// on a phone, growing on a wider one-column window so the header is not a thumbnail on a large empty backdrop.
+pub const SMALL_COVER_SHARE: f64 = 0.24;
+pub const SMALL_COVER_MIN: i32 = 100;
+pub const SMALL_COVER_MAX: i32 = 180;
 /// The large layout draws the cover at this share of its column.
 pub const LARGE_COVER_SHARE: f64 = 0.65;
 
@@ -131,7 +134,9 @@ pub fn cover_size(large: bool, column_width: i32) -> (i32, i32) {
     let width = if large {
         (f64::from(column_width) * LARGE_COVER_SHARE).round() as i32
     } else {
-        column_width.min(SMALL_COVER_MAX)
+        // in 20 px steps, so a window being resized rebuilds the header only a few times
+        let share = (f64::from(column_width) * SMALL_COVER_SHARE).round() as i32;
+        (share / 20 * 20).clamp(SMALL_COVER_MIN, SMALL_COVER_MAX).min(column_width)
     };
     (width, width * 3 / 2)
 }
@@ -192,9 +197,11 @@ mod tests {
     }
 
     #[test]
-    fn small_cover_is_capped_at_100_and_large_is_65_percent() {
-        assert_eq!(cover_size(false, 400), (100, 150));
-        assert_eq!(cover_size(false, 80), (80, 120));
+    fn small_cover_grows_from_100_to_180_with_its_column_and_large_is_65_percent() {
+        assert_eq!(cover_size(false, 400), (100, 150), "a phone keeps 100 px");
+        assert_eq!(cover_size(false, 80), (80, 120), "never wider than its column");
+        assert_eq!(cover_size(false, 600), (140, 210), "in 20 px steps");
+        assert_eq!(cover_size(false, 1200), (180, 270), "at most 180 px");
         assert_eq!(cover_size(true, 400), (260, 390));
     }
 }

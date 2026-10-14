@@ -135,6 +135,31 @@ pub fn header_bar() -> gtk::HeaderBar {
     header
 }
 
+/// The Anime | Manga switch of a page header, and the row under the header that takes it in a narrow window. Below the
+/// width where the sidebar gives way to the bottom bar (`shell::layout::WIDE_MIN_WIDTH_PX`) the header keeps only its
+/// buttons and the window buttons, so it fits a window down to the 360 px minimum; the switch then sits centred in its own
+/// row, as phone apps put tabs under the toolbar. Append the returned row right under the header.
+pub fn switch_with_narrow_row(header: &gtk::HeaderBar, switch: &gtk::StackSwitcher) -> GBox {
+    let row = GBox::new(O::Horizontal, 0);
+    row.set_halign(Align::Center);
+    row.set_margin_top(6);
+    row.set_margin_bottom(6);
+    if let Some(stack) = switch.stack() {
+        row.append(&gtk::StackSwitcher::builder().stack(&stack).build());
+    }
+    row.set_visible(false);
+    let (switch, narrow_row) = (switch.clone(), row.clone());
+    header.add_tick_callback(move |header, _| {
+        let narrow = header.root().is_some_and(|root| root.width() > 0 && root.width() < crate::shell::layout::WIDE_MIN_WIDTH_PX);
+        if switch.is_visible() == narrow {
+            switch.set_visible(!narrow);
+            narrow_row.set_visible(narrow);
+        }
+        glib::ControlFlow::Continue
+    });
+    row
+}
+
 /// The Back button of a pushed page's header.
 pub fn back_button() -> Button {
     let b = Button::from_icon_name("go-previous-symbolic");
@@ -219,14 +244,21 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
         header.pack_start(&back_button());
     }
     let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.into_iter().partition(|w| w.is::<gtk::StackSwitcher>());
+    let mut narrow_rows = Vec::new();
     for w in &switches {
         header.pack_start(w);
+        if let Some(switch) = w.downcast_ref::<gtk::StackSwitcher>() {
+            narrow_rows.push(switch_with_narrow_row(&header, switch));
+        }
     }
     for w in end.iter().rev() {
         header.pack_end(w);
     }
     no_sticky_focus(&header);
     b.append(&header);
+    for row in &narrow_rows {
+        b.append(row);
+    }
     if let Some(bar) = &bar {
         b.append(bar);
     }
@@ -526,14 +558,39 @@ pub fn selection_header(count: &Label, on_cancel: impl Fn() + 'static, on_select
 }
 
 /// The bottom bar of a page in selection mode: the bulk-action `buttons` in a `gtk::ActionBar` inside a Revealer, hidden
-/// at first (`set_reveal_child(true)` while something is selected).
+/// at first (`set_reveal_child(true)` while something is selected). More buttons than the window is wide scroll sideways
+/// instead of widening the window (a hidden bar still counts toward the window's minimum width). [`action_bar_row`] is the
+/// row the buttons sit in, for buttons added later.
 pub fn action_bar(buttons: &[Button]) -> gtk::Revealer {
-    let bar = gtk::ActionBar::new();
+    let row = GBox::new(O::Horizontal, 6);
     for b in buttons {
-        bar.pack_start(b);
+        row.append(b);
     }
+    let scroller = gtk::ScrolledWindow::builder().child(&row).hexpand(true).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).build();
+    let bar = gtk::ActionBar::new();
+    bar.pack_start(&scroller);
     no_sticky_focus(&bar);
     gtk::Revealer::builder().child(&bar).transition_type(gtk::RevealerTransitionType::SlideUp).build()
+}
+
+/// The row of buttons of an [`action_bar`].
+pub fn action_bar_row(bar: &gtk::Revealer) -> GBox {
+    fn find(widget: &gtk::Widget) -> Option<GBox> {
+        if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            let child = scroller.child()?;
+            let inner = child.downcast_ref::<gtk::Viewport>().and_then(|v| v.child()).unwrap_or(child);
+            return inner.downcast::<GBox>().ok();
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            if let Some(row) = find(&c) {
+                return Some(row);
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+    bar.child().as_ref().and_then(find).expect("an action bar has its row")
 }
 
 /// An empty state in the Library's look (docs/design/main-window.md): a large dim icon over the message. A caller with

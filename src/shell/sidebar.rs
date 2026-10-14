@@ -294,7 +294,13 @@ pub fn bottom_bar(tabs: &gtk::Stack) -> GBox {
     bar.set_halign(gtk::Align::Center);
     bar.set_margin_top(6);
     bar.set_margin_bottom(6);
-    bar.append(&gtk::StackSwitcher::builder().stack(tabs).build());
+    let switcher = gtk::StackSwitcher::builder().stack(tabs).build();
+    // the bar also shows over a pushed page: a tap leaves it for the tab pages, like the panel's rows
+    let leave = gtk::GestureClick::new();
+    leave.set_propagation_phase(gtk::PropagationPhase::Capture);
+    leave.connect_pressed(|_, _, _, _| ui::pop_to_root());
+    switcher.add_controller(leave);
+    bar.append(&switcher);
     let settings = ui::icon_button("emblem-system-symbolic", &tr(MsgKey::label_settings));
     settings.add_css_class("flat");
     settings.connect_clicked(|_| open_settings());

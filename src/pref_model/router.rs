@@ -31,9 +31,15 @@ impl Destination {
     }
 }
 
-/// Two panes in a wide window: the smaller side of the window is at least 720 px, so 719 is one pane (T-47b-002).
+/// The narrowest window with two panes: the app's sidebar (about 240 px), the settings list (240 px) and a page of
+/// useful width. Two panes from the 720 px tablet size alone did not fit, so the window could not be made narrower than
+/// about 835 px while settings was open.
+pub const TWO_PANE_MIN_WIDTH: i32 = 960;
+
+/// Two panes in a wide window: the smaller side is at least 720 px (T-47b-002) and the window is at least
+/// [`TWO_PANE_MIN_WIDTH`] wide.
 pub fn two_pane(width: i32, height: i32) -> bool {
-    crate::window_size::is_tablet_ui(width, height)
+    crate::window_size::is_tablet_ui(width, height) && width >= TWO_PANE_MIN_WIDTH
 }
 
 /// A page of the settings shell.
@@ -154,8 +160,9 @@ mod tests {
     }
 
     #[test]
-    fn two_panes_start_at_720_px() {
-        assert!(two_pane(720, 720));
+    fn two_panes_need_a_960_px_wide_and_720_px_tall_window() {
+        assert!(two_pane(960, 720));
+        assert!(!two_pane(959, 900), "the app sidebar, the list and a page do not fit");
         assert!(!two_pane(719, 900));
         assert!(!two_pane(1200, 719), "a short window has one pane");
     }

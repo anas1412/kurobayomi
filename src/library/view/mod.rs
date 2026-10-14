@@ -582,8 +582,8 @@ impl LibraryView {
         connect(&invert, Box::new(|inner: &Rc<RefCell<Inner>>| select_with(inner, |sel, page| sel.invert(page))));
         header.append(&invert);
         sel_header.append(&header);
-        let bar_box = self.inner.borrow().bar.child().and_then(|w| w.downcast::<gtk::ActionBar>().ok());
-        if let Some(bar_box) = bar_box {
+        let bar_box = crate::ui::action_bar_row(&self.inner.borrow().bar);
+        {
             let buttons: Vec<(String, Action)> = vec![
                 (tr(MsgKey::action_move_category), Box::new(|inner: &Rc<RefCell<Inner>>| {
                     let ids = inner.borrow().selection.ids().to_vec();
@@ -596,7 +596,7 @@ impl LibraryView {
             for (label, action) in buttons {
                 let button = gtk::Button::with_label(&label);
                 connect(&button, action);
-                bar_box.pack_start(&button);
+                bar_box.append(&button);
             }
             // the Download menu: the next 1, 5, 10 or 25 items, or every unread one (T-37a-028), shared with the entry pages
             let weak_menu = weak.clone();
@@ -606,7 +606,7 @@ impl LibraryView {
                 }
             });
             download_button.set_popover(Some(&popover));
-            bar_box.pack_start(&download_button);
+            bar_box.append(&download_button);
             crate::ui::no_sticky_focus(&bar_box);
         }
         let weak_global = weak.clone();

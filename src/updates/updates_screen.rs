@@ -38,7 +38,6 @@ use crate::updates::selection::{Selection, is_selection_mode};
 use crate::updates::state_page::PageStates;
 use crate::updates::updates_dialog::confirm_bulk_delete;
 use crate::updates::updates_page::{self, BackAction, UpdatesLoad, back_action, cover_click_enabled};
-use crate::library::layout::SPACE_S;
 use crate::widgets::context_menu::{self, Item};
 use crate::widgets::download_button::{DownloadButton, Request};
 
@@ -130,18 +129,9 @@ impl UpdatesScreen {
             invert.connect_clicked(move |_| invert_run());
             sel_header.append(&invert);
             sel_header.set_visible(false);
-            let bar = GBox::new(O::Horizontal, SPACE_S);
-            // more actions than the window is wide scroll sideways instead of widening the window
-            let bar_scroller = gtk::ScrolledWindow::builder()
-                .child(&bar)
-                .hexpand(true)
-                .vscrollbar_policy(gtk::PolicyType::Never)
-                .propagate_natural_height(true)
-                .build();
+            // the shared selection bar: more actions than the window is wide scroll sideways
             let bar_revealer = crate::ui::action_bar(&[]);
-            if let Some(action_bar) = bar_revealer.child().and_downcast::<gtk::ActionBar>() {
-                action_bar.pack_start(&bar_scroller);
-            }
+            let bar = crate::ui::action_bar_row(&bar_revealer);
             let body = GBox::new(O::Vertical, 0);
             body.append(&sel_header);
             body.append(pages.widget());

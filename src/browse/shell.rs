@@ -248,7 +248,7 @@ pub(crate) mod tests {
         let mut all = Vec::new();
         walk(header.upcast_ref(), &mut all);
         assert_eq!(all.iter().filter(|w| w.is::<gtk::SearchEntry>()).count(), 0, "the entry is in the bar, not the header");
-        assert!(header.next_sibling().is_some_and(|w| w.is::<gtk::SearchBar>()), "the search bar sits under the header");
+        assert!(header.next_sibling().and_then(|row| row.next_sibling()).is_some_and(|w| w.is::<gtk::SearchBar>()), "the search bar sits under the header and its narrow switch row");
         assert_eq!(all.iter().filter(|w| w.downcast_ref::<gtk::ToggleButton>().is_some_and(|b| b.icon_name().as_deref() == Some("system-search-symbolic"))).count(), 1, "one search toggle");
         assert!(!all.iter().any(|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label() == "Browse")), "no page title");
         assert!(shell.end.is_empty(), "the header is part of the page");

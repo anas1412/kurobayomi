@@ -91,6 +91,14 @@ window.kb-dialog.csd {
 gridview box {
   margin: 0;
 }
+/* the theme gives every switch button a 100 px minimum (inside its padding); the Anime | Manga switch then made each header
+   too wide for a small window. The words fit with this padding. */
+stackswitcher > button,
+stackswitcher > button.text-button {
+  min-width: 0;
+  padding-left: 10px;
+  padding-right: 10px;
+}
 .kb-library-grid {
   background: none;
   padding: 8px 12px;

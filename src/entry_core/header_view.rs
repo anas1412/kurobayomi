@@ -173,7 +173,8 @@ pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) 
     let xalign = if large { 0.5 } else { 0.0 };
     let info = GBox::new(O::Vertical, 4);
     info.set_hexpand(true);
-    info.set_valign(Align::End);
+    // centred beside the cover: bottom-aligned, a text taller than a small cover hung below it onto the action row
+    info.set_valign(Align::Center);
     info.append(&field_label(model, Field::Title, &model.title, &["title-2"], xalign, h));
     let author = field_label(model, Field::Author, &model.author, &[], xalign, h);
     info.append(&icon_row("avatar-default-symbolic", &author, large));
@@ -196,7 +197,7 @@ pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) 
     root.set_margin_start(16);
     root.set_margin_end(16);
     root.set_margin_top(16);
-    root.set_margin_bottom(8);
+    root.set_margin_bottom(12);
     if large {
         cover.set_halign(Align::Center);
     }

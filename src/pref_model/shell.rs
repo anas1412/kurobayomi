@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gtk::glib;
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
@@ -109,6 +110,15 @@ pub fn body() -> Option<Built> {
     search.connect_clicked(|_| crate::ui::open("settings_search"));
     let current = SHELL.with(|s| s.borrow().current()).unwrap_or(Page::Main);
     let content = if wide { two_pane(current) } else { main_list(Rc::new(|id| crate::ui::open(id))) };
+    // the layout follows the window: a resize across the two-pane width rebuilds the page, checked every frame so it holds
+    // for any way the window changes size
+    content.add_tick_callback(move |_, _| {
+        if two_pane_now() == wide {
+            return glib::ControlFlow::Continue;
+        }
+        glib::idle_add_local_once(rebuild_for_resize);
+        glib::ControlFlow::Break
+    });
     Some(Built { content, end: vec![search.upcast()] })
 }
 
@@ -120,14 +130,6 @@ fn rebuild_for_resize() {
         crate::ui::pop();
         crate::ui::open("settings");
     }
-}
-
-/// Registers the resize handler once, at startup.
-pub fn follow_resizes() {
-    crate::window_size::on_tablet_change(|_| {
-        rebuild_for_resize();
-        true
-    });
 }
 
 /// A settings page as a row: the screen it opens, its title, its one-line summary and its icon.

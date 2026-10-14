@@ -530,7 +530,7 @@ mod tests {
             let headers = all_under(root, &|w| w.is::<gtk::HeaderBar>());
             assert_eq!(headers.len(), 1, "one header row");
             let switches = all_under(root, &|w| w.is::<gtk::StackSwitcher>());
-            assert_eq!(switches.len(), 1);
+            assert_eq!(switches.len(), 2, "the header's switch and the narrow window's row under it");
             assert!(switches[0].is_ancestor(&headers[0]), "the kind switch is in the header row");
             let add = all_under(&headers[0], &|w| w.tooltip_text().as_deref() == Some("Add category"));
             assert_eq!(add.len(), 2, "one Add per kind in the header, the visible kind's shows");

@@ -281,14 +281,12 @@ fn build_window(app: &gtk::Application) {
 
     // reader/player are immersive: no sidebar or tab bar while they're on screen
     let refresh = {
-        let (win, nav, tabs) = (win.clone(), nav.clone(), tabs.clone());
+        let (win, nav) = (win.clone(), nav.clone());
         move || {
             let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
             let (width, _) = window_size::size_of(&win);
             let chrome = shell::layout::chrome_for(width, win.is_maximized());
-            // the bottom bar belongs to the tab pages
-            let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
-            let shown = shell::layout::visibility(chrome, immersive, on_tabs);
+            let shown = shell::layout::visibility(chrome, immersive);
             sidebar.set_visible(shown.sidebar);
             sep.set_visible(shown.sidebar);
             bottom.set_visible(shown.bottom_bar);
@@ -304,8 +302,6 @@ fn build_window(app: &gtk::Application) {
     win.connect_default_height_notify(move |_| r());
     let r = refresh.clone();
     win.connect_maximized_notify(move |_| r());
-    // the entry header and the settings shell follow the same breakpoint
-    pref_model::shell::follow_resizes();
     window_size::watch(&win);
     theme::attach_window(&win);
     local_flow::ui::attach(&win);

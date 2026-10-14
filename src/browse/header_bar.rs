@@ -40,7 +40,9 @@ pub struct SourceHeader {
 pub fn build(deps: HeaderDeps) -> SourceHeader {
     let bar = crate::ui::header_bar();
     bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
-    bar.set_title_widget(Some(&gtk::Label::builder().label(&deps.source_name).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).build()));
+    // an Inscription, not a Label: an ellipsized label still needs the width of "…", which kept the window from 360 px
+    let chars = u32::try_from(deps.source_name.chars().count()).unwrap_or(u32::MAX);
+    bar.set_title_widget(Some(&gtk::Inscription::builder().text(&deps.source_name).css_classes(["title"]).min_chars(0).nat_chars(chars).text_overflow(gtk::InscriptionOverflow::EllipsizeEnd).valign(gtk::Align::Center).build()));
 
     bar.pack_start(&back_button(Rc::clone(&deps.on_back)));
 

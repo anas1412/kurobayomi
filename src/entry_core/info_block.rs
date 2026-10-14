@@ -40,13 +40,15 @@ impl InfoBlock {
     /// changes (`HeaderModel::looks_like`, which ignores the library flag), or the layout or the column does: the cover
     /// is sized for its column.
     pub fn set_header(&self, model: &HeaderModel, large: bool, column: i32, handlers: &Handlers) {
-        let same = self.shown_header.borrow().as_ref().is_some_and(|(shown, was_large, at)| shown.looks_like(model) && *was_large == large && *at == column);
+        // the cover size, not the width, decides a rebuild: a resize rebuilds the header only when its cover changes size
+        let cover = crate::entry_core::header::cover_size(large, column - 32).0;
+        let same = self.shown_header.borrow().as_ref().is_some_and(|(shown, was_large, at)| shown.looks_like(model) && *was_large == large && *at == cover);
         if same {
             return;
         }
         clear(&self.header);
         self.header.append(&header_view::build(model, large, column, handlers));
-        *self.shown_header.borrow_mut() = Some((model.clone(), large, column));
+        *self.shown_header.borrow_mut() = Some((model.clone(), large, cover));
     }
 
     /// Draws the description and its genre chips. They are built again only when either changes.
@@ -75,7 +77,7 @@ mod tests {
     use crate::entry_core::header::SearchRequest;
     use crate::entry_core::text::description;
 
-    /// One display test: the header is built again only when its model, its layout or its column changes, and the
+    /// One display test: the header is built again only when its model, its layout or its cover size changes, and the
     /// description only when its text or its genre chips change.
     #[test]
     fn the_header_and_the_description_are_built_again_only_when_they_change() {
@@ -92,8 +94,8 @@ mod tests {
             let header = info.header.first_child();
             info.set_header(&model, false, 400, &handlers);
             assert_eq!(info.header.first_child(), header, "the same header keeps its widgets");
-            info.set_header(&model, false, 300, &handlers);
-            assert_ne!(info.header.first_child(), header, "a new column draws the header again");
+            info.set_header(&model, false, 600, &handlers);
+            assert_ne!(info.header.first_child(), header, "a column wide enough for another cover size draws the header again");
             let large = info.header.first_child();
             info.set_header(&model, true, 300, &handlers);
             assert_ne!(info.header.first_child(), large, "a new layout draws the header again");
