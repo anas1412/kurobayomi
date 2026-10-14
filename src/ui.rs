@@ -86,7 +86,9 @@ pub fn pop_to_root() {
 pub fn decoration(sidebar: bool) -> String {
     let layout = gtk::Settings::default().and_then(|s| s.gtk_decoration_layout()).map(|l| l.to_string()).unwrap_or_default();
     let (left, right) = layout.split_once(':').unwrap_or(("", &layout));
-    if sidebar { format!("{left}:") } else { format!(":{right}") }
+    // the layout may carry the window icon ("icon:close"); the app shows no icon in its headers
+    let without_icon = |side: &str| side.split(',').filter(|b| *b != "icon").collect::<Vec<_>>().join(",");
+    if sidebar { format!("{}:", without_icon(left)) } else { format!(":{}", without_icon(right)) }
 }
 
 /// A clicked button keeps keyboard focus, and some GTK themes paint a focused button like a pressed one, so it looks stuck.
