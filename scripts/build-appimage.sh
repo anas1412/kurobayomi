@@ -44,7 +44,9 @@ fetch appimagetool https://github.com/AppImage/appimagetool/releases/download/1.
 # the app's files, laid out like an install into /usr
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" "$appdir/usr/share/mime/packages"
 install -m755 "$bin" "$appdir/usr/bin/kurobayomi"
-cp -r "$icons" "$appdir/usr/share/"
+# every size and the SVG, into the one folder desktops read (the nightly's folder has another name in the source)
+mkdir -p "$appdir/usr/share/icons"
+cp -r "$icons/." "$appdir/usr/share/icons/"
 # no D-Bus activation from inside an AppImage: there is no installed service file for the bus to start
 desktop="$data/io.github.anas1412.Kurobayomi.desktop"
 if [ "${CHANNEL:-stable}" = nightly ]; then

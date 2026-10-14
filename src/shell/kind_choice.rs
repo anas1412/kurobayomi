@@ -48,12 +48,19 @@ pub fn follow(stack: &gtk::Stack, names: [&'static str; 2]) {
         }
         let Some(kind) = stack.visible_child_name().and_then(|name| kind_of(&name, names)) else { return };
         keep(kind);
+        // a search belongs to the kind it was made in
+        if let Some(page) = stack.parent() {
+            crate::ui::close_searches(&page);
+        }
         MOVING.set(true);
         STACKS.with(|stacks| {
             stacks.borrow_mut().retain(|(weak, _)| weak.upgrade().is_some());
             for (other, other_names) in stacks.borrow().iter() {
                 if let Some(other) = other.upgrade().filter(|other| other != stack) {
                     other.set_visible_child_name(name_of(kind, *other_names));
+                    if let Some(page) = other.parent() {
+                        crate::ui::close_searches(&page);
+                    }
                 }
             }
         });
@@ -83,6 +90,21 @@ mod tests {
             assert_eq!(browse.visible_child_name().as_deref(), Some("1"), "browse follows the library");
             browse.set_visible_child_name("0");
             assert_eq!(library.visible_child_name().as_deref(), Some("anime"), "and the other way");
+        });
+    }
+
+    #[test]
+    fn switching_the_kind_closes_an_open_search() {
+        crate::testing::with_display(|| {
+            let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let bar = gtk::SearchBar::new();
+            let kinds = stack(["anime", "manga"]);
+            page.append(&bar);
+            page.append(&kinds);
+            follow(&kinds, ["anime", "manga"]);
+            bar.set_search_mode(true);
+            kinds.set_visible_child_name(if kinds.visible_child_name().as_deref() == Some("anime") { "manga" } else { "anime" });
+            assert!(!bar.is_search_mode(), "the search closed with the switch");
         });
     }
 

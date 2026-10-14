@@ -116,11 +116,11 @@ fn download(client: &reqwest::blocking::Client, update: &Newer, target: &Path, p
 }
 
 fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path, progress: &dyn Fn(u64)) -> Result<(), String> {
-    let mut response = client.get(&update.url).send().and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
+    let mut response = client.get(&update.url).send().and_then(|r| r.error_for_status()).map_err(|e| describe(&e))?;
     let mut file = std::fs::File::create(part).map_err(|e| e.to_string())?;
     let (mut hasher, mut total, mut buf) = (Sha256::new(), 0_u64, [0_u8; 64 * 1024]);
     loop {
-        let n = response.read(&mut buf).map_err(|e| e.to_string())?;
+        let n = response.read(&mut buf).map_err(|e| format!("the download from GitHub broke off ({e})"))?;
         if n == 0 {
             break;
         }
@@ -147,6 +147,30 @@ fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path
 
 const GITHUB_API: &str = "https://api.github.com";
 
+/// A failed request in words: what went wrong, then the deepest cause it gives ("could not reach GitHub (dns error:
+/// failed to lookup address information)"), where reqwest alone says only "error sending request for url".
+fn describe(error: &reqwest::Error) -> String {
+    let what = if error.is_timeout() {
+        "GitHub did not answer in time".to_owned()
+    } else if let Some(status) = error.status() {
+        format!("GitHub answered {status}")
+    } else if error.is_connect() || error.is_request() {
+        "could not reach GitHub".to_owned()
+    } else {
+        "the download from GitHub broke off".to_owned()
+    };
+    let mut cause = None;
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        cause = Some(inner.to_string());
+        source = inner.source();
+    }
+    match cause {
+        Some(cause) if !error.is_status() => format!("{what} ({cause})"),
+        _ => what,
+    }
+}
+
 /// What the worker tells the main loop while it updates.
 #[derive(Debug)]
 enum Step {
@@ -161,17 +185,17 @@ enum Step {
 fn update(file: &Path, track: Track, api: &str, step: &dyn Fn(Step)) -> Result<Option<String>, String> {
     let http = |timeout| reqwest::blocking::Client::builder().timeout(Duration::from_secs(timeout)).user_agent(USER_AGENT).build().map_err(|e| e.to_string());
     let url = format!("{api}/repos/{}/{}", crate::channel::REPOSITORY, track.release_path());
-    let response = http(30)?.get(url).send().map_err(|e| e.to_string())?;
+    let response = http(30)?.get(url).send().map_err(|e| describe(&e))?;
     // no release while the workflow is replacing the nightly, or before the first stable one
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
-    let body = response.error_for_status().and_then(|r| r.bytes()).map_err(|e| e.to_string())?;
+    let body = response.error_for_status().and_then(|r| r.bytes()).map_err(|e| describe(&e))?;
     let Some(mut newer) = newer(&body, track) else { return Ok(None) };
     if newer.sha256.is_none()
         && let Some(url) = &newer.sums_url
     {
-        let sums = http(30)?.get(url).send().and_then(|r| r.error_for_status()).and_then(|r| r.text()).map_err(|e| e.to_string())?;
+        let sums = http(30)?.get(url).send().and_then(|r| r.error_for_status()).and_then(|r| r.text()).map_err(|e| describe(&e))?;
         newer.sha256 = Some(sum_of(&sums, track.asset()).ok_or("SHA256SUMS does not list the AppImage")?);
     }
     step(Step::Found { build: newer.build.clone(), size: newer.size });
@@ -513,5 +537,17 @@ mod tests {
 
         assert_eq!(update_quiet(&file, track, &serve(stable_release("v0.2.0", new.clone(), hex(&new)))), Ok(Some("0.2.0".to_owned())));
         assert_eq!(std::fs::read(&file).unwrap(), new);
+    }
+
+    #[test]
+    fn a_failed_request_says_what_went_wrong_and_why() {
+        // nothing listens on this port: the connection is refused
+        let error = reqwest::blocking::Client::new().get("http://127.0.0.1:9/").send().unwrap_err();
+        let text = describe(&error);
+        assert!(text.starts_with("could not reach GitHub ("), "{text}");
+        assert!(!text.contains("error sending request"), "the cause, not reqwest's summary: {text}");
+        let base = serve(|_| Vec::new());
+        let status = reqwest::blocking::get(format!("{base}/missing")).unwrap().error_for_status().unwrap_err();
+        assert_eq!(describe(&status), "GitHub answered 404 Not Found");
     }
 }

@@ -724,6 +724,19 @@ pub fn menu_button(sections: Vec<Vec<MenuEntry>>) -> Option<gtk::MenuButton> {
     Some(button)
 }
 
+/// Closes every search bar in `root` (and clears it, as closing does): a search belongs to the view it was made in, so
+/// leaving a tab or switching Anime | Manga closes it (user, 2026-10-14).
+pub fn close_searches(root: &gtk::Widget) {
+    if let Some(bar) = root.downcast_ref::<gtk::SearchBar>() {
+        bar.set_search_mode(false);
+    }
+    let mut child = root.first_child();
+    while let Some(c) = child {
+        close_searches(&c);
+        child = c.next_sibling();
+    }
+}
+
 /// The refresh button of a page's header (`HeaderActions::refresh`), the one every page builds: the circular arrow, with
 /// `tip` saying what it loads again (the Library's updates the library, a title's page fetches its episodes).
 pub fn refresh_button(tip: &str) -> gtk::Button {

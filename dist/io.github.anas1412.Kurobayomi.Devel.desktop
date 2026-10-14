@@ -6,6 +6,6 @@ Comment=Development build of Kurobayomi
 Exec=kurobayomi %U
 Icon=io.github.anas1412.Kurobayomi.Devel
 Terminal=false
-Categories=AudioVideo;Graphics;Viewer;
+Categories=AudioVideo;Video;Player;
 StartupNotify=true
 StartupWMClass=io.github.anas1412.Kurobayomi.Devel

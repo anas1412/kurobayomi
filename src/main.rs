@@ -2,6 +2,7 @@ mod app_update;
 mod appimage_update;
 mod channel;
 mod whats_new;
+mod appimage_integrate;
 mod backup_host;
 mod backup_run;
 mod backup_schedule;
@@ -309,6 +310,13 @@ fn build_window(app: &gtk::Application) {
     nav.connect_visible_child_notify(move |_| r());
     let r = refresh.clone();
     tabs.connect_visible_child_name_notify(move |_| r());
+    // a search belongs to its tab: leaving the tab closes it
+    let left = std::rc::Rc::new(std::cell::RefCell::new(tabs.visible_child()));
+    tabs.connect_visible_child_notify(move |tabs| {
+        if let Some(page) = left.replace(tabs.visible_child()) {
+            ui::close_searches(&page);
+        }
+    });
     let r = refresh.clone();
     win.connect_default_width_notify(move |_| r());
     let r = refresh.clone();
@@ -328,6 +336,7 @@ fn build_window(app: &gtk::Application) {
     }
     app_update::startup();
     appimage_update::startup();
+    appimage_integrate::startup();
     whats_new::startup();
     // requests that arrived before the window: --action, --search, --open and opened files
     shell::launch::window_built(app, &win);

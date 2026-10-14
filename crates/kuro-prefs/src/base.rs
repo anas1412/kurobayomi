@@ -19,6 +19,8 @@ define_prefs! {
         check_app_updates: bool = "check_app_updates" => true;
         // the Anime | Manga choice every page's switch shares, kept across runs: "anime" or "manga"
         last_kind: String = "__APP_STATE_last_kind" => String::from("anime");
+        // the user took the AppImage out of the applications menu (About), so it does not add itself again
+        appimage_menu_removed: bool = "__APP_STATE_appimage_menu_removed" => false;
     }
 }
 
@@ -44,6 +46,7 @@ mod tests {
                 ("muted_notification_channels", "muted_notification_channels"),
                 ("check_app_updates", "check_app_updates"),
                 ("last_kind", "__APP_STATE_last_kind"),
+                ("appimage_menu_removed", "__APP_STATE_appimage_menu_removed"),
             ]
         );
         assert_eq!(BasePrefs::TABLE, "base");

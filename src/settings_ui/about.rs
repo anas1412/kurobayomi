@@ -151,6 +151,34 @@ fn startup_check_row() -> PreferenceItem {
     tap_item(STARTUP_CHECK_TITLE, Some(STARTUP_CHECK_SUBTITLE), true, Some(trailing), None, on_tap)
 }
 
+/// The switch that adds the AppImage to the applications menu or takes it out (`appimage_integrate`). When an AppImage
+/// manager already lists it, the row says so and has no switch.
+fn applications_menu_row() -> PreferenceItem {
+    if crate::appimage_integrate::managed_elsewhere() {
+        return text(MENU_TITLE, Some("Your AppImage manager already lists it there"), false);
+    }
+    let trailing: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
+        let switch = gtk::Switch::builder().valign(gtk::Align::Center).active(crate::appimage_integrate::in_menu()).build();
+        switch.connect_active_notify(|switch| {
+            crate::appimage_integrate::set_removed_by_user(!switch.is_active());
+            if switch.is_active() {
+                crate::appimage_integrate::add();
+            } else {
+                crate::appimage_integrate::remove();
+            }
+        });
+        switch.upcast()
+    });
+    let on_tap: Rc<dyn Fn(&TapRow)> = Rc::new(|row| {
+        if let Some(switch) = row.trailing.as_ref().and_then(|widget| widget.downcast_ref::<gtk::Switch>()) {
+            switch.set_active(!switch.is_active());
+        }
+    });
+    tap_item(MENU_TITLE, Some("With its icon, like an installed app"), true, Some(trailing), None, on_tap)
+}
+
+pub const MENU_TITLE: &str = "Show in applications menu";
+
 pub const STARTUP_CHECK_TITLE: &str = "Check for updates at startup";
 const STARTUP_CHECK_SUBTITLE: &str = "A newer version is downloaded in the background and runs after a restart";
 
@@ -356,7 +384,8 @@ pub fn page_rows() -> Vec<Preference> {
         (version_row(), check_row())
     };
     let startup = (crate::appimage_update::can_update() || check_available()).then(startup_check_row);
-    [Some(version), Some(check), startup, Some(whats_new_row())]
+    let menu = crate::appimage_integrate::available().then(applications_menu_row);
+    [Some(version), Some(check), startup, menu, Some(whats_new_row())]
         .into_iter()
         .flatten()
         .map(item)
