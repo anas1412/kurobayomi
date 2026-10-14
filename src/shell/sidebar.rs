@@ -214,8 +214,11 @@ fn bottom_rows() -> gtk::ListBox {
         ("emblem-system-symbolic", tr(MsgKey::label_settings), open_settings),
     ];
     let runs: Vec<fn()> = rows.iter().map(|(_, _, run)| *run).collect();
+    // the About row carries the "New" pill while an update notice is unseen (`whats_new`)
+    let update_pill = crate::whats_new::pill();
     for (icon, label, _) in rows {
-        list.append(&nav_row(icon, &label, &[]));
+        let extra: &[&gtk::Widget] = if icon == "help-about-symbolic" { &[update_pill.upcast_ref()] } else { &[] };
+        list.append(&nav_row(icon, &label, extra));
     }
     list.connect_row_activated(move |_, row| {
         match usize::try_from(row.index()).ok() {

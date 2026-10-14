@@ -8,6 +8,12 @@ pub fn appimage_file() -> Option<PathBuf> {
     std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|path| path.is_file())
 }
 
+/// Starts `appimage` again a moment after this process exits (so the new copy is not handed to the running one as a second
+/// window). The caller then quits.
+pub fn relaunch_after_exit(appimage: &Path) -> io::Result<()> {
+    crate::process::spawn_detached(Path::new("sh"), &["-c".as_ref(), "sleep 1; exec \"$0\"".as_ref(), appimage.as_os_str()])
+}
+
 /// Makes `new` executable and moves it over `target`. Keep both in one folder so the move is atomic; the running copy keeps
 /// its old file until it exits.
 pub fn replace_file(new: &Path, target: &Path) -> io::Result<()> {

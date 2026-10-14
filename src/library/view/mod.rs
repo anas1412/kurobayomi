@@ -1125,12 +1125,21 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
     };
     list_item.set_child(Some(&card.root));
 
-    // the action runs on release, so the menu's touch long press can claim the sequence first
+    // the action runs on release; a long press (mouse or touch) selects instead, as on the episode and chapter rows, and the
+    // release that ends it does not also open the entry
+    let long_pressed = Rc::new(std::cell::Cell::new(false));
     let click = gtk::GestureClick::new();
     click.set_button(gdk::BUTTON_PRIMARY);
     let row: LibraryRow = item.row.clone();
-    let (weak_click, click_row) = (weak.clone(), row.clone());
+    click.connect_pressed({
+        let long_pressed = Rc::clone(&long_pressed);
+        move |_, _, _, _| long_pressed.set(false)
+    });
+    let (weak_click, click_row, click_long) = (weak.clone(), row.clone(), Rc::clone(&long_pressed));
     click.connect_released(move |gesture, _, _, _| {
+        if click_long.get() {
+            return;
+        }
         let Some(inner) = weak_click.upgrade() else { return };
         let modifiers = gesture.current_event_state();
         let selecting = !inner.borrow().selection.is_empty();
@@ -1149,8 +1158,23 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         }
     });
     card.root.add_controller(click);
+    let long = gtk::GestureLongPress::new();
+    let (weak_long, long_row) = (weak.clone(), row.clone());
+    long.connect_pressed(move |gesture, _, _| {
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        long_pressed.set(true);
+        // on idle, so no borrow of the view is held while the selection redraws the grid
+        let (weak, row) = (weak_long.clone(), long_row.clone());
+        glib::idle_add_local_once(move || {
+            if let Some(inner) = weak.upgrade() {
+                select_with(&inner, |sel, _| sel.toggle(&row));
+            }
+        });
+    });
+    card.root.add_controller(long);
+    // the right click (and the Menu key) open the cover's menu; the long press selects
     let weak_menu = weak.clone();
-    context_menu::attach(&card.root, move |_, _| cover_menu(&weak_menu, &row));
+    context_menu::attach_without_long_press(&card.root, move |_, _| cover_menu(&weak_menu, &row));
 
     if let Some(button) = card.continue_button {
         let weak_resume = weak.clone();

@@ -1,6 +1,7 @@
 mod app_update;
 mod appimage_update;
 mod channel;
+mod whats_new;
 mod backup_host;
 mod backup_run;
 mod backup_schedule;
@@ -318,6 +319,7 @@ fn build_window(app: &gtk::Application) {
     }
     app_update::startup();
     appimage_update::startup();
+    whats_new::startup();
     // requests that arrived before the window: --action, --search, --open and opened files
     shell::launch::window_built(app, &win);
     // the desktop search provider serves library titles while the app runs (T-53a-066)

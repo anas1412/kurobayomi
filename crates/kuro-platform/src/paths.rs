@@ -104,6 +104,10 @@ pub trait Paths {
     fn cookie_jar_file(&self) -> PathBuf {
         self.data_dir().join("cookies.json")
     }
+    /// The build the app ran last time; after an update the app compares it with the running one (What's new).
+    fn last_build_file(&self) -> PathBuf {
+        self.state_dir().join("last-build")
+    }
     /// A cover or background folder under the data directory (`covers`, `animecovers`, ...).
     fn cover_family_dir(&self, folder: &str) -> PathBuf {
         self.data_dir().join(folder)
@@ -230,6 +234,7 @@ mod role_tests {
         assert_eq!(p.download_index_cache_dir(), PathBuf::from("/k/downloads"));
         assert_eq!(p.library_update_log_file(), PathBuf::from("/k/update_errors.txt"));
         assert_eq!(p.cookie_jar_file(), PathBuf::from("/d/cookies.json"));
+        assert_eq!(p.last_build_file(), PathBuf::from("/s/last-build"));
         assert_eq!(p.cover_family_dir("animecovers"), PathBuf::from("/d/animecovers"));
         assert_eq!(p.cookies_import_file(), PathBuf::from("/c/cookies.txt"));
     }

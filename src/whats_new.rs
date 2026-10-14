@@ -1,0 +1,299 @@
+//! Updates and What's new, for both channels. The notice of an update (a stable release that is out, or a nightly that was
+//! installed and waits for a restart) shows as a toast with one action and as a "New" pill on the sidebar's About row until
+//! it is looked at. The notes are a stable release's changelog section, or for a nightly the commits between two builds.
+//! After an update, the first start shows the notes of the new build once; the build of the last run is kept in
+//! `Paths::last_build_file`. A local build has no channel build and shows none of this.
+
+use std::cell::RefCell;
+use std::time::Duration;
+
+use gtk::glib;
+use gtk::prelude::*;
+use kuro_domain::release::Release;
+use kuro_platform::paths::Paths;
+
+use crate::settings_ui::about::notes_dialog;
+use crate::ui::{DialogButton, Role};
+
+/// The build this app is: a stable release (its version) or a nightly (its commit). `None` for a local build.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Build {
+    Stable(String),
+    Nightly(String),
+}
+
+impl Build {
+    pub fn current() -> Option<Build> {
+        if let Some(commit) = crate::channel::commit() {
+            return Some(Build::Nightly(commit.to_owned()));
+        }
+        let info = &*kuro_core::app_info::APP_INFO;
+        (info.build_type == "release" && !crate::app_update::UPDATE_REPOSITORY.is_empty()).then(|| Build::Stable(info.version_name.clone()))
+    }
+
+    fn line(&self) -> String {
+        match self {
+            Build::Stable(version) => format!("stable {version}"),
+            Build::Nightly(commit) => format!("nightly {commit}"),
+        }
+    }
+
+    fn parse(line: &str) -> Option<Build> {
+        match line.trim().split_once(' ')? {
+            ("stable", version) => Some(Build::Stable(version.to_owned())),
+            ("nightly", commit) => Some(Build::Nightly(commit.to_owned())),
+            _ => None,
+        }
+    }
+}
+
+/// An update the user has not acted on yet.
+#[derive(Clone)]
+enum Notice {
+    /// A newer stable release is out.
+    Stable(Release),
+    /// A newer nightly replaced the AppImage; it runs after a restart. The commit of the new build.
+    Nightly(String),
+}
+
+thread_local! {
+    /// The notice and whether it was looked at (the pill shows while it was not).
+    static NOTICE: RefCell<Option<(Notice, bool)>> = const { RefCell::new(None) };
+    static PILLS: RefCell<Vec<glib::WeakRef<gtk::Label>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn set_notice(notice: Notice) {
+    NOTICE.with(|n| *n.borrow_mut() = Some((notice, false)));
+    refresh_pills();
+}
+
+fn take_notice_for_viewing() -> Option<Notice> {
+    let notice = NOTICE.with(|n| n.borrow_mut().as_mut().map(|(notice, seen)| {
+        *seen = true;
+        notice.clone()
+    }));
+    refresh_pills();
+    notice
+}
+
+fn unseen() -> bool {
+    NOTICE.with(|n| n.borrow().as_ref().is_some_and(|(_, seen)| !seen))
+}
+
+fn refresh_pills() {
+    let show = unseen();
+    PILLS.with(|pills| {
+        pills.borrow_mut().retain(|pill| pill.upgrade().map(|pill| pill.set_visible(show)).is_some());
+    });
+}
+
+/// The "New" pill for the sidebar's About row, shown while an update notice is unseen.
+pub fn pill() -> gtk::Label {
+    let pill = gtk::Label::builder().label("New").css_classes(["kb-nav-badge"]).valign(gtk::Align::Center).visible(unseen()).build();
+    pill.set_tooltip_text(Some("An update is waiting: open About, What's new"));
+    PILLS.with(|pills| pills.borrow_mut().push(pill.downgrade()));
+    pill
+}
+
+/// The About page's What's new row: its subtitle, and whether it can open anything.
+pub fn row_subtitle() -> Option<String> {
+    NOTICE.with(|n| {
+        n.borrow().as_ref().map(|(notice, _)| match notice {
+            Notice::Stable(release) => format!("Kurobayomi {} is available", release.version),
+            Notice::Nightly(commit) => format!("Nightly {} is installed: restart to use it", short(commit)),
+        })
+    })
+}
+
+pub fn row_enabled() -> bool {
+    Build::current().is_some()
+}
+
+/// A newer stable release is out (the startup check found it).
+pub fn stable_available(release: Release) {
+    let text = format!("Kurobayomi {} is available", release.version);
+    set_notice(Notice::Stable(release));
+    crate::toast::notify_action(&text, "What's new", Some(Duration::from_secs(10)), open);
+}
+
+/// The nightly AppImage was replaced by a newer build.
+pub fn nightly_installed(commit: String) {
+    let text = format!("Nightly {} is installed", short(&commit));
+    set_notice(Notice::Nightly(commit));
+    crate::toast::notify_action(&text, "Restart", Some(Duration::from_secs(10)), restart);
+}
+
+/// What's new: the waiting update when there is one, else the notes of the running build.
+pub fn open() {
+    match take_notice_for_viewing() {
+        Some(Notice::Stable(release)) => crate::settings_ui::about::show_update(&release),
+        Some(Notice::Nightly(new)) => {
+            let Some(Build::Nightly(running)) = Build::current() else { return };
+            let restart_button = DialogButton::new("Restart", Role::Suggested, restart);
+            fetch(move || commits_between(&running, &new).map(|c| (commits_markdown(&c), new)), move |(notes, new)| {
+                notes_dialog("Nightly update installed", &format!("Nightly {}", short(&new)), &notes, None, Some(restart_button));
+            });
+        }
+        None => show_current(None),
+    }
+}
+
+/// The notes of the running build. `since` is the build of the last run: a nightly then lists the commits since it.
+fn show_current(since: Option<Build>) {
+    match Build::current() {
+        Some(Build::Stable(version)) => {
+            let heading = if since.is_some() { format!("Updated to Kurobayomi {version}") } else { "What's new".to_owned() };
+            fetch(move || stable_notes(&version).map(|notes| (notes, version)), move |((body, url), version)| {
+                notes_dialog(&heading, &format!("Kurobayomi {version}"), &body, Some(&url), None);
+            });
+        }
+        Some(Build::Nightly(commit)) => {
+            let old = match since {
+                Some(Build::Nightly(old)) => Some(old),
+                _ => None,
+            };
+            let heading = if old.is_some() { format!("Updated to nightly {}", short(&commit)) } else { "What's new".to_owned() };
+            fetch(
+                move || {
+                    let commits = match &old {
+                        Some(old) => commits_between(old, &commit)?,
+                        None => recent_commits(&commit)?,
+                    };
+                    Ok((commits_markdown(&commits), commit))
+                },
+                move |(notes, commit)| notes_dialog(&heading, &format!("Nightly {}", short(&commit)), &notes, None, None),
+            );
+        }
+        None => {}
+    }
+}
+
+/// At start: remember this build, and after an update show its notes once.
+pub fn startup() {
+    let Some(current) = Build::current() else { return };
+    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
+    let file = paths.last_build_file();
+    let last = std::fs::read_to_string(&file).ok().and_then(|line| Build::parse(&line));
+    if let Some(parent) = file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(error) = std::fs::write(&file, current.line()) {
+        tracing::debug!(%error, "could not keep the build of this run");
+    }
+    if let Some(last) = last.filter(|last| *last != current) {
+        show_current(Some(last));
+    }
+}
+
+/// Starts this AppImage again once the app has quit, then closes the window.
+fn restart() {
+    let relaunched = kuro_platform::self_update::appimage_file().is_some_and(|file| kuro_platform::self_update::relaunch_after_exit(&file).is_ok());
+    if relaunched {
+        crate::ui::window().close();
+    } else {
+        crate::toast::notify("Restart Kurobayomi to use the new version");
+    }
+}
+
+fn short(commit: &str) -> &str {
+    &commit[..8.min(commit.len())]
+}
+
+/// Runs `work` off the GTK thread and `done` with its result on it; a failure is a toast.
+fn fetch<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static, done: impl FnOnce(T) + 'static) {
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(work());
+    });
+    glib::spawn_future_local(async move {
+        match rx.recv().await {
+            Ok(Ok(value)) => done(value),
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "What's new could not be loaded");
+                crate::toast::notify("Could not load what's new");
+            }
+            Err(_) => {}
+        }
+    });
+}
+
+fn github(path: &str) -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(concat!("kurobayomi/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = format!("https://api.github.com/repos/{}/{path}", crate::channel::REPOSITORY);
+    let response = client.get(url).send().and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
+    response.json().map_err(|e| e.to_string())
+}
+
+/// The changelog section and the page of the stable release `version`.
+fn stable_notes(version: &str) -> Result<(String, String), String> {
+    let release = github(&format!("releases/tags/v{version}"))?;
+    Ok((release["body"].as_str().unwrap_or_default().to_owned(), release["html_url"].as_str().unwrap_or_default().to_owned()))
+}
+
+/// The commits after `old` up to `new`, newest first.
+fn commits_between(old: &str, new: &str) -> Result<Vec<(String, String)>, String> {
+    let mut commits = commit_list(&github(&format!("compare/{old}...{new}"))?["commits"]);
+    commits.reverse();
+    Ok(commits)
+}
+
+/// The 20 latest commits up to `commit`, newest first.
+fn recent_commits(commit: &str) -> Result<Vec<(String, String)>, String> {
+    Ok(commit_list(&github(&format!("commits?sha={commit}&per_page=20"))?))
+}
+
+/// The commit hash and the first line of the message of every commit of a GitHub commit list.
+fn commit_list(list: &serde_json::Value) -> Vec<(String, String)> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| Some((c["sha"].as_str()?.to_owned(), c["commit"]["message"].as_str()?.lines().next().unwrap_or_default().to_owned())))
+        .collect()
+}
+
+/// The notes of a list of commits: one bullet per commit, its message and short hash.
+fn commits_markdown(commits: &[(String, String)]) -> String {
+    if commits.is_empty() {
+        return "No changes since your last version.".to_owned();
+    }
+    let mut notes = String::from("### Changes\n");
+    for (sha, subject) in commits {
+        notes.push_str(&format!("- {subject} (`{}`)\n", short(sha)));
+    }
+    notes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_build_line_round_trips_and_odd_lines_are_none() {
+        for build in [Build::Stable("0.2.0".into()), Build::Nightly("abcdef0123456789".into())] {
+            assert_eq!(Build::parse(&build.line()), Some(build));
+        }
+        assert_eq!(Build::parse("debug 1"), None);
+        assert_eq!(Build::parse(""), None);
+    }
+
+    #[test]
+    fn a_commit_list_keeps_the_hash_and_the_first_line() {
+        let list = serde_json::json!([
+            { "sha": "1111111111aaaa", "commit": { "message": "Fix the grid\n\nlong text" } },
+            { "sha": "2222222222bbbb", "commit": { "message": "Add a button" } },
+            { "nothing": true }
+        ]);
+        assert_eq!(commit_list(&list), vec![("1111111111aaaa".into(), "Fix the grid".into()), ("2222222222bbbb".into(), "Add a button".into())]);
+    }
+
+    #[test]
+    fn the_notes_list_each_commit_with_its_short_hash() {
+        let notes = commits_markdown(&[("1111111111aaaa".into(), "Fix the grid".into())]);
+        assert_eq!(notes, "### Changes\n- Fix the grid (`11111111`)\n");
+        assert_eq!(commits_markdown(&[]), "No changes since your last version.");
+    }
+}

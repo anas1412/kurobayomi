@@ -138,22 +138,19 @@ fn run_check(done: impl FnOnce(Result<Outcome, ReleaseError>) + 'static) {
     });
 }
 
-/// The update page (T-47ba-030, ui-parity 3.5): a 48 px icon, the heading, the version, the notes in a scrolling body
-/// and the pinned Download and Not now buttons. Enter is Download, Escape is Not now.
-///
-/// Decision (T-47ba-032): there is no in-place install (T-35a-056 drops it). Download opens the release's file link
-/// with the desktop's handler and closes the page; the button is disabled on the first click. Offline, the handler
-/// fails and a toast says so.
-fn show_update(release: &Release) {
+/// A release-notes dialog (the update page, T-47ba-030, ui-parity 3.5, and What's new): a 48 px icon, the heading, the
+/// version, the notes (markdown) in a scrolling body, the release page when there is one, and the buttons: `primary` after
+/// Not now, or Close alone. Escape closes it.
+pub fn notes_dialog(heading: &str, version: &str, notes_markdown: &str, link: Option<&str>, primary: Option<DialogButton>) {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let icon = gtk::Image::builder().icon_name("software-update-available-symbolic").pixel_size(48).halign(gtk::Align::Center).build();
     icon.set_accessible_role(gtk::AccessibleRole::Presentation);
     column.append(&icon);
-    column.append(&gtk::Label::builder().label(tr(MsgKey::update_check_notification_update_available)).css_classes(["title-1"]).build());
-    column.append(&gtk::Label::builder().label(&release.version).css_classes(["dim-label"]).build());
+    column.append(&gtk::Label::builder().label(heading).css_classes(["title-1"]).wrap(true).build());
+    column.append(&gtk::Label::builder().label(version).css_classes(["dim-label"]).build());
 
     let notes = gtk::Label::builder().use_markup(true).wrap(true).xalign(0.0).yalign(0.0).selectable(true).build();
-    notes.set_markup(&changelog::to_pango(&release.info));
+    notes.set_markup(&changelog::to_pango(notes_markdown));
     notes.connect_activate_link(|_, url| {
         crate::ui::open_link(url, None);
         gtk::glib::Propagation::Stop
@@ -161,20 +158,30 @@ fn show_update(release: &Release) {
     let scroll = gtk::ScrolledWindow::builder().child(&notes).propagate_natural_height(true).max_content_height(360).hscrollbar_policy(gtk::PolicyType::Never).build();
     column.append(&scroll);
 
-    if changelog::link_visible(&release.release_link) {
+    if let Some(link) = link.filter(|link| changelog::link_visible(link)) {
         let open = gtk::Button::builder().label(tr(MsgKey::update_check_open)).icon_name("web-browser-symbolic").halign(gtk::Align::Start).build();
         open.add_css_class("flat");
-        let link = release.release_link.clone();
+        let link = link.to_owned();
         open.connect_clicked(move |_| crate::ui::open_link(&link, None));
         column.append(&open);
     }
 
+    let buttons = match primary {
+        Some(primary) => vec![DialogButton::cancel(tr(MsgKey::action_not_now)), primary],
+        None => vec![DialogButton::cancel("Close")],
+    };
+    crate::ui::dialog(heading, &column, 520, buttons).present();
+}
+
+/// The update page of a newer stable release. Decision (T-47ba-032): there is no in-place install for a stable build
+/// (T-35a-056 drops it). Download opens the release's file link with the desktop's handler and closes the page. Offline,
+/// the handler fails and a toast says so.
+pub fn show_update(release: &Release) {
     let file = release.download_link.clone();
     let download = DialogButton::new(tr(MsgKey::update_check_confirm), Role::Suggested, move || {
         crate::ui::open_link_or(&file, None, |_| crate::toast::notify(tr(MsgKey::update_check_notification_download_error)));
     });
-    let title = tr(MsgKey::update_check_notification_update_available);
-    crate::ui::dialog(&title, &column, 520, vec![DialogButton::cancel(tr(MsgKey::action_not_now)), download]).present();
+    notes_dialog(&tr(MsgKey::update_check_notification_update_available), &release.version, &release.info, Some(&release.release_link), Some(download));
 }
 
 /// A tap on the row: starts a check unless one runs, shows the spinner meanwhile, then the report.
@@ -220,32 +227,14 @@ pub fn check_row() -> PreferenceItem {
 pub const PROJECT_URL: &str = "https://github.com/anas1412/kurobayomi";
 /// Where bugs are reported.
 pub const ISSUES_URL: &str = "https://github.com/anas1412/kurobayomi/issues";
-/// The release tag of a build: `v<version>` for a release, `r<commit count>` for a preview.
-pub fn release_tag(build_type: &str, version_name: &str, commit_count: u32) -> String {
-    if build_type == "preview" { format!("r{commit_count}") } else { format!("v{version_name}") }
-}
-
-/// The GitHub release page of a tag.
-pub fn release_page_url(repo: &str, tag: &str) -> String {
-    format!("https://github.com/{repo}/releases/tag/{tag}")
-}
-
-/// A row that opens `url` when tapped.
-fn link_row(title: &str, url: &str, enabled: bool) -> PreferenceItem {
-    let mut row = text(title, None, enabled);
+/// What's new: the waiting update when there is one (its subtitle says which), else the notes of this build
+/// (`whats_new`). Off in a local build, which has no release to show.
+fn whats_new_row() -> PreferenceItem {
+    let mut row = text("What's new", crate::whats_new::row_subtitle().as_deref(), crate::whats_new::row_enabled());
     if let PreferenceItem::Text { on_click, .. } = &mut row {
-        let url = url.to_owned();
-        *on_click = Some(Rc::new(move || crate::ui::open_link(&url, None)));
+        *on_click = Some(Rc::new(crate::whats_new::open));
     }
     row
-}
-
-/// What's new: the release page of this build. Hidden in debug builds and when no release repository is set.
-fn whats_new_row() -> PreferenceItem {
-    let info = &*APP_INFO;
-    let repo = crate::app_update::UPDATE_REPOSITORY;
-    let tag = release_tag(info.build_type, &info.version_name, info.commit_count);
-    link_row("What's new", &release_page_url(repo, &tag), info.build_type != "debug" && !repo.is_empty())
 }
 
 /// The bottom row of links: the project page and the issue tracker.
@@ -279,17 +268,6 @@ pub fn page_rows() -> Vec<Preference> {
 #[cfg(test)]
 mod link_tests {
     use super::*;
-
-    #[test]
-    fn a_preview_build_tags_its_commit_count_and_a_release_its_version() {
-        assert_eq!(release_tag("preview", "0.1.0", 42), "r42");
-        assert_eq!(release_tag("release", "0.1.0", 42), "v0.1.0");
-    }
-
-    #[test]
-    fn the_release_page_url_joins_repo_and_tag() {
-        assert_eq!(release_page_url("owner/name", "v1.2.3"), "https://github.com/owner/name/releases/tag/v1.2.3");
-    }
 
     #[test]
     fn the_links_lead_to_this_apps_project_and_never_to_aniyomi() {

@@ -10,7 +10,6 @@ use std::time::Duration;
 use gtk::glib;
 use sha2::{Digest, Sha256};
 
-const REPOSITORY: &str = "anas1412/kurobayomi";
 const ASSET: &str = "Kurobayomi-nightly-x86_64.AppImage";
 const USER_AGENT: &str = concat!("kurobayomi/", env!("CARGO_PKG_VERSION"));
 
@@ -89,7 +88,7 @@ fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path
 /// One check and, when there is a newer nightly, the replacement. `Some(commit)` when the file was replaced.
 fn update(file: &Path, current: &str) -> Result<Option<String>, String> {
     let http = |timeout| reqwest::blocking::Client::builder().timeout(Duration::from_secs(timeout)).user_agent(USER_AGENT).build().map_err(|e| e.to_string());
-    let response = http(30)?.get(format!("https://api.github.com/repos/{REPOSITORY}/releases/tags/nightly")).send().map_err(|e| e.to_string())?;
+    let response = http(30)?.get(format!("https://api.github.com/repos/{}/releases/tags/nightly", crate::channel::REPOSITORY)).send().map_err(|e| e.to_string())?;
     // no release while the workflow is replacing it
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -110,7 +109,7 @@ pub fn startup() {
     });
     glib::spawn_future_local(async move {
         match rx.recv().await {
-            Ok(Ok(Some(commit))) => crate::toast::notify(format!("Updated to nightly {}. Restart to use it.", &commit[..8])),
+            Ok(Ok(Some(commit))) => crate::whats_new::nightly_installed(commit),
             Ok(Err(error)) => tracing::debug!(%error, "the nightly update failed"),
             _ => {}
         }

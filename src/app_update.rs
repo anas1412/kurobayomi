@@ -3,16 +3,14 @@
 //! reports the error text. The throttle and the version rule are `kuro_domain::release::check`; no check time is stored,
 //! so every call is un-throttled, and this file decides when the check may run at all.
 
-use gtk::prelude::*;
 use std::time::Duration;
 
 use gtk::glib;
 use kuro_domain::release::check::{Outcome, check_for_update};
 use kuro_domain::release::github::{GithubReleases, ReleaseHttp};
-use kuro_domain::release::{Release, ReleaseError, ReleaseService};
+use kuro_domain::release::{ReleaseError, ReleaseService};
 use kuro_i18n::{MsgKey, tr};
 
-use crate::ui::{DialogButton, Role};
 
 /// The GitHub `owner/name` that releases are read from (`UPDATE_REPOSITORY`). Empty turns the check off. A build
 /// sets it with the `KB_UPDATE_REPOSITORY` environment variable.
@@ -94,7 +92,7 @@ pub fn startup() {
         return;
     }
     spawn_check(false, |result| match result {
-        Ok(Outcome::NewUpdate(release)) => crate::toast::notify(update_text(&release)),
+        Ok(Outcome::NewUpdate(release)) => crate::whats_new::stable_available(release),
         Ok(Outcome::NoNewUpdate) => {}
         Err(e) => tracing::debug!(error = %e, "the startup release check failed"),
     });
@@ -105,7 +103,7 @@ pub fn startup() {
 pub fn manual() {
     spawn_check(true, |result| match result {
         Ok(Outcome::NoNewUpdate) => crate::toast::notify(tr(MsgKey::update_check_no_new_updates)),
-        Ok(Outcome::NewUpdate(release)) => show_update(&release),
+        Ok(Outcome::NewUpdate(release)) => crate::settings_ui::about::show_update(&release),
         Err(e) => crate::toast::notify(e.to_string()),
     });
 }
@@ -119,23 +117,9 @@ pub fn on_action(screen: &str, title: &str) -> bool {
     true
 }
 
-fn update_text(release: &Release) -> String {
-    format!("{} {}", tr(MsgKey::update_check_notification_update_available), release.version)
-}
-
-/// "New version available!" with the notes, and Open on GitHub or Not now. There is no in-place install, the package
-/// manager owns the files (T-07a-037).
-fn show_update(release: &Release) {
-    let link = release.release_link.clone();
-    let open = DialogButton::new(tr(MsgKey::update_check_open), Role::Suggested, move || {
-        crate::ui::open_link(&link, None);
-    });
-    let body = crate::ui::message(&release.info);
-    crate::ui::dialog(&update_text(release), &body, 420, vec![DialogButton::cancel(tr(MsgKey::action_not_now)), open]).present();
-}
-
 #[cfg(test)]
 mod tests {
+    use kuro_domain::release::Release;
     use std::cell::Cell;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -172,8 +156,8 @@ mod tests {
     }
 
     #[test]
-    fn the_startup_check_is_off_and_the_manual_check_stays() {
-        assert!(!crate::misc::diet_defaults::APP_UPDATE_CHECK_AT_STARTUP);
+    fn the_startup_check_is_on_and_the_manual_check_stays() {
+        assert!(crate::misc::diet_defaults::APP_UPDATE_CHECK_AT_STARTUP);
     }
 
     #[test]
