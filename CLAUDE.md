@@ -101,3 +101,19 @@ The app flow the user decided on 2026-10-11 is in docs/design/app-flow.md. Build
 ## Lanes never build or test (user, 2026-10-11)
 
 Agents in a workflow lane only read and write code (and write tests); they do NOT run cargo, rustc, tests, formatters or the app. The lead does ONE build, the compile fixes and the full test run at the very end. Agents therefore read the real definition of every item they use, match signatures and imports exactly, keep edits small, and end their report with a list titled UNSURE of the places they are not certain compile. Models: Haiku 5.5 high for implement and review, Sonnet 5.5 medium for fixes, never Opus. This supersedes the older "wait for a long build with one command" rules while it is in force.
+
+## Releases: nightly and stable (user, 2026-10-14)
+
+Follow this pattern for every release and for any workflow that publishes one.
+
+**Stable** (tagged, not built yet): tag `vMAJOR.MINOR.PATCH` (semantic versioning); title "Kurobayomi X.Y.Z"; notes are that version's changelog grouped as Added, Changed, Fixed, Removed; a normal release (not a prerelease), so GitHub shows it as "Latest"; a fixed-name AppImage plus a checksum file. A stable build has no `KB_CHANNEL`.
+
+**Nightly** (rolling, built by `.github/workflows/appimage.yml`): tag `nightly`, moved to each new build, and the one release is updated in place (files first, notes last). Title "Nightly (<8-char hash>)"; always a prerelease. The first line of the notes is exactly `Built from commit <full 40-character hash>.`: the app's self-updater (`src/appimage_update.rs`) reads the commit from it, so never change that line. Human text may follow it (a warning that nightly may be unstable and keeps separate data, then the commits since the last stable tag).
+
+How the nightly works:
+- It builds after the CI tests pass on `main` (`workflow_run`), never before. File name `Kurobayomi-nightly-x86_64.AppImage` never changes, plus a `.zsync` file next to it.
+- The build gets `KB_CHANNEL=nightly` and `KB_COMMIT=<sha>`. `channel::NIGHTLY` (GTK crate) and `kuro_platform::channel::NIGHTLY` read them. A nightly build is its own app: id `io.github.anas1412.Kurobayomi.Nightly`, name "Kurobayomi Nightly", gold-frame logo, data in `kurobayomi-nightly` and `~/Kurobayomi-Nightly`. Its icons are `src/shell/data/icons-nightly`, and `build.rs` recolours the in-app logos.
+- It updates itself: at start it reads the `nightly` release and, if the commit differs, replaces its own AppImage file (size, sha256 and ELF checks first). Only when `APPIMAGE` is set and the build has a commit.
+- Shelly cannot read embedded update info, so it needs a one-time `shelly sync appimage Kurobayomi <download url> StaticUrl`; the URL is `https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage`.
+- GTK stays at 4.14 (`v4_14`). Lowering it to 4.6 gave 86 compile errors (file dialogs, launchers, accessibility API, picture content fit); older distros are a job for a Flatpak.
+- `scripts/build-appimage.sh` cannot run on Arch (linuxdeploy's GTK plugin expects the Ubuntu folder layout); test it in an Ubuntu 24.04 container.
