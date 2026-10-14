@@ -8,4 +8,7 @@ Aniyomi   https://github.com/aniyomiorg/aniyomi   Apache License 2.0
 Mihon     https://github.com/mihonapp/mihon        Apache License 2.0
 Tachiyomi https://github.com/tachiyomiorg/tachiyomi Apache License 2.0
 
+The app's icons (src/theme/icons/scalable/actions) are Material Design icons by Google, recoloured for GTK:
+Material Design Icons https://github.com/google/material-design-icons Apache License 2.0
+
 The full licence text is in LICENSE.

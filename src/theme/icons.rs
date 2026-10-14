@@ -221,8 +221,13 @@ impl Icon {
 /// The icon bundle compiled by `build.rs`.
 static BUNDLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/kurobayomi.gresource"));
 
-/// Adds the bundled icon theme to the default display, so the `kb-*` names resolve. Must run before
-/// the first window is shown. A missing bundle logs one error and the app keeps the user's icons.
+/// Adds the bundled icon theme to the default display and makes it the app's only icon theme. Must run before the first
+/// window is shown. A missing bundle logs one error and the app keeps the user's icons.
+///
+/// The app draws its own icons on every desktop (user, 2026-10-14): the bundle holds a Material icon under every standard
+/// name the app uses (`gen/material_icons.py`) besides the `kb-*` ones. An icon theme is looked up before the bundle, and
+/// a theme whose "-symbolic" icons are colour drawings showed them as blobs, so the theme is set to a name only the bundle
+/// answers; GTK's own widgets keep GTK's built-in icons.
 pub fn register(display: &gtk::gdk::Display) {
     match gtk::gio::Resource::from_data(&gtk::glib::Bytes::from_static(BUNDLE)) {
         Ok(bundle) => gtk::gio::resources_register(&bundle),
@@ -234,7 +239,13 @@ pub fn register(display: &gtk::gdk::Display) {
         return;
     }
     gtk::IconTheme::for_display(display).add_resource_path(ICON_RESOURCE_PATH);
+    // the display's icon theme follows the settings (it refuses a name of its own); a value the app sets outranks the
+    // desktop's
+    gtk::Settings::for_display(display).set_gtk_icon_theme_name(Some(APP_ICON_THEME));
 }
+
+/// The icon theme the app sets: no such theme is installed, so every lookup falls through to the bundle.
+pub const APP_ICON_THEME: &str = "kurobayomi-own-icons";
 
 #[cfg(test)]
 /// The anime library tab icon: outline when not selected, filled when selected (T-49ba-015).
