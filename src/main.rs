@@ -294,9 +294,13 @@ fn build_window(app: &gtk::Application) {
             let chrome = shell::layout::chrome_for(width, win.is_maximized());
             let shown = shell::layout::visibility(chrome, immersive);
             sidebar.set_visible(shown.sidebar);
-            // the open tab's menu and search sit in the sidebar's header while it shows that tab
+            // a narrow window packs its header buttons tighter (`style.css`, `.kb-narrow`)
+            if shown.bottom_bar { win.add_css_class("kb-narrow") } else { win.remove_css_class("kb-narrow") }
+            // the top page's search and ⋮ menu sit in the sidebar's header while it shows: the open tab, or the page pushed
+            // over the tabs
             let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
-            shell::lead::place(tabs.visible_child().as_ref(), shown.sidebar && on_tabs);
+            let top = if on_tabs { tabs.visible_child() } else { nav.visible_child() };
+            shell::lead::place(top.as_ref(), shown.sidebar);
             sep.set_visible(shown.sidebar);
             bottom.set_visible(shown.bottom_bar);
         }

@@ -260,13 +260,12 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
     header.set_title_widget(Some(&centre));
     if back {
         header.pack_start(&back_button());
-    } else {
-        // a tab page leads with its search toggle and its ⋮ menu
-        let search = bar.as_ref().map(|_| end.remove(0));
-        let menu = end.iter().position(|w| w.has_css_class(MORE_MENU)).map(|i| end.remove(i));
-        if search.is_some() || menu.is_some() {
-            pack_lead(&header, search.as_ref(), menu.as_ref());
-        }
+    }
+    // every page leads with its search toggle and its ⋮ menu, after Back on a pushed page (`pack_lead`)
+    let search = bar.as_ref().map(|_| end.remove(0));
+    let menu = end.iter().position(|w| w.has_css_class(MORE_MENU)).map(|i| end.remove(i));
+    if search.is_some() || menu.is_some() {
+        pack_lead(&header, search.as_ref(), menu.as_ref());
     }
     let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.into_iter().partition(|w| w.is::<gtk::StackSwitcher>());
     let mut narrow_rows = Vec::new();
@@ -767,9 +766,10 @@ pub const LEAD_SEARCH: &str = "kb-lead-search";
 /// The lead slot of the ⋮ menu.
 pub const LEAD_MENU: &str = "kb-lead-menu";
 
-/// Leads a tab page's header with its search toggle and its ⋮ menu (user, 2026-10-14). In a narrow window they stay here;
-/// with the sidebar showing, the shell moves both into the sidebar's header around the app name, the search before it and
-/// the menu after it (`shell::lead`). Call before anything else is packed at the start.
+/// Leads a page's header with its search toggle and its ⋮ menu (user, 2026-10-14), on every page: the tabs and the pages
+/// pushed over them. In a narrow window they stay here, after Back on a pushed page; with the sidebar showing, the shell
+/// moves the top page's two into the sidebar's header around the app name, the search before it and the menu after it
+/// (`shell::lead`). Call after Back and before anything else is packed at the start.
 pub fn pack_lead(header: &gtk::HeaderBar, search: Option<&gtk::Widget>, menu: Option<&gtk::Widget>) {
     let lead = GBox::new(O::Horizontal, 4);
     lead.add_css_class(LEAD);

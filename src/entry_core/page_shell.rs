@@ -78,7 +78,17 @@ pub fn header_with_back(page: &GBox) -> (Option<gtk::HeaderBar>, Option<Label>, 
     back.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
     back.set_focus_on_click(false);
     if let Some(header) = &header {
+        // Back first, then the page's search and ⋮ menu (`ui::pack_lead`), as on every pushed page
+        let lead = std::iter::successors(header.first_child(), |w| w.first_child().or_else(|| w.next_sibling()))
+            .find(|w| w.has_css_class(ui::LEAD))
+            .and_downcast::<GBox>();
+        if let Some(lead) = &lead {
+            detach(lead);
+        }
         header.pack_start(&back);
+        if let Some(lead) = &lead {
+            header.pack_start(lead);
+        }
         ui::no_sticky_focus(header);
     }
     (header, title, back)

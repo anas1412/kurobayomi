@@ -110,6 +110,14 @@ headerbar menubutton > button.image-button,
   border-color: transparent;
   box-shadow: none;
 }
+/* a narrow window (the bottom bar shows) packs its header buttons tighter, so a pushed page's Back, search and ⋮ fit
+   beside its own actions at 360 px */
+window.kb-narrow headerbar button.image-button,
+window.kb-narrow headerbar menubutton > button.image-button {
+  min-width: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
 headerbar button.image-button:not(.suggested-action):not(.destructive-action):hover,
 headerbar menubutton > button.image-button:hover,
 .kb-bottom-bar button:hover {

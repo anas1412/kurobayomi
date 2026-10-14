@@ -39,24 +39,33 @@ pub struct SourceHeader {
     pub overflow: Option<gtk::MenuButton>,
 }
 
+/// The narrowest a source's name shows in its header: room for a few letters and the "…".
+const TITLE_MIN_PX: i32 = 48;
+
 pub fn build(deps: HeaderDeps) -> SourceHeader {
     let bar = crate::ui::header_bar();
     bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
     // an Inscription, not a Label: an ellipsized label still needs the width of "…", which kept the window from 360 px
     let chars = u32::try_from(deps.source_name.chars().count()).unwrap_or(u32::MAX);
-    bar.set_title_widget(Some(&gtk::Inscription::builder().text(&deps.source_name).css_classes(["title"]).min_chars(0).nat_chars(chars).text_overflow(gtk::InscriptionOverflow::EllipsizeEnd).valign(gtk::Align::Center).build()));
+    let title = gtk::Inscription::builder().text(&deps.source_name).css_classes(["title"]).min_chars(0).nat_chars(chars).text_overflow(gtk::InscriptionOverflow::EllipsizeEnd).valign(gtk::Align::Center).build();
+    // with too little room the name would shrink to a lone "…": it is hidden then (it keeps its place)
+    title.add_tick_callback(|title, _| {
+        title.set_opacity(if title.width() < TITLE_MIN_PX { 0.0 } else { 1.0 });
+        gtk::glib::ControlFlow::Continue
+    });
+    bar.set_title_widget(Some(&title));
 
     bar.pack_start(&back_button(Rc::clone(&deps.on_back)));
 
+    // the search and the ⋮ menu lead the row after Back, as on every page (`ui::pack_lead`)
     let overflow = overflow_menu(&deps);
-    if let Some(menu) = &overflow {
-        bar.pack_end(menu);
-    }
+    let search = deps.search.clone();
+    crate::ui::pack_lead(&bar, Some(search.upcast_ref()), overflow.as_ref().map(|menu| menu.upcast_ref()));
 
     let display = display_menu(&deps);
     bar.pack_end(&display.widget);
 
-    // the shared order of a header's actions: search, refresh, the display options, the menu
+    // the actions at the end: refresh, then the display options
     let on_refresh = Rc::clone(&deps.on_refresh);
     let refresh = crate::ui::refresh_button("Refresh");
     refresh.connect_clicked(move |button| {
@@ -64,9 +73,6 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
         on_refresh();
     });
     bar.pack_end(&refresh);
-
-    let search = deps.search.clone();
-    bar.pack_end(&search);
     crate::ui::no_sticky_focus(&bar);
 
     SourceHeader { bar, search, display, overflow }
