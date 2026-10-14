@@ -507,15 +507,6 @@ impl ActionHost for GtkHost {
             .unwrap_or_default()
     }
 
-    fn start_app_update(&self, url: &str, version: Option<String>, sha256: Option<String>) {
-        if !crate::misc::download::start_app_update(url, version, sha256) {
-            self.unavailable("start app update before the downloader exists");
-        }
-    }
-
-    fn cancel_app_update(&self) {
-        crate::misc::download::cancel_app_update();
-    }
 }
 
 /// Registers `app.notice` and starts showing posted notices. Call from the GTK main thread, with the application running;

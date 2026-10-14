@@ -29,7 +29,7 @@ pub fn enabled(updater_feature: bool, repository: &str) -> bool {
     updater_feature && !repository.is_empty()
 }
 
-fn available() -> bool {
+pub fn available() -> bool {
     enabled(kuro_core::app_info::APP_INFO.updater_enabled, UPDATE_REPOSITORY)
 }
 
@@ -86,9 +86,10 @@ fn spawn_check(force: bool, deliver: impl FnOnce(Result<Outcome, ReleaseError>) 
 }
 
 /// The startup check: only when the build has the check and the user opted in. It is throttled, and any failure is
-/// logged and otherwise silent. A newer release shows one toast.
+/// logged and otherwise silent. A newer release shows one toast. An AppImage updates itself instead
+/// (`appimage_update::startup`).
 pub fn startup() {
-    if !available() || !crate::misc::diet_defaults::APP_UPDATE_CHECK_AT_STARTUP {
+    if !available() || !crate::misc::diet_defaults::APP_UPDATE_CHECK_AT_STARTUP || crate::appimage_update::can_update() {
         return;
     }
     spawn_check(false, |result| match result {
@@ -99,8 +100,17 @@ pub fn startup() {
 }
 
 /// The manual check of the About row: it ignores the opt-in and the throttle, and says what happened, with the error
-/// text when the lookup failed. A newer release opens a dialog with a button to its page.
+/// text when the lookup failed. An AppImage updates itself; another build opens a dialog with a button to the release.
 pub fn manual() {
+    if crate::appimage_update::can_update() {
+        crate::toast::notify("Checking for updates…");
+        crate::appimage_update::run(|result| match result {
+            Ok(Some(build)) => crate::appimage_update::announce(build),
+            Ok(None) => crate::toast::notify(tr(MsgKey::update_check_no_new_updates)),
+            Err(e) => crate::toast::notify(format!("The update failed: {e}")),
+        });
+        return;
+    }
     spawn_check(true, |result| match result {
         Ok(Outcome::NoNewUpdate) => crate::toast::notify(tr(MsgKey::update_check_no_new_updates)),
         Ok(Outcome::NewUpdate(release)) => crate::settings_ui::about::show_update(&release),

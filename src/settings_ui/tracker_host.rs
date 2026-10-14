@@ -48,6 +48,17 @@ use kuro_track::trackers::secret_migration::UNENCRYPTED_WARNING;
 use kuro_track::trackers::sources::{SourceDirectory, SourcePrefs};
 use kuro_track::trackers::suwayomi::SuwayomiTracker;
 
+/// The desktop's network state (T-35a-057). GIO reports link availability, not internet reachability.
+struct GioNetwork;
+
+#[async_trait::async_trait]
+impl Connectivity for GioNetwork {
+    fn is_online(&self) -> bool {
+        use gtk::gio::prelude::NetworkMonitorExt as _;
+        gtk::gio::NetworkMonitor::default().is_network_available()
+    }
+}
+
 /// The services of the Tracking screen. Only AniList is switched on in this build: the other trackers are built (the
 /// registry holds all eleven) but no screen shows them and no session reads them.
 pub struct Host {
@@ -206,7 +217,7 @@ fn build(secrets: Arc<kuro_platform::secrets::FallbackSecrets>, config_dir: &std
 
     // The queue lives in the anime database (its rows carry the kind, so both kinds share it).
     let queue = Arc::new(RetryQueue::new(Arc::clone(&app.db)).map_err(|e| text(&e))?);
-    let net: Arc<dyn Connectivity> = Arc::new(crate::misc::download::GioNetwork);
+    let net: Arc<dyn Connectivity> = Arc::new(GioNetwork);
     let scheduler = Arc::new(RetryScheduler::new(Arc::clone(&queue), Arc::clone(&net)));
     let ctx = Arc::new(TrackCtx {
         trackers: Arc::clone(&manager),

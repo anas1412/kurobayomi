@@ -137,7 +137,7 @@ impl Ctx {
     fn start_backup(&self, path: PathBuf, options: BackupOptions) {
         let library = library();
         let (tx, rx) = async_channel::unbounded();
-        let notifier: Arc<dyn Notifier> = Arc::new(self.notifier.clone());
+        let notifier: Arc<dyn Notifier> = Arc::new(self.notifier);
         let target = kuro_backup::file::Target::Manual(path);
         let started = start_manual_report(backup_pages::job_slot(), notifier, tx, move || library.create(&options, &target));
         match started {
@@ -172,7 +172,7 @@ impl Ctx {
             finish(&self.notifier, &Err(e.to_string()));
             return;
         }
-        let notifier = self.notifier.clone();
+        let notifier = self.notifier;
         glib::spawn_future_local(async move {
             while let Ok(msg) = rx.recv().await {
                 match msg {

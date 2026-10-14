@@ -44,14 +44,6 @@ pub enum AppAction {
     CancelLibraryUpdate { notice: Option<String> },
     CancelAnimeLibraryUpdate { notice: Option<String> },
     CancelRestore,
-    /// `sha256` is the release digest when the release names one; the download is then hashed and checked (T-35a-054).
-    StartAppUpdate {
-        url: String,
-        version: Option<String>,
-        #[serde(default)]
-        sha256: Option<String>,
-    },
-    CancelAppUpdate,
     RevealFile { path: PathBuf },
     OpenUrl { url: String },
     /// Withdraws this slot only.
@@ -110,9 +102,6 @@ pub trait ActionHost {
     fn reveal(&self, path: &std::path::Path);
     /// The folders a reveal may name (design 6.1): the data folder, the downloads folder and the cache folder.
     fn reveal_roots(&self) -> Vec<PathBuf>;
-    /// Starts the app-update download of `url` (already checked by [`update_url_ok`]).
-    fn start_app_update(&self, url: &str, version: Option<String>, sha256: Option<String>);
-    fn cancel_app_update(&self);
     /// An action no part of the app handles yet.
     fn unavailable(&self, what: &str);
 }
@@ -124,16 +113,6 @@ fn valid_urls(urls: &[String]) -> bool {
 fn web_url(url: &str) -> bool {
     let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
     lower.starts_with("https://") || lower.starts_with("http://")
-}
-
-/// Design 6.1: the asset url of an app update is `https`, on a GitHub release host, with no user info and the default port.
-pub fn update_url_ok(url: &str) -> bool {
-    let Ok(parsed) = reqwest::Url::parse(url) else { return false };
-    parsed.scheme() == "https"
-        && parsed.username().is_empty()
-        && parsed.password().is_none()
-        && parsed.port().is_none()
-        && matches!(parsed.host_str(), Some("github.com" | "objects.githubusercontent.com"))
 }
 
 /// Design 6.1: a path to reveal is absolute, has no `..`, and lies under one of `roots`.
@@ -209,9 +188,6 @@ pub fn route(host: &dyn ActionHost, action: AppAction) {
             host.withdraw(kuro_backup::notify::ID_RESTORE_PROGRESS);
             host.cancel_restore();
         }
-        StartAppUpdate { url, version, sha256 } if update_url_ok(&url) => host.start_app_update(&url, version, sha256),
-        StartAppUpdate { url, .. } => tracing::warn!(%url, "a notice action named an update url outside the release hosts"),
-        CancelAppUpdate => host.cancel_app_update(),
         RevealFile { path } if reveal_path_ok(&path, &host.reveal_roots()) => host.reveal(&path),
         RevealFile { path } => tracing::warn!(?path, "a notice action named a path that may not be revealed"),
         OpenUrl { url } if web_url(&url) => host.open_url(&url),
@@ -288,12 +264,6 @@ mod tests {
         fn reveal_roots(&self) -> Vec<PathBuf> {
             vec!["/data".into(), "/downloads".into()]
         }
-        fn start_app_update(&self, url: &str, version: Option<String>, sha256: Option<String>) {
-            self.log(format!("start_app_update {url} {version:?} {sha256:?}"));
-        }
-        fn cancel_app_update(&self) {
-            self.log("cancel_app_update".to_owned());
-        }
     }
 
     fn run(action: AppAction) -> Vec<String> {
@@ -327,8 +297,6 @@ mod tests {
             AppAction::CancelLibraryUpdate { notice: notice.clone() },
             AppAction::CancelAnimeLibraryUpdate { notice: None },
             AppAction::CancelRestore,
-            AppAction::StartAppUpdate { url: "https://x".into(), version: Some("1.0.0".into()), sha256: Some("ab".into()) },
-            AppAction::CancelAppUpdate,
             AppAction::RevealFile { path: "/tmp/a".into() },
             AppAction::OpenUrl { url: "https://x".into() },
             AppAction::Dismiss { notice: "n".into() },
@@ -398,27 +366,6 @@ mod tests {
         assert!(run(AppAction::OpenUrl { url: "file:///etc/passwd".into() }).is_empty());
         assert_eq!(run(AppAction::OpenUrl { url: "https://a.b".into() }), ["open_url https://a.b"]);
         assert!(run(AppAction::RevealFile { path: "rel/x".into() }).is_empty());
-    }
-
-    #[test]
-    fn an_update_url_must_be_https_on_a_release_host() {
-        // T-35a-092, test U13
-        let start = |url: &str| run(AppAction::StartAppUpdate { url: url.into(), version: Some("v1".into()), sha256: None });
-        let good = "https://github.com/o/r/releases/download/v1/App.AppImage";
-        assert_eq!(start(good), [format!("start_app_update {good} Some(\"v1\") None")]);
-        assert_eq!(start("https://objects.githubusercontent.com/x").len(), 1);
-        for bad in [
-            "http://github.com/o/r/a.AppImage",
-            "https://evil.example/a.AppImage",
-            "https://github.com.evil.example/a",
-            "https://user@github.com/a",
-            "https://github.com:8443/a",
-            "file:///etc/passwd",
-            "not a url",
-        ] {
-            assert!(start(bad).is_empty(), "{bad}");
-        }
-        assert_eq!(run(AppAction::CancelAppUpdate), ["cancel_app_update"]);
     }
 
     #[test]

@@ -15,3 +15,5 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 - Tracking with AniList, Kitsu, MangaUpdates and Simkl.
 - Local folders as sources, and restoring Aniyomi and Tachiyomi backups (`.tachibk`).
 - An AppImage for Linux that carries its own libraries; it needs glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13, Arch).
+- The AppImage updates itself: at start it downloads a newer release in the background, checks it, and runs it after a
+  restart.

@@ -8,7 +8,7 @@ Two channels, both built by GitHub Actions as an AppImage. See also `CLAUDE.md` 
 | Release | one rolling prerelease, tag `nightly`, replaced in place | one normal release per tag, shown as "Latest" |
 | File | `Kurobayomi-nightly-x86_64.AppImage` (+ `.zsync`) | `Kurobayomi-x86_64.AppImage` (+ `.zsync`, `SHA256SUMS`) |
 | App | `io.github.anas1412.Kurobayomi.Nightly`, gold icon, own data folders | `io.github.anas1412.Kurobayomi` |
-| Updates | updates itself from the `nightly` release | the About page's release checker (opens the release page) |
+| Updates | updates itself from the `nightly` release | the AppImage updates itself from the latest release (`SHA256SUMS` when GitHub gives no digest); another build only shows the notice |
 
 ## Cutting a stable release
 

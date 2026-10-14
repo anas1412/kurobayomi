@@ -7,9 +7,6 @@
 
 use kuro_platform::kind::Kind;
 
-pub const APP_UPDATE_PROGRESS: &str = "app-update.progress";
-pub const APP_UPDATE_INSTALL: &str = "app-update.install";
-pub const APP_UPDATE_ERROR: &str = "app-update.error";
 pub const LIBRARY_PROGRESS: &str = "library.progress";
 pub const LIBRARY_ERROR: &str = "library.error";
 pub const LIBRARY_SIZE_WARNING: &str = "library.size-warning";
@@ -28,7 +25,6 @@ pub const SHARED_PICTURE: &str = "reader-shared-picture";
 pub fn channel(id: &str) -> &'static str {
     let base = id.split(':').next().unwrap_or(id);
     match base {
-        APP_UPDATE_PROGRESS | APP_UPDATE_INSTALL | APP_UPDATE_ERROR => "app_apk_update_channel",
         LIBRARY_PROGRESS | LIBRARY_SIZE_WARNING => "library_progress_channel",
         LIBRARY_ERROR => "library_errors_channel",
         LIBRARY_SUMMARY | NEW_CHAPTERS | NEW_EPISODES => "new_chapters_episodes_channel",
@@ -94,8 +90,8 @@ mod tests {
         assert!(library_progress(Kind::Manga).starts_with(LIBRARY_PROGRESS));
     }
 
-    const FIXED: [&str; 22] = [
-        APP_UPDATE_PROGRESS, APP_UPDATE_INSTALL, APP_UPDATE_ERROR, LIBRARY_PROGRESS, LIBRARY_ERROR, LIBRARY_SIZE_WARNING,
+    const FIXED: [&str; 19] = [
+        LIBRARY_PROGRESS, LIBRARY_ERROR, LIBRARY_SIZE_WARNING,
         LIBRARY_SUMMARY, NEW_CHAPTERS, NEW_EPISODES, ID_AUTO_WARNING, ID_BACKUP_PROGRESS, ID_BACKUP_RESULT,
         ID_RESTORE_PROGRESS, ID_RESTORE_RESULT, ANIME_ERROR_ID, ANIME_PROGRESS_ID, ANIME_WARNING_ID, MANGA_ERROR_ID,
         MANGA_PROGRESS_ID, MANGA_WARNING_ID, PICTURE_NOTICE_ID, SHARED_PICTURE,

@@ -54,6 +54,8 @@ enum Notice {
     Stable(Release),
     /// A newer nightly replaced the AppImage; it runs after a restart. The commit of the new build.
     Nightly(String),
+    /// A newer stable release replaced the AppImage; it runs after a restart. The version of the new build.
+    StableInstalled(String),
 }
 
 thread_local! {
@@ -101,6 +103,7 @@ pub fn row_subtitle() -> Option<String> {
         n.borrow().as_ref().map(|(notice, _)| match notice {
             Notice::Stable(release) => format!("Kurobayomi {} is available", release.version),
             Notice::Nightly(commit) => format!("Nightly {} is installed: restart to use it", short(commit)),
+            Notice::StableInstalled(version) => format!("Kurobayomi {version} is installed: restart to use it"),
         })
     })
 }
@@ -123,6 +126,13 @@ pub fn nightly_installed(commit: String) {
     crate::toast::notify_action(&text, "Restart", Some(Duration::from_secs(10)), restart);
 }
 
+/// The stable AppImage was replaced by a newer release.
+pub fn stable_installed(version: String) {
+    let text = format!("Kurobayomi {version} is installed");
+    set_notice(Notice::StableInstalled(version));
+    crate::toast::notify_action(&text, "Restart", Some(Duration::from_secs(10)), restart);
+}
+
 /// What's new: the waiting update when there is one, else the notes of the running build.
 pub fn open() {
     match take_notice_for_viewing() {
@@ -132,6 +142,12 @@ pub fn open() {
             let restart_button = DialogButton::new("Restart", Role::Suggested, restart);
             fetch(move || commits_between(&running, &new).map(|c| (commits_markdown(&c), new)), move |(notes, new)| {
                 notes_dialog("Nightly update installed", &format!("Nightly {}", short(&new)), &notes, None, Some(restart_button));
+            });
+        }
+        Some(Notice::StableInstalled(version)) => {
+            let restart_button = DialogButton::new("Restart", Role::Suggested, restart);
+            fetch(move || stable_notes(&version).map(|notes| (notes, version)), move |((body, url), version)| {
+                notes_dialog("Update installed", &format!("Kurobayomi {version}"), &body, Some(&url), Some(restart_button));
             });
         }
         None => show_current(None),
