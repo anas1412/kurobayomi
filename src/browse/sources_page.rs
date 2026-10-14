@@ -206,12 +206,12 @@ impl Inner {
 fn status_dot(status: kuro_extensions::repo::Status) -> gtk::Box {
     use kuro_extensions::repo::Status;
     let (class, text) = match status {
-        Status::Active => ("kb-status-active", "Working"),
-        Status::Blocked => ("kb-status-blocked", "Temporarily blocked by the site"),
-        Status::Broken => ("kb-status-broken", "Broken: waiting for a fix"),
+        Status::Active => ("kb-status-active", tr(MsgKey::source_status_active)),
+        Status::Blocked => ("kb-status-blocked", tr(MsgKey::source_status_blocked)),
+        Status::Broken => ("kb-status-broken", tr(MsgKey::source_status_broken)),
     };
-    let dot = gtk::Box::builder().valign(gtk::Align::Center).margin_end(6).css_classes(["kb-status", class]).tooltip_text(text).build();
-    dot.update_property(&[gtk::accessible::Property::Label(text)]);
+    let dot = gtk::Box::builder().valign(gtk::Align::Center).margin_end(6).css_classes(["kb-status", class]).tooltip_text(&text).build();
+    dot.update_property(&[gtk::accessible::Property::Label(&text)]);
     dot
 }
 

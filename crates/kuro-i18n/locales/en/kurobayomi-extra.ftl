@@ -124,3 +124,18 @@ right_to_left_viewer = Paged, right to left
 
 # source: kurobayomi
 vertical_viewer = Paged, vertical
+
+# source: kurobayomi
+source_status_active = Working
+
+# source: kurobayomi
+source_status_blocked = Temporarily blocked by the site
+
+# source: kurobayomi
+source_status_broken = Broken: waiting for a fix
+
+# source: kurobayomi
+browse_check_sources = Check for new and updated sources
+
+# source: kurobayomi
+downloads_check_files = Check the downloaded files again

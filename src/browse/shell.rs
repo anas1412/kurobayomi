@@ -66,7 +66,7 @@ impl BrowseShell {
         // the shared header row: the Anime | Manga switch at the start, the search toggle and the actions at the end, the bar under it
         let (options, menu) = inner.header_actions();
         let on_refresh = Rc::clone(&inner.deps.on_refresh);
-        let refresh = crate::ui::refresh_button("Check for new and updated sources");
+        let refresh = crate::ui::refresh_button(&tr(MsgKey::browse_check_sources));
         refresh.connect_clicked(move |button| on_refresh(button));
         let end = crate::ui::HeaderActions {
             search: Some(inner.search.clone()),

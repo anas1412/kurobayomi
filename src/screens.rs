@@ -252,7 +252,7 @@ fn downloads() -> Option<Built> {
 fn downloads_view(kind: Kind) -> Built {
     if let Some((page, search, menu)) = crate::downloads::queue_page::page(kind) {
         // refresh checks the download folders of this kind again (Settings' Reindex downloads, for one kind)
-        let refresh = crate::ui::refresh_button("Check the downloaded files again");
+        let refresh = crate::ui::refresh_button(&kuro_i18n::tr(kuro_i18n::MsgKey::downloads_check_files));
         refresh.connect_clicked(move |button| {
             crate::ui::spin_once(button);
             if let Some(downloads) = crate::shell::host::Shell::get().and_then(|shell| shell.download_service()) {

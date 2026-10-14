@@ -68,7 +68,7 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
 
     // the actions at the end: refresh, then the display options
     let on_refresh = Rc::clone(&deps.on_refresh);
-    let refresh = crate::ui::refresh_button("Refresh");
+    let refresh = crate::ui::refresh_button(&tr(MsgKey::action_webview_refresh));
     refresh.connect_clicked(move |button| {
         crate::ui::spin_once(button);
         on_refresh();

@@ -71,8 +71,8 @@ fn update_center_row() -> PreferenceItem {
             let button = gtk::Button::new();
             button.set_valign(gtk::Align::Center);
             let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
-            let pause = crate::ui::icon_button("media-playback-pause-symbolic", "Pause");
-            let cancel = crate::ui::icon_button("window-close-symbolic", "Cancel");
+            let pause = crate::ui::icon_button("media-playback-pause-symbolic", &tr(MsgKey::action_pause));
+            let cancel = crate::ui::icon_button("window-close-symbolic", &tr(MsgKey::action_cancel));
             for download_button in [&pause, &cancel] {
                 download_button.set_valign(gtk::Align::Center);
                 download_button.add_css_class("flat");
@@ -127,10 +127,10 @@ fn update_center_row() -> PreferenceItem {
                 let paused = matches!(status, Status::Paused { .. });
                 pause.set_visible(downloading);
                 cancel.set_visible(downloading);
-                let (icon, tip) = if paused { ("media-playback-start-symbolic", "Resume") } else { ("media-playback-pause-symbolic", "Pause") };
+                let (icon, tip) = if paused { ("media-playback-start-symbolic", tr(MsgKey::action_resume)) } else { ("media-playback-pause-symbolic", tr(MsgKey::action_pause)) };
                 pause.set_icon_name(icon);
-                pause.set_tooltip_text(Some(tip));
-                pause.update_property(&[gtk::accessible::Property::Label(tip)]);
+                pause.set_tooltip_text(Some(&tip));
+                pause.update_property(&[gtk::accessible::Property::Label(&tip)]);
                 // the end spinner while checking; during a download the bar's own spinner
                 spinner.set_visible(status.busy() && status.fraction().is_none());
                 button.set_visible(!status.busy());

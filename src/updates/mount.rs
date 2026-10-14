@@ -67,7 +67,7 @@ pub fn history() -> Option<Built> {
         let target = Rc::clone(screen);
         let menu = vec![vec![crate::ui::MenuEntry::new(tr(MsgKey::pref_clear_history), move || target.ask_clear())]];
         let target = Rc::clone(screen);
-        let refresh = crate::ui::refresh_button("Refresh");
+        let refresh = crate::ui::refresh_button(&tr(MsgKey::action_webview_refresh));
         refresh.connect_clicked(move |button| {
             crate::ui::spin_once(button);
             target.reload();
