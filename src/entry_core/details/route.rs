@@ -219,12 +219,6 @@ struct View {
     related_shown: RefCell<Option<(Vec<AnimeRelationGroup>, kuro_prefs::library::LibraryDisplayMode)>>,
 }
 
-fn icon_button(icon: &str, tip: &str) -> Button {
-    let b = ui::icon_button(icon, tip);
-    b.set_focus_on_click(false);
-    b
-}
-
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -435,7 +429,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
 
     let (episode_spec, season_spec) = (list_options::item_spec(kind), list_options::season_spec());
     let options = ViewOptions::new(list_options::TOOLTIP, &episode_spec.sections());
-    let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
+    let refresh_button = crate::ui::refresh_button(&tr(MsgKey::action_webview_refresh));
     // the header row every page shares (`ui::HeaderActions`); the "more" menu holds the items `overflow_menu::items` gives
     // for this entry and its source (T-39a-075), and Download all is in the head of the list
     let toolbar = crate::ui::HeaderActions {
@@ -812,7 +806,8 @@ impl View {
         self.options.widget.set_sensitive(header.enabled);
         self.spinner.set_spinning(m.flow.refreshing);
         self.spinner.set_visible(m.flow.refreshing);
-        // one refresh runs at a time
+        // one refresh runs at a time; its arrow turns meanwhile
+        ui::set_refreshing(&self.refresh_button, m.flow.refreshing);
         self.refresh_button.set_sensitive(!m.flow.refreshing && !m.selection.is_active());
         self.empty.set_visible(none_shown && !m.flow.refreshing);
         self.empty_label.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { crate::entry_core::wording::none_found(self.env.kind) }));

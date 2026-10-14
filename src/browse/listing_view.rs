@@ -225,7 +225,6 @@ impl ListingView {
         self.inner.listing.borrow().query().clone()
     }
 
-    #[cfg(test)]
     /// The listing's filters, as its running search holds them.
     pub fn filters(&self) -> FilterList {
         self.inner.listing.borrow().filters().clone()

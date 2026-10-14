@@ -1,5 +1,5 @@
 //! The GTK page over `stores::Page`, for the one repository list (T-47b-009 to T-47b-019): a spinner while loading, the empty text, the card list, the Add FAB that shrinks on scroll, the
-//! add, remove and deep-link dialogs, and the header Refresh with its spinner. The page owns no rules: each user action
+//! add, remove and deep-link dialogs, and the header Refresh, whose arrow turns while it runs. The page owns no rules: each user action
 //! is an [`Event`] for the reducer, and the returned [`Effect`] runs on a worker through [`Ops`].
 
 use std::cell::{Cell, RefCell};
@@ -155,7 +155,6 @@ struct Inner<T: Keyed + Send + 'static> {
     fab: gtk::Button,
     fab_label: gtk::Label,
     refresh: gtk::Button,
-    spinner: gtk::Spinner,
     dialog: RefCell<Option<DialogUi>>,
 }
 
@@ -198,10 +197,8 @@ pub fn build<T: Keyed + Send + 'static>(
     fab.set_visible(false);
     let fab_label = fab.child().and_then(|c| c.last_child()).and_downcast::<gtk::Label>().expect("the FAB ends with its label");
 
-    let refresh = crate::ui::icon_button("view-refresh-symbolic", &texts.refresh);
+    let refresh = crate::ui::refresh_button(&texts.refresh);
     refresh.set_sensitive(false);
-    let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
-    spinner.set_visible(false);
 
     let inner = Rc::new(Inner {
         ops,
@@ -214,7 +211,6 @@ pub fn build<T: Keyed + Send + 'static>(
         fab: fab.clone(),
         fab_label,
         refresh: refresh.clone(),
-        spinner: spinner.clone(),
         dialog: RefCell::new(None),
     });
 
@@ -282,7 +278,7 @@ pub fn build<T: Keyed + Send + 'static>(
     let keep = Rc::clone(&inner);
     let root: gtk::Widget = overlay.clone().upcast();
     root.connect_destroy(move |_| drop(Rc::clone(&keep)));
-    let built = Built { content: overlay.upcast(), end: vec![spinner.upcast(), refresh.upcast()] };
+    let built = Built { content: overlay.upcast(), end: vec![refresh.upcast()] };
     (built, StoresPage { inner })
 }
 
@@ -405,8 +401,9 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             (true, false) => "list",
         });
         self.fab.set_visible(ready);
+        // the arrow turns while the links are fetched again
+        crate::ui::set_refreshing(&self.refresh, refreshing);
         self.refresh.set_sensitive(ready && !refreshing);
-        self.spinner.set_visible(refreshing);
         while let Some(row) = self.list.first_child() {
             self.list.remove(&row);
         }
@@ -777,12 +774,12 @@ mod tests {
             inner.dispatch(Event::ConfirmRemove);
             assert!(inner.dialog.borrow().is_none(), "the dialog closes at once");
 
-            // a refresh shows the header spinner until it is done
+            // a refresh turns the Refresh arrow until it is done
             inner.dispatch(Event::Refresh);
-            assert!(inner.spinner.is_visible());
-            pump_until(|| !inner.spinner.is_visible());
-            assert!(!inner.spinner.is_visible());
-            assert_eq!(built.end.len(), 2, "spinner and Refresh in the header");
+            assert!(inner.refresh.has_css_class("kb-refreshing"));
+            pump_until(|| !inner.refresh.has_css_class("kb-refreshing"));
+            assert!(!inner.refresh.has_css_class("kb-refreshing") && inner.refresh.is_sensitive());
+            assert_eq!(built.end.len(), 1, "Refresh alone in the header");
         });
     }
 

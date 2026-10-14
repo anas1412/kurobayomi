@@ -205,9 +205,17 @@ fn incognito_icon() -> gtk::Image {
 
 /// The panel title: the app's name, with the incognito icon beside it while Incognito mode is on. Not a menu: the app's
 /// own items (Incognito, Keyboard shortcuts, Help, About) are rows at the bottom of the panel.
+/// The panel's title: the app's name, and on a nightly build a small "nightly" under it (a property of the build, not part
+/// of the name; it also leaves the header room for the search, the menu and the Incognito icon).
 fn title() -> GBox {
     let title = GBox::new(O::Horizontal, 6);
-    title.append(&gtk::Label::builder().label(crate::channel::APP_NAME).css_classes(["title"]).build());
+    let names = GBox::new(O::Vertical, 0);
+    names.set_valign(gtk::Align::Center);
+    names.append(&gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build());
+    if crate::channel::NIGHTLY {
+        names.append(&gtk::Label::builder().label("nightly").css_classes(["kb-subtitle", "dim-label"]).build());
+    }
+    title.append(&names);
     title.append(&incognito_icon());
     title
 }

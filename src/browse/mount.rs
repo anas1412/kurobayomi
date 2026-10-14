@@ -29,6 +29,20 @@ thread_local! {
     static SHELL: RefCell<Option<Rc<BrowseShell>>> = const { RefCell::new(None) };
 }
 
+/// Fetches every repository link again and reloads the sources (the Repositories page's refresh), off the GTK thread;
+/// the button stays off until it ends.
+fn refresh_repositories(button: &gtk::Button) {
+    use crate::pref_model::stores_backend::{Ops as _, RepoOps};
+    let links = SourcePrefs::new(crate::data::app().base.store().clone()).manga_extension_repos;
+    let ops = RepoOps::new(links);
+    crate::ui::set_refreshing(button, true);
+    let button = button.clone();
+    gtk::glib::spawn_future_local(async move {
+        let _ = gtk::gio::spawn_blocking(move || ops.refresh()).await;
+        crate::ui::set_refreshing(&button, false);
+    });
+}
+
 /// Opens the one repository list, which holds the links of both kinds. The empty Sources pages and the header menu
 /// both lead here.
 pub fn open_repos() {
@@ -174,6 +188,7 @@ pub fn browse() -> Option<Built> {
         on_route: Rc::new(|route| open_route(&route)),
         on_filter: Rc::new(move |page: BrowsePage| open_filter(page.kind(), &filter_prefs)),
         on_repos: Rc::new(|_kind| open_repos()),
+        on_refresh: Rc::new(refresh_repositories),
         on_leave: Rc::new(crate::ui::pop),
     };
     let shell = Rc::new(BrowseShell::new(deps));

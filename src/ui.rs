@@ -725,6 +725,39 @@ pub fn menu_button(sections: Vec<Vec<MenuEntry>>) -> Option<gtk::MenuButton> {
     Some(button)
 }
 
+/// The refresh button of a page's header (`HeaderActions::refresh`), the one every page builds: the circular arrow, with
+/// `tip` saying what it loads again (the Library's updates the library, a title's page fetches its episodes).
+pub fn refresh_button(tip: &str) -> gtk::Button {
+    icon_button("view-refresh-symbolic", tip)
+}
+
+/// How a refresh button shows that its work runs: the arrow turns until it ends, and the button is off meanwhile, so the
+/// work starts once. Every page's refresh shows it this way (`style.css`, `.kb-refreshing`).
+pub fn set_refreshing(button: &gtk::Button, busy: bool) {
+    if busy {
+        button.add_css_class("kb-refreshing");
+    } else {
+        button.remove_css_class("kb-refreshing");
+    }
+    button.set_sensitive(!busy);
+}
+
+/// One turn of a refresh button's arrow, for a refresh that is done at once (reading a list again): it shows the click
+/// was taken.
+pub fn spin_once(button: &gtk::Button) {
+    button.remove_css_class("kb-spin-once");
+    button.add_css_class("kb-spin-once");
+    let weak = button.downgrade();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(SPIN_MS), move || {
+        if let Some(button) = weak.upgrade() {
+            button.remove_css_class("kb-spin-once");
+        }
+    });
+}
+
+/// One turn of the refresh arrow, in milliseconds (`style.css` uses the same).
+const SPIN_MS: u64 = 700;
+
 /// The css class of a page's ⋮ menu ([`menu_button`]), so a tab page can lead its header with it.
 pub const MORE_MENU: &str = "kb-more";
 /// The box at the start of a tab page's header that holds its two lead slots: the search toggle, then the ⋮ menu.

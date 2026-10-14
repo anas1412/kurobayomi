@@ -179,7 +179,7 @@ impl LibraryView {
         search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
         // the page header sizes it (`ui::page` clamps a search entry to `ui::SEARCH_WIDTH`)
         search.set_hexpand(true);
-        let refresh_button = crate::ui::icon_button("view-refresh-symbolic", &tr(MsgKey::action_update_library));
+        let refresh_button = crate::ui::refresh_button(&tr(MsgKey::action_update_library));
         let options = options::Options::new(deps.kind);
 
         let tabs = tabs::TabStrip::new();
@@ -634,13 +634,13 @@ fn repositories_exist() -> bool {
     !sources.manga_extension_repos.get().is_empty() || !sources.anime_extension_repos.get().is_empty()
 }
 
-/// Disables the refresh button while a pass of this kind runs.
+/// Turns the refresh arrow (and keeps the button off) while a pass of this kind runs.
 fn sync_refresh_button(inner: &Rc<RefCell<Inner>>) {
     let (button, running) = {
         let st = inner.borrow();
         (st.refresh_button.clone(), st.nav.update_running.clone())
     };
-    button.set_sensitive(!running());
+    crate::ui::set_refreshing(&button, running());
 }
 
 /// Sends the current settings to the worker as a new generation.

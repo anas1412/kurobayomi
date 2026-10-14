@@ -251,7 +251,16 @@ fn downloads() -> Option<Built> {
 
 fn downloads_view(kind: Kind) -> Built {
     if let Some((page, search, menu)) = crate::downloads::queue_page::page(kind) {
-        let end = crate::ui::HeaderActions { search: Some(search), menu: vec![menu], ..Default::default() }.widgets();
+        // refresh checks the download folders of this kind again (Settings' Reindex downloads, for one kind)
+        let refresh = crate::ui::refresh_button("Check the downloaded files again");
+        refresh.connect_clicked(move |button| {
+            crate::ui::spin_once(button);
+            if let Some(downloads) = crate::shell::host::Shell::get().and_then(|shell| shell.download_service()) {
+                downloads.reindex(Some(kind));
+                crate::toast::notify("Checking the downloaded files again");
+            }
+        });
+        let end = crate::ui::HeaderActions { search: Some(search), refresh: Some(refresh.upcast()), menu: vec![menu], ..Default::default() }.widgets();
         return Built { content: scrolled(&page).upcast(), end };
     }
     let library = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::label_library));

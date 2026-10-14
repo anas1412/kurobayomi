@@ -26,6 +26,9 @@ pub struct ShellDeps {
     pub on_filter: Rc<dyn Fn(BrowsePage)>,
     /// The menu's repository entry, for the visible kind: where source repository links are added.
     pub on_repos: Rc<dyn Fn(Kind)>,
+    /// The refresh button: fetches the repositories again for new and updated sources. It gets the button, to turn it
+    /// off while that runs.
+    pub on_refresh: Rc<dyn Fn(&gtk::Button)>,
     /// Escape with an empty search: back out of the Browse page.
     pub on_leave: Rc<dyn Fn()>,
 }
@@ -62,8 +65,12 @@ impl BrowseShell {
         let inner = Rc::new(Inner { stack, search: gtk::SearchEntry::new(), deps });
         // the shared header row: the Anime | Manga switch at the start, the search toggle and the actions at the end, the bar under it
         let (options, menu) = inner.header_actions();
+        let on_refresh = Rc::clone(&inner.deps.on_refresh);
+        let refresh = crate::ui::refresh_button("Check for new and updated sources");
+        refresh.connect_clicked(move |button| on_refresh(button));
         let end = crate::ui::HeaderActions {
             search: Some(inner.search.clone()),
+            refresh: Some(refresh.upcast()),
             extra: vec![gtk::StackSwitcher::builder().stack(&inner.stack).build().upcast()],
             options: Some(options),
             menu,
@@ -214,6 +221,7 @@ pub(crate) mod tests {
             on_route: Rc::new(move |route| routes.borrow_mut().push(route)),
             on_filter: Rc::new(|_| {}),
             on_repos: Rc::new(move |kind| repos.borrow_mut().push(kind)),
+            on_refresh: Rc::new(|_| {}),
             on_leave: Rc::new(move || *left.borrow_mut() += 1),
         };
         (BrowseShell::new(deps), log)

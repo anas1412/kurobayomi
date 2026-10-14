@@ -18,12 +18,20 @@ const DESKTOP: &str = "Desktop";
 const SESSION: &str = "Session";
 const GTK: &str = "GTK";
 
-/// "Stable <version>", "Debug <sha>" in a debug build.
-pub fn version_text(build_type: &str, version: &str, sha: &str) -> String {
-    match build_type {
-        "debug" => format!("Debug {sha}"),
-        _ => format!("Stable {version}"),
+/// "Nightly <commit>" on a nightly build, else "Stable <version>", or "Debug <sha>" in a debug build.
+pub fn version_text(build_type: &str, version: &str, sha: &str, nightly_commit: Option<&str>) -> String {
+    match (nightly_commit, build_type) {
+        (Some(commit), _) => format!("Nightly {commit}"),
+        (None, "debug") => format!("Debug {sha}"),
+        (None, _) => format!("Stable {version}"),
     }
+}
+
+/// The version line of this build, for About's Version row and the debug information.
+pub fn current_version_text() -> String {
+    let info = &*APP_INFO;
+    let nightly = Some(crate::channel::short_commit()).filter(|commit| crate::channel::NIGHTLY && !commit.is_empty());
+    version_text(info.build_type, &info.version_name, info.git_sha, nightly)
 }
 
 /// "<vendor> <product>" from the two DMI files; one missing gives the other, both missing gives `None`.
@@ -46,7 +54,7 @@ fn read_file(path: &str) -> Option<String> {
 pub fn app_rows(version_title: &str, build_time_title: &str) -> Vec<(String, String)> {
     let info = &*APP_INFO;
     vec![
-        (version_title.to_owned(), version_text(info.build_type, &info.version_name, info.git_sha)),
+        (version_title.to_owned(), current_version_text()),
         (build_time_title.to_owned(), info.build_time.to_owned()),
     ]
 }
@@ -134,8 +142,9 @@ mod tests {
 
     #[test]
     fn t_47b_040_the_version_row_names_the_build() {
-        assert_eq!(version_text("release", "0.1.0", "abc1234"), "Stable 0.1.0");
-        assert_eq!(version_text("debug", "0.1.0-77", "abc1234"), "Debug abc1234");
+        assert_eq!(version_text("release", "0.1.0", "abc1234", None), "Stable 0.1.0");
+        assert_eq!(version_text("debug", "0.1.0-77", "abc1234", None), "Debug abc1234");
+        assert_eq!(version_text("release", "0.1.0", "abc1234", Some("6f273298")), "Nightly 6f273298", "a nightly says so");
     }
 
     #[test]

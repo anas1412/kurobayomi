@@ -18,7 +18,7 @@ use kuro_domain::release::{Release, ReleaseError};
 use kuro_i18n::{tr, MsgKey};
 
 use crate::app_update;
-use crate::pref_model::debug_info::{app_rows, device_rows, model_text, version_text};
+use crate::pref_model::debug_info::{app_rows, device_rows, model_text};
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::changelog;
 use crate::settings_ui::clipboard::copy_to_clipboard;
@@ -29,13 +29,9 @@ pub const VERSION_TITLE: &str = "Version";
 pub const BUILD_TIME_TITLE: &str = "Build time";
 pub const MODEL_TITLE: &str = "Device model";
 
-/// The Version subtitle: `Stable <version> (<build time>)` in a release, `Debug <sha> (<build time>)` in a debug build.
+/// The Version subtitle: the build's version line (`debug_info::current_version_text`) and its build time in brackets.
 pub fn version_subtitle() -> String {
-    let info = &*APP_INFO;
-    if crate::channel::NIGHTLY {
-        return format!("Nightly {} ({})", crate::channel::short_commit(), info.build_time);
-    }
-    format!("{} ({})", version_text(info.build_type, &info.version_name, info.git_sha), info.build_time)
+    format!("{} ({})", crate::pref_model::debug_info::current_version_text(), APP_INFO.build_time)
 }
 
 /// The debug information block the Version row copies: one `Title: value` line per row, app rows first.

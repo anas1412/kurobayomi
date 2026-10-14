@@ -271,6 +271,11 @@ mod base_css_tests {
         let mut rest = BASE_CSS;
         while let Some(at) = rest.find('@') {
             let name: String = rest[at + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            // an at-rule, not a colour: the refresh arrow's animation
+            if name == "keyframes" {
+                rest = &rest[at + 1..];
+                continue;
+            }
             let palette = name
                 .strip_prefix("kuro_")
                 .is_some_and(|role| crate::theme::tokens::Role::ALL.iter().any(|r| r.css_name() == role));

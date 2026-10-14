@@ -123,6 +123,22 @@ headerbar menubutton > button.image-button:checked,
 .kb-bottom-bar button:checked {
   background: alpha(currentColor, 0.16);
 }
+/* A refresh button at work: its arrow turns until the work ends (`ui::set_refreshing`), or once for a refresh that is done
+   at once (`ui::spin_once`, 700 ms). Every page's refresh button uses it. */
+@keyframes kb-spin {
+  from { -gtk-icon-transform: rotate(0turn); }
+  to { -gtk-icon-transform: rotate(1turn); }
+}
+button.kb-refreshing image {
+  animation: kb-spin 900ms linear infinite;
+}
+button.kb-spin-once image {
+  animation: kb-spin 700ms ease-in-out 1;
+}
+/* the small line under a title: the "nightly" of the panel's title */
+.kb-subtitle {
+  font-size: 0.8em;
+}
 .kb-library-grid {
   background: none;
   padding: 8px 12px;

@@ -66,7 +66,13 @@ pub fn history() -> Option<Built> {
     let view = |screen: &Rc<HistoryScreen>| {
         let target = Rc::clone(screen);
         let menu = vec![vec![crate::ui::MenuEntry::new(tr(MsgKey::pref_clear_history), move || target.ask_clear())]];
-        let end = crate::ui::HeaderActions { search: Some(screen.search().clone()), menu, ..Default::default() }.widgets();
+        let target = Rc::clone(screen);
+        let refresh = crate::ui::refresh_button("Refresh");
+        refresh.connect_clicked(move |button| {
+            crate::ui::spin_once(button);
+            target.reload();
+        });
+        let end = crate::ui::HeaderActions { search: Some(screen.search().clone()), refresh: Some(refresh.upcast()), menu, ..Default::default() }.widgets();
         Built { content: screen.widget().clone().upcast(), end }
     };
     let (page, _) = tab_page([view(&anime), view(&manga)]);
@@ -106,7 +112,7 @@ pub fn updates() -> Option<Built> {
         let mut actions = crate::ui::HeaderActions::default();
         for item in &spec.toolbar {
             if item.label == UPDATE_LIBRARY {
-                let button = crate::ui::icon_button(&item.icon, &item.label);
+                let button = crate::ui::refresh_button(&item.label);
                 button.connect_clicked(move |button| update_library(button, kind));
                 refresh.push(button.clone());
                 actions.refresh = Some(button.upcast());
@@ -178,16 +184,16 @@ fn update_library(button: &gtk::Button, kind: Kind) {
     }
 }
 
-/// Puts a spinner on the button until the library pass of `kind` is no longer running.
+/// Turns the button's arrow until the library pass of `kind` is no longer running.
 fn spin_until_done(button: &gtk::Button, kind: Kind) {
-    button.set_child(Some(&crate::ui::loading(crate::ui::LoadSize::Inline)));
+    crate::ui::set_refreshing(button, true);
     let weak = button.downgrade();
     glib::timeout_add_local(Duration::from_millis(500), move || {
         let Some(button) = weak.upgrade() else { return glib::ControlFlow::Break };
         if library_trigger::running(kind) {
             return glib::ControlFlow::Continue;
         }
-        button.set_child(Some(&gtk::Image::from_icon_name("view-refresh-symbolic")));
+        crate::ui::set_refreshing(&button, false);
         glib::ControlFlow::Break
     });
 }

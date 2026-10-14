@@ -271,6 +271,10 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
             let listing = listing_view.clone();
             Rc::new(move |mode| listing.set_display_mode(mode))
         },
+        on_refresh: {
+            let listing = listing_view.clone();
+            Rc::new(move || listing.restart_with(listing.query(), listing.filters()))
+        },
         on_overflow: {
             let open_url = Rc::clone(&open_url);
             Rc::new(move |item| match (item, is_local) {

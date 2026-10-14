@@ -117,6 +117,11 @@ impl HistoryScreen {
     }
 
     /// (Re)starts the live query for the current search text. The previous run is aborted.
+    /// Reads the history again (the header's refresh).
+    pub fn reload(self: &Rc<Self>) {
+        self.start();
+    }
+
     fn start(self: &Rc<Self>) {
         if let Some(previous) = self.watch.borrow_mut().take() {
             previous.abort();

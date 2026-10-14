@@ -27,6 +27,8 @@ pub struct HeaderDeps {
     /// A display mode was chosen and already stored.
     pub on_display_mode: Rc<dyn Fn(LibraryDisplayMode)>,
     pub on_overflow: Rc<dyn Fn(OverflowItem)>,
+    /// The refresh button: loads the listing again from its first page.
+    pub on_refresh: Rc<dyn Fn()>,
 }
 
 #[allow(dead_code)] // kept for the shape of the type; not built or read yet
@@ -53,6 +55,15 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
 
     let display = display_menu(&deps);
     bar.pack_end(&display.widget);
+
+    // the shared order of a header's actions: search, refresh, the display options, the menu
+    let on_refresh = Rc::clone(&deps.on_refresh);
+    let refresh = crate::ui::refresh_button("Refresh");
+    refresh.connect_clicked(move |button| {
+        crate::ui::spin_once(button);
+        on_refresh();
+    });
+    bar.pack_end(&refresh);
 
     let search = deps.search.clone();
     bar.pack_end(&search);
@@ -126,6 +137,7 @@ pub(crate) mod tests {
             search: gtk::ToggleButton::new(),
             on_display_mode: Rc::new(move |m| mode.borrow_mut().push(format!("mode {m:?}"))),
             on_overflow: Rc::new(move |i| overflow.borrow_mut().push(format!("overflow {i:?}"))),
+            on_refresh: Rc::new(|| {}),
         }
     }
 

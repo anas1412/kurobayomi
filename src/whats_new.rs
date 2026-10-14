@@ -271,14 +271,28 @@ fn commit_list(list: &serde_json::Value) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The notes of a list of commits: one bullet per commit, its message and short hash.
+/// The most commits the notes list; older ones are counted in one last line.
+const MAX_COMMITS: usize = 10;
+/// The longest commit subject the notes show, in characters; a longer one ends with an ellipsis.
+const MAX_SUBJECT_CHARS: usize = 140;
+
+/// The notes of a list of commits (newest first): one bullet per commit, its message and short hash, for the newest
+/// [`MAX_COMMITS`], then how many more there are.
 fn commits_markdown(commits: &[(String, String)]) -> String {
     if commits.is_empty() {
         return "No changes since your last version.".to_owned();
     }
     let mut notes = String::from("### Changes\n");
-    for (sha, subject) in commits {
+    for (sha, subject) in commits.iter().take(MAX_COMMITS) {
+        let subject = if subject.chars().count() > MAX_SUBJECT_CHARS {
+            format!("{}…", subject.chars().take(MAX_SUBJECT_CHARS - 1).collect::<String>().trim_end())
+        } else {
+            subject.clone()
+        };
         notes.push_str(&format!("- {subject} (`{}`)\n", short(sha)));
+    }
+    if let Some(more) = commits.len().checked_sub(MAX_COMMITS).filter(|more| *more > 0) {
+        notes.push_str(&format!("\n…and {more} more {}.\n", if more == 1 { "change" } else { "changes" }));
     }
     notes
 }
@@ -311,5 +325,18 @@ mod tests {
         let notes = commits_markdown(&[("1111111111aaaa".into(), "Fix the grid".into())]);
         assert_eq!(notes, "### Changes\n- Fix the grid (`11111111`)\n");
         assert_eq!(commits_markdown(&[]), "No changes since your last version.");
+    }
+
+    #[test]
+    fn the_notes_list_the_newest_ten_changes_shortened_and_count_the_rest() {
+        let commits: Vec<(String, String)> = (0..13).map(|n| (format!("{n:040}"), format!("change {n}"))).collect();
+        let notes = commits_markdown(&commits);
+        assert_eq!(notes.matches("\n- ").count() + usize::from(notes.starts_with("- ")), 10);
+        assert!(notes.contains("change 9") && !notes.contains("change 10"), "the newest ten");
+        assert!(notes.ends_with("…and 3 more changes.\n"));
+        let long = vec![("a".repeat(40), "x".repeat(300))];
+        let line = commits_markdown(&long);
+        assert!(line.contains(&format!("{}…", "x".repeat(MAX_SUBJECT_CHARS - 1))) && !line.contains(&"x".repeat(MAX_SUBJECT_CHARS)));
+        assert!(!commits_markdown(&commits[..10]).contains("more"), "exactly ten: no count line");
     }
 }
