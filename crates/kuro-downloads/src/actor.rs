@@ -249,12 +249,15 @@ impl Actor {
 
     async fn handle(&mut self, command: Command) {
         match command {
+            // a caller that waits for the answer reads the queue next: the snapshot is published before the answer
             Command::Enqueue { req, reply } => {
                 let outcome = self.enqueue(req).await;
+                self.publish();
                 let _ = reply.send(outcome);
             }
             Command::StartNow { req, reply } => {
                 let outcome = self.start_now(req).await;
+                self.publish();
                 let _ = reply.send(outcome);
             }
             Command::Start { kind } => {
@@ -267,6 +270,7 @@ impl Actor {
             Command::Reorder { kind, unit_ids } => self.reorder(kind, &unit_ids).await,
             Command::Cancel { kind, target, reply } => {
                 let ids = self.cancel(kind, target).await;
+                self.publish();
                 let _ = reply.send(ids);
             }
             Command::Hold { kind, entry_id, reply } => {
