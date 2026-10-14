@@ -138,7 +138,7 @@ fn parse_request(json: &str, hosts: &[String]) -> Result<Request, String> {
 /// The transport follows redirects, so the allow-list is checked again on the final URL and a response from a host
 /// outside it is dropped unread. ponytail: only the final hop is visible here. A per-hop check needs a redirect hook
 /// in kuro-net, which this crate cannot add.
-async fn send(client: NetworkClient, request: Request, hosts: &[String]) -> Result<String, String> {
+async fn send(client: NetworkClient, request: Request, hosts: &[String]) -> Result<HttpResponse, String> {
     let response = client.execute(request).await.map_err(|e| e.to_string())?;
     check_host(hosts, &response.url)?;
     let status = response.status.as_u16();
@@ -153,14 +153,47 @@ async fn send(client: NetworkClient, request: Request, hosts: &[String]) -> Resu
         Ok(text) => (text.to_owned(), None),
         Err(_) => (BASE64_STANDARD.encode(&bytes), Some("base64")),
     };
-    serde_json::to_string(&HttpResponse {
-        status,
-        headers,
-        url: final_url,
-        body,
-        body_encoding,
-    })
-    .map_err(|e| e.to_string())
+    Ok(HttpResponse { status, headers, url: final_url, body, body_encoding })
+}
+
+/// Runs a guest request inside a hidden browser page of its site, for sites that answer plain clients with a browser
+/// check (Cloudflare's "Just a moment..."). The check's pass is tied to the browser that solved it, so the request has to
+/// be sent from that browser, not replayed here with its cookie. The app installs one with [`set_page_fetch`].
+pub trait PageFetch: Send + Sync {
+    /// Sends `request_json` (the guest's request shape, already allow-listed) and returns the guest's response shape:
+    /// `{status, headers, url, body, bodyEncoding?}`. Blocks until the page answers.
+    fn fetch(&self, request_json: &str) -> Result<String, String>;
+}
+
+static PAGE_FETCH: std::sync::OnceLock<std::sync::Arc<dyn PageFetch>> = std::sync::OnceLock::new();
+
+/// Installs the browser the challenged sites are reached through. Only the first call counts.
+pub fn set_page_fetch(page: std::sync::Arc<dyn PageFetch>) {
+    let _ = PAGE_FETCH.set(page);
+}
+
+/// The hosts that answered with a browser check in this run: their requests skip the plain client.
+fn challenged() -> std::sync::MutexGuard<'static, std::collections::HashSet<String>> {
+    static CHALLENGED: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(Mutex::default);
+    CHALLENGED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether an answer is Cloudflare's browser check rather than the page.
+fn is_challenge(response: &HttpResponse) -> bool {
+    matches!(response.status, 403 | 503)
+        && response.headers.iter().any(|(name, value)| name.eq_ignore_ascii_case("cf-mitigated") && value.eq_ignore_ascii_case("challenge"))
+}
+
+/// Sends through the page and applies the allow-list to where the page ended up, as [`send`] does.
+fn through_page(page: &dyn PageFetch, request_json: &str, hosts: &[String]) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Landed {
+        url: String,
+    }
+    let answer = page.fetch(request_json)?;
+    let landed: Landed = serde_json::from_str(&answer).map_err(|e| format!("invalid page answer: {e}"))?;
+    check_host(hosts, &Url::parse(&landed.url).map_err(|e| format!("invalid url: {e}"))?)?;
+    Ok(answer)
 }
 
 impl HostState {
@@ -178,8 +211,18 @@ impl HostState {
         if !wait.is_zero() {
             std::thread::sleep(wait);
         }
+        let page = PAGE_FETCH.get();
+        if let Some(page) = page.filter(|_| challenged().contains(&host)) {
+            return through_page(page.as_ref(), request_json, &self.hosts);
+        }
         let handle = tokio::runtime::Handle::try_current().map_err(|e| format!("no async runtime: {e}"))?;
-        handle.block_on(send(self.client.clone(), request, &self.hosts))
+        let response = handle.block_on(send(self.client.clone(), request, &self.hosts))?;
+        if let Some(page) = page.filter(|_| is_challenge(&response)) {
+            tracing::info!(host, "the site answered with a browser check; its requests now go through a hidden page");
+            challenged().insert(host);
+            return through_page(page.as_ref(), request_json, &self.hosts);
+        }
+        serde_json::to_string(&response).map_err(|e| e.to_string())
     }
 }
 
@@ -525,5 +568,32 @@ mod tests {
         let now = host.unix_seconds();
         let after = SystemTime::now().duration_since(UNIX_EPOCH).expect("after 1970").as_secs();
         assert!(before <= now && now <= after, "{before} <= {now} <= {after}");
+    }
+
+    fn answer(status: u16, headers: &[(&str, &str)]) -> HttpResponse {
+        let headers = headers.iter().map(|(n, v)| ((*n).to_owned(), (*v).to_owned())).collect();
+        HttpResponse { status, headers, url: "https://ok.test/".into(), body: String::new(), body_encoding: None }
+    }
+
+    #[test]
+    fn only_a_cloudflare_check_counts_as_a_challenge() {
+        assert!(is_challenge(&answer(403, &[("cf-mitigated", "challenge")])));
+        assert!(is_challenge(&answer(503, &[("CF-Mitigated", "Challenge")])));
+        assert!(!is_challenge(&answer(403, &[])), "a plain 403 is the site's own answer");
+        assert!(!is_challenge(&answer(200, &[("cf-mitigated", "challenge")])));
+    }
+
+    struct Landing(&'static str);
+    impl PageFetch for Landing {
+        fn fetch(&self, _: &str) -> Result<String, String> {
+            Ok(format!(r#"{{"status":200,"headers":[],"url":"{}","body":""}}"#, self.0))
+        }
+    }
+
+    #[test]
+    fn a_page_answer_from_a_host_outside_the_allow_list_is_dropped() {
+        let allowed = hosts(&["ok.test"]);
+        assert!(through_page(&Landing("https://ok.test/x"), "{}", &allowed).is_ok());
+        assert_eq!(through_page(&Landing("https://evil.test/"), "{}", &allowed).unwrap_err(), "host not allowed: evil.test");
     }
 }

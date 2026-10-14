@@ -158,9 +158,15 @@ fn select_defaults(mut commands: Vec<Vec<String>>, preferred: &str, preferred_au
 pub(super) fn media_of(video: Video, title: crate::widgets::page_header::MediaTitle, preferred: &str, preferred_audio: &str) -> Media {
     let tracks = |list: &[Track]| list.iter().map(|t| kuro_player::types::Track { url: t.url.clone(), lang: t.lang.clone() }).collect::<Vec<_>>();
     let headers = http_header_fields(true, video.headers.as_ref().map(|h| h.0.as_slice()), &[]).filter(|h| !h.is_empty());
+    // a remote HLS stream plays through the local relay, which fetches it the way a browser does (`hls_proxy`)
+    let target = if super::hls_proxy::wants_relay(&video.video_url) {
+        super::hls_proxy::local_url(&video.video_url, video.headers.as_ref().map_or(&[][..], |h| h.0.as_slice()))
+    } else {
+        video.video_url
+    };
     Media {
         tracks: select_defaults(external_track_commands(&tracks(&video.audio_tracks), &tracks(&video.subtitle_tracks)).commands, preferred, preferred_audio),
-        target: video.video_url,
+        target,
         title,
         headers,
     }
@@ -259,7 +265,11 @@ mod tests {
             fail: false,
         };
         let media = media_of(resolve(&fake).expect("a video"), crate::widgets::page_header::MediaTitle::new("Show", "1"), "", "");
-        assert_eq!(media.target, "https://cdn.test/1080.m3u8", "the source's best quality is the default");
+        assert_eq!(
+            super::super::hls_proxy::upstream_of(&media.target).as_deref(),
+            Some("https://cdn.test/1080.m3u8"),
+            "the source's best quality is the default, played through the HLS relay"
+        );
 
         let headers = "Origin: https://krussdomi.com,User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML\\, like Gecko)";
         assert_eq!(media.headers.as_deref(), Some(headers), "commas inside a value are escaped for the mpv list");
@@ -268,7 +278,7 @@ mod tests {
             vec![
                 kuro_player::load::start_command_ms(0),
                 vec!["set".to_owned(), "http-header-fields".to_owned(), headers.to_owned()],
-                vec!["loadfile".to_owned(), "https://cdn.test/1080.m3u8".to_owned(), "replace".to_owned()],
+                vec!["loadfile".to_owned(), media.target.clone(), "replace".to_owned()],
             ],
             "the headers are set before loadfile, which has no index argument (mpv before 0.38)"
         );

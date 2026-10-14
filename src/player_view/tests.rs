@@ -239,7 +239,9 @@ fn fullscreen_and_escape_act_on_the_window_that_holds_the_player() {
         let page = stack.visible_child().and_downcast::<gtk::Box>().expect("the page is the visible child");
 
         // the header is the page's first child: fullscreen hides it, and leaving fullscreen brings it back
-        let header = page.first_child().expect("the page has its header");
+        // (inside the revealer that auto-hide slides; the header is its child)
+        let first = page.first_child().expect("the page has its header");
+        let header = first.downcast_ref::<gtk::Revealer>().and_then(gtk::Revealer::child).unwrap_or(first);
         super::toggle_fullscreen(&page);
         pump_for(700);
         if window.is_fullscreen() {

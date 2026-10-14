@@ -498,6 +498,9 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
         }
     });
     kuro_extensions::instantiate::set_compile_cache_dir(paths.wasm_cache_dir());
+    // a site that answers the plug-ins with a browser check is reached through a hidden page (`page_fetch`)
+    let (webkit_data, webkit_cache) = (kuro_platform::webview::data::webkit_data_dir(paths.as_ref()), kuro_platform::webview::data::webkit_cache_dir(paths.as_ref()));
+    kuro_source_wasm::bridge::set_page_fetch(Arc::new(crate::page_fetch::WebKitPages::new(webkit_data, webkit_cache)));
     reload();
     let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
     schedule_daily_check(&links);

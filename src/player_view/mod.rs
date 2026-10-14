@@ -7,6 +7,7 @@ mod after_seen;
 mod auto_hide;
 mod controls;
 mod gl;
+mod hls_proxy;
 mod menu;
 mod neighbours;
 mod playback;
