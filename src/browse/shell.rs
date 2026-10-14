@@ -79,6 +79,8 @@ impl BrowseShell {
                 inner.page_changed();
             }
         });
+        // after the handler above, so a kept Manga choice loads its page
+        crate::shell::kind_choice::follow(&inner.stack, ["0", "1"]);
         // Enter searches every source of the visible kind (the global search is the way in, not a filter of the list)
         let (weak, search) = (Rc::downgrade(&inner), inner.search.clone());
         search.connect_activate(move |entry| {

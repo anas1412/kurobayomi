@@ -62,6 +62,102 @@ pub fn version_row() -> PreferenceItem {
     row
 }
 
+/// The Version row of an AppImage that updates itself: the build, then how the update goes (checking, a download with its
+/// bar, installed, failed) and one button at the end: check now, a spinner while busy, Restart once installed. A tap on
+/// the text copies the debug information, as on the plain row.
+fn update_center_row() -> PreferenceItem {
+    use crate::appimage_update::{self as update, Status};
+    use crate::pref_model::widgets::row::{self, RowSpec};
+    PreferenceItem::Custom {
+        title: VERSION_TITLE.to_owned(),
+        build: Rc::new(|| {
+            let button = gtk::Button::new();
+            button.set_valign(gtk::Align::Center);
+            let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+            let end = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            end.append(&spinner);
+            end.append(&button);
+            let subtitle = version_subtitle();
+            let built = row::build(RowSpec { title: VERSION_TITLE, subtitle: Some(&subtitle), icon: None, trailing: Some(end.upcast_ref()), on_click: None });
+            let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
+            built.row.set_child(None::<&gtk::Widget>);
+            let state = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(built.subtitle.css_classes()).build();
+            // the state line with the download's spinner right after its text, then the bar
+            let bar_spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+            let state_row = gtk::Box::builder().spacing(6).build();
+            state_row.append(&state);
+            state_row.append(&bar_spinner);
+            let bar = gtk::ProgressBar::builder().margin_top(6).build();
+            if let Some(column) = built.subtitle.parent().and_downcast::<gtk::Box>() {
+                column.append(&state_row);
+                column.append(&bar);
+            }
+            let copy = gtk::GestureClick::new();
+            copy.connect_released(|_, _, _, _| copy_to_clipboard(&current_debug_block()));
+            content.add_controller(copy);
+            button.connect_clicked(|_| match update::status() {
+                Status::Installed(_) => crate::whats_new::restart(),
+                _ => update::check(),
+            });
+            let weak = (button.downgrade(), spinner.downgrade(), state.downgrade(), bar.downgrade(), bar_spinner.downgrade());
+            update::watch(move |status| {
+                let (Some(button), Some(spinner), Some(state), Some(bar), Some(bar_spinner)) =
+                    (weak.0.upgrade(), weak.1.upgrade(), weak.2.upgrade(), weak.3.upgrade(), weak.4.upgrade())
+                else {
+                    return false;
+                };
+                let line = status.line();
+                state.set_visible(line.is_some());
+                state.set_label(line.as_deref().unwrap_or_default());
+                bar.set_visible(status.fraction().is_some());
+                bar_spinner.set_visible(status.fraction().is_some());
+                bar.set_fraction(status.fraction().unwrap_or(0.0));
+                // the end spinner while checking; during a download the bar's own spinner
+                spinner.set_visible(status.busy() && status.fraction().is_none());
+                button.set_visible(!status.busy());
+                let installed = matches!(status, Status::Installed(_));
+                if installed {
+                    button.set_icon_name("");
+                    button.set_label("Restart");
+                    button.set_tooltip_text(None);
+                    button.remove_css_class("flat");
+                    button.add_css_class("suggested-action");
+                } else {
+                    button.set_icon_name("view-refresh-symbolic");
+                    button.set_tooltip_text(Some(app_update::CHECK_ROW_TITLE));
+                    button.add_css_class("flat");
+                }
+                true
+            });
+            content.upcast()
+        }),
+    }
+}
+
+/// The switch that lets the app look for updates at start (`check_app_updates`, on by default).
+fn startup_check_row() -> PreferenceItem {
+    let trailing: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
+        let switch = gtk::Switch::builder().valign(gtk::Align::Center).active(crate::appimage_update::check_at_startup()).build();
+        switch.connect_active_notify(|switch| {
+            if crate::data::is_installed()
+                && let Err(error) = crate::data::app().base.check_app_updates.set(switch.is_active())
+            {
+                tracing::warn!(%error, "the update switch could not be stored");
+            }
+        });
+        switch.upcast()
+    });
+    let on_tap: Rc<dyn Fn(&TapRow)> = Rc::new(|row| {
+        if let Some(switch) = row.trailing.as_ref().and_then(|widget| widget.downcast_ref::<gtk::Switch>()) {
+            switch.set_active(!switch.is_active());
+        }
+    });
+    tap_item(STARTUP_CHECK_TITLE, Some(STARTUP_CHECK_SUBTITLE), true, Some(trailing), None, on_tap)
+}
+
+pub const STARTUP_CHECK_TITLE: &str = "Check for updates at startup";
+const STARTUP_CHECK_SUBTITLE: &str = "A newer version is downloaded in the background and runs after a restart";
+
 /// Whether the release check exists in this build (the updater feature and a repository).
 pub fn check_available() -> bool {
     app_update::enabled(APP_INFO.updater_enabled, app_update::UPDATE_REPOSITORY)
@@ -256,13 +352,23 @@ fn links_row() -> PreferenceItem {
 /// The typed rows of the About page, merged over the spec rows of the same titles. The links row has no spec twin and
 /// is kept at the end.
 pub fn page_rows() -> Vec<Preference> {
-    vec![
-        item(version_row()),
-        item(check_row()),
-        item(whats_new_row()),
+    // an AppImage that updates itself shows it all on the Version row; another build keeps the plain row and the check row
+    // (the disabled twin of the check row drops the spec's row of that title)
+    let (version, check) = if crate::appimage_update::can_update() {
+        (update_center_row(), text(app_update::CHECK_ROW_TITLE, None, false))
+    } else {
+        (version_row(), check_row())
+    };
+    let startup = (crate::appimage_update::can_update() || check_available()).then(startup_check_row);
+    [Some(version), Some(check), startup, Some(whats_new_row())]
+        .into_iter()
+        .flatten()
+        .map(item)
+        .chain([
         item(crate::settings_ui::maintenance::share_crash_logs_row()),
         item(links_row()),
-    ]
+    ])
+    .collect()
 }
 
 #[cfg(test)]

@@ -279,13 +279,15 @@ define_prefs! {
     "pref_subtitle_lang", Normal, Str, "", "player.subtitles", "preferred_sub_languages";
     "anime_ext_last_check", Normal, Long, 0, "sources", "anime_ext_last_check";
     "muted_notification_channels", Normal, Set, &[], "base", "muted_notification_channels";
+    "check_app_updates", Normal, Bool, true, "base", "check_app_updates";
+    "__APP_STATE_last_kind", AppState, Str, "anime", "base", "last_kind";
 }
 
 /// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
 /// The registry holds no row for them, a restore skips them ([`is_dropped`]) and nothing reads them, so an old
 /// `config.toml` or an Aniyomi backup that still carries one loads and restores without it. Each key and its reason
 /// is recorded in `docs/drop-decisions.md`.
-pub const DROPPED_KEYS: [&str; 277] = [
+pub const DROPPED_KEYS: [&str; 276] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -540,7 +542,6 @@ pub const DROPPED_KEYS: [&str; 277] = [
     "default_user_agent",
     "pref_display_profile_key",
     "pref_always_decode_long_strip_with_ssiv",
-    "check_app_updates",
     "__APP_STATE_last_app_check",
     "restore_after_crash",
     "migrate_flags",
@@ -666,11 +667,14 @@ mod tests {
     fn registry_has_the_61_plan_rows_in_order() {
         let rows = plan_rows();
         assert_eq!(rows.len(), 61, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
-        // two Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064) and `muted_notification_channels`
-        // (T-req-platform-004)
-        assert_eq!(REGISTRY.len(), rows.len() + 2);
+        // four Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064), `muted_notification_channels`
+        // (T-req-platform-004), `check_app_updates` (the update toggle, back from the settings diet, on by default) and
+        // `last_kind` (the Anime | Manga choice every page shares)
+        assert_eq!(REGISTRY.len(), rows.len() + 4);
         assert_eq!(REGISTRY[rows.len()].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 1].key, "muted_notification_channels");
+        assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
+        assert_eq!(REGISTRY[rows.len() + 3].key, "__APP_STATE_last_kind");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

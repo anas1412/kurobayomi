@@ -1,8 +1,8 @@
 //! `[base]` preferences (Aniyomi `BasePreferences`) that the desktop keeps.
 //!
 //! `downloaded_only` and `incognito_mode` are app state and live in `state.toml`. The keys the
-//! settings diet cut (display profile, long-strip decoding, the release check and its last lookup) are dropped: a
-//! backed-up value is skipped on restore.
+//! settings diet cut (display profile, long-strip decoding, the release check's last lookup) are dropped: a backed-up
+//! value is skipped on restore. `check_app_updates` came back as the one update toggle (user, 2026-10-14).
 
 use std::collections::BTreeSet;
 
@@ -15,6 +15,10 @@ define_prefs! {
         incognito_mode: bool = "__APP_STATE_incognito_mode" => false;
         // Linux addition: the notification channel ids (`notifications::CATEGORIES`) the user muted
         muted_notification_channels: BTreeSet<String> = "muted_notification_channels" => BTreeSet::new();
+        // look for a newer release at start; an AppImage then updates itself (on by default)
+        check_app_updates: bool = "check_app_updates" => true;
+        // the Anime | Manga choice every page's switch shares, kept across runs: "anime" or "manga"
+        last_kind: String = "__APP_STATE_last_kind" => String::from("anime");
     }
 }
 
@@ -38,6 +42,8 @@ mod tests {
                 ("downloaded_only", "__APP_STATE_pref_downloaded_only"),
                 ("incognito_mode", "__APP_STATE_incognito_mode"),
                 ("muted_notification_channels", "muted_notification_channels"),
+                ("check_app_updates", "check_app_updates"),
+                ("last_kind", "__APP_STATE_last_kind"),
             ]
         );
         assert_eq!(BasePrefs::TABLE, "base");
@@ -55,6 +61,7 @@ mod tests {
         assert!(!base.downloaded_only.get());
         assert!(!base.incognito_mode.get());
         assert!(base.muted_notification_channels.get().is_empty(), "no channel is muted by default");
+        assert!(base.check_app_updates.get(), "updates are on by default");
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod bootstrap;
 pub mod intents;
 pub mod host;
 pub mod launch;
+pub mod kind_choice;
 pub mod layout;
 // the stack-based navigator is replaced in the window by `ui::push`; it stays for the route table
 pub mod nav;

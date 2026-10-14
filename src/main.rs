@@ -213,6 +213,10 @@ fn build_window(app: &gtk::Application) {
         .default_width(1180)
         .default_height(780)
         .build();
+    // dev hook: KUROBAYOMI_SIZE=WxH opens at that size, set before any page is built so they lay out for it
+    if let Some((w, h)) = std::env::var("KUROBAYOMI_SIZE").ok().and_then(|v| v.split_once('x').map(|(w, h)| (w.parse().unwrap_or(1180), h.parse().unwrap_or(780)))) {
+        win.set_default_size(w, h);
+    }
     // each page brings its own header bar, so the window titlebar stays empty. It is hidden, not just empty: GTK gives a
     // visible titlebar widget the theme's titlebar height (the built-in `.titlebar:not(headerbar)` min-height), which
     // shows as an empty band above the app's header. A hidden one takes no space and GTK does not add a default one.
@@ -354,9 +358,6 @@ fn build_window(app: &gtk::Application) {
     shell::layout::apply_minimum_size(&win);
     // dev hooks: KUROBAYOMI_OPEN=<screen id> starts on that screen; KUROBAYOMI_SMOKE=1 opens every
     // screen, sheet and dialog once and quits (a panic or GTK critical shows up in the output)
-    if let Some((w, h)) = std::env::var("KUROBAYOMI_SIZE").ok().and_then(|v| v.split_once('x').map(|(w, h)| (w.parse().unwrap_or(1180), h.parse().unwrap_or(780)))) {
-        win.set_default_size(w, h);
-    }
     if let Ok(id) = std::env::var("KUROBAYOMI_OPEN") {
         ui::open(&id);
         if let Some(sh) = std::env::var("KUROBAYOMI_SHEET").ok().and_then(|n| ui::screen(&id).sheets.into_iter().find(|s| s.id == n)) {

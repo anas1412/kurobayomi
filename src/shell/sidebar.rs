@@ -291,6 +291,7 @@ pub fn build(tabs: &gtk::Stack) -> GBox {
 /// The narrow window's bar: the same items as the panel. The places switch the tab pages, then Settings and the app menu.
 pub fn bottom_bar(tabs: &gtk::Stack) -> GBox {
     let bar = GBox::new(O::Horizontal, 6);
+    bar.add_css_class("kb-bottom-bar");
     bar.set_halign(gtk::Align::Center);
     bar.set_margin_top(6);
     bar.set_margin_bottom(6);

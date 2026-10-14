@@ -29,6 +29,12 @@ use kuro_prefs::store::PrefStore;
 
 use crate::entry_core::constants::{FALLBACK_WIDTH, LEFT_PANE_WIDTH};
 
+/// The width the page is laid out for before it has one: the window's, so a narrow window never gets the two-pane layout
+/// for a frame (its minimum width would push the window wider); the app's default size before there is a window.
+fn first_width() -> i32 {
+    crate::ui::window_width().unwrap_or(FALLBACK_WIDTH)
+}
+
 use super::actions::{OpenPlan, continue_plan, tap_plan};
 use super::airing::{Airing, format_airing, visible as airing_visible};
 use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
@@ -487,7 +493,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
         seasons,
         seasons_shown: RefCell::new(None),
         two_pane: Cell::new(None),
-        width: Cell::new(FALLBACK_WIDTH),
+        width: Cell::new(first_width()),
         expansion: Rc::new(Cell::new(Expansion::new(false, false))),
         related: RefCell::new(Vec::new()),
         related_host,
@@ -495,7 +501,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     });
     let weak = Rc::downgrade(&view);
     *weak_view.borrow_mut() = weak.clone();
-    view.apply_width(FALLBACK_WIDTH);
+    view.apply_width(first_width());
 
     let on_view = |f: fn(&Rc<View>)| {
         let weak = weak.clone();

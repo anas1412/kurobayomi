@@ -36,6 +36,18 @@ pub fn window() -> gtk::ApplicationWindow {
     nav().1
 }
 
+/// The main window, when it exists (a test builds pages without one).
+pub fn window_opt() -> Option<gtk::ApplicationWindow> {
+    NAV.with(|n| n.get().map(|(_, win)| win.clone()))
+}
+
+/// The main window's width, or the size it opens at while it is not shown yet. A page built before its first frame lays
+/// out for this, so it never asks for more than the window has (a wide first frame would push a narrow window wider).
+pub fn window_width() -> Option<i32> {
+    let win = window_opt()?;
+    [win.width(), win.default_width()].into_iter().find(|w| *w > 0)
+}
+
 pub fn push(page: &impl IsA<gtk::Widget>) {
     let stack = nav().0;
     stack.add_child(page);
@@ -147,10 +159,16 @@ pub fn switch_with_narrow_row(header: &gtk::HeaderBar, switch: &gtk::StackSwitch
     if let Some(stack) = switch.stack() {
         row.append(&gtk::StackSwitcher::builder().stack(&stack).build());
     }
-    row.set_visible(false);
+    // the first frame already shows the right place: a switch in a narrow header pushes the window wider
+    let narrow = window_width().is_some_and(|w| w < crate::shell::layout::WIDE_MIN_WIDTH_PX);
+    row.set_visible(narrow);
+    switch.set_visible(!narrow);
     let (switch, narrow_row) = (switch.clone(), row.clone());
     header.add_tick_callback(move |header, _| {
-        let narrow = header.root().is_some_and(|root| root.width() > 0 && root.width() < crate::shell::layout::WIDE_MIN_WIDTH_PX);
+        // no width yet (the first frames) decides nothing: taken as wide, it put the switch back for a frame and the window
+        // grew to fit it
+        let Some(width) = header.root().map(|root| root.width()).filter(|w| *w > 0) else { return glib::ControlFlow::Continue };
+        let narrow = width < crate::shell::layout::WIDE_MIN_WIDTH_PX;
         if switch.is_visible() == narrow {
             switch.set_visible(!narrow);
             narrow_row.set_visible(narrow);

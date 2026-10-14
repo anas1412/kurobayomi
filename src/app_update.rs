@@ -89,7 +89,7 @@ fn spawn_check(force: bool, deliver: impl FnOnce(Result<Outcome, ReleaseError>) 
 /// logged and otherwise silent. A newer release shows one toast. An AppImage updates itself instead
 /// (`appimage_update::startup`).
 pub fn startup() {
-    if !available() || !crate::misc::diet_defaults::APP_UPDATE_CHECK_AT_STARTUP || crate::appimage_update::can_update() {
+    if !available() || !crate::appimage_update::check_at_startup() || crate::appimage_update::can_update() {
         return;
     }
     spawn_check(false, |result| match result {
@@ -103,12 +103,8 @@ pub fn startup() {
 /// text when the lookup failed. An AppImage updates itself; another build opens a dialog with a button to the release.
 pub fn manual() {
     if crate::appimage_update::can_update() {
-        crate::toast::notify("Checking for updates…");
-        crate::appimage_update::run(|result| match result {
-            Ok(Some(build)) => crate::appimage_update::announce(build),
-            Ok(None) => crate::toast::notify(tr(MsgKey::update_check_no_new_updates)),
-            Err(e) => crate::toast::notify(format!("The update failed: {e}")),
-        });
+        // the About page's Version row shows how it goes
+        crate::appimage_update::check();
         return;
     }
     spawn_check(true, |result| match result {
@@ -163,11 +159,6 @@ mod tests {
         assert!(enabled(true, "o/r"));
         assert!(!enabled(true, ""));
         assert!(!enabled(false, "o/r"));
-    }
-
-    #[test]
-    fn the_startup_check_is_on_and_the_manual_check_stays() {
-        assert!(crate::misc::diet_defaults::APP_UPDATE_CHECK_AT_STARTUP);
     }
 
     #[test]

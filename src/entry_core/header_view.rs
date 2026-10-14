@@ -156,6 +156,11 @@ fn fade() -> gtk::DrawingArea {
     area
 }
 
+/// Below this column width the title takes the smaller `title-4` style.
+pub const NARROW_TITLE_BELOW: i32 = 480;
+/// The title wraps to at most this many lines, then ends with an ellipsis.
+pub const TITLE_MAX_LINES: i32 = 3;
+
 /// Builds the header. The small layout puts the cover beside the text, the large layout puts a wider cover above
 /// centered text. `column_width` is the width of the column that holds the header. The header sits inside 16 px side
 /// margins, over the backdrop: the theme colour fading out and the cover blurred behind it (T-38a-014).
@@ -173,9 +178,14 @@ pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) 
     let xalign = if large { 0.5 } else { 0.0 };
     let info = GBox::new(O::Vertical, 4);
     info.set_hexpand(true);
-    // centred beside the cover: bottom-aligned, a text taller than a small cover hung below it onto the action row
+    // at the top of the cover: centred, a text taller than the cover spilled over the action row below
     info.set_valign(Align::Center);
-    info.append(&field_label(model, Field::Title, &model.title, &["title-2"], xalign, h));
+    // a narrow column takes a smaller title, and a long one stops at three lines
+    let title_style = if !large && column_width < NARROW_TITLE_BELOW { "title-4" } else { "title-2" };
+    let title = field_label(model, Field::Title, &model.title, &[title_style], xalign, h);
+    title.set_lines(TITLE_MAX_LINES);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    info.append(&title);
     let author = field_label(model, Field::Author, &model.author, &[], xalign, h);
     info.append(&icon_row("avatar-default-symbolic", &author, large));
     if let Some(artist) = &model.artist {

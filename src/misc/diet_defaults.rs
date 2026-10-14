@@ -93,6 +93,3 @@ pub const PLAYER_ALWAYS_EXTERNAL: bool = false;
 
 // Shell and notifications.
 pub const NOTIFICATION_HIDE_CONTENT: bool = false;
-/// The release check at startup (`check_app_updates`): on (user, 2026-10-14), so a stable user hears about a new release
-/// without opening About. The manual "Check for updates" action stays.
-pub const APP_UPDATE_CHECK_AT_STARTUP: bool = true;

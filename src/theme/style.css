@@ -99,6 +99,30 @@ stackswitcher > button.text-button {
   padding-left: 10px;
   padding-right: 10px;
 }
+/* Top-bar and bottom-bar buttons are bare icons (user, 2026-10-14): no frame and no fill until hovered, pressed or switched
+   on. One rule for every page's header (search, refresh, sort, menus, back) and for the narrow window's bottom bar, whose
+   tab buttons show the open tab with the "on" fill. The header's Anime | Manga switch keeps its segmented look and a
+   suggested or destructive button keeps its colour. */
+headerbar button.image-button:not(.suggested-action):not(.destructive-action),
+headerbar menubutton > button.image-button,
+.kb-bottom-bar button {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+headerbar button.image-button:not(.suggested-action):not(.destructive-action):hover,
+headerbar menubutton > button.image-button:hover,
+.kb-bottom-bar button:hover {
+  background: alpha(currentColor, 0.08);
+}
+headerbar button.image-button:not(.suggested-action):not(.destructive-action):active,
+headerbar button.image-button:not(.suggested-action):not(.destructive-action):checked,
+headerbar menubutton > button.image-button:active,
+headerbar menubutton > button.image-button:checked,
+.kb-bottom-bar button:active,
+.kb-bottom-bar button:checked {
+  background: alpha(currentColor, 0.16);
+}
 .kb-library-grid {
   background: none;
   padding: 8px 12px;

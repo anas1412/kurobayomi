@@ -202,7 +202,7 @@ pub fn startup() {
 }
 
 /// Starts this AppImage again once the app has quit, then closes the window.
-fn restart() {
+pub fn restart() {
     let relaunched = kuro_platform::self_update::appimage_file().is_some_and(|file| kuro_platform::self_update::relaunch_after_exit(&file).is_ok());
     if relaunched {
         crate::ui::window().close();

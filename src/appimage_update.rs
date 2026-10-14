@@ -103,18 +103,18 @@ fn sum_of(sums: &str, name: &str) -> Option<String> {
 }
 
 /// Downloads the update beside `target` and checks its size, its hash (when GitHub gives one) and that it is an ELF file.
-fn download(client: &reqwest::blocking::Client, update: &Newer, target: &Path) -> Result<PathBuf, String> {
+fn download(client: &reqwest::blocking::Client, update: &Newer, target: &Path, progress: &dyn Fn(u64)) -> Result<PathBuf, String> {
     let mut name = target.as_os_str().to_owned();
     name.push(".update");
     let part = PathBuf::from(name);
-    let result = fetch_checked(client, update, &part);
+    let result = fetch_checked(client, update, &part, progress);
     if result.is_err() {
         let _ = std::fs::remove_file(&part);
     }
     result.map(|()| part)
 }
 
-fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path) -> Result<(), String> {
+fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path, progress: &dyn Fn(u64)) -> Result<(), String> {
     let mut response = client.get(&update.url).send().and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
     let mut file = std::fs::File::create(part).map_err(|e| e.to_string())?;
     let (mut hasher, mut total, mut buf) = (Sha256::new(), 0_u64, [0_u8; 64 * 1024]);
@@ -126,6 +126,7 @@ fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path
         hasher.update(&buf[..n]);
         file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
         total += n as u64;
+        progress(total);
     }
     file.flush().map_err(|e| e.to_string())?;
     let hash: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
@@ -145,9 +146,18 @@ fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path
 
 const GITHUB_API: &str = "https://api.github.com";
 
+/// What the worker tells the main loop while it updates.
+#[derive(Debug)]
+enum Step {
+    /// A newer build was found; its download of `size` bytes starts.
+    Found { build: String, size: u64 },
+    /// Bytes downloaded so far.
+    Bytes(u64),
+}
+
 /// One check against the releases at `api` and, when there is a newer release, the replacement. `Some(build)` when the
-/// file was replaced.
-fn update(file: &Path, track: Track, api: &str) -> Result<Option<String>, String> {
+/// file was replaced. `step` hears what happens along the way.
+fn update(file: &Path, track: Track, api: &str, step: &dyn Fn(Step)) -> Result<Option<String>, String> {
     let http = |timeout| reqwest::blocking::Client::builder().timeout(Duration::from_secs(timeout)).user_agent(USER_AGENT).build().map_err(|e| e.to_string());
     let url = format!("{api}/repos/{}/{}", crate::channel::REPOSITORY, track.release_path());
     let response = http(30)?.get(url).send().map_err(|e| e.to_string())?;
@@ -163,7 +173,8 @@ fn update(file: &Path, track: Track, api: &str) -> Result<Option<String>, String
         let sums = http(30)?.get(url).send().and_then(|r| r.error_for_status()).and_then(|r| r.text()).map_err(|e| e.to_string())?;
         newer.sha256 = Some(sum_of(&sums, track.asset()).ok_or("SHA256SUMS does not list the AppImage")?);
     }
-    let part = download(&http(900)?, &newer, file)?;
+    step(Step::Found { build: newer.build.clone(), size: newer.size });
+    let part = download(&http(900)?, &newer, file, &|bytes| step(Step::Bytes(bytes)))?;
     kuro_platform::self_update::replace_file(&part, file).map_err(|e| e.to_string())?;
     Ok(Some(newer.build))
 }
@@ -173,17 +184,127 @@ pub fn can_update() -> bool {
     kuro_platform::self_update::appimage_file().is_some() && Track::current().is_some()
 }
 
-/// Checks and updates on a worker thread, then hands the result to `done` on the main loop: `Ok(Some(build))` when the
-/// AppImage was replaced. Does nothing when this run cannot update itself.
-pub fn run(done: impl FnOnce(Result<Option<String>, String>) + 'static) {
+/// Where the self-update is. The About page's Version row shows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Status {
+    /// Nothing checked in this run yet.
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Downloading { build: String, done: u64, total: u64 },
+    /// The new build replaced the AppImage; it runs after a restart.
+    Installed(String),
+    Failed(String),
+}
+
+impl Status {
+    /// A check or a download runs.
+    pub fn busy(&self) -> bool {
+        matches!(self, Self::Checking | Self::Downloading { .. })
+    }
+
+    /// The line the Version row shows under the version, if any.
+    pub fn line(&self) -> Option<String> {
+        let short = |build: &str| build[..8.min(build.len())].to_owned();
+        match self {
+            Self::Idle => None,
+            Self::Checking => Some("Checking for updates…".to_owned()),
+            Self::UpToDate => Some("Up to date".to_owned()),
+            Self::Downloading { build, done, total } => {
+                let percent = (*done * 100).checked_div(*total).unwrap_or(0);
+                Some(format!("Downloading {}: {percent}%", short(build)))
+            }
+            Self::Installed(build) => Some(format!("{} is installed: restart to use it", short(build))),
+            Self::Failed(error) => Some(format!("The update failed: {error}")),
+        }
+    }
+
+    /// How far the download is, from 0 to 1, while one runs.
+    pub fn fraction(&self) -> Option<f64> {
+        match self {
+            Self::Downloading { done, total, .. } if *total > 0 => Some((*done as f64 / *total as f64).min(1.0)),
+            _ => None,
+        }
+    }
+}
+
+thread_local! {
+    static STATUS: std::cell::RefCell<Status> = std::cell::RefCell::new(Status::Idle);
+    /// Called on every change; a watcher whose widget is gone returns `false` and is dropped.
+    static WATCHERS: std::cell::RefCell<Vec<Box<dyn Fn(&Status) -> bool>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The self-update now.
+pub fn status() -> Status {
+    STATUS.with(|s| s.borrow().clone())
+}
+
+/// Calls `watch` now and on every change, until it returns `false`. Main thread only.
+pub fn watch(watch: impl Fn(&Status) -> bool + 'static) {
+    if watch(&status()) {
+        WATCHERS.with(|w| w.borrow_mut().push(Box::new(watch)));
+    }
+}
+
+fn set(next: Status) {
+    STATUS.with(|s| *s.borrow_mut() = next.clone());
+    let watchers = WATCHERS.with(|w| std::mem::take(&mut *w.borrow_mut()));
+    let kept: Vec<_> = watchers.into_iter().filter(|watch| watch(&next)).collect();
+    WATCHERS.with(|w| {
+        let mut w = w.borrow_mut();
+        let added = std::mem::take(&mut *w);
+        *w = kept;
+        w.extend(added);
+    });
+}
+
+/// Checks and, when there is a newer release, updates, on a worker thread; the [`Status`] follows each step. Does
+/// nothing while a check runs, after an install, or when this run cannot update itself. A new build shows the
+/// installed toast.
+pub fn check() {
+    let status = status();
+    if status.busy() || matches!(status, Status::Installed(_)) {
+        return;
+    }
     let (Some(file), Some(track)) = (kuro_platform::self_update::appimage_file(), Track::current()) else { return };
-    let (tx, rx) = async_channel::bounded(1);
+    set(Status::Checking);
+    let (tx, rx) = async_channel::unbounded();
     std::thread::spawn(move || {
-        let _ = tx.send_blocking(update(&file, track, GITHUB_API));
+        // a step per 1% at most, so the main loop is not flooded
+        let last = std::cell::Cell::new((String::new(), 0_u64, 0_u64));
+        let step = |step: Step| {
+            let (build, size, shown) = last.take();
+            let next = match step {
+                Step::Found { build, size } => Status::Downloading { build: build.clone(), done: 0, total: size },
+                Step::Bytes(done) if size > 0 && (done - shown) * 100 < size && done < size => {
+                    last.set((build, size, shown));
+                    return;
+                }
+                Step::Bytes(done) => Status::Downloading { build: build.clone(), done, total: size },
+            };
+            if let Status::Downloading { build, done, total } = &next {
+                last.set((build.clone(), *total, *done));
+            }
+            let _ = tx.send_blocking(Ok(next));
+        };
+        let result = update(&file, track, GITHUB_API, &step);
+        let _ = tx.send_blocking(Err(result));
     });
     glib::spawn_future_local(async move {
-        if let Ok(result) = rx.recv().await {
-            done(result);
+        while let Ok(message) = rx.recv().await {
+            match message {
+                Ok(progress) => set(progress),
+                Err(Ok(Some(build))) => {
+                    set(Status::Installed(build.clone()));
+                    announce(build);
+                }
+                Err(Ok(None)) => set(Status::UpToDate),
+                Err(Err(error)) => {
+                    tracing::warn!(%error, "the AppImage update failed");
+                    set(Status::Failed(error));
+                }
+            }
         }
     });
 }
@@ -196,13 +317,16 @@ pub fn announce(build: String) {
     }
 }
 
-/// The startup check. A failure is logged and otherwise silent; an update shows one toast.
+/// Whether the user lets the app look for updates at start (`check_app_updates`, on by default).
+pub fn check_at_startup() -> bool {
+    !crate::data::is_installed() || crate::data::app().base.check_app_updates.get()
+}
+
+/// The startup check, when the user lets it run.
 pub fn startup() {
-    run(|result| match result {
-        Ok(Some(build)) => announce(build),
-        Ok(None) => {}
-        Err(error) => tracing::debug!(%error, "the AppImage update failed"),
-    });
+    if check_at_startup() {
+        check();
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +443,35 @@ mod tests {
         }
     }
 
+    fn update_quiet(file: &Path, track: Track, api: &str) -> Result<Option<String>, String> {
+        update(file, track, api, &|_| {})
+    }
+
+    #[test]
+    fn the_status_line_follows_the_update() {
+        assert_eq!(Status::Idle.line(), None);
+        let downloading = Status::Downloading { build: NEW.into(), done: 42, total: 100 };
+        assert_eq!(downloading.line().as_deref(), Some("Downloading 22222222: 42%"));
+        assert_eq!(downloading.fraction(), Some(0.42));
+        assert!(downloading.busy() && Status::Checking.busy() && !Status::UpToDate.busy());
+        assert_eq!(Status::Installed("0.2.0".into()).line().as_deref(), Some("0.2.0 is installed: restart to use it"));
+        assert_eq!(Status::Downloading { build: "x".into(), done: 1, total: 0 }.fraction(), None);
+    }
+
+    #[test]
+    fn a_watcher_hears_each_change_until_it_lets_go() {
+        let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let h = heard.clone();
+        watch(move |status| {
+            h.borrow_mut().push(status.clone());
+            !matches!(status, Status::UpToDate)
+        });
+        set(Status::Checking);
+        set(Status::UpToDate);
+        set(Status::Idle);
+        assert_eq!(*heard.borrow(), [Status::Idle, Status::Checking, Status::UpToDate], "dropped after it returned false");
+    }
+
     fn hex(bytes: &[u8]) -> String {
         Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
     }
@@ -332,19 +485,19 @@ mod tests {
         let new = b"\x7fELF new build".to_vec();
         let track = Track::Stable("0.1.0");
 
-        assert_eq!(update(&file, track, &serve(|_| Vec::new())), Ok(None), "no stable release yet");
-        assert_eq!(update(&file, track, &serve(stable_release("v0.1.0", new.clone(), hex(&new)))), Ok(None), "the same version");
+        assert_eq!(update_quiet(&file, track, &serve(|_| Vec::new())), Ok(None), "no stable release yet");
+        assert_eq!(update_quiet(&file, track, &serve(stable_release("v0.1.0", new.clone(), hex(&new)))), Ok(None), "the same version");
 
-        let error = update(&file, track, &serve(stable_release("v0.2.0", new.clone(), hex(b"other")))).unwrap_err();
+        let error = update_quiet(&file, track, &serve(stable_release("v0.2.0", new.clone(), hex(b"other")))).unwrap_err();
         assert!(error.contains("checksum"), "{error}");
         assert_eq!(std::fs::read(&file).unwrap(), b"\x7fELF old", "a file that fails its sum leaves the AppImage alone");
         assert!(!dir.path().join(format!("{STABLE}.update")).exists(), "and is removed");
 
         let bad_file = b"not an elf".to_vec();
-        let error = update(&file, track, &serve(stable_release("v0.2.0", bad_file.clone(), hex(&bad_file)))).unwrap_err();
+        let error = update_quiet(&file, track, &serve(stable_release("v0.2.0", bad_file.clone(), hex(&bad_file)))).unwrap_err();
         assert!(error.contains("not an AppImage"), "{error}");
 
-        assert_eq!(update(&file, track, &serve(stable_release("v0.2.0", new.clone(), hex(&new)))), Ok(Some("0.2.0".to_owned())));
+        assert_eq!(update_quiet(&file, track, &serve(stable_release("v0.2.0", new.clone(), hex(&new)))), Ok(Some("0.2.0".to_owned())));
         assert_eq!(std::fs::read(&file).unwrap(), new);
     }
 }

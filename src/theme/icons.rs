@@ -294,7 +294,7 @@ pub const SHORTCUT_ICONS: [(&str, &str); 5] = [
     ("animelib", Icon::AnimeLibraryFilled.name()),
     ("updates", Icon::UpdatesTab.name()),
     ("history", Icon::HistoryTab.name()),
-    ("browse", "system-search-symbolic"),
+    ("browse", Icon::Compass.name()),
 ];
 
 #[cfg(test)]
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(shortcut_icon_name("animelib"), Some("kb-animelibrary-filled-symbolic"));
         assert_eq!(shortcut_icon_name("updates"), Some("kb-updates-outline-symbolic"));
         assert_eq!(shortcut_icon_name("history"), Some("document-open-recent-symbolic"));
-        assert_eq!(shortcut_icon_name("browse"), Some("system-search-symbolic"));
+        assert_eq!(shortcut_icon_name("browse"), Some("kb-compass-symbolic"));
         assert_eq!(shortcut_icon_name("show_recently_updated"), None);
     }
 

@@ -207,6 +207,7 @@ pub(crate) fn kind_page(views: [Built; 2], back: bool) -> GBox {
     for follower in [&bars, &end] {
         kinds.bind_property("visible-child-name", follower, "visible-child-name").sync_create().build();
     }
+    crate::shell::kind_choice::follow(&kinds, ["anime", "manga"]);
     let header = crate::ui::header_bar();
     header.set_decoration_layout(Some(&decoration(false)));
     if back {

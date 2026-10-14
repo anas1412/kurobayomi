@@ -20,7 +20,7 @@ pub struct InfoBlock {
     pub action_row: ActionRow,
     description: GBox,
     /// The header on screen: its model, the layout and the column it was built for.
-    shown_header: RefCell<Option<(HeaderModel, bool, i32)>>,
+    shown_header: RefCell<Option<(HeaderModel, bool, (i32, bool))>>,
     /// The description on screen with its genre chips.
     shown_description: RefCell<Option<(Description, Vec<GenreChip>)>>,
 }
@@ -40,15 +40,17 @@ impl InfoBlock {
     /// changes (`HeaderModel::looks_like`, which ignores the library flag), or the layout or the column does: the cover
     /// is sized for its column.
     pub fn set_header(&self, model: &HeaderModel, large: bool, column: i32, handlers: &Handlers) {
-        // the cover size, not the width, decides a rebuild: a resize rebuilds the header only when its cover changes size
+        // the cover size and the title style, not the width, decide a rebuild: a resize rebuilds the header only when one of
+        // them changes
         let cover = crate::entry_core::header::cover_size(large, column - 32).0;
-        let same = self.shown_header.borrow().as_ref().is_some_and(|(shown, was_large, at)| shown.looks_like(model) && *was_large == large && *at == cover);
+        let at = (cover, !large && column < header_view::NARROW_TITLE_BELOW);
+        let same = self.shown_header.borrow().as_ref().is_some_and(|(shown, was_large, shown_at)| shown.looks_like(model) && *was_large == large && *shown_at == at);
         if same {
             return;
         }
         clear(&self.header);
         self.header.append(&header_view::build(model, large, column, handlers));
-        *self.shown_header.borrow_mut() = Some((model.clone(), large, cover));
+        *self.shown_header.borrow_mut() = Some((model.clone(), large, at));
     }
 
     /// Draws the description and its genre chips. They are built again only when either changes.
