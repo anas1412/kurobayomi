@@ -7,9 +7,14 @@
 //!   version.
 //!
 //! Any other build (a local one, a package) has no `APPIMAGE`, no commit or no release check, and never updates itself.
+//!
+//! The download can be paused and cancelled from the About page (`pause`, `resume`, `cancel`), and it reads the file
+//! from the fastest of GitHub's download addresses (`fastest_route`).
 
 use std::io::{Read, Write};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use gtk::glib;
@@ -104,30 +109,171 @@ fn sum_of(sums: &str, name: &str) -> Option<String> {
 }
 
 /// Downloads the update beside `target` and checks its size, its hash (when GitHub gives one) and that it is an ELF file.
-fn download(client: &reqwest::blocking::Client, update: &Newer, target: &Path, progress: &dyn Fn(u64)) -> Result<PathBuf, String> {
+/// What the Pause and Cancel buttons ask of the running download; the download looks at it between reads.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Wish {
+    #[default]
+    Run,
+    Pause,
+    Cancel,
+}
+
+#[derive(Default)]
+struct Control {
+    wish: Mutex<Wish>,
+    changed: Condvar,
+}
+
+/// The error of a download the user cancelled: not a failure, so the status goes back to idle without a message.
+const CANCELLED: &str = "cancelled";
+
+impl Control {
+    fn wish(&self) -> Wish {
+        *self.wish.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn ask(&self, wish: Wish) {
+        *self.wish.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = wish;
+        self.changed.notify_all();
+    }
+
+    /// Waits while the download is paused; an error once it is cancelled.
+    fn hold(&self) -> Result<(), String> {
+        let mut wish = self.wish.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        while *wish == Wish::Pause {
+            wish = self.changed.wait(wish).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        if *wish == Wish::Cancel { Err(CANCELLED.to_owned()) } else { Ok(()) }
+    }
+}
+
+/// The control of the download that runs now, for the buttons.
+static ACTIVE: Mutex<Option<Arc<Control>>> = Mutex::new(None);
+
+fn active() -> Option<Arc<Control>> {
+    ACTIVE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+}
+
+/// Pauses the running download. The connection is closed and the file kept: resuming asks GitHub for the rest.
+pub fn pause() {
+    if let (Some(control), Status::Downloading { build, done, total }) = (active(), status()) {
+        control.ask(Wish::Pause);
+        set(Status::Paused { build, done, total });
+    }
+}
+
+/// Carries on a paused download from where it stopped.
+pub fn resume() {
+    if let (Some(control), Status::Paused { build, done, total }) = (active(), status()) {
+        control.ask(Wish::Run);
+        set(Status::Downloading { build, done, total });
+    }
+}
+
+/// Stops the running download and deletes what was downloaded. The AppImage in use is never touched.
+pub fn cancel() {
+    if let Some(control) = active() {
+        control.ask(Wish::Cancel);
+    }
+}
+
+/// How much of a file each address is asked for when the addresses are raced.
+const PROBE_BYTES: u64 = 256 * 1024;
+
+/// GitHub serves a release file from several download addresses, and from some connections one of them is far slower
+/// than the rest (47 KB/s against 1.6 MB/s on one home line, and always the same one: it is the first address, which
+/// is the one an ordinary client tries). This follows the redirect to the file's host, asks every address of that host
+/// for the first [`PROBE_BYTES`] at once, and gives a client pinned to the first to answer, with the redirected url.
+/// When there is no redirect, one address or no answer it gives the client and url it was given.
+fn fastest_route(client: &reqwest::blocking::Client, url: &str) -> (reqwest::blocking::Client, String) {
+    let Some(target) = redirect_target(url) else { return (client.clone(), url.to_owned()) };
+    let plain = || (client.clone(), target.to_string());
+    let Some(host) = target.host_str().filter(|host| host.parse::<std::net::IpAddr>().is_err()) else { return plain() };
+    let port = target.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<SocketAddr> = (host, port).to_socket_addrs().map(Iterator::collect).unwrap_or_default();
+    if addrs.len() < 2 {
+        return plain();
+    }
+    let Some(fastest) = fastest_address(host, target.as_str(), &addrs) else { return plain() };
+    let pinned = reqwest::blocking::Client::builder().resolve(host, fastest).timeout(Duration::from_secs(900)).user_agent(USER_AGENT).build();
+    pinned.map_or_else(|_| plain(), |client| (client, target.to_string()))
+}
+
+/// Where `url` redirects to, `None` when it does not.
+fn redirect_target(url: &str) -> Option<reqwest::Url> {
+    let client = reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(30)).user_agent(USER_AGENT).build().ok()?;
+    let response = client.get(url).send().ok()?;
+    if !response.status().is_redirection() {
+        return None;
+    }
+    let location = response.headers().get(reqwest::header::LOCATION)?.to_str().ok()?;
+    reqwest::Url::parse(url).ok()?.join(location).ok()
+}
+
+/// The first of `addrs` that gives the start of `url` (served by `host`); the others are left to give up on their own
+/// after a few seconds. `None` when none does in time.
+fn fastest_address(host: &str, url: &str, addrs: &[SocketAddr]) -> Option<SocketAddr> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    for &addr in addrs {
+        let (tx, host, url) = (tx.clone(), host.to_owned(), url.to_owned());
+        std::thread::spawn(move || {
+            let read_start = || -> Option<()> {
+                let client = reqwest::blocking::Client::builder().resolve(&host, addr).timeout(Duration::from_secs(8)).user_agent(USER_AGENT).build().ok()?;
+                let response = client.get(&url).header(reqwest::header::RANGE, format!("bytes=0-{}", PROBE_BYTES - 1)).send().ok()?.error_for_status().ok()?;
+                let mut got = Vec::new();
+                response.take(PROBE_BYTES).read_to_end(&mut got).ok()?;
+                (!got.is_empty()).then_some(())
+            };
+            if read_start().is_some() {
+                let _ = tx.send(addr);
+            }
+        });
+    }
+    drop(tx);
+    rx.recv_timeout(Duration::from_secs(10)).ok()
+}
+
+fn download(client: &reqwest::blocking::Client, update: &Newer, target: &Path, progress: &dyn Fn(u64), control: &Control) -> Result<PathBuf, String> {
     let mut name = target.as_os_str().to_owned();
     name.push(".update");
     let part = PathBuf::from(name);
-    let result = fetch_checked(client, update, &part, progress);
+    let result = fetch_checked(client, update, &part, progress, control);
     if result.is_err() {
         let _ = std::fs::remove_file(&part);
     }
     result.map(|()| part)
 }
 
-fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path, progress: &dyn Fn(u64)) -> Result<(), String> {
-    let mut response = client.get(&update.url).send().and_then(|r| r.error_for_status()).map_err(|e| describe(&e))?;
+fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path, progress: &dyn Fn(u64), control: &Control) -> Result<(), String> {
     let mut file = std::fs::File::create(part).map_err(|e| e.to_string())?;
     let (mut hasher, mut total, mut buf) = (Sha256::new(), 0_u64, [0_u8; 64 * 1024]);
+    // one pass per connection: the first, and a new one after each pause, asking for the rest of the file
     loop {
-        let n = response.read(&mut buf).map_err(|e| format!("the download from GitHub broke off ({e})"))?;
-        if n == 0 {
+        control.hold()?;
+        let (client, url) = fastest_route(client, &update.url);
+        let mut request = client.get(&url);
+        if total > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={total}-"));
+        }
+        let mut response = request.send().and_then(|r| r.error_for_status()).map_err(|e| describe(&e))?;
+        if total > 0 && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err("GitHub would not carry on the download".to_owned());
+        }
+        let mut finished = false;
+        while control.wish() == Wish::Run {
+            let n = response.read(&mut buf).map_err(|e| format!("the download from GitHub broke off ({e})"))?;
+            if n == 0 {
+                finished = true;
+                break;
+            }
+            hasher.update(&buf[..n]);
+            file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            total += n as u64;
+            progress(total);
+        }
+        if finished {
             break;
         }
-        hasher.update(&buf[..n]);
-        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        total += n as u64;
-        progress(total);
     }
     file.flush().map_err(|e| e.to_string())?;
     let hash: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
@@ -182,7 +328,7 @@ enum Step {
 
 /// One check against the releases at `api` and, when there is a newer release, the replacement. `Some(build)` when the
 /// file was replaced. `step` hears what happens along the way.
-fn update(file: &Path, track: Track, api: &str, step: &dyn Fn(Step)) -> Result<Option<String>, String> {
+fn update(file: &Path, track: Track, api: &str, step: &dyn Fn(Step), control: &Control) -> Result<Option<String>, String> {
     let http = |timeout| reqwest::blocking::Client::builder().timeout(Duration::from_secs(timeout)).user_agent(USER_AGENT).build().map_err(|e| e.to_string());
     let url = format!("{api}/repos/{}/{}", crate::channel::REPOSITORY, track.release_path());
     let response = http(30)?.get(url).send().map_err(|e| describe(&e))?;
@@ -199,7 +345,7 @@ fn update(file: &Path, track: Track, api: &str, step: &dyn Fn(Step)) -> Result<O
         newer.sha256 = Some(sum_of(&sums, track.asset()).ok_or("SHA256SUMS does not list the AppImage")?);
     }
     step(Step::Found { build: newer.build.clone(), size: newer.size });
-    let part = download(&http(900)?, &newer, file, &|bytes| step(Step::Bytes(bytes)))?;
+    let part = download(&http(900)?, &newer, file, &|bytes| step(Step::Bytes(bytes)), control)?;
     kuro_platform::self_update::replace_file(&part, file).map_err(|e| e.to_string())?;
     Ok(Some(newer.build))
 }
@@ -218,6 +364,8 @@ pub enum Status {
     Checking,
     UpToDate,
     Downloading { build: String, done: u64, total: u64 },
+    /// The download was paused: the file is kept and resuming asks for the rest.
+    Paused { build: String, done: u64, total: u64 },
     /// The new build replaced the AppImage; it runs after a restart.
     Installed(String),
     Failed(String),
@@ -226,7 +374,12 @@ pub enum Status {
 impl Status {
     /// A check or a download runs.
     pub fn busy(&self) -> bool {
-        matches!(self, Self::Checking | Self::Downloading { .. })
+        matches!(self, Self::Checking | Self::Downloading { .. } | Self::Paused { .. })
+    }
+
+    /// Something is at work now: busy, and not waiting for the user to resume.
+    pub fn working(&self) -> bool {
+        self.busy() && !matches!(self, Self::Paused { .. })
     }
 
     /// The line the Version row shows under the version, if any.
@@ -240,6 +393,10 @@ impl Status {
                 let percent = (*done * 100).checked_div(*total).unwrap_or(0);
                 Some(format!("Downloading {}: {percent}%", short(build)))
             }
+            Self::Paused { build, done, total } => {
+                let percent = (*done * 100).checked_div(*total).unwrap_or(0);
+                Some(format!("Paused {}: {percent}%", short(build)))
+            }
             Self::Installed(build) => Some(format!("{} is installed: restart to use it", short(build))),
             Self::Failed(error) => Some(format!("The update failed: {error}")),
         }
@@ -248,7 +405,7 @@ impl Status {
     /// How far the download is, from 0 to 1, while one runs.
     pub fn fraction(&self) -> Option<f64> {
         match self {
-            Self::Downloading { done, total, .. } if *total > 0 => Some((*done as f64 / *total as f64).min(1.0)),
+            Self::Downloading { done, total, .. } | Self::Paused { done, total, .. } if *total > 0 => Some((*done as f64 / *total as f64).min(1.0)),
             _ => None,
         }
     }
@@ -291,7 +448,7 @@ pub fn busy_spinner() -> gtk::Spinner {
     let weak = spinner.downgrade();
     watch(move |status| {
         let Some(spinner) = weak.upgrade() else { return false };
-        spinner.set_visible(status.busy());
+        spinner.set_visible(status.working());
         true
     });
     spinner
@@ -307,7 +464,10 @@ pub fn check() {
     }
     let (Some(file), Some(track)) = (kuro_platform::self_update::appimage_file(), Track::current()) else { return };
     set(Status::Checking);
+    let control = Arc::new(Control::default());
+    *ACTIVE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(control.clone());
     let (tx, rx) = async_channel::unbounded();
+    let worker_control = control.clone();
     std::thread::spawn(move || {
         // a step per 1% at most, so the main loop is not flooded
         let last = std::cell::Cell::new((String::new(), 0_u64, 0_u64));
@@ -326,18 +486,23 @@ pub fn check() {
             }
             let _ = tx.send_blocking(Ok(next));
         };
-        let result = update(&file, track, GITHUB_API, &step);
+        let result = update(&file, track, GITHUB_API, &step, &worker_control);
+        // before the last message, so a check started by it finds no control of this run
+        *ACTIVE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         let _ = tx.send_blocking(Err(result));
     });
     glib::spawn_future_local(async move {
         while let Ok(message) = rx.recv().await {
             match message {
+                // a step queued before Pause or Cancel was pressed must not bring the download back on screen
+                Ok(Status::Downloading { .. }) if control.wish() != Wish::Run => {}
                 Ok(progress) => set(progress),
                 Err(Ok(Some(build))) => {
                     set(Status::Installed(build.clone()));
                     announce(build);
                 }
                 Err(Ok(None)) => set(Status::UpToDate),
+                Err(Err(error)) if error == CANCELLED => set(Status::Idle),
                 Err(Err(error)) => {
                     tracing::warn!(%error, "the AppImage update failed");
                     set(Status::Failed(error));
@@ -482,7 +647,7 @@ mod tests {
     }
 
     fn update_quiet(file: &Path, track: Track, api: &str) -> Result<Option<String>, String> {
-        update(file, track, api, &|_| {})
+        update(file, track, api, &|_| {}, &Control::default())
     }
 
     #[test]
@@ -494,6 +659,145 @@ mod tests {
         assert!(downloading.busy() && Status::Checking.busy() && !Status::UpToDate.busy());
         assert_eq!(Status::Installed("0.2.0".into()).line().as_deref(), Some("0.2.0 is installed: restart to use it"));
         assert_eq!(Status::Downloading { build: "x".into(), done: 1, total: 0 }.fraction(), None);
+    }
+
+    #[test]
+    fn a_paused_download_keeps_its_bar_and_is_busy_but_not_working() {
+        let paused = Status::Paused { build: NEW.into(), done: 42, total: 100 };
+        assert_eq!(paused.line().as_deref(), Some("Paused 22222222: 42%"));
+        assert_eq!(paused.fraction(), Some(0.42));
+        assert!(paused.busy() && !paused.working());
+        assert!(Status::Checking.working() && Status::Downloading { build: NEW.into(), done: 1, total: 2 }.working());
+    }
+
+    /// Serves `body` at `/file` over HTTP on 127.0.0.1, in four pieces a little apart, and answers `Range: bytes=N-` with
+    /// the rest of it (206), as GitHub's download servers do. One thread per connection.
+    fn serve_ranged(body: Vec<u8>) -> String {
+        use std::io::{BufRead, BufReader};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let body = body.clone();
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    let mut start = 0_usize;
+                    let mut lines = BufReader::new(&stream).lines();
+                    while let Some(Ok(line)) = lines.next() {
+                        if line.is_empty() {
+                            break;
+                        }
+                        if let Some(range) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
+                            start = range.split('-').next().and_then(|n| n.parse().ok()).unwrap_or(0);
+                        }
+                    }
+                    let rest = &body[start.min(body.len())..];
+                    let status = if start > 0 { "206 Partial Content" } else { "200 OK" };
+                    let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", rest.len());
+                    for piece in rest.chunks(rest.len().div_ceil(4).max(1)) {
+                        if stream.write_all(piece).is_err() {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                });
+            }
+        });
+        base
+    }
+
+    fn newer_for(base: &str, body: &[u8]) -> Newer {
+        Newer { build: NEW.into(), url: format!("{base}/file"), size: body.len() as u64, sha256: Some(hex(body)), sums_url: None }
+    }
+
+    fn client() -> reqwest::blocking::Client {
+        reqwest::blocking::Client::builder().timeout(Duration::from_secs(30)).build().unwrap()
+    }
+
+    #[test]
+    fn a_paused_download_waits_and_resumes_where_it_stopped() {
+        let mut body = b"\x7fELF".to_vec();
+        body.extend((0..400_000_u32).map(|n| (n % 251) as u8));
+        let base = serve_ranged(body.clone());
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("app.AppImage");
+        let control = Control::default();
+        let paused_at = std::sync::atomic::AtomicU64::new(0);
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                let progress = |bytes: u64| {
+                    if paused_at.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                        paused_at.store(bytes, std::sync::atomic::Ordering::SeqCst);
+                        control.ask(Wish::Pause);
+                    }
+                };
+                download(&client(), &newer_for(&base, &body), &target, &progress, &control)
+            });
+            while paused_at.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::thread::sleep(Duration::from_millis(300));
+            let part = dir.path().join("app.AppImage.update");
+            let kept = std::fs::metadata(&part).unwrap().len();
+            assert_eq!(kept, paused_at.load(std::sync::atomic::Ordering::SeqCst), "nothing is read while paused");
+            assert!(kept < body.len() as u64);
+            control.ask(Wish::Run);
+            let done = worker.join().unwrap().expect("the download finishes after the resume");
+            assert_eq!(std::fs::read(done).unwrap(), body, "the pieces before and after the pause make the whole file");
+        });
+    }
+
+    #[test]
+    fn a_cancelled_download_deletes_its_file_and_is_not_a_failure_message() {
+        let body: Vec<u8> = vec![7; 400_000];
+        let base = serve_ranged(body.clone());
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("app.AppImage");
+        let control = Control::default();
+        let result = download(&client(), &newer_for(&base, &body), &target, &|_| control.ask(Wish::Cancel), &control);
+        assert_eq!(result, Err(CANCELLED.to_owned()));
+        assert!(!dir.path().join("app.AppImage.update").exists());
+    }
+
+    #[test]
+    fn a_cancel_while_paused_ends_the_wait() {
+        let control = Control::default();
+        control.ask(Wish::Pause);
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| control.hold());
+            std::thread::sleep(Duration::from_millis(100));
+            control.ask(Wish::Cancel);
+            assert_eq!(waiting.join().unwrap(), Err(CANCELLED.to_owned()));
+        });
+    }
+
+    #[test]
+    fn the_fastest_address_wins_and_a_dead_one_loses() {
+        // one host name, three loopback addresses on one port: a slow server, a fast one, and one nobody listens on
+        let fast = std::net::TcpListener::bind("127.0.0.2:0").unwrap();
+        let port = fast.local_addr().unwrap().port();
+        let slow = std::net::TcpListener::bind(("127.0.0.3", port)).unwrap();
+        for (listener, delay) in [(fast, 0), (slow, 1500)] {
+            std::thread::spawn(move || {
+                for mut stream in listener.incoming().flatten() {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(delay));
+                        let _ = write!(stream, "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd");
+                    });
+                }
+            });
+        }
+        let addrs: Vec<SocketAddr> = ["127.0.0.1", "127.0.0.3", "127.0.0.2"].iter().map(|ip| SocketAddr::new(ip.parse().unwrap(), port)).collect();
+        let url = format!("http://files.test:{port}/file");
+        assert_eq!(fastest_address("files.test", &url, &addrs), Some(SocketAddr::new("127.0.0.2".parse().unwrap(), port)));
+        assert_eq!(fastest_address("files.test", &url, &addrs[..1]), None, "no server at 127.0.0.1: no address is better than none");
+    }
+
+    #[test]
+    fn a_url_that_does_not_redirect_is_used_as_it_is() {
+        let base = serve(|_| vec![("/file".to_owned(), b"abc".to_vec())]);
+        let url = format!("{base}/file");
+        assert_eq!(fastest_route(&client(), &url).1, url);
     }
 
     #[test]

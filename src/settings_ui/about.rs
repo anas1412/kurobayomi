@@ -59,8 +59,9 @@ pub fn version_row() -> PreferenceItem {
 }
 
 /// The Version row of an AppImage that updates itself: the build, then how the update goes (checking, a download with its
-/// bar, installed, failed) and one button at the end: check now, a spinner while busy, Restart once installed. A tap on
-/// the text copies the debug information, as on the plain row.
+/// bar, installed, failed) and the buttons at the end: check now, a spinner while checking, Pause (then Resume) and
+/// Cancel while a download runs, Restart once installed. A tap on the text copies the debug information, as on the plain
+/// row.
 fn update_center_row() -> PreferenceItem {
     use crate::appimage_update::{self as update, Status};
     use crate::pref_model::widgets::row::{self, RowSpec};
@@ -70,8 +71,16 @@ fn update_center_row() -> PreferenceItem {
             let button = gtk::Button::new();
             button.set_valign(gtk::Align::Center);
             let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
+            let pause = crate::ui::icon_button("media-playback-pause-symbolic", "Pause");
+            let cancel = crate::ui::icon_button("window-close-symbolic", "Cancel");
+            for download_button in [&pause, &cancel] {
+                download_button.set_valign(gtk::Align::Center);
+                download_button.add_css_class("flat");
+            }
             let end = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             end.append(&spinner);
+            end.append(&pause);
+            end.append(&cancel);
             end.append(&button);
             let subtitle = version_subtitle();
             let built = row::build(RowSpec { title: VERSION_TITLE, subtitle: Some(&subtitle), icon: None, trailing: Some(end.upcast_ref()), on_click: None });
@@ -95,10 +104,15 @@ fn update_center_row() -> PreferenceItem {
                 Status::Installed(_) => crate::whats_new::restart(),
                 _ => update::check(),
             });
-            let weak = (button.downgrade(), spinner.downgrade(), state.downgrade(), bar.downgrade(), bar_spinner.downgrade());
+            pause.connect_clicked(|_| match update::status() {
+                Status::Paused { .. } => update::resume(),
+                _ => update::pause(),
+            });
+            cancel.connect_clicked(|_| update::cancel());
+            let weak = (button.downgrade(), spinner.downgrade(), state.downgrade(), bar.downgrade(), bar_spinner.downgrade(), pause.downgrade(), cancel.downgrade());
             update::watch(move |status| {
-                let (Some(button), Some(spinner), Some(state), Some(bar), Some(bar_spinner)) =
-                    (weak.0.upgrade(), weak.1.upgrade(), weak.2.upgrade(), weak.3.upgrade(), weak.4.upgrade())
+                let (Some(button), Some(spinner), Some(state), Some(bar), Some(bar_spinner), Some(pause), Some(cancel)) =
+                    (weak.0.upgrade(), weak.1.upgrade(), weak.2.upgrade(), weak.3.upgrade(), weak.4.upgrade(), weak.5.upgrade(), weak.6.upgrade())
                 else {
                     return false;
                 };
@@ -106,8 +120,17 @@ fn update_center_row() -> PreferenceItem {
                 state.set_visible(line.is_some());
                 state.set_label(line.as_deref().unwrap_or_default());
                 bar.set_visible(status.fraction().is_some());
-                bar_spinner.set_visible(status.fraction().is_some());
+                bar_spinner.set_visible(matches!(status, Status::Downloading { .. }));
                 bar.set_fraction(status.fraction().unwrap_or(0.0));
+                // Pause turns into Resume while paused
+                let downloading = status.fraction().is_some();
+                let paused = matches!(status, Status::Paused { .. });
+                pause.set_visible(downloading);
+                cancel.set_visible(downloading);
+                let (icon, tip) = if paused { ("media-playback-start-symbolic", "Resume") } else { ("media-playback-pause-symbolic", "Pause") };
+                pause.set_icon_name(icon);
+                pause.set_tooltip_text(Some(tip));
+                pause.update_property(&[gtk::accessible::Property::Label(tip)]);
                 // the end spinner while checking; during a download the bar's own spinner
                 spinner.set_visible(status.busy() && status.fraction().is_none());
                 button.set_visible(!status.busy());
