@@ -156,11 +156,6 @@ pub fn pin_button_style(pinned: bool) -> (bool, f64) {
     if pinned { (true, 1.0) } else { (false, SECONDARY_ALPHA) }
 }
 
-/// The Latest button only appears when the source supports latest (E-SL-07).
-pub fn shows_latest(source: &Source) -> bool {
-    source.supports_latest
-}
-
 #[cfg(test)]
 /// The disable toggle is not offered for the local source.
 pub fn can_disable(id: i64) -> bool {
@@ -410,9 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_button_follows_supports_latest_and_the_pin_button_styles_differ() {
-        assert!(shows_latest(&src(1, "Beta", "en", true)));
-        assert!(!shows_latest(&src(1, "Beta", "en", false)));
+    fn the_pin_button_styles_differ() {
         assert_eq!(pin_button_style(true), (true, 1.0));
         assert_eq!(pin_button_style(false), (false, 0.78));
     }

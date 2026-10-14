@@ -1,4 +1,4 @@
-//! The Sources tab of either kind: language header rows, then source rows with a Latest button (T-40a-007, T-40a-005,
+//! The Sources tab of either kind: language header rows, then source rows; Latest is opened from the listing (T-40a-005,
 //! T-40b-003, T-41b-005). Sources are not pinned or hidden here: the language filter decides which rows show.
 //! `sources::source_list` decides what is listed; this file draws it and routes the clicks.
 
@@ -16,7 +16,7 @@ use super::glue::{follow_ready, keep_alive};
 use super::icons::IconCache;
 #[cfg(test)]
 use super::icons::SourceIcon;
-use super::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, language_line, section_title, shows_latest, source_list};
+use super::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, language_line, section_title, source_list};
 use super::view::{list_row, source_row_with};
 use crate::widgets::context_menu::Item;
 
@@ -184,17 +184,6 @@ impl Inner {
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         if let Some(status) = crate::recipe_sources::status(source.id) {
             actions.append(&status_dot(status));
-        }
-        if shows_latest(&source) {
-            let latest = gtk::Button::with_label(&tr(MsgKey::latest));
-            latest.add_css_class("flat");
-            let (weak, id) = (Rc::downgrade(self), source.id);
-            latest.connect_clicked(move |_| {
-                if let Some(inner) = weak.upgrade() {
-                    (inner.nav.open_listing)(id, BrowseQuery::Latest);
-                }
-            });
-            actions.append(&latest);
         }
 
         let language = language_line(section, &source);
@@ -390,7 +379,7 @@ pub(crate) mod tests {
         assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("list"));
     }
 
-    fn latest_shows_only_for_sources_that_support_it_and_no_row_has_a_pin_button() {
+    fn no_row_has_a_latest_or_pin_button() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let (_tx, rx) = watch::channel(true);
         let page = SourcesPage::new(nav(&log), rx);
@@ -398,11 +387,8 @@ pub(crate) mod tests {
         let mut all = Vec::new();
         buttons(page.inner.column.upcast_ref(), &mut all);
         let latest = tr(MsgKey::latest);
-        let latest_buttons: Vec<_> = all.iter().filter(|b| b.label().as_deref() == Some(latest.as_str())).collect();
-        assert_eq!(latest_buttons.len(), 1, "only Alpha supports latest");
+        assert!(!all.iter().any(|b| b.label().as_deref() == Some(latest.as_str())), "Latest is opened from the listing, not the row");
         assert!(!all.iter().any(|b| b.icon_name().as_deref() == Some("view-pin-symbolic")), "sources are not pinned from the list");
-        latest_buttons[0].emit_clicked();
-        assert_eq!(log.borrow().first().map(String::as_str), Some("open 1 Latest"));
     }
 
     fn a_stub_row_says_not_installed_in_the_error_colour() {
@@ -462,7 +448,7 @@ pub(crate) mod tests {
         a_refresh_of_the_rows_keeps_the_scroll_offset();
         the_page_waits_for_the_registry_then_lists_headers_and_rows();
         pre_init_sources_spinner();
-        latest_shows_only_for_sources_that_support_it_and_no_row_has_a_pin_button();
+        no_row_has_a_latest_or_pin_button();
         a_stub_row_says_not_installed_in_the_error_colour();
         no_sources_shows_the_empty_screen_and_a_stub_gets_the_warning_icon();
     }
