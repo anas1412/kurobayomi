@@ -133,10 +133,6 @@ fn library() -> Library {
     Library { prefs: app.base.store().clone(), db: app.db.clone(), extensions_dir: paths.extensions_dir() }
 }
 
-fn hide_content() -> bool {
-    crate::misc::diet_defaults::NOTIFICATION_HIDE_CONTENT
-}
-
 impl Ctx {
     fn start_backup(&self, path: PathBuf, options: BackupOptions) {
         let library = library();
@@ -178,12 +174,12 @@ impl Ctx {
         }
         let notifier = self.notifier.clone();
         glib::spawn_future_local(async move {
-            let hide = hide_content();
             while let Ok(msg) = rx.recv().await {
                 match msg {
                     Msg::Progress(event) => {
+                        // progress stays in the banner: a desktop notice per title piles up (the freedesktop backend
+                        // cannot replace a notice whose first send is still in flight); only the result notifies
                         set_banner(Some(&format!("{} ({}/{})", event.title, event.done, event.total)));
-                        notify::restore_progress(&event.title, event.done, event.total, false, hide).show_hiding(&notifier, hide);
                     }
                     Msg::Done(result) => {
                         finish(&notifier, &result);

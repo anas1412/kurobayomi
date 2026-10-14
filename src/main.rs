@@ -68,6 +68,8 @@ fn main() -> glib::ExitCode {
         println!("{}", kuro_core::app_info::version_line());
         return glib::ExitCode::SUCCESS;
     }
+    // the name desktop notifications show: without it they fall back to the binary, "AppRun.wrapped" inside the AppImage
+    glib::set_application_name(channel::APP_NAME);
     // `--updates-json`: the desktop applets read the updates feed here, before any GTK call (works without a display)
     {
         let args: Vec<String> = std::env::args().skip(1).collect();

@@ -15,6 +15,7 @@ use std::cell::{OnceCell, RefCell};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use kuro_db::handle::Db;
 use kuro_domain::items::source_sync::EntrySyncLocks;
@@ -88,26 +89,28 @@ impl Host for ToastHost {
     fn add_new_updates(&self, _kind: Kind, _count: usize) {}
 
     fn show_progress(&self, kind: Kind, title: &str, body: Option<&str>) {
-        notify::post(notify::progress_post(kind, title, body));
+        show_progress_once(kind, title, body);
     }
 
     fn cancel_progress(&self, kind: Kind) {
-        notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
+        withdraw_progress(kind);
     }
 
     fn show_summary(&self, kind: Kind, updates: &[EntryUpdate], hide_content: bool) {
         if updates.is_empty() {
             return;
         }
+        // one notice per pass: one updated entry gets its own notice and its buttons, more get the summary
+        if let [update] = updates
+            && let Some(post) = notify::entry_post(kind, update, hide_content)
+        {
+            notify::post(post);
+            return;
+        }
         let titles: Vec<String> = updates.iter().map(|u| u.title.clone()).collect();
         let summary = text::summary(kind, &titles, hide_content);
         if !notify::post(notify::summary_post(kind, &summary)) {
             crate::toast::notify(format!("{}: {}", summary.title, summary.text));
-        }
-        for update in updates {
-            if let Some(post) = notify::entry_post(kind, update, hide_content) {
-                notify::post(post);
-            }
         }
     }
 
@@ -304,12 +307,32 @@ struct MetadataNotices;
 
 impl MetadataProgress for MetadataNotices {
     fn show(&self, kind: Kind, title: &str) {
-        notify::post(notify::progress_post(kind, title, None));
+        show_progress_once(kind, title, None);
     }
 
     fn done(&self, kind: Kind) {
-        notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
+        withdraw_progress(kind);
     }
+}
+
+/// Whether the progress notice of a kind (manga, anime) is up.
+static PROGRESS_SHOWN: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+
+fn progress_shown(kind: Kind) -> &'static AtomicBool {
+    &PROGRESS_SHOWN[usize::from(kind == Kind::Anime)]
+}
+
+/// The progress notice is posted once per pass, not on every finished entry: the desktop cannot replace a notice whose
+/// first send is still in flight, so quick updates piled up as one notice each. It keeps its Cancel button.
+fn show_progress_once(kind: Kind, title: &str, body: Option<&str>) {
+    if !progress_shown(kind).swap(true, Ordering::Relaxed) {
+        notify::post(notify::progress_post(kind, title, body));
+    }
+}
+
+fn withdraw_progress(kind: Kind) {
+    progress_shown(kind).store(false, Ordering::Relaxed);
+    notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
 }
 
 fn metadata_passes() -> Arc<MetadataPasses> {
