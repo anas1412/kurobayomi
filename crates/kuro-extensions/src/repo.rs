@@ -282,7 +282,22 @@ pub async fn sync_link(client: &reqwest::Client, dir: &Path, link: &str) -> Resu
     }
     let text = serde_json::to_string(&index).map_err(|e| RepoError::Parse(e.to_string()))?;
     write_atomic(&dir.join(INDEX_FILE), text.as_bytes()).map_err(|e| RepoError::Write(e.to_string()))?;
+    prune(dir, &index);
     Ok(index)
+}
+
+/// Deletes the copies in `dir` that `index` no longer lists: a source dropped from the repo, or a file it replaced (a
+/// recipe that became a plug-in). Files still being written (`.part`) are left alone.
+fn prune(dir: &Path, index: &Index) {
+    let Ok(files) = std::fs::read_dir(dir) else { return };
+    let keep: std::collections::HashSet<PathBuf> = index.sources.iter().flat_map(|e| [cached_path(dir, e), cached_icon_path(dir, e)]).chain([dir.join(INDEX_FILE)]).collect();
+    for path in files.flatten().map(|f| f.path()) {
+        if !keep.contains(&path) && path.extension().is_none_or(|ext| ext != "part") {
+            if let Err(error) = std::fs::remove_file(&path) {
+                tracing::warn!(%error, path = %path.display(), "a dropped source's copy could not be deleted");
+            }
+        }
+    }
 }
 
 /// Writes `bytes` to `path` through a `.part` file, so a crash never leaves a half-written copy under the final name.
@@ -413,6 +428,19 @@ mod tests {
         std::fs::write(cached_path(dir.path(), source), b"changed").expect("overwrite source");
         assert_eq!(read_source(dir.path(), source), None, "a changed copy is not used");
         assert!(checked_at(dir.path()).is_some(), "the index file dates the last check");
+    }
+
+    #[test]
+    fn copies_the_index_no_longer_lists_are_deleted() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let index = parse_index(&index_of(&[entry("kept", "manga", "en")])).expect("valid");
+        for name in [INDEX_FILE, "kept.toml", "kept.png", "gone.toml", "gone.png", "kept.wasm", "x.1.part"] {
+            std::fs::write(dir.path().join(name), b"x").expect("write");
+        }
+        prune(dir.path(), &index);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path()).expect("read").flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, [INDEX_FILE, "kept.png", "kept.toml", "x.1.part"]);
     }
 
     #[test]
