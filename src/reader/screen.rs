@@ -1353,19 +1353,9 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
         screen.top_slot.append(&build_bare_top_bar(move || back()));
         return;
     };
-    let manga_id = screen.core.deps.manga_id;
     let bookmark = Rc::downgrade(screen);
-    let leaving = Rc::downgrade(screen);
     let actions = TopBarActions {
         on_back: Box::new(move || back()),
-        // the title shows the manga's details page in place of the reader, so Back there leaves to the page the reader was
-        // opened from and not into the chapter that was being read
-        on_open_manga: Box::new(move || {
-            if let Some(screen) = leaving.upgrade() {
-                screen.core.flush_deletes();
-            }
-            crate::entry_core::details::route::replace_with(kuro_platform::kind::Kind::Manga, manga_id);
-        }),
         on_bookmark: Box::new(move || {
             let Some(screen) = bookmark.upgrade() else { return };
             if let Some(Err(_)) = screen.core.toggle_bookmark() {

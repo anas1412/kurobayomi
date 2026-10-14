@@ -22,6 +22,8 @@ pub fn title_label(text: &str) -> gtk::Label {
 #[derive(Clone)]
 pub struct TwoLineTitle {
     pub root: gtk::Box,
+    /// The top line, for a page whose title changes (the player's next episode).
+    pub title: gtk::Label,
     subtitle: gtk::Label,
 }
 
@@ -42,10 +44,11 @@ pub fn two_line_title(text: &str) -> TwoLineTitle {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.set_halign(gtk::Align::Center);
     root.set_valign(gtk::Align::Center);
-    root.append(&title_label(text));
+    let title = title_label(text);
+    root.append(&title);
     let subtitle = gtk::Label::builder().css_classes(["subtitle", "dim-label"]).ellipsize(gtk::pango::EllipsizeMode::End).build();
     root.append(&subtitle);
-    TwoLineTitle { root, subtitle }
+    TwoLineTitle { root, title, subtitle }
 }
 
 /// `Page 3 of 12`, or `None` when there is no page on screen (a page or total not above zero, or a transition card).
@@ -64,6 +67,14 @@ pub fn header(title: &impl IsA<gtk::Widget>, on_back: impl Fn() + 'static) -> gt
     header.pack_start(&back);
     crate::ui::no_sticky_focus(&header);
     header
+}
+
+/// The top bar of the reader and the player, one format for both: Back, the two-line `title` (`page_title`) centred,
+/// and nothing clickable in it. The caller packs its own buttons on the right and may write the second line (the reader's
+/// page position).
+pub fn media_header(title: &str, on_back: impl Fn() + 'static) -> (gtk::HeaderBar, TwoLineTitle) {
+    let two_lines = two_line_title(title);
+    (header(&two_lines.root, on_back), two_lines)
 }
 
 #[cfg(test)]

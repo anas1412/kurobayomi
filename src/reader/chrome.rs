@@ -199,7 +199,6 @@ pub struct TopBar {
 /// The top bar actions. The overflow menu's own actions are [`menu_actions`].
 pub struct TopBarActions {
     pub on_back: Box<dyn Fn()>,
-    pub on_open_manga: Box<dyn Fn()>,
     pub on_bookmark: Box<dyn Fn()>,
 }
 
@@ -209,19 +208,13 @@ pub fn build_bare_top_bar(on_back: impl Fn() + 'static) -> gtk::HeaderBar {
     page_header::header(&gtk::Box::new(gtk::Orientation::Horizontal, 0), on_back)
 }
 
-/// The top bar: the themed header the player also uses (docs/design/player-reader.md). Back is on the left, the
-/// `<manga> - <chapter>` title is centred with the page position under it and opens the manga's page, and the
-/// bookmark and the menu are on the right. The bar is never hidden. The menu's actions come from the page's
+/// The top bar: the themed header the player also uses (docs/design/player-reader.md), in the same format: Back on the
+/// left, the `<manga> - <chapter>` title centred with the page position under it (a plain title, as the player's), and
+/// the bookmark and the menu on the right. The bar is never hidden. The menu's actions come from the page's
 /// [`ACTION_GROUP`]; the returned title takes the page position.
 pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> (gtk::HeaderBar, page_header::TwoLineTitle) {
-    let TopBarActions { on_back, on_open_manga, on_bookmark } = actions;
-    let title = page_header::two_line_title(&page_header::page_title(&bar.manga_title, &bar.chapter_name));
-    // a gesture and not a Button: a button's padding around two lines would make this bar taller than the others
-    let click = gtk::GestureClick::new();
-    click.connect_released(move |_, _, _, _| on_open_manga());
-    title.root.add_controller(click);
-    title.root.set_cursor_from_name(Some("pointer"));
-    let header = page_header::header(&title.root, on_back);
+    let TopBarActions { on_back, on_bookmark } = actions;
+    let (header, title) = page_header::media_header(&page_header::page_title(&bar.manga_title, &bar.chapter_name), on_back);
 
     let bookmark = gtk::ToggleButton::builder()
         .icon_name(if bar.bookmarked { "bookmark-filled-symbolic" } else { "bookmark-new-symbolic" })

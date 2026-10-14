@@ -320,12 +320,13 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     overlay.set_vexpand(true);
 
     let title = shared.borrow().media.title.clone();
-    let title_label = page_header::title_label(&title);
+
     let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     page.set_widget_name("screen:player");
     page.set_focusable(true);
     // the shared page header: Back stops and saves at once, then leaves the page
-    let header = page_header::header(&title_label, {
+    // the reader's top bar (`media_header`); the second line stays empty here, so both bars are as tall
+    let (header, two_lines) = page_header::media_header(&title, {
         let (shared, page) = (Rc::clone(shared), page.downgrade());
         move || {
             shared.borrow_mut().finish();
@@ -335,6 +336,8 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
             crate::ui::pop();
         }
     });
+    // the title follows the episode (the next one plays in place)
+    let title_label = two_lines.title.clone();
     let menu = menu::tracks_menu(shared);
     let servers = sheets::quality::Servers::default();
     let quality = sheets::quality::button(shared, &servers);
@@ -622,9 +625,9 @@ fn autoplay_next() -> bool {
     player_prefs().is_some_and(|p| p.autoplay_enabled.get())
 }
 
-/// The title a page shows for an episode: "anime - episode".
+/// The title a page shows for an episode: "anime - episode", the reader's `page_header::page_title`.
 pub fn episode_title(anime: &str, episode: &str) -> String {
-    format!("{anime} - {episode}")
+    page_header::page_title(anime, episode)
 }
 
 /// The title of episode row `episode_id`, or the file name of `path` when the row or its entry is missing.
