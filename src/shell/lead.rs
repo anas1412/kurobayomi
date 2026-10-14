@@ -51,7 +51,10 @@ pub fn place(page: Option<&gtk::Widget>, wide: bool) {
         home.set_visible(!wide);
     }
     let Some(lead) = page.and_then(lead_of) else { return };
-    lead.set_visible(true);
+    // an empty slot box still takes its spacing in the header, so while the sidebar holds the slots every page's box is
+    // hidden, the page on screen and the one fading out alike: the Anime | Manga switch then keeps its place across a
+    // change of tab
+    lead.set_visible(!wide);
     if !wide {
         return;
     }
@@ -93,6 +96,8 @@ mod tests {
             let other = GBox::new(gtk::Orientation::Vertical, 0);
             place(Some(other.upcast_ref()), true);
             assert!(search.is_ancestor(&lead) && !lead.is_visible(), "a page left while wide keeps its slots hidden");
+            place(Some(page.upcast_ref()), true);
+            assert!(!lead.is_visible(), "the page on screen has its empty box hidden too, so no page leaves a gap");
             place(Some(page.upcast_ref()), false);
             assert!(lead.is_visible(), "shown again once it is the page on screen");
             place(None, true);
