@@ -388,10 +388,20 @@ fn load_sources() -> Vec<String> {
         }
     }
 
+    // a manga plug-in names the headers of its images (a Referer the image host asks for): covers use them too, as the
+    // reader's pages do
+    let plugin_headers: HashMap<i64, HeaderMap> = manga_plugins
+        .iter()
+        .filter_map(|(source, row)| {
+            let pairs = block(source.request_headers())?.ok()??;
+            Some((row.source.id, crate::reader::source_pages::header_map(&pairs)))
+        })
+        .collect();
     let by_package: HashMap<String, HeaderMap> = recipes.iter().map(|recipe| (package_of(recipe), header_map(recipe))).collect();
     let (manga, anime) = build(recipes, manga_plugins, anime_plugins, &client);
     let rows: Vec<DirectorySource> = manga.sources().into_iter().chain(anime.anime.iter().map(|(_, row)| row.clone())).collect();
-    let headers: HashMap<i64, HeaderMap> = rows.iter().filter_map(|row| Some((row.source.id, by_package.get(&row.package)?.clone()))).collect();
+    let mut headers: HashMap<i64, HeaderMap> = rows.iter().filter_map(|row| Some((row.source.id, by_package.get(&row.package)?.clone()))).collect();
+    headers.extend(plugin_headers);
     let icon_paths: HashMap<i64, PathBuf> = rows.iter().filter_map(|row| Some((row.source.id, icons.get(&row.package)?.clone()))).collect();
     *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
     *ICON_PATHS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(icon_paths);

@@ -91,7 +91,7 @@ pub(crate) async fn page_image_headers(source: &dyn MangaSource, default: Header
 }
 
 /// The source's pairs as a header map. A pair that is not a valid header is left out.
-fn header_map(pairs: &[(String, String)]) -> HeaderMap {
+pub(crate) fn header_map(pairs: &[(String, String)]) -> HeaderMap {
     let mut map = HeaderMap::new();
     for (name, value) in pairs {
         if let (Ok(name), Ok(value)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_str(value)) {
