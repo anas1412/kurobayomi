@@ -86,7 +86,7 @@ fn the_top_bar_labels_the_bookmark_by_its_state_and_has_a_named_back_button() {
         let actions = TopBarActions { on_back: Box::new(|| {}), on_bookmark: Box::new(|| {}) };
         let (header, title) = build_top_bar(&bar, actions);
         // the player's format: a plain two-line title that takes no clicks
-        assert_eq!(title.title.label(), "Manga - Chapter 1");
+        assert_eq!((title.title.label().as_str(), title.subtitle().as_str()), ("Manga", "Chapter 1"), "the manga over the chapter");
         assert_eq!(title.root.observe_controllers().n_items(), 0, "the title is not clickable");
         let buttons = buttons_under(header.upcast_ref());
         assert!(position_of(&buttons, strings::ACTION_REMOVE_BOOKMARK).is_some(), "a bookmarked chapter offers to unbookmark");
@@ -200,8 +200,8 @@ fn the_top_bar_menu_is_a_native_popover_menu_and_the_title_has_a_position_line()
         let menu = all_of::<gtk::MenuButton>(header.upcast_ref()).pop().expect("the menu button");
         let popover = menu.popover().expect("the popover");
         assert!(popover.downcast_ref::<gtk::PopoverMenu>().is_some_and(|p| p.menu_model().is_some()), "a menu model, not hand-made buttons");
-        assert_eq!(title.subtitle(), "", "no position before a page is shown");
+        assert_eq!(title.subtitle(), "C", "the chapter alone before a page is shown");
         title.set_subtitle(Some("Page 1 of 23"));
-        assert_eq!(title.subtitle(), "Page 1 of 23");
+        assert_eq!(title.subtitle(), "C · Page 1 of 23");
     });
 }

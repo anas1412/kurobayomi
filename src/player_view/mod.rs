@@ -55,7 +55,8 @@ const TICK: Duration = Duration::from_millis(250);
 struct Media {
     /// The path or URL `loadfile` gets.
     target: String,
-    title: String,
+    /// The anime over the episode, as the top bar shows it.
+    title: page_header::MediaTitle,
     /// The `http-header-fields` value; `None` for a file.
     headers: Option<String>,
     /// `audio-add` and `sub-add` commands, sent once mpv has loaded the stream.
@@ -325,7 +326,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     page.set_widget_name("screen:player");
     page.set_focusable(true);
     // the shared page header: Back stops and saves at once, then leaves the page
-    // the reader's top bar (`media_header`); the second line stays empty here, so both bars are as tall
+    // the reader's top bar (`media_header`): the anime over the episode
     let (header, two_lines) = page_header::media_header(&title, {
         let (shared, page) = (Rc::clone(shared), page.downgrade());
         move || {
@@ -336,8 +337,6 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
             crate::ui::pop();
         }
     });
-    // the title follows the episode (the next one plays in place)
-    let title_label = two_lines.title.clone();
     let menu = menu::tracks_menu(shared);
     let servers = sheets::quality::Servers::default();
     let quality = sheets::quality::button(shared, &servers);
@@ -434,7 +433,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
         controls::Parts { page: &page, area: &area, bar: &bar, previous: &previous, next: &next, quality: &quality, speed: &speed, chapters: &chapters },
         shared,
     );
-    start_ticks(&page, &title_label, &play, &seek, &time, &volume, &loading, &skip, shared);
+    start_ticks(&page, &two_lines, &play, &seek, &time, &volume, &loading, &skip, shared);
     page
 }
 
@@ -625,18 +624,18 @@ fn autoplay_next() -> bool {
     player_prefs().is_some_and(|p| p.autoplay_enabled.get())
 }
 
-/// The title a page shows for an episode: "anime - episode", the reader's `page_header::page_title`.
-pub fn episode_title(anime: &str, episode: &str) -> String {
-    page_header::page_title(anime, episode)
+/// The title the top bar shows for an episode: the anime over the episode.
+pub fn episode_title(anime: &str, episode: &str) -> page_header::MediaTitle {
+    page_header::MediaTitle::new(anime, episode)
 }
 
 /// The title of episode row `episode_id`, or the file name of `path` when the row or its entry is missing.
-fn title_or_file(episode_id: i64, path: &Path) -> String {
-    row_title(episode_id).unwrap_or_else(|| path.file_name().map_or_else(|| "Player".to_owned(), |n| n.to_string_lossy().into_owned()))
+fn title_or_file(episode_id: i64, path: &Path) -> page_header::MediaTitle {
+    row_title(episode_id).unwrap_or_else(|| page_header::MediaTitle::new(&path.file_name().map_or_else(|| "Player".to_owned(), |n| n.to_string_lossy().into_owned()), ""))
 }
 
-/// "Anime - episode" of episode row `episode_id`; `None` before the app data exists or when the row is missing.
-fn row_title(episode_id: i64) -> Option<String> {
+/// The anime and the episode of row `episode_id`; `None` before the app data exists or when the row is missing.
+fn row_title(episode_id: i64) -> Option<page_header::MediaTitle> {
     if !crate::data::is_installed() {
         return None;
     }
@@ -751,11 +750,12 @@ fn remember_volume(playback: &Playback) {
 /// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due and refreshes the controls and the skip
 /// button. A failed file is a toast, and the end of an episode plays the next one when autoplay is on. The header hides
 /// only in fullscreen (`watch_fullscreen`). The timer stops once the page is gone or closed.
-fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, skip: &skip_button::Ui, shared: &Shared) {
+fn start_ticks(page: &gtk::Box, title: &page_header::TwoLineTitle, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, skip: &skip_button::Ui, shared: &Shared) {
     let loading = loading.clone();
     let opened = std::time::Instant::now();
     let page = page.downgrade();
-    let title_label = title_label.clone();
+    // the title follows the episode (the next one plays in place)
+    let (title_bar, shown_title) = (title.clone(), RefCell::new(shared.borrow().media.title.clone()));
     let play = play.clone();
     let seek = seek.clone();
     let time = time.clone();
@@ -814,8 +814,9 @@ fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, se
             play_adjacent(&shared, Step::Next, false);
         }
         let title = shared.borrow().media.title.clone();
-        if title_label.text().as_str() != title.as_str() {
-            title_label.set_text(&title);
+        if *shown_title.borrow() != title {
+            title_bar.set_title(&title);
+            *shown_title.borrow_mut() = title;
         }
         play.set_icon_name(if snapshot.paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" });
         // loading until mpv knows the duration; an idle mpv after the first seconds means the load failed, so stop

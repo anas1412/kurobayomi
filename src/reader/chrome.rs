@@ -209,12 +209,12 @@ pub fn build_bare_top_bar(on_back: impl Fn() + 'static) -> gtk::HeaderBar {
 }
 
 /// The top bar: the themed header the player also uses (docs/design/player-reader.md), in the same format: Back on the
-/// left, the `<manga> - <chapter>` title centred with the page position under it (a plain title, as the player's), and
+/// left, the manga over the chapter and its page position centred (a plain title, as the player's), and
 /// the bookmark and the menu on the right. The bar is never hidden. The menu's actions come from the page's
 /// [`ACTION_GROUP`]; the returned title takes the page position.
 pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> (gtk::HeaderBar, page_header::TwoLineTitle) {
     let TopBarActions { on_back, on_bookmark } = actions;
-    let (header, title) = page_header::media_header(&page_header::page_title(&bar.manga_title, &bar.chapter_name), on_back);
+    let (header, title) = page_header::media_header(&page_header::MediaTitle::new(&bar.manga_title, &bar.chapter_name), on_back);
 
     let bookmark = gtk::ToggleButton::builder()
         .icon_name(if bar.bookmarked { "bookmark-filled-symbolic" } else { "bookmark-new-symbolic" })

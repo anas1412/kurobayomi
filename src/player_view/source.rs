@@ -60,7 +60,7 @@ pub fn open_source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) ->
 pub struct SourceEpisode {
     source: Arc<dyn AnimeSource>,
     episode: Item,
-    title: String,
+    title: crate::widgets::page_header::MediaTitle,
 }
 
 /// The row `episode_id` when its entry belongs to one of `sources`. `None` for a missing row, a local entry, a source
@@ -155,7 +155,7 @@ fn select_defaults(mut commands: Vec<Vec<String>>, preferred: &str, preferred_au
     commands
 }
 
-pub(super) fn media_of(video: Video, title: String, preferred: &str, preferred_audio: &str) -> Media {
+pub(super) fn media_of(video: Video, title: crate::widgets::page_header::MediaTitle, preferred: &str, preferred_audio: &str) -> Media {
     let tracks = |list: &[Track]| list.iter().map(|t| kuro_player::types::Track { url: t.url.clone(), lang: t.lang.clone() }).collect::<Vec<_>>();
     let headers = http_header_fields(true, video.headers.as_ref().map(|h| h.0.as_slice()), &[]).filter(|h| !h.is_empty());
     Media {
@@ -258,7 +258,7 @@ mod tests {
             hosters: vec![hoster("VidStreaming", vec![video("https://cdn.test/480.m3u8", 480), video("https://cdn.test/1080.m3u8", 1080)])],
             fail: false,
         };
-        let media = media_of(resolve(&fake).expect("a video"), "Show - 1".into(), "", "");
+        let media = media_of(resolve(&fake).expect("a video"), crate::widgets::page_header::MediaTitle::new("Show", "1"), "", "");
         assert_eq!(media.target, "https://cdn.test/1080.m3u8", "the source's best quality is the default");
 
         let headers = "Origin: https://krussdomi.com,User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML\\, like Gecko)";
@@ -286,7 +286,7 @@ mod tests {
     fn a_video_without_headers_sets_none() {
         let mut plain = video("https://cdn.test/a.m3u8", 720);
         plain.headers = None;
-        assert_eq!(media_of(plain, String::new(), "", "").headers, None);
+        assert_eq!(media_of(plain, Default::default(), "", "").headers, None);
     }
 
     #[test]

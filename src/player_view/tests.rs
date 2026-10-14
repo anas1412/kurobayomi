@@ -176,7 +176,7 @@ fn popping_the_embedded_player_stops_playback_at_once() {
         let was_visible = window.is_visible();
         window.present();
         crate::ui::push(&gtk::Label::new(Some("below")));
-        let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
+        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, tracks: Vec::new() };
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         pump_for(500);
         assert!(!shared.borrow().closed, "playing");
@@ -204,7 +204,7 @@ fn a_closed_player_is_freed_and_leaves_no_leak() {
         let was_visible = window.is_visible();
         window.present();
         crate::ui::push(&gtk::Label::new(Some("below")));
-        let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
+        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, tracks: Vec::new() };
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         pump_for(400);
         let weak = std::rc::Rc::downgrade(&shared);
@@ -234,7 +234,7 @@ fn fullscreen_and_escape_act_on_the_window_that_holds_the_player() {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         stack.add_child(&root);
         stack.set_visible_child(&root);
-        let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
+        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, tracks: Vec::new() };
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         let page = stack.visible_child().and_downcast::<gtk::Box>().expect("the page is the visible child");
 
