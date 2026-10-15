@@ -31,7 +31,6 @@ pub struct Parts<'a> {
     pub previous: &'a gtk::Button,
     pub next: &'a gtk::Button,
     pub quality: &'a gtk::MenuButton,
-    pub server: &'a gtk::MenuButton,
     pub speed: &'a gtk::MenuButton,
     pub chapters: &'a gtk::MenuButton,
 }
@@ -42,7 +41,6 @@ struct Live {
     previous: gtk::Button,
     next: gtk::Button,
     quality: gtk::MenuButton,
-    server: gtk::MenuButton,
     speed: gtk::MenuButton,
     chapters: gtk::MenuButton,
     /// The episode row the buttons last followed. `i64::MIN` before the first check.
@@ -63,14 +61,12 @@ impl Live {
         };
         self.previous.set_sensitive(has_previous);
         self.next.set_sensitive(has_next);
-        let online = sheets::quality::is_online(episode);
-        self.quality.set_visible(online);
-        self.server.set_visible(online);
+        self.quality.set_visible(sheets::quality::is_online(episode));
     }
 
     /// A speed or chapter menu that is open keeps the bar shown.
     fn menu_open(&self) -> bool {
-        [&self.quality, &self.server, &self.speed, &self.chapters].iter().any(|button| button.popover().is_some_and(|p| p.is_visible()))
+        [&self.quality, &self.speed, &self.chapters].iter().any(|button| button.popover().is_some_and(|p| p.is_visible()))
     }
 }
 
@@ -132,7 +128,6 @@ pub fn wire(parts: Parts, shared: &Shared) {
         previous: parts.previous.clone(),
         next: parts.next.clone(),
         quality: parts.quality.clone(),
-        server: parts.server.clone(),
         speed: parts.speed.clone(),
         chapters: parts.chapters.clone(),
         episode: Cell::new(i64::MIN),
@@ -160,7 +155,6 @@ pub fn wire(parts: Parts, shared: &Shared) {
             page.set_cursor_from_name(pointer_hidden.then_some("none"));
         }
         sheets::quality::refresh(&live.quality);
-        sheets::quality::refresh_server(&live.server);
         sheets::speed::refresh(&live.speed, &shared);
         sheets::chapters::refresh(&live.chapters, &shared);
         glib::ControlFlow::Continue

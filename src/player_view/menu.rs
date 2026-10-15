@@ -32,9 +32,15 @@ impl TrackProps for MpvTracks<'_> {
 }
 
 /// The menu button. Its list is rebuilt whenever it opens, so tracks added after the load show up.
-pub fn tracks_menu(shared: &Shared) -> gtk::MenuButton {
-    let shared = Rc::clone(shared);
-    let menu = sheets::menu("Tracks", move |column, popover| fill(column, popover, &shared));
+pub fn tracks_menu(shared: &Shared, servers: &sheets::quality::Servers) -> gtk::MenuButton {
+    let (shared, servers) = (Rc::clone(shared), servers.clone());
+    let menu = sheets::menu("Tracks", move |column, popover| {
+        fill(column, popover, &shared);
+        // an online episode also lists its servers here
+        if sheets::quality::is_online(shared.borrow().episode_id) {
+            sheets::quality::fill_servers(column, popover, &shared, &servers);
+        }
+    });
     menu.set_icon_name("view-more-symbolic");
     menu
 }

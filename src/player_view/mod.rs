@@ -283,7 +283,7 @@ fn apply_action(shared: &Shared, page: &gtk::Box, action: Action) -> bool {
     true
 }
 
-/// The player page: a slim header (Back, title, the tracks menu) over the video and its control bar (with the quality
+/// The player page: a slim header (Back, title, the ⋮ menu of tracks and servers) over the video and its control bar (with the quality
 /// menu). The
 /// page is named `screen:player`, so the main window hides its sidebar while it shows. The caller pushes it.
 fn build_page(shared: &Shared, start: i64) -> gtk::Box {
@@ -309,7 +309,6 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let chapters = sheets::chapters::button(shared);
     let servers = sheets::quality::Servers::default();
     let quality = sheets::quality::button(shared, &servers);
-    let server = sheets::quality::server_button(shared, &servers);
     let skip = skip_button::Ui::new(shared);
 
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -319,7 +318,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     bar.set_margin_end(12);
     bar.set_margin_bottom(12);
     bar.set_valign(gtk::Align::End);
-    for widget in [previous.upcast_ref::<gtk::Widget>(), play.upcast_ref(), next.upcast_ref(), seek.upcast_ref(), time.upcast_ref(), quality.upcast_ref(), server.upcast_ref(), speed.upcast_ref(), chapters.upcast_ref(), volume.upcast_ref(), fullscreen.upcast_ref()] {
+    for widget in [previous.upcast_ref::<gtk::Widget>(), play.upcast_ref(), next.upcast_ref(), seek.upcast_ref(), time.upcast_ref(), quality.upcast_ref(), speed.upcast_ref(), chapters.upcast_ref(), volume.upcast_ref(), fullscreen.upcast_ref()] {
         bar.append(widget);
     }
 
@@ -348,7 +347,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
             crate::ui::pop();
         }
     });
-    let menu = menu::tracks_menu(shared);
+    let menu = menu::tracks_menu(shared, &servers);
     header.pack_end(&menu);
     // the buttons packed here came after page_header::header made its pass, so they need their own
     crate::ui::no_sticky_focus(&header);
@@ -414,7 +413,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
         let (shared, page, menu) = (Rc::clone(shared), page.downgrade(), menu.downgrade());
-        let popovers = [quality.downgrade(), server.downgrade(), speed.downgrade(), chapters.downgrade()];
+        let popovers = [quality.downgrade(), speed.downgrade(), chapters.downgrade()];
         keys.connect_key_pressed(move |_, keyval, _, state| {
             let Some(page) = page.upgrade() else {
                 return glib::Propagation::Proceed;
@@ -440,7 +439,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     });
 
     controls::wire(
-        controls::Parts { page: &page, area: &area, bar: &bar, previous: &previous, next: &next, quality: &quality, server: &server, speed: &speed, chapters: &chapters },
+        controls::Parts { page: &page, area: &area, bar: &bar, previous: &previous, next: &next, quality: &quality, speed: &speed, chapters: &chapters },
         shared,
     );
     start_ticks(&page, &two_lines, &hiding, &play, &seek, &time, &volume, &loading, &skip, shared);

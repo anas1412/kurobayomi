@@ -1,5 +1,5 @@
-//! The quality and server menus of an online episode, side by side in the control bar (user, 2026-10-15). The quality
-//! button shows the playing height ("1080p"), the server button the playing server. When a menu opens, the episode's servers and their videos load on the source's runtime (a spinner until
+//! The quality menu of an online episode, in the control bar, and its server list, in the top bar's ⋮ menu (user,
+//! 2026-10-15). The quality button shows the playing height ("1080p"). When a menu opens, the episode's servers and their videos load on the source's runtime (a spinner until
 //! they do, then the list is kept for the episode). One lists the heights ("1080p, 720p, 360p"), the other the
 //! servers. Choosing a height plays it on the playing server (else on the first server that has
 //! it); choosing a server plays the playing height there (else its first video). The stream resolves and reloads at the
@@ -107,27 +107,12 @@ pub fn button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
     button
 }
 
-/// The server button over the same `servers`, next to the quality button.
-pub fn server_button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
-    let button = menu(&tr(MsgKey::player_server), {
-        let (shared, servers) = (Rc::clone(shared), servers.clone());
-        move |column, popover| fill(column, popover, &shared, &servers, Lists::Server)
-    });
-    button.set_icon_name("network-server-symbolic");
-    button
-}
-
-/// Shows the playing server on its button, or its icon while none is known (or the source lists no servers).
-pub fn refresh_server(button: &gtk::MenuButton) {
-    match last().and_then(|pick| heading(&pick.hoster).map(str::to_owned)) {
-        Some(name) => {
-            if button.label().as_deref() != Some(name.as_str()) {
-                button.set_label(&name);
-            }
-        }
-        None if button.icon_name().is_none() => button.set_icon_name("network-server-symbolic"),
-        None => {}
-    }
+/// The Server list of the top bar's ⋮ menu, in its own box of `column`: it loads like the quality menu (a spinner,
+/// then the list), and a source that lists no servers adds nothing.
+pub fn fill_servers(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Servers) {
+    let part = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    column.append(&part);
+    fill(&part, popover, shared, servers, Lists::Server);
 }
 
 /// Shows the playing height on the button ("1080p"), or its icon while the height is unknown.
