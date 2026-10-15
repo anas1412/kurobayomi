@@ -103,6 +103,13 @@ dconf_module=/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so
 mkdir -p "$appdir/usr/lib/gio/modules"
 cp "$dconf_module" "$appdir/usr/lib/gio/modules/"
 echo 'export GIO_EXTRA_MODULES="$APPDIR/usr/lib/gio/modules${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"' >> "$hook"
+# WebKit (through libsoup) makes its HTTPS connections with GIO's TLS module, glib-networking's libgiognutls. The bundled GIO
+# looks in Ubuntu's folder alone, so on another distro WebKit failed every HTTPS page with "TLS support is not available" (and
+# the app then fell back to the system browser). The module travels in the same extra folder, with the libraries it needs.
+tls_module=/usr/lib/x86_64-linux-gnu/gio/modules/libgiognutls.so
+[ -f "$tls_module" ] || { echo "missing $tls_module: install glib-networking" >&2; exit 1; }
+cp "$tls_module" "$appdir/usr/lib/gio/modules/"
+"$tools/linuxdeploy" --appdir "$appdir" --deploy-deps-only "$appdir/usr/lib/gio/modules"
 
 # WebKitGTK (the hidden pages that pass Cloudflare's browser check, `src/page_fetch.rs`) starts helper programs
 # (WebKitWebProcess, WebKitNetworkProcess) from a folder whose absolute path is compiled into the library. Inside an
