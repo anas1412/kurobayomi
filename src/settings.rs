@@ -64,7 +64,7 @@ fn clear_db(id: &str) -> Option<Built> {
     let sources = sorted_by_name(sources);
     let b = GBox::new(O::Vertical, 0);
     if sources.is_empty() {
-        let text = screen(id).empty.unwrap_or_else(|| "Nothing to clear".to_owned());
+        let text = screen(id).empty.unwrap_or_else(|| tr(MsgKey::database_clean).to_owned());
         let label = Label::builder().label(text).wrap(true).xalign(0.0).build();
         margins(&label, 12);
         b.append(&label);
@@ -174,8 +174,8 @@ fn after_clear(_kind: Kind, removed: usize) {
             }
         });
     });
-    let body = crate::ui::message("This can take a while. The app stays usable, but do not close it until it is done.");
-    crate::ui::dialog("Compact the database to free the space?", &body, 420, vec![DialogButton::cancel(&tr(MsgKey::action_not_now)), compact]).present();
+    let body = crate::ui::message(&tr(MsgKey::ui_this_can_take_a_while_the_app_stays_usable_b));
+    crate::ui::dialog(&tr(MsgKey::ui_compact_the_database_to_free_the_space), &body, 420, vec![DialogButton::cancel(&tr(MsgKey::action_not_now)), compact]).present();
 }
 
 /// Advanced > "Clear WebView data" (T-12a-034): the toast text for the outcome of `clear_data`.

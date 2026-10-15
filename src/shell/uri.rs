@@ -2,6 +2,7 @@
 //! launch parsing shares (T-53a-010). The route table is the one of `p1-data-and-config.md` section 4.2. Pure: the window
 //! maps a [`UriRoute`] to a screen and an error to a toast.
 
+use kuro_i18n::{MsgKey, tr};
 use std::cell::RefCell;
 
 /// Where a link goes.
@@ -34,7 +35,7 @@ impl std::fmt::Display for UriError {
         match self {
             Self::UnsupportedScheme(s) => write!(f, "Unsupported link type {s}"),
             Self::UnknownHost(h) => write!(f, "Unknown link {h}"),
-            Self::MissingRepositoryAddress => f.write_str("Missing repository address"),
+            Self::MissingRepositoryAddress => f.write_str(&tr(MsgKey::ui_missing_repository_address)),
         }
     }
 }

@@ -1,6 +1,7 @@
 //! The one HTTP client of the extension repo pages. The domain flow takes a blocking GET behind a port
 //! ([`HttpGet`] for an index), so the page runs it on a worker thread.
 
+use kuro_i18n::{MsgKey, tr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -55,7 +56,7 @@ impl BlockingHttp {
 }
 
 fn too_large() -> String {
-    "The document is larger than 16 MiB".to_owned()
+    tr(MsgKey::ui_the_document_is_larger_than_16_mib).to_owned()
 }
 
 impl HttpGet for BlockingHttp {

@@ -150,8 +150,8 @@ pub(crate) fn text_veto(pref: &Pref<String>, can_be_blank: bool, validate: fn(&s
 /// The one auto-hide switch of the reader and the player (`auto_hide_bars`): both settings pages show this row.
 pub fn auto_hide_bars(base: &kuro_prefs::base::BasePrefs) -> PreferenceItem {
     switch_with(
-        "Hide the bars automatically",
-        Some("While reading or watching, the top bar and the controls get out of the way"),
+        &tr(MsgKey::ui_hide_the_bars_automatically),
+        Some(&tr(MsgKey::ui_while_reading_or_watching_the_top_bar_and_th)),
         &base.auto_hide_bars,
         true,
         bind::accept(),
@@ -178,10 +178,10 @@ pub fn exclusive_switch(title: &str, pref: &Pref<bool>, partner: &Pref<bool>, en
 }
 
 /// A list of `i32` codes (Aniyomi stores these as ints).
-pub fn int_choice(title: &str, pref: &Pref<i32>, options: &[(i32, &str)], enabled: bool) -> PreferenceItem {
+pub fn int_choice<S: AsRef<str>>(title: &str, pref: &Pref<i32>, options: &[(i32, S)], enabled: bool) -> PreferenceItem {
     let stored = pref.get();
     let current = if options.iter().any(|(code, _)| *code == stored) { stored } else { pref.default_value() };
-    let entries = options.iter().map(|(code, label)| (code.to_string(), (*label).to_owned())).collect();
+    let entries = options.iter().map(|(code, label)| (code.to_string(), label.as_ref().to_owned())).collect();
     let pref = pref.clone();
     let on_change = bind::veto(move |key: String| {
         let result = key

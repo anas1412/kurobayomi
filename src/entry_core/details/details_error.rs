@@ -1,6 +1,7 @@
 //! Typed errors of the anime details page (T-39a-060, D-5). Each place the Kotlin used `!!` or a failing lookup now
 //! returns one of these, shows its text, and logs it with `tracing::error!`. Upstream: `p1-rust-design.md` section 10.
 
+use kuro_i18n::{MsgKey, tr};
 use std::fmt;
 
 use kuro_data::DataError;
@@ -20,9 +21,9 @@ impl DetailsError {
     /// The text a user sees in the error state or the snackbar.
     pub fn user_message(&self) -> String {
         match self {
-            Self::EpisodeNotFound(_) => "This episode is no longer in the library".to_owned(),
-            Self::AnimeNotFound(_) => "This anime is no longer in the library".to_owned(),
-            Self::Data(_) | Self::Db(_) | Self::Io(_) => "Something went wrong while reading this entry".to_owned(),
+            Self::EpisodeNotFound(_) => tr(MsgKey::ui_this_episode_is_no_longer_in_the_library).to_owned(),
+            Self::AnimeNotFound(_) => tr(MsgKey::ui_this_anime_is_no_longer_in_the_library).to_owned(),
+            Self::Data(_) | Self::Db(_) | Self::Io(_) => tr(MsgKey::ui_something_went_wrong_while_reading_this_entr).to_owned(),
         }
     }
 

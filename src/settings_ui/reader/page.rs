@@ -1,6 +1,7 @@
 //! Reader settings rows: the six kept reader settings (settings diet, 2026-10-11). The top row is the default reading
 //! mode; the Display group holds the background colour; the Paged group holds the scale type, the zoom start position,
 //! crop borders and split wide pages. Every other reader setting is cut.
+use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::reader::ReaderPrefs;
 
@@ -8,39 +9,47 @@ use crate::pref_model::model::Preference;
 use crate::settings_ui::rows::{group, int_choice, item, switch};
 
 /// `ReadingMode` codes (`pref_default_reading_mode_key`); 0 (Default) is not offered.
-pub const READING_MODES: [(i32, &str); 5] = [
-    (1, "Paged, left to right"),
-    (2, "Paged, right to left"),
-    (3, "Paged, vertical"),
-    (4, "Long strip"),
-    (5, "Long strip with gaps"),
-];
+pub fn reading_modes() -> [(i32, String); 5] {
+    [
+        (1, tr(MsgKey::left_to_right_viewer)),
+        (2, tr(MsgKey::right_to_left_viewer)),
+        (3, tr(MsgKey::vertical_viewer)),
+        (4, tr(MsgKey::webtoon_viewer)),
+        (5, tr(MsgKey::vertical_plus_viewer)),
+    ]
+}
 /// Background codes (`pref_reader_theme_key`).
-pub const BACKGROUNDS: [(i32, &str); 4] = [(1, "Black"), (2, "Gray"), (0, "White"), (3, "Auto")];
+pub fn backgrounds() -> [(i32, String); 4] {
+    [(1, tr(MsgKey::black_background)), (2, tr(MsgKey::gray_background)), (0, tr(MsgKey::white_background)), (3, tr(MsgKey::automatic_background))]
+}
 /// Scale type codes (`pref_image_scale_type_key`).
-pub const SCALE_TYPES: [(i32, &str); 6] = [
-    (1, "Fit screen"),
-    (2, "Stretch"),
-    (3, "Fit width"),
-    (4, "Fit height"),
-    (5, "Original size"),
-    (6, "Smart fit"),
-];
+pub fn scale_types() -> [(i32, String); 6] {
+    [
+        (1, tr(MsgKey::scale_type_fit_screen)),
+        (2, tr(MsgKey::scale_type_stretch)),
+        (3, tr(MsgKey::scale_type_fit_width)),
+        (4, tr(MsgKey::scale_type_fit_height)),
+        (5, tr(MsgKey::scale_type_original_size)),
+        (6, tr(MsgKey::scale_type_smart_fit)),
+    ]
+}
 /// Zoom start codes (`pref_zoom_start_key`).
-pub const ZOOM_STARTS: [(i32, &str); 4] = [(1, "Automatic"), (2, "Left"), (3, "Right"), (4, "Center")];
+pub fn zoom_starts() -> [(i32, String); 4] {
+    [(1, tr(MsgKey::zoom_start_automatic)), (2, tr(MsgKey::zoom_start_left)), (3, tr(MsgKey::zoom_start_right)), (4, tr(MsgKey::zoom_start_center))]
+}
 
 /// The Display and Paged groups: the background colour and the paged layout. The Settings reader page and the reader's
 /// own settings window both show them, so the rows are built here once.
 pub fn layout_rows(r: &ReaderPrefs) -> Vec<Preference> {
     vec![
-        group("Display", vec![int_choice("Background color", &r.reader_theme, &BACKGROUNDS, true)]),
+        group(&tr(MsgKey::action_display), vec![int_choice(&tr(MsgKey::pref_reader_theme), &r.reader_theme, &backgrounds(), true)]),
         group(
-            "Paged",
+            &tr(MsgKey::pager_viewer),
             vec![
-                int_choice("Scale type", &r.image_scale_type, &SCALE_TYPES, true),
-                int_choice("Zoom start position", &r.zoom_start, &ZOOM_STARTS, true),
-                switch("Crop borders", &r.crop_borders, true),
-                switch("Split wide pages", &r.dual_page_split_paged, true),
+                int_choice(&tr(MsgKey::pref_image_scale_type), &r.image_scale_type, &scale_types(), true),
+                int_choice(&tr(MsgKey::pref_zoom_start), &r.zoom_start, &zoom_starts(), true),
+                switch(&tr(MsgKey::pref_crop_borders), &r.crop_borders, true),
+                switch(&tr(MsgKey::pref_dual_page_split), &r.dual_page_split_paged, true),
             ],
         ),
     ]
@@ -49,7 +58,7 @@ pub fn layout_rows(r: &ReaderPrefs) -> Vec<Preference> {
 /// The reader settings page: the default reading mode, then [`layout_rows`]. Every row is kept.
 pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
     let mut tree = vec![
-        item(int_choice("Default reading mode", &prefs.reader.default_reading_mode, &READING_MODES, true)),
+        item(int_choice(&tr(MsgKey::pref_viewer_type), &prefs.reader.default_reading_mode, &reading_modes(), true)),
         item(crate::settings_ui::rows::auto_hide_bars(&prefs.base)),
     ];
     tree.extend(layout_rows(&prefs.reader));
@@ -89,9 +98,9 @@ mod tests {
 
     #[test]
     fn the_reading_mode_offers_the_five_modes_and_the_background_the_four_colours() {
-        assert_eq!(READING_MODES.len(), 5);
-        assert_eq!(BACKGROUNDS.len(), 4);
-        assert_eq!(SCALE_TYPES.len(), 6);
-        assert_eq!(ZOOM_STARTS.len(), 4);
+        assert_eq!(reading_modes().len(), 5);
+        assert_eq!(backgrounds().len(), 4);
+        assert_eq!(scale_types().len(), 6);
+        assert_eq!(zoom_starts().len(), 4);
     }
 }

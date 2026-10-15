@@ -106,7 +106,7 @@ pub fn index_from(build: impl Fn(&str) -> Vec<Preference>) -> Vec<Row> {
     let mut rows = Vec::new();
     for (ids, player) in [(&MAIN_SCREENS[..], false), (&PLAYER_SCREENS[..], true)] {
         for id in ids {
-            let title = crate::ui::with_spec(|spec| spec.screen(id).map(|sc| sc.title.clone())).unwrap_or_default();
+            let title = crate::ui::with_spec(|spec| spec.screen(id).map(|sc| crate::spec::shown(&sc.title))).unwrap_or_default();
             rows.extend(rows_of(id, &title, &build(id), player));
         }
     }
@@ -199,13 +199,13 @@ fn scoped_index(player_only: bool) -> Vec<Row> {
 fn search_page(player_only: bool) -> Option<Built> {
     let col = crate::ui::column();
     let entry = gtk::SearchEntry::builder().placeholder_text(&tr(MsgKey::action_search_settings)).hexpand(true).build();
-    entry.update_property(&[gtk::accessible::Property::Label("Search settings")]);
+    entry.update_property(&[gtk::accessible::Property::Label(&tr(MsgKey::action_search_settings))]);
     let results = crate::ui::boxed_list();
     results.set_visible(false);
     col.append(&results);
-    let hint = crate::ui::status("system-search-symbolic", "Type to search every setting");
+    let hint = crate::ui::status("system-search-symbolic", &tr(MsgKey::ui_type_to_search_every_setting));
     col.append(&hint);
-    let empty = crate::ui::status("system-search-symbolic", "No results found");
+    let empty = crate::ui::status("system-search-symbolic", &tr(MsgKey::no_results_found));
     empty.set_visible(false);
     col.append(&empty);
 

@@ -108,7 +108,7 @@ pub fn search() -> Option<Built> {
     let Some(entry) = entry() else { return unavailable("tracker_search") };
     let column = ui::column();
     let field = gtk::SearchEntry::new();
-    field.set_placeholder_text(Some("Search AniList"));
+    field.set_placeholder_text(Some(&tr(MsgKey::ui_search_anilist)));
     field.set_text(&entry.title);
     let status = ui::dim("");
     let results = GBox::new(O::Vertical, 0);
@@ -211,7 +211,7 @@ fn anilist_list(entry: &Entry, tracker: &dyn Tracker, bound: Option<Bound>, redr
             let search = Button::with_label(&kuro_i18n::tr(kuro_i18n::MsgKey::action_search));
             search.set_valign(Align::Center);
             search.connect_clicked(|_| ui::open("tracker_search"));
-            list.append(&ui::row(tracker.name(), Some("Not tracked yet"), Some(search.upcast::<gtk::Widget>())));
+            list.append(&ui::row(tracker.name(), Some(&tr(MsgKey::ui_not_tracked_yet)), Some(search.upcast::<gtk::Widget>())));
         }
     }
     list
@@ -319,10 +319,10 @@ fn edit_rows(list: &ListBox, entry: &Entry, shown: Shown, bound: Bound, redraw: 
 
     if !shown.url.is_empty() {
         let url = shown.url.clone();
-        list.append(&button_row("Open on AniList", &["flat"], move || crate::ui::open_link(&url, None)));
+        list.append(&button_row(&tr(MsgKey::ui_open_on_anilist), &["flat"], move || crate::ui::open_link(&url, None)));
     }
     let deletable = shown.deletable;
-    list.append(&button_row("Stop tracking", &["flat", "destructive-action"], move || confirm_stop(&bound, deletable, Rc::clone(&redraw))));
+    list.append(&button_row(&tr(MsgKey::ui_stop_tracking), &["flat", "destructive-action"], move || confirm_stop(&bound, deletable, Rc::clone(&redraw))));
 }
 
 /// "Episodes" or "Chapters": a spin button over `0..=total` (10000 while the total is unknown) and "of N" beside it.
@@ -356,7 +356,7 @@ fn progress_row(kind: Kind, shown: &Shown, write: Rc<dyn Fn(Edit)>) -> gtk::List
 /// A day in the future, a start after the finish or a finish before the start is refused with a toast.
 fn date_row(is_start: bool, stored: i64, other: i64, write: Rc<dyn Fn(Edit)>) -> gtk::ListBoxRow {
     let zone = chrono::Local;
-    let text = picker_day(stored, &zone).map_or_else(|| "Not set".to_owned(), |day| day.format("%Y-%m-%d").to_string());
+    let text = picker_day(stored, &zone).map_or_else(|| tr(MsgKey::ui_not_set).to_owned(), |day| day.format("%Y-%m-%d").to_string());
     let button = gtk::MenuButton::builder().label(text).build();
     let popover = gtk::Popover::new();
     let calendar = gtk::Calendar::new();
@@ -385,7 +385,7 @@ fn date_row(is_start: bool, stored: i64, other: i64, write: Rc<dyn Fn(Edit)>) ->
             let Some(day) = NaiveDate::from_ymd_opt(picked.year(), picked.month() as u32, picked.day_of_month() as u32) else { return };
             let zone = chrono::Local;
             if !dates::date_selectable(is_start, day, picker_day(other, &zone), picker_today(now_ms(), &zone)) {
-                crate::toast::notify(if is_start { "The start date can't be in the future or after the finish date." } else { "The finish date can't be in the future or before the start date." });
+                crate::toast::notify(if is_start { tr(MsgKey::ui_the_start_date_can_t_be_in_the_future_or_aft) } else { tr(MsgKey::ui_the_finish_date_can_t_be_in_the_future_or_be) });
                 return;
             }
             popover.popdown();

@@ -18,7 +18,7 @@ pub fn label(hours: i32) -> String {
     match hours {
         0 => "Off".to_owned(),
         24 => "Daily".to_owned(),
-        48 => "Every 2 days".to_owned(),
+        48 => tr(MsgKey::update_48hour).to_owned(),
         168 => "Weekly".to_owned(),
         h if h % 24 == 0 => format!("Every {} days", h / 24),
         h => format!("Every {h} hours"),
@@ -34,7 +34,7 @@ pub fn hours(stored: i32) -> u32 {
 /// The settings row. The library settings page merges it over the spec row of the same group and title, so the
 /// choice reads and writes the real preference.
 pub fn rows(pref: &Pref<i32>) -> Vec<Preference> {
-    vec![group("Global update", vec![ranged_choice("Automatic updates", pref, label, true), info(&first_run_note())])]
+    vec![group(&tr(MsgKey::pref_category_library_update), vec![ranged_choice(&tr(MsgKey::pref_library_update_interval), pref, label, true), info(&first_run_note())])]
 }
 
 /// Sends `stored` as hours to every schedule loop. Each loop restarts its wait on the change (`run_schedule`).

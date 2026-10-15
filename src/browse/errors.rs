@@ -73,7 +73,7 @@ pub fn classify(error: &SourceError, online: bool) -> Trouble {
 
 /// The sentence for a kind of trouble with `source` (its bare name; a blank name reads "This source").
 pub fn says(source: &str, trouble: Trouble) -> String {
-    let name = if source.trim().is_empty() { "This source" } else { source.trim() };
+    let name = if source.trim().is_empty() { tr(MsgKey::ui_this_source) } else { source.trim().to_string() };
     match trouble {
         Trouble::Offline => offline().to_owned(),
         Trouble::Slow => format!("{name} is not answering. Try again in a moment."),

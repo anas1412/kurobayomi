@@ -68,7 +68,7 @@ pub fn marked(kind: Kind, entry_id: i64, read: bool, numbers: &[f64], incognito:
                 crate::ui::DialogButton::cancel(&tr(MsgKey::action_cancel)),
                 crate::ui::DialogButton::new(&tr(MsgKey::ext_update), crate::ui::Role::Suggested, move || send_and_tell(kind, entry_id, update_to)),
             ];
-            crate::ui::dialog("Update tracker", &body, 360, buttons).present();
+            crate::ui::dialog(&tr(MsgKey::ui_update_tracker), &body, 360, buttons).present();
         }
     }
 }

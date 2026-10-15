@@ -66,7 +66,7 @@ pub fn build(id: &str) -> GBox {
             // a page with its own one-row header (the kind pages) is used as it is
             let p = match b.content.clone().downcast::<GBox>() {
                 Ok(own) if own.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>()) => own,
-                _ => page(&s.title, &b.content, b.end, true),
+                _ => page(&crate::spec::shown(&s.title), &b.content, b.end, true),
             };
             tag(&p, id);
             p

@@ -47,7 +47,7 @@ impl DetailError {
     /// `formattedMessage`: the text of a banner or toast for this error.
     pub fn user_message(&self) -> String {
         match self {
-            Self::Http(_) => says("This source", Trouble::Broken),
+            Self::Http(_) => says(&tr(MsgKey::ui_this_source), Trouble::Broken),
             Self::Plain(text) => text.clone(),
             Self::NoChapters => tr(MsgKey::no_results_found),
             Self::SourceNotInstalled => tr(MsgKey::loader_not_implemented_error),

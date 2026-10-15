@@ -1,6 +1,7 @@
 //! The entry model of a library pass and the queue it builds (behaviour 3: category selection, season
 //! expansion, item restrictions, title order). Pure: the caller supplies the library rows and the preferences.
 
+use kuro_i18n::{MsgKey, tr};
 use std::collections::{HashMap, HashSet};
 
 pub use kuro_db::codec::UpdateStrategy;
@@ -87,13 +88,13 @@ pub enum SkipReason {
 }
 
 impl SkipReason {
-    pub fn message(self) -> &'static str {
+    pub fn message(self) -> String {
         match self {
-            Self::NotAlwaysUpdate => "Skipped because series does not require updates",
-            Self::Completed => "Skipped because series is complete",
-            Self::NotCaughtUp => "Skipped because there are unread chapters",
-            Self::NotStarted => "Skipped because no chapters are read",
-            Self::NotInReleasePeriod => "Skipped because no release was expected today",
+            Self::NotAlwaysUpdate => tr(MsgKey::skipped_reason_not_always_update),
+            Self::Completed => tr(MsgKey::skipped_reason_completed),
+            Self::NotCaughtUp => tr(MsgKey::skipped_reason_not_caught_up),
+            Self::NotStarted => tr(MsgKey::skipped_reason_not_started),
+            Self::NotInReleasePeriod => tr(MsgKey::skipped_reason_not_in_release_period),
         }
     }
 }

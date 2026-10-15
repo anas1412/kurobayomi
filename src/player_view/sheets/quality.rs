@@ -88,7 +88,7 @@ impl Servers {
 
 /// The quality and server button over `servers`. Its list loads the first time it opens for an episode.
 pub fn button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
-    let button = menu("Quality and server", {
+    let button = menu(&tr(MsgKey::ui_quality_and_server), {
         let (shared, servers) = (Rc::clone(shared), servers.clone());
         move |column, popover| fill(column, popover, &shared, &servers)
     });
@@ -215,7 +215,7 @@ fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterStat
                 Some((heading(hoster_name).map(str::to_owned), choices))
             }
             HosterState::Error { hoster_name } => {
-                let failed = Choice { title: "Could not load".to_owned(), subtitle: None, current: false, enabled: false, pick: Box::new(|| {}) };
+                let failed = Choice { title: tr(MsgKey::ui_could_not_load).to_owned(), subtitle: None, current: false, enabled: false, pick: Box::new(|| {}) };
                 Some((heading(hoster_name).map(str::to_owned), vec![failed]))
             }
             _ => None,

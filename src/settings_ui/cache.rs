@@ -55,7 +55,7 @@ pub fn clear(dir: &Path) -> io::Result<usize> {
 pub fn cleared_message(result: &io::Result<usize>) -> String {
     match result {
         Ok(deleted) => format!("Cache cleared, {deleted} files deleted"),
-        Err(_) => "Error occurred while clearing".to_owned(),
+        Err(_) => tr(MsgKey::cache_delete_error).to_owned(),
     }
 }
 

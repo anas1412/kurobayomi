@@ -46,7 +46,7 @@ fn badge(text: &str, tooltip: Option<&str>, accent: bool) -> gtk::Label {
 fn count_badges(model: &CardModel) -> gtk::Box {
     let group = gtk::Box::new(O::Horizontal, SPACE_XS);
     if let Some(text) = &model.unread {
-        group.append(&badge(text, model.unread_tooltip.or(Some("Not yet watched or read")), true));
+        group.append(&badge(text, model.unread_tooltip.or(Some(&tr(MsgKey::ui_not_yet_watched_or_read))), true));
     }
     if let Some(text) = &model.downloads {
         group.append(&badge(text, Some("Downloaded"), false));
@@ -63,7 +63,7 @@ fn origin_badge(model: &CardModel) -> gtk::Box {
         group.append(&gtk::Image::from_icon_name("folder-symbolic"));
         group.append(&gtk::Label::new(Some(&layout::local_badge())));
     } else if let Some(text) = &model.language {
-        group.append(&badge(text, Some("Source language"), false));
+        group.append(&badge(text, Some(&tr(MsgKey::ui_source_language)), false));
     }
     group
 }

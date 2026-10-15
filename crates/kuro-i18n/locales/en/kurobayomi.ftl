@@ -4540,3 +4540,367 @@ ui_quit = Quit
 
 # source: kurobayomi
 ui_ascending_descending = Ascending / descending
+
+# source: kurobayomi
+ui_chapter_unavailable = Chapter unavailable
+
+# source: kurobayomi
+ui_not_an_image = Not an image
+
+# source: kurobayomi
+ui_page_list_is_empty = Page list is empty
+
+# source: kurobayomi
+ui_reading_manga = Reading manga
+
+# source: kurobayomi
+ui_the_document_is_larger_than_16_mib = The document is larger than 16 MiB
+
+# source: kurobayomi
+ui_added_1_source = Added 1 source
+
+# source: kurobayomi
+ui_the_repo_could_not_be_reached = The repo could not be reached
+
+# source: kurobayomi
+ui_the_repo_lists_more_than_10_sources_of_one_k = The repo lists more than 10 sources of one kind
+
+# source: kurobayomi
+ui_a_source_does_not_match_its_checksum_in_the = A source does not match its checksum in the repo index
+
+# source: kurobayomi
+ui_the_repo_index_is_not_valid = The repo index is not valid
+
+# source: kurobayomi
+ui_not_yet_watched_or_read = Not yet watched or read
+
+# source: kurobayomi
+ui_source_language = Source language
+
+# source: kurobayomi
+ui_cover_only = Cover only
+
+# source: kurobayomi
+ui_reverse_order = Reverse order
+
+# source: kurobayomi
+ui_show_only = Show only
+
+# source: kurobayomi
+ui_sort_by = Sort by
+
+# source: kurobayomi
+ui_grid_style = Grid style
+
+# source: kurobayomi
+ui_view_options = View options
+
+# source: kurobayomi
+ui_mark_all_as_read = Mark all as read
+
+# source: kurobayomi
+ui_download_unread = Download unread
+
+# source: kurobayomi
+ui_mark_all_as_watched = Mark all as watched
+
+# source: kurobayomi
+ui_download_unwatched = Download unwatched
+
+# source: kurobayomi
+ui_change_categories = Change categories
+
+# source: kurobayomi
+ui_search_anilist = Search AniList
+
+# source: kurobayomi
+ui_not_tracked_yet = Not tracked yet
+
+# source: kurobayomi
+ui_open_on_anilist = Open on AniList
+
+# source: kurobayomi
+ui_not_set = Not set
+
+# source: kurobayomi
+ui_the_start_date_can_t_be_in_the_future_or_aft = The start date can't be in the future or after the finish date.
+
+# source: kurobayomi
+ui_the_finish_date_can_t_be_in_the_future_or_be = The finish date can't be in the future or before the start date.
+
+# source: kurobayomi
+ui_update_tracker = Update tracker
+
+# source: kurobayomi
+ui_up_down = Up / Down
+
+# source: kurobayomi
+ui_move_focus_in_the_chapter_list = Move focus in the chapter list
+
+# source: kurobayomi
+ui_open_the_focused_chapter = Open the focused chapter
+
+# source: kurobayomi
+ui_toggle_the_focused_chapter = Toggle the focused chapter
+
+# source: kurobayomi
+ui_select_a_range_from_the_anchor = Select a range from the anchor
+
+# source: kurobayomi
+ui_toggle_one_chapter = Toggle one chapter
+
+# source: kurobayomi
+ui_invert_the_selection = Invert the selection
+
+# source: kurobayomi
+ui_clear_the_selection = Clear the selection
+
+# source: kurobayomi
+ui_open_the_filter_sheet = Open the filter sheet
+
+# source: kurobayomi
+ui_open_the_webview = Open the WebView
+
+# source: kurobayomi
+ui_f1_or = F1 or ?
+
+# source: kurobayomi
+ui_show_this_help = Show this help
+
+# source: kurobayomi
+ui_keyboard_shortcuts = Keyboard shortcuts
+
+# source: kurobayomi
+ui_this_episode_is_no_longer_in_the_library = This episode is no longer in the library
+
+# source: kurobayomi
+ui_this_anime_is_no_longer_in_the_library = This anime is no longer in the library
+
+# source: kurobayomi
+ui_something_went_wrong_while_reading_this_entr = Something went wrong while reading this entry
+
+# source: kurobayomi
+ui_use_as_default_for_all_titles = Use as default for all titles
+
+# source: kurobayomi
+ui_source_order = Source order
+
+# source: kurobayomi
+ui_upload_date = Upload date
+
+# source: kurobayomi
+ui_every_title_in_your_library_takes_these_list = Every title in your library takes these list options, and titles you open later start with them.
+
+# source: kurobayomi
+ui_this_source = This source
+
+# source: kurobayomi
+ui_subtitle_language = Subtitle language
+
+# source: kurobayomi
+ui_audio_language = Audio language
+
+# source: kurobayomi
+ui_autoplay_next_episode = Autoplay next episode
+
+# source: kurobayomi
+ui_theme_mode = Theme mode
+
+# source: kurobayomi
+ui_no_passphrase_is_set = No passphrase is set
+
+# source: kurobayomi
+ui_hide_the_bars_automatically = Hide the bars automatically
+
+# source: kurobayomi
+ui_while_reading_or_watching_the_top_bar_and_th = While reading or watching, the top bar and the controls get out of the way
+
+# source: kurobayomi
+ui_type_to_search_every_setting = Type to search every setting
+
+# source: kurobayomi
+ui_your_appimage_manager_already_lists_it_there = Your AppImage manager already lists it there
+
+# source: kurobayomi
+ui_with_its_icon_like_an_installed_app = With its icon, like an installed app
+
+# source: kurobayomi
+ui_report_an_issue = Report an issue
+
+# source: kurobayomi
+ui_source_not_installed = Source not installed
+
+# source: kurobayomi
+ui_missing_repository_address = Missing repository address
+
+# source: kurobayomi
+ui_anime_library = Anime library
+
+# source: kurobayomi
+ui_downloads_running = Downloads running
+
+# source: kurobayomi
+ui_no_results = No results
+
+# source: kurobayomi
+ui_couldn_t_open_this_link = Couldn't open this link
+
+# source: kurobayomi
+ui_add_local_manga_folder = Add local manga folder
+
+# source: kurobayomi
+ui_add_local_anime_folder = Add local anime folder
+
+# source: kurobayomi
+ui_quality_and_server = Quality and server
+
+# source: kurobayomi
+ui_could_not_load = Could not load
+
+# source: kurobayomi
+ui_playback_speed = Playback speed
+
+# source: kurobayomi
+ui_playing_video = Playing video
+
+# source: kurobayomi
+ui_quality_loading = Quality: loading…
+
+# source: kurobayomi
+ui_no_downloads_are_queued = No downloads are queued.
+
+# source: kurobayomi
+ui_pause_downloads = Pause downloads
+
+# source: kurobayomi
+ui_resume_downloads = Resume downloads
+
+# source: kurobayomi
+ui_clear_queue = Clear queue
+
+# source: kurobayomi
+ui_waiting_for_source = Waiting for source
+
+# source: kurobayomi
+ui_select_count_from_items_i_join_entries_e_on = SELECT count(*) FROM items i JOIN entries e ON e._id = i.entry_id WHERE e.kind = ?1
+
+# source: kurobayomi
+ui_this_can_take_a_while_the_app_stays_usable_b = This can take a while. The app stays usable, but do not close it until it is done.
+
+# source: kurobayomi
+ui_compact_the_database_to_free_the_space = Compact the database to free the space?
+
+# source: kurobayomi
+ui_github_would_not_carry_on_the_download = GitHub would not carry on the download
+
+# source: kurobayomi
+ui_github_did_not_answer_in_time = GitHub did not answer in time
+
+# source: kurobayomi
+ui_sha256sums_does_not_list_the_appimage = SHA256SUMS does not list the AppImage
+
+# source: kurobayomi
+ui_checking_for_updates = Checking for updates…
+
+# source: kurobayomi
+ui_up_to_date = Up to date
+
+# source: kurobayomi
+ui_nightly_update_installed = Nightly update installed
+
+# source: kurobayomi
+ui_update_installed = Update installed
+
+# source: kurobayomi
+ui_no_changes_since_your_last_version = No changes since your last version.
+
+# source: kurobayomi
+ui_comfortable = Comfortable
+
+# source: kurobayomi
+repos_added =
+    { $count ->
+        [one] Added 1 source
+       *[other] Added { NUMBER($count, useGrouping: "false") } sources
+    }
+
+# source: kurobayomi
+spec_anime_details = Anime details
+
+# source: kurobayomi
+spec_anime_title = Anime title
+
+# source: kurobayomi
+spec_auto_play = Auto-play
+
+# source: kurobayomi
+spec_automatic_and_manual_backups_maintenance = Automatic and manual backups, maintenance
+
+# source: kurobayomi
+spec_backup_file_schema = Backup file schema
+
+# source: kurobayomi
+spec_clear = Clear
+
+# source: kurobayomi
+spec_downloads_and_storage = Downloads and storage
+
+# source: kurobayomi
+spec_kurobayomi_version_licence_and_links = Kurobayomi, version, licence and links
+
+# source: kurobayomi
+spec_languages_default_volume_autoplay = Languages, default volume, autoplay
+
+# source: kurobayomi
+spec_library_name = Library name
+
+# source: kurobayomi
+spec_library_settings = Library settings
+
+# source: kurobayomi
+spec_manga_details = Manga details
+
+# source: kurobayomi
+spec_maximum_downloads_auto_download_cleanup = Maximum downloads, auto-download, cleanup
+
+# source: kurobayomi
+spec_migrate_search = Migrate search
+
+# source: kurobayomi
+spec_remove_anilist_tracking = Remove AniList tracking?
+
+# source: kurobayomi
+spec_result = Result
+
+# source: kurobayomi
+spec_screenshot = Screenshot
+
+# source: kurobayomi
+spec_source_name = Source name
+
+# source: kurobayomi
+spec_source_search = Source search
+
+# source: kurobayomi
+spec_sources_and_tracking = Sources and tracking
+
+# source: kurobayomi
+spec_sources_repositories_anilist_cookies = Sources, repositories, AniList, cookies
+
+# source: kurobayomi
+spec_tag = Tag
+
+# source: kurobayomi
+spec_theme_and_start_screen = Theme and start screen
+
+# source: kurobayomi
+spec_track_search = Track search
+
+# source: kurobayomi
+spec_welcome = Welcome!
+
+# source: kurobayomi
+spec_worker_info = Worker info
+
+# source: kurobayomi
+ui_maintenance = Maintenance

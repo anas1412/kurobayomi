@@ -2,6 +2,7 @@
 //! the GTK thread. Names come from the image crate's reader name rule, and a name already taken gets " (2)", " (3)"
 //! and so on (E-SAVE-2). Failures show as the error notice; nothing here panics.
 
+use kuro_i18n::{MsgKey, tr};
 use std::path::{Path, PathBuf};
 
 use kuro_images::cover_file::write_atomic;
@@ -68,7 +69,7 @@ pub fn save_in_background(
 /// The blocking part of a save: read, sniff, pick a free name, write. Returns the written path.
 pub fn save_now(source: &ByteSource, title: &str, file_base: &str, folder_per_manga: bool, pictures: &Path) -> Result<PathBuf, String> {
     let bytes = read(source).map_err(|e| e.to_string())?;
-    let format = sniff(&bytes).ok_or_else(|| "Not an image".to_owned())?;
+    let format = sniff(&bytes).ok_or_else(|| tr(MsgKey::ui_not_an_image).to_owned())?;
     let ext = format.extension();
     let dir = target_folder(pictures, title, folder_per_manga);
     let name = free_name(file_base, ext, |candidate| dir.join(build_valid_filename(candidate)).exists());
@@ -116,7 +117,7 @@ pub fn write_local_cover(source: &ByteSource, folder: &Path) -> Result<kuro_loca
 /// returns the staged file.
 pub fn stage_for_share(source: &ByteSource, file_base: &str, staging: &Path) -> Result<PathBuf, String> {
     let bytes = read(source).map_err(|e| e.to_string())?;
-    let ext = sniff(&bytes).ok_or_else(|| "Not an image".to_owned())?.extension();
+    let ext = sniff(&bytes).ok_or_else(|| tr(MsgKey::ui_not_an_image).to_owned())?.extension();
     let _ = std::fs::remove_dir_all(staging);
     std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
     let target = staging.join(build_valid_filename(&format!("{file_base}.{ext}")));

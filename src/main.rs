@@ -471,8 +471,8 @@ fn tabs() -> gtk::Stack {
         // a page that starts with its own one-row header (Library, Updates, History, Browse) is used as it is; the
         // sidebar already names the tab, so it carries no title
         let own_header = b.content.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>());
-        let page: gtk::Widget = if own_header { b.content } else { ui::page(&ui::screen(&n.id).title, &b.content, b.end, false).upcast() };
-        tabs.add_titled(&page, Some(&n.id), &n.title).set_icon_name(&n.icon);
+        let page: gtk::Widget = if own_header { b.content } else { ui::page(&spec::shown(&ui::screen(&n.id).title), &b.content, b.end, false).upcast() };
+        tabs.add_titled(&page, Some(&n.id), &spec::shown(&n.title)).set_icon_name(&n.icon);
     }
     tabs
 }

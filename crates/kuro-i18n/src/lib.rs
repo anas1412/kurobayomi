@@ -105,6 +105,37 @@ pub fn tr_plural(key: MsgKey, count: i64, args: &[(&str, Arg<'_>)]) -> String {
     format_key(key, Some(&to_args(args, Some(count))))
 }
 
+/// The message whose English text is exactly `english`, in the active language; `None` when no message reads so.
+///
+/// For text that comes from data and keeps its English as its identity, such as the UI spec files (`spec/*.json`), whose
+/// titles also name the stored preference of a row: the data stays English and only what is drawn goes through here.
+/// Messages with arguments or plural forms are not in the lookup. Where two messages read the same English, the first in
+/// the English file wins. Never use it on text the user or a source wrote (titles, names): it would translate a manga
+/// called "Library".
+pub fn translate_known(english: &str) -> Option<String> {
+    static BY_ENGLISH: OnceLock<std::collections::HashMap<String, Vec<MsgKey>>> = OnceLock::new();
+    let index = BY_ENGLISH.get_or_init(|| {
+        let english_only = Catalog::build(&["en"], sources::LOCALE_SOURCES);
+        let mut index: std::collections::HashMap<String, Vec<MsgKey>> = std::collections::HashMap::new();
+        for key in MsgKey::ALL {
+            if !key.args().is_empty() {
+                continue;
+            }
+            if let Some((text, errors)) = english_only.format(key.id(), None) {
+                if errors.is_empty() {
+                    index.entry(text).or_default().push(*key);
+                }
+            }
+        }
+        index
+    });
+    let candidates = index.get(english)?;
+    // Several messages may read the same English (the word "Display" is a heading and an action). The first one that the
+    // active language has translated wins, so a word is not left in English because its first message was never translated.
+    let translated = candidates.iter().map(|key| tr(*key)).find(|text| text != english);
+    translated.or_else(|| candidates.first().map(|key| tr(*key)))
+}
+
 fn to_args<'a>(args: &[(&str, Arg<'a>)], count: Option<i64>) -> FluentArgs<'a> {
     let mut out = FluentArgs::with_capacity(args.len() + 1);
     if let Some(count) = count {

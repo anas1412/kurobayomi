@@ -2,6 +2,7 @@
 //! delete-after-read rule and the two new-item switches. Wi-Fi only, the chapter speed limit, CBZ and tall images, the
 //! category rules, download-ahead and the external downloader are cut (`docs/design/settings-diet.md`). The keys and
 //! defaults come from `kuro_domain::download::prefs::DownloadPrefs`.
+use kuro_i18n::{MsgKey, tr};
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_prefs::prefs::Prefs;
 
@@ -12,7 +13,7 @@ use crate::settings_ui::rows::{group, item, ranged_choice, switch};
 pub fn remove_after_read_label(slots: i32) -> String {
     match slots {
         -1 => "Disabled".to_owned(),
-        0 => "Last read chapter".to_owned(),
+        0 => tr(MsgKey::last_read_chapter).to_owned(),
         n => format!("{} to last read chapter", ["Second", "Third", "Fourth", "Fifth"].get(n as usize - 1).copied().unwrap_or("Later")),
     }
 }
@@ -21,14 +22,14 @@ pub fn remove_after_read_label(slots: i32) -> String {
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let d = DownloadPrefs::new(prefs.store());
     vec![
-        item(ranged_choice("Maximum downloads", &d.number_of_downloads_pref, |n| n.to_string(), true)),
+        item(ranged_choice(&tr(MsgKey::pref_download_slots), &d.number_of_downloads_pref, |n| n.to_string(), true)),
         group(
-            "Delete chapters/episodes",
-            vec![ranged_choice("After reading/watching automatically delete", &d.remove_after_read_slots, remove_after_read_label, true)],
+            &tr(MsgKey::pref_category_delete_chapters),
+            vec![ranged_choice(&tr(MsgKey::pref_remove_after_read), &d.remove_after_read_slots, remove_after_read_label, true)],
         ),
         group(
-            "Auto-download",
-            vec![switch("Download new episodes", &d.download_new_episodes, true), switch("Download new chapters", &d.download_new_chapters, true)],
+            &tr(MsgKey::pref_category_auto_download),
+            vec![switch(&tr(MsgKey::pref_download_new_episodes), &d.download_new_episodes, true), switch(&tr(MsgKey::pref_download_new), &d.download_new_chapters, true)],
         ),
     ]
 }

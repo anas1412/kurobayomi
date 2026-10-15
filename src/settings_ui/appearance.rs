@@ -3,6 +3,7 @@
 //!
 //! Theme mode changes the look through one path, `theme::apply` (`update_settings`): the
 //! window marks and the GTK dark preference are set together, with no restart.
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use kuro_prefs::prefs::Prefs;
@@ -15,11 +16,11 @@ use crate::settings_ui::rows::{enum_choice, group, requires_restart};
 /// The Theme mode row: System, Light and Dark as linked toggle buttons (`widgets::theme_mode`). A click stores the
 /// mode and applies it through `theme::apply`; a click on the selected segment writes nothing.
 pub fn theme_mode_row(prefs: &Prefs) -> PreferenceItem {
-    let (pref, title) = (prefs.ui.theme_mode.clone(), "Theme mode");
+    let (pref, title) = (prefs.ui.theme_mode.clone(), tr(MsgKey::ui_theme_mode));
     PreferenceItem::Custom {
         title: title.to_owned(),
         build: Rc::new(move || {
-            let built = theme_mode::row(&crate::pref_model::model::ItemCommon::new(title), pref.clone());
+            let built = theme_mode::row(&crate::pref_model::model::ItemCommon::new(&title), pref.clone());
             custom_content(built.row)
         }),
     }
@@ -44,7 +45,7 @@ pub const START_SCREENS: [(StartScreen, &str); 5] = [
 
 /// The start screen list. It applies at the next launch, so its subtitle says so (task T-47a-010).
 pub fn start_screen_row(prefs: &Prefs) -> PreferenceItem {
-    let mut row = enum_choice("Start Screen", &prefs.ui.start_screen, &START_SCREENS, true);
+    let mut row = enum_choice(&tr(MsgKey::pref_start_screen), &prefs.ui.start_screen, &START_SCREENS, true);
     if let PreferenceItem::BasicList { common, .. } = &mut row {
         common.subtitle = Some(requires_restart());
     }
@@ -77,8 +78,8 @@ pub fn open_start_tab(tabs: &gtk::Stack, prefs: &Prefs) {
 /// app lock group. The rest of the page stays as the spec builds it.
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     vec![
-        group("Theme", vec![theme_mode_row(prefs)]),
-        group("Display", vec![start_screen_row(prefs)]),
+        group(&tr(MsgKey::pref_category_theme), vec![theme_mode_row(prefs)]),
+        group(&tr(MsgKey::pref_category_display), vec![start_screen_row(prefs)]),
     ]
 }
 

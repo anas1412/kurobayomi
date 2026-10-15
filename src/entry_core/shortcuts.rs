@@ -1,8 +1,9 @@
 //! Header shortcuts of the entry screens (T-38a-046). The chapter and episode list keys are `selection::key_command`. In the
 //! header: F opens the filter sheet, R or Ctrl+R refreshes (T-38a-050), Ctrl+M
 //! migrates and W opens the WebView when it is available. Upstream: `MangaScreen.kt` key handling. Pure: the window asks
-//! `header_key` and shows `HELP`.
+//! `header_key` and shows [`help`].
 
+use kuro_i18n::{MsgKey, tr};
 use super::selection::Mods;
 
 /// What a header shortcut does.
@@ -25,22 +26,25 @@ pub fn header_key(letter: char, mods: Mods, webview_available: bool) -> Option<H
     }
 }
 
-/// The in-app help list: each shortcut and what it does (the list is a labelled proposal, in English).
-pub const HELP: &[(&str, &str)] = &[
-    ("Up / Down", "Move focus in the chapter list"),
-    ("Enter", "Open the focused chapter"),
-    ("Space", "Toggle the focused chapter"),
-    ("Shift+click", "Select a range from the anchor"),
-    ("Ctrl+click", "Toggle one chapter"),
-    ("Ctrl+A", "Select all"),
-    ("Ctrl+I", "Invert the selection"),
-    ("Escape", "Clear the selection"),
-    ("F", "Open the filter sheet"),
-    ("R", "Refresh"),
-    ("Ctrl+M", "Migrate"),
-    ("W", "Open the WebView"),
-    ("F1 or ?", "Show this help"),
-];
+/// The in-app help list: each shortcut and what it does (the list is a labelled proposal).
+pub fn help() -> Vec<(String, String)> {
+    let key = |name: &str| name.to_owned();
+    vec![
+        (tr(MsgKey::ui_up_down), tr(MsgKey::ui_move_focus_in_the_chapter_list)),
+        (key("Enter"), tr(MsgKey::ui_open_the_focused_chapter)),
+        (key("Space"), tr(MsgKey::ui_toggle_the_focused_chapter)),
+        (key("Shift+click"), tr(MsgKey::ui_select_a_range_from_the_anchor)),
+        (key("Ctrl+click"), tr(MsgKey::ui_toggle_one_chapter)),
+        (key("Ctrl+A"), tr(MsgKey::action_select_all)),
+        (key("Ctrl+I"), tr(MsgKey::ui_invert_the_selection)),
+        (key("Escape"), tr(MsgKey::ui_clear_the_selection)),
+        (key("F"), tr(MsgKey::ui_open_the_filter_sheet)),
+        (key("R"), tr(MsgKey::action_webview_refresh)),
+        (key("Ctrl+M"), tr(MsgKey::action_migrate)),
+        (key("W"), tr(MsgKey::ui_open_the_webview)),
+        (tr(MsgKey::ui_f1_or), tr(MsgKey::ui_show_this_help)),
+    ]
+}
 
 #[cfg(test)]
 mod tests {
@@ -67,9 +71,10 @@ mod tests {
 
     #[test]
     fn the_help_lists_the_chapter_and_header_keys() {
-        assert!(HELP.iter().any(|(keys, _)| *keys == "Ctrl+I"));
-        assert!(HELP.iter().any(|(keys, _)| *keys == "Ctrl+M"));
-        assert!(HELP.len() >= 13);
-        assert!(HELP.iter().any(|(keys, _)| *keys == "F1 or ?"));
+        let help = help();
+        assert!(help.iter().any(|(keys, _)| keys == "Ctrl+I"));
+        assert!(help.iter().any(|(keys, _)| keys == "Ctrl+M"));
+        assert!(help.len() >= 13);
+        assert!(help.iter().any(|(keys, _)| keys == "F1 or ?"));
     }
 }

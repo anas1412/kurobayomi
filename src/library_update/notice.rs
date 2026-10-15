@@ -69,13 +69,13 @@ pub enum EntryAction {
 
 impl EntryAction {
     /// The button label of the action for `kind`.
-    pub fn label(self, kind: Kind) -> &'static str {
+    pub fn label(self, kind: Kind) -> String {
         match (self, kind) {
-            (Self::MarkRead, Kind::Manga) => "Mark as read",
-            (Self::MarkRead, Kind::Anime) => "Mark as watched",
-            (Self::ViewItems, Kind::Manga) => "View chapters",
-            (Self::ViewItems, Kind::Anime) => "View episodes",
-            (Self::Download, _) => "Download",
+            (Self::MarkRead, Kind::Manga) => tr(MsgKey::action_mark_as_read),
+            (Self::MarkRead, Kind::Anime) => tr(MsgKey::action_mark_as_seen),
+            (Self::ViewItems, Kind::Manga) => tr(MsgKey::action_view_chapters),
+            (Self::ViewItems, Kind::Anime) => tr(MsgKey::action_view_episodes),
+            (Self::Download, _) => "Download".to_string(),
         }
     }
 }

@@ -156,7 +156,7 @@ fn incognito_label() -> String {
 /// The app's own pages under the places, in the panel and in the narrow window's menu: icon, label, action name, opener.
 fn app_pages() -> [(&'static str, String, &'static str, fn()); 4] {
     [
-        ("input-keyboard-symbolic", "Keyboard shortcuts".to_owned(), "shortcuts", crate::entry_core::shortcut_help_view::open),
+        ("input-keyboard-symbolic", tr(MsgKey::ui_keyboard_shortcuts).to_owned(), "shortcuts", crate::entry_core::shortcut_help_view::open),
         ("help-browser-symbolic", tr(MsgKey::label_help), "help", open_help),
         ("help-about-symbolic", tr(MsgKey::pref_category_about), "about", open_about),
         ("emblem-system-symbolic", tr(MsgKey::label_settings), "settings", open_settings),
@@ -262,9 +262,9 @@ pub fn build(tabs: &gtk::Stack) -> GBox {
     let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());
     for n in ui::with_spec(|s| s.nav.clone()) {
         let row = match n.id.as_str() {
-            "updates" => nav_row(&n.icon, &n.title, &[updates_badge().upcast_ref()]),
-            DOWNLOADS => downloads_row(&n.icon, &n.title),
-            _ => nav_row(&n.icon, &n.title, &[]),
+            "updates" => nav_row(&n.icon, &crate::spec::shown(&n.title), &[updates_badge().upcast_ref()]),
+            DOWNLOADS => downloads_row(&n.icon, &crate::spec::shown(&n.title)),
+            _ => nav_row(&n.icon, &crate::spec::shown(&n.title), &[]),
         };
         list.append(&row);
     }

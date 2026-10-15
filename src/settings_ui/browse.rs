@@ -63,16 +63,16 @@ pub fn source_languages_row(prefs: &Prefs) -> PreferenceItem {
 pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
     vec![
         group(
-            "Sources",
+            &tr(MsgKey::label_sources),
             vec![
                 source_languages_row(prefs),
                 repo_row(&repos_title(), counts.repos, REPOS_SCREEN),
             ],
         ),
         group(
-            "NSFW (18+) sources",
+            &tr(MsgKey::pref_category_nsfw_content),
             vec![
-                nsfw_switch("Show in sources and extensions lists", &prefs.sources.show_nsfw_source),
+                nsfw_switch(&tr(MsgKey::pref_show_nsfw_source), &prefs.sources.show_nsfw_source),
                 info(&nsfw_info()),
             ],
         ),

@@ -820,26 +820,27 @@ impl HeaderActions {
 
 pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
     Some(match item {
-        Item::Switch { title, subtitle, default } => switch_item_row(title, subtitle.as_deref(), default.as_bool().unwrap_or(false)),
+        Item::Switch { title, subtitle, default } => switch_item_row(&crate::spec::shown(title), subtitle.as_deref().map(crate::spec::shown).as_deref(), default.as_bool().unwrap_or(false)),
         Item::List { title, subtitle, options, default } => {
-            let opts: Vec<&str> = options.iter().map(String::as_str).collect();
+            let labels = crate::spec::shown_all(options);
+            let opts: Vec<&str> = labels.iter().map(String::as_str).collect();
             let d = gtk::DropDown::from_strings(&opts);
             let def = value_str(default);
             if let Some(i) = options.iter().position(|o| *o == def) {
                 d.set_selected(i as u32);
             }
-            row(title, subtitle.as_deref(), Some(d.upcast()))
+            row(&crate::spec::shown(title), subtitle.as_deref().map(crate::spec::shown).as_deref(), Some(d.upcast()))
         }
         Item::Multi { title, subtitle, options, default } => {
             let defaults: Vec<String> = default.as_array().map(|a| a.iter().map(value_str).collect()).unwrap_or_default();
             let col = GBox::new(O::Vertical, 2);
             margins(&col, 6);
             for o in options {
-                col.append(&gtk::CheckButton::builder().label(o).active(defaults.contains(o)).build());
+                col.append(&gtk::CheckButton::builder().label(crate::spec::shown(o)).active(defaults.contains(o)).build());
             }
             let pop = gtk::Popover::builder().child(&scrolled_max(&col, 360)).build();
             let mb = quiet_menu(gtk::MenuButton::builder().label(format!("{} selected", defaults.len())).popover(&pop).build());
-            row(title, subtitle.as_deref(), Some(mb.upcast()))
+            row(&crate::spec::shown(title), subtitle.as_deref().map(crate::spec::shown).as_deref(), Some(mb.upcast()))
         }
         Item::Slider { title, min, max, step, default, unit } => {
             let (min, max) = (min.unwrap_or(0.0), max.unwrap_or(100.0));
@@ -855,22 +856,23 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             sc.set_width_request(220);
             sc.set_draw_value(true);
             sc.set_digits(if step < 1.0 { 2 } else { 0 });
-            row(title, unit.as_deref(), Some(sc.upcast()))
+            row(&crate::spec::shown(title), unit.as_deref(), Some(sc.upcast()))
         }
         Item::Text { title, subtitle, default } => {
             let e = gtk::Entry::builder().text(value_str(default)).width_chars(18).build();
-            row(title, subtitle.as_deref(), Some(e.upcast()))
+            row(&crate::spec::shown(title), subtitle.as_deref().map(crate::spec::shown).as_deref(), Some(e.upcast()))
         }
         Item::Tristate { title } => {
             // off → include (checked) → exclude (dash), like Aniyomi's TriStateItem
             let t = crate::tri_check::tri_check(kuro_prefs::checkbox::TriState::None(()), |_| {});
-            let r = row(title, None, Some(t.widget().clone().upcast()));
+            let r = row(&crate::spec::shown(title), None, Some(t.widget().clone().upcast()));
             r.set_activatable(true);
             crate::widgets::row_activate::on_activate(&r, move |_| t.activate());
             r
         }
         Item::Sort { title, options } => {
-            let opts: Vec<&str> = options.iter().map(String::as_str).collect();
+            let labels = crate::spec::shown_all(options);
+            let opts: Vec<&str> = labels.iter().map(String::as_str).collect();
             let h = GBox::new(O::Horizontal, 6);
             h.append(&gtk::DropDown::from_strings(&opts));
             let dir = Button::from_icon_name("view-sort-ascending-symbolic");
@@ -880,30 +882,30 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
                 b.set_icon_name(if up { "view-sort-descending-symbolic" } else { "view-sort-ascending-symbolic" });
             });
             h.append(&dir);
-            row(title, None, Some(h.upcast()))
+            row(&crate::spec::shown(title), None, Some(h.upcast()))
         }
         Item::Chips { title, options, default } => {
             let def = value_str(default);
             let active = options.iter().position(|o| *o == def).unwrap_or(0);
             if options.len() <= 4 {
-                return Some(row(title, None, Some(linked(options, active).upcast())));
+                return Some(row(&crate::spec::shown(title), None, Some(linked(&crate::spec::shown_all(options), active).upcast())));
             }
             // long chip lists (e.g. the 19 app themes) wrap under the title instead of widening the window
             let flow = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).max_children_per_line(8).column_spacing(4).row_spacing(4).build();
             let mut first: Option<gtk::ToggleButton> = None;
             for (i, o) in options.iter().enumerate() {
-                let t = gtk::ToggleButton::builder().label(o).active(i == active).build();
+                let t = gtk::ToggleButton::builder().label(crate::spec::shown(o)).active(i == active).build();
                 match &first { Some(f) => t.set_group(Some(f)), None => first = Some(t.clone()) }
                 flow.insert(&t, -1);
             }
             let v = GBox::new(O::Vertical, 8);
             margins(&v, 10);
-            v.append(&Label::builder().label(title).xalign(0.0).build());
+            v.append(&Label::builder().label(crate::spec::shown(title)).xalign(0.0).build());
             v.append(&flow);
             gtk::ListBoxRow::builder().child(&v).activatable(false).build()
         }
         Item::Link { title, subtitle, target } => {
-            let r = row(title, subtitle.as_deref(), Some(chevron().upcast()));
+            let r = row(&crate::spec::shown(title), subtitle.as_deref().map(crate::spec::shown).as_deref(), Some(chevron().upcast()));
             r.set_activatable(true);
             let t = target.clone();
             crate::widgets::row_activate::on_activate(&r, move |_| open(&t));
@@ -913,7 +915,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             if crate::app_update::hides_row(title) {
                 return None;
             }
-            let r = row(title, subtitle.as_deref(), None);
+            let r = row(&crate::spec::shown(title), subtitle.as_deref().map(crate::spec::shown).as_deref(), None);
             r.set_activatable(true);
             let t = title.clone();
             crate::widgets::row_activate::on_activate(&r, move |r| {
@@ -939,7 +941,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             h.set_margin_top(12);
             h.set_margin_bottom(12);
             h.append(&gtk::Image::from_icon_name("dialog-information-symbolic"));
-            let l = dim(title);
+            let l = dim(&crate::spec::shown(title));
             l.set_hexpand(true);
             h.append(&l);
             gtk::ListBoxRow::builder().child(&h).activatable(false).build()
@@ -965,7 +967,7 @@ fn scrolled_max(child: &impl IsA<gtk::Widget>, h: i32) -> gtk::ScrolledWindow {
 pub fn groups_into(col: &GBox, groups: &[Group]) {
     for g in groups {
         if let Some(t) = g.title.as_deref().filter(|t| !t.is_empty()) {
-            col.append(&heading(t));
+            col.append(&heading(&crate::spec::shown(t)));
         }
         let l = boxed_list();
         for it in &g.items {
@@ -1003,12 +1005,12 @@ pub fn show_sheet(sheet: &Sheet) {
     for t in &sheet.tabs {
         let col = column();
         groups_into(&col, &t.groups);
-        stack.add_titled(&scrolled(&col), None, &t.title);
+        stack.add_titled(&scrolled(&col), None, &crate::spec::shown(&t.title));
     }
     let title: gtk::Widget = if sheet.tabs.len() > 1 {
         gtk::StackSwitcher::builder().stack(&stack).build().upcast()
     } else {
-        Label::builder().label(&sheet.title).css_classes(["title"]).build().upcast()
+        Label::builder().label(crate::spec::shown(&sheet.title)).css_classes(["title"]).build().upcast()
     };
     modal(&title, &stack, 520, 620).present();
 }
@@ -1115,7 +1117,7 @@ pub fn message(text: &str) -> Label {
 pub fn show_dialog_then(d: &Dialog, on_ok: impl Fn() + 'static) {
     let body = GBox::new(O::Vertical, 12);
     if let Some(t) = &d.text {
-        body.append(&message(t));
+        body.append(&message(&crate::spec::shown(t)));
     }
     groups_into(&body, &d.groups);
     let labels = if d.buttons.is_empty() { vec!["OK".to_string()] } else { d.buttons.clone() };
@@ -1126,15 +1128,15 @@ pub fn show_dialog_then(d: &Dialog, on_ok: impl Fn() + 'static) {
         .enumerate()
         .map(|(i, l)| {
             if i + 1 < n {
-                return DialogButton::cancel(l);
+                return DialogButton::cancel(&crate::spec::shown(l));
             }
             let lower = l.to_lowercase();
             let role = if lower.contains("delete") || lower.contains("remove") { Role::Destructive } else { Role::Suggested };
             let on_ok = Rc::clone(&on_ok);
-            DialogButton::new(l, role, move || on_ok())
+            DialogButton::new(&crate::spec::shown(l), role, move || on_ok())
         })
         .collect();
-    dialog(&d.title, &body, 420, buttons).present();
+    dialog(&crate::spec::shown(&d.title), &body, 420, buttons).present();
 }
 
 fn norm(s: &str) -> String {
@@ -1177,7 +1179,7 @@ pub fn resolve(id: &str, label: &str) -> bool {
 pub fn toolbar(s: &Screen) -> Vec<gtk::Widget> {
     let mut out: Vec<gtk::Widget> = vec![];
     for t in &s.toolbar {
-        let b = icon_button(&t.icon, &t.label);
+        let b = icon_button(&t.icon, &crate::spec::shown(&t.label));
         let (id, l) = (s.id.clone(), t.label.clone());
         b.connect_clicked(move |_| {
             resolve(&id, &l);
@@ -1189,7 +1191,7 @@ pub fn toolbar(s: &Screen) -> Vec<gtk::Widget> {
         .iter()
         .map(|label| {
             let (id, label) = (s.id.clone(), label.clone());
-            MenuEntry::new(label.clone(), move || {
+            MenuEntry::new(crate::spec::shown(&label), move || {
                 resolve(&id, &label);
             })
         })
@@ -1219,7 +1221,7 @@ pub fn tag(w: &impl IsA<gtk::Widget>, id: &str) {
 pub fn generic(s: &Screen) -> GBox {
     let col = column();
     if !s.tabs.is_empty() {
-        let t = linked(&s.tabs, 0);
+        let t = linked(&crate::spec::shown_all(&s.tabs), 0);
         t.set_halign(Align::Center);
         col.append(&t);
     }
@@ -1227,12 +1229,12 @@ pub fn generic(s: &Screen) -> GBox {
     let content: gtk::Widget = if s.groups.is_empty() {
         let b = GBox::new(O::Vertical, 0);
         b.append(&col);
-        b.append(&status("dialog-information-symbolic", s.empty.as_deref().unwrap_or(&s.title)));
+        b.append(&status("dialog-information-symbolic", &crate::spec::shown(s.empty.as_deref().unwrap_or(&s.title))));
         b.upcast()
     } else {
         scrolled(&col).upcast()
     };
-    let p = page(&s.title, &content, toolbar(s), true);
+    let p = page(&crate::spec::shown(&s.title), &content, toolbar(s), true);
     tag(&p, &s.id);
     p
 }

@@ -2,6 +2,7 @@
 //! folders" for both kinds, and the add-manga shortcut. Scanning and storing run on a worker thread; the toast and the
 //! library refresh run back on the GTK thread.
 
+use kuro_i18n::{MsgKey, tr};
 use std::sync::Arc;
 
 use gtk::gio;
@@ -29,8 +30,8 @@ pub fn attach(window: &gtk::ApplicationWindow) {
 /// Asks for a folder and adds it: a manga folder is one entry, an anime folder holds one folder per series.
 pub fn add_folder(kind: Kind) {
     let title = match kind {
-        Kind::Manga => "Add local manga folder",
-        Kind::Anime => "Add local anime folder",
+        Kind::Manga => tr(MsgKey::ui_add_local_manga_folder),
+        Kind::Anime => tr(MsgKey::ui_add_local_anime_folder),
     };
     let dialog = gtk::FileDialog::builder().title(title).modal(true).build();
     dialog.select_folder(Some(&crate::ui::window()), gio::Cancellable::NONE, move |picked| {

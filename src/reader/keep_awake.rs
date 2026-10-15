@@ -1,6 +1,7 @@
 //! Keep the screen on while the reader is open (T-043a-051) or a video plays. The inhibit is taken with the application and
 //! released when the reader or the player closes, the video pauses, or the preference goes off.
 
+use kuro_i18n::{MsgKey, tr};
 use std::cell::RefCell;
 
 use kuro_platform::idle::{IdleGuard, IdleInhibitor};
@@ -19,7 +20,7 @@ pub struct KeepAwake {
 
 impl KeepAwake {
     pub fn sync(&self, _window: &gtk::Window, want: bool) {
-        self.sync_for(want, "Reading manga");
+        self.sync_for(want, &tr(MsgKey::ui_reading_manga));
     }
 
     /// Takes or releases the inhibit to match `want`; `reason` is what the desktop shows for it.

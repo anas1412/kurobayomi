@@ -1,11 +1,11 @@
-//! The in-app shortcut help dialog (T-38a-046): a two-column list of `shortcuts::HELP`, opened with F1 or `?` on the
+//! The in-app shortcut help dialog (T-38a-046): a two-column list of `shortcuts::help()`, opened with F1 or `?` on the
 //! manga and anime details pages.
 
 use kuro_i18n::{MsgKey, tr};
 use gtk::prelude::*;
 use gtk::Label;
 
-use super::shortcuts::HELP;
+use super::shortcuts::help;
 use crate::ui::{self, DialogButton, Role};
 
 /// Whether this key opens the help dialog.
@@ -16,9 +16,9 @@ pub fn is_help_key(key: gtk::gdk::Key) -> bool {
 /// The grid of the help list: the keys on the left, what they do on the right.
 pub fn grid() -> gtk::Grid {
     let grid = gtk::Grid::builder().row_spacing(8).column_spacing(24).build();
-    for (row, (keys, what)) in HELP.iter().enumerate() {
-        let keys = Label::builder().label(*keys).xalign(0.0).css_classes(["monospace"]).build();
-        let what = Label::builder().label(*what).xalign(0.0).wrap(true).build();
+    for (row, (keys, what)) in help().iter().enumerate() {
+        let keys = Label::builder().label(keys.as_str()).xalign(0.0).css_classes(["monospace"]).build();
+        let what = Label::builder().label(what.as_str()).xalign(0.0).wrap(true).build();
         grid.attach(&keys, 0, row as i32, 1, 1);
         grid.attach(&what, 1, row as i32, 1, 1);
     }
@@ -28,7 +28,7 @@ pub fn grid() -> gtk::Grid {
 /// Opens the dialog.
 pub fn open() {
     let buttons = vec![DialogButton::new(&tr(MsgKey::action_close), Role::Suggested, || {})];
-    ui::dialog("Keyboard shortcuts", &grid(), 420, buttons).present();
+    ui::dialog(&tr(MsgKey::ui_keyboard_shortcuts), &grid(), 420, buttons).present();
 }
 
 #[cfg(test)]
@@ -45,7 +45,7 @@ mod tests {
                 rows += 1;
                 child = w.next_sibling();
             }
-            assert_eq!(rows, HELP.len() * 2);
+            assert_eq!(rows, help().len() * 2);
         });
     }
 

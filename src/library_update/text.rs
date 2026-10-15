@@ -61,7 +61,7 @@ pub fn progress_body(titles: &[String]) -> String {
 /// Title and body of the summary notification of one kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryText {
-    pub title: &'static str,
+    pub title: String,
     pub text: String,
     /// `None` when content is hidden (or when a single entry shows its title in `text`).
     pub big_text: Option<String>,
@@ -74,8 +74,8 @@ fn plural(count: usize, one: &str, other: &str) -> String {
 /// The summary of the entries that have new items. `titles` has one entry per updated entry.
 pub fn summary(kind: Kind, titles: &[String], hide_content: bool) -> SummaryText {
     let (title, entry_word) = match kind {
-        Kind::Manga => ("New chapters found", ("entry", "entries")),
-        Kind::Anime => ("New episodes found", ("title", "titles")),
+        Kind::Manga => (tr(MsgKey::notification_new_chapters), ("entry", "entries")),
+        Kind::Anime => (tr(MsgKey::notification_new_episodes), ("title", "titles")),
     };
     if titles.len() == 1 && !hide_content {
         return SummaryText { title, text: chop(&titles[0], SUMMARY_TITLE_CHOP), big_text: None };

@@ -3,6 +3,7 @@
 //! from the live source when it is installed, else from the stub table, which keeps the names of sources that were listed
 //! before. A source with neither has no name, and its rows wait for it (docs/design/unified-downloads.md D5).
 
+use kuro_i18n::{MsgKey, tr};
 use std::sync::Arc;
 
 use kuro_data::entry::EntryRepo;
@@ -63,7 +64,7 @@ impl AppDirectory {
 impl SourceDirectory for AppDirectory {
     fn source_key(&self, kind: Kind, source_id: i64) -> Option<SourceKey> {
         if source_id == LOCAL_SOURCE_ID {
-            return Some(SourceKey { id: source_id, name: "Local source".to_owned(), lang: "other".to_owned(), unmetered: true, availability: Availability::Local });
+            return Some(SourceKey { id: source_id, name: tr(MsgKey::action_display_local_badge).to_owned(), lang: "other".to_owned(), unmetered: true, availability: Availability::Local });
         }
         let catalogue = crate::browse::directory::current(kind).catalogue(source_id);
         let live = match kind {

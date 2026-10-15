@@ -26,7 +26,7 @@ pub fn volume_levels() -> Vec<f32> {
 }
 
 fn label(level: f32) -> String {
-    if level < 0.0 { "Last used".to_owned() } else { format!("{level:.0}%") }
+    if level < 0.0 { tr(MsgKey::last_used_source).to_owned() } else { format!("{level:.0}%") }
 }
 
 /// The Default volume row. A stored level outside the list is kept, shown as `Custom (N%)` and listed first.
@@ -65,10 +65,10 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let tree = vec![group(
         "",
         vec![
-            language::language_row("Subtitle language", &subtitles),
-            language::language_row("Audio language", &audio),
+            language::language_row(&tr(MsgKey::ui_subtitle_language), &subtitles),
+            language::language_row(&tr(MsgKey::ui_audio_language), &audio),
             volume_row(&p.player_volume_value),
-            switch("Autoplay next episode", &p.autoplay_enabled, true),
+            switch(&tr(MsgKey::ui_autoplay_next_episode), &p.autoplay_enabled, true),
             crate::settings_ui::rows::auto_hide_bars(&prefs.base),
         ],
     )];
@@ -80,7 +80,7 @@ fn search_button() -> gtk::Widget {
     button.update_property(&[gtk::accessible::Property::Label("Search")]);
     button.connect_clicked(|_| {
         if let Some(page) = search::player_page() {
-            crate::ui::push(&crate::ui::page("Search settings", &page.content, page.end, true));
+            crate::ui::push(&crate::ui::page(&tr(MsgKey::action_search_settings), &page.content, page.end, true));
         }
     });
     button.upcast()

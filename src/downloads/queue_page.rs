@@ -34,7 +34,7 @@ pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry, Vec<crate::ui:
     let column = crate::ui::column();
     let list = crate::ui::boxed_list();
     // the app's empty state (icon, line), as the library and history show theirs
-    let (empty, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", &[]);
+    let (empty, _) = look::empty_state("folder-download-symbolic", &tr(MsgKey::ui_no_downloads_are_queued), &[]);
     empty.set_vexpand(true);
     column.append(&list);
     column.append(&empty);
@@ -162,9 +162,9 @@ fn menu_entries(downloads: &Downloads, kind: Kind) -> Vec<crate::ui::MenuEntry> 
     let (pause, resume, clear) = (downloads.clone(), downloads.clone(), downloads.clone());
     let (when_pause, when_resume) = (downloads.clone(), downloads.clone());
     vec![
-        MenuEntry::new("Pause downloads", move || pause.pause(kind)).when(move || running(&when_pause, kind)),
-        MenuEntry::new("Resume downloads", move || resume.start(kind)).when(move || !running(&when_resume, kind)),
-        MenuEntry::new("Clear queue", move || clear.clear(kind)),
+        MenuEntry::new(tr(MsgKey::ui_pause_downloads), move || pause.pause(kind)).when(move || running(&when_pause, kind)),
+        MenuEntry::new(tr(MsgKey::ui_resume_downloads), move || resume.start(kind)).when(move || !running(&when_resume, kind)),
+        MenuEntry::new(tr(MsgKey::ui_clear_queue), move || clear.clear(kind)),
     ]
 }
 
@@ -178,7 +178,7 @@ fn row_key(item: &QueueItem) -> String {
 /// source is not installed waits for it.
 fn status_line(item: &QueueItem) -> String {
     if item.waiting {
-        return "Waiting for source".to_owned();
+        return tr(MsgKey::ui_waiting_for_source).to_owned();
     }
     match item.state {
         DownloadState::Downloading => match (item.kind, item.pages_total) {

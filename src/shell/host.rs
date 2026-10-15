@@ -137,7 +137,7 @@ impl Shell {
                 DialogButton::cancel(tr(MsgKey::action_cancel)),
                 DialogButton::new(&tr(MsgKey::ui_quit), Role::Destructive, move || quit.destroy()),
             ];
-            let dialog = crate::ui::dialog("Downloads running", &crate::ui::message(CLOSE_PROMPT), 360, buttons);
+            let dialog = crate::ui::dialog(&tr(MsgKey::ui_downloads_running), &crate::ui::message(CLOSE_PROMPT), 360, buttons);
             dialog.set_transient_for(Some(win));
             dialog.present();
             gtk::glib::Propagation::Stop

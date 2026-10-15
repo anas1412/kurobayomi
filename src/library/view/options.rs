@@ -145,20 +145,22 @@ fn mode_target(mode: LibraryDisplayMode) -> &'static str {
 }
 
 /// The three grid styles of the Grid style radios: the title on the cover, under it, or no title.
-const GRID_STYLES: [(&str, &str, LibraryDisplayMode); 3] = [
-    ("compact", "Compact", LibraryDisplayMode::CompactGrid),
-    ("comfortable", "Comfortable", LibraryDisplayMode::ComfortableGrid),
-    ("cover", "Cover only", LibraryDisplayMode::CoverOnlyGrid),
-];
+fn grid_styles() -> [(&'static str, String, LibraryDisplayMode); 3] {
+    [
+        ("compact", tr(MsgKey::ui_compact), LibraryDisplayMode::CompactGrid),
+        ("comfortable", tr(MsgKey::ui_comfortable), LibraryDisplayMode::ComfortableGrid),
+        ("cover", tr(MsgKey::ui_cover_only), LibraryDisplayMode::CoverOnlyGrid),
+    ]
+}
 
 /// The Grid style radio of `mode`; none in the list view.
 fn style_target(mode: LibraryDisplayMode) -> &'static str {
-    GRID_STYLES.iter().find(|(_, _, m)| *m == mode).map_or("", |(token, _, _)| token)
+    grid_styles().into_iter().find(|(_, _, m)| *m == mode).map_or("", |(token, _, _)| token)
 }
 
 /// The grid a Grid style radio picks (from the list view too).
 fn style_mode(token: &str) -> Option<LibraryDisplayMode> {
-    GRID_STYLES.iter().find(|(t, _, _)| *t == token).map(|(_, _, m)| *m)
+    grid_styles().into_iter().find(|(t, _, _)| *t == token).map(|(_, _, m)| m)
 }
 
 /// The sort of the active page and the category it is stored on (`None`: the global sort).
@@ -190,20 +192,20 @@ fn sections(kind: Kind, has_tracker: bool) -> Vec<Section> {
     let mut sort: Vec<Item> =
         sort_rows(kind, has_tracker).into_iter().filter_map(|ty| ty.token(kind).map(|token| Item::radio("sort", token, tr(sort_label(kind, ty))))).collect();
     if OFFER_REVERSE {
-        sort.push(Item::toggle("reverse", "Reverse order"));
+        sort.push(Item::toggle("reverse", tr(MsgKey::ui_reverse_order)));
     }
     vec![
-        Section::filter("Show only", show),
-        Section::new("Sort by", sort),
+        Section::filter(tr(MsgKey::ui_show_only), show),
+        Section::new(tr(MsgKey::ui_sort_by), sort),
         Section::new("View", vec![Item::radio("mode", "grid", "Grid"), Item::radio("mode", "list", tr(MsgKey::action_display_list))]),
-        Section::new("Grid style", GRID_STYLES.iter().map(|(token, label, _)| Item::radio("style", *token, *label)).collect()),
+        Section::new(tr(MsgKey::ui_grid_style), grid_styles().iter().map(|(token, label, _)| Item::radio("style", *token, label)).collect()),
     ]
 }
 
 impl Options {
     /// The button and its menu; `wire` connects the picks once the view exists.
     pub fn new(kind: Kind) -> Self {
-        let menu = ViewOptions::new("View options", &sections(kind, false));
+        let menu = ViewOptions::new(&tr(MsgKey::ui_view_options), &sections(kind, false));
         Self { widget: menu.widget.clone(), menu, has_tracker: Rc::new(Cell::new(false)) }
     }
 
@@ -304,7 +306,7 @@ mod tests {
 
     #[test]
     fn each_grid_style_picks_its_grid_and_the_list_view_marks_none() {
-        for (token, _, mode) in GRID_STYLES {
+        for (token, _, mode) in grid_styles() {
             assert_eq!(style_mode(token), Some(mode));
             assert_eq!(style_target(mode), token);
         }

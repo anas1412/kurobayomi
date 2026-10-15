@@ -117,7 +117,7 @@ pub fn row_enabled() -> bool {
 pub fn stable_available(release: Release) {
     let text = format!("Kurobayomi {} is available", release.version);
     set_notice(Notice::Stable(release));
-    crate::toast::notify_action(&text, "What's new", Some(Duration::from_secs(10)), open);
+    crate::toast::notify_action(&text, &tr(MsgKey::whats_new), Some(Duration::from_secs(10)), open);
 }
 
 /// The nightly AppImage was replaced by a newer build.
@@ -142,13 +142,13 @@ pub fn open() {
             let Some(Build::Nightly(running)) = Build::current() else { return };
             let restart_button = DialogButton::new(&tr(MsgKey::ui_restart), Role::Suggested, restart);
             fetch(move || commits_between(&running, &new).map(|c| (commits_markdown(&c), new)), move |(notes, new)| {
-                notes_dialog("Nightly update installed", &format!("Nightly {}", short(&new)), &notes, None, Some(restart_button));
+                notes_dialog(&tr(MsgKey::ui_nightly_update_installed), &format!("Nightly {}", short(&new)), &notes, None, Some(restart_button));
             });
         }
         Some(Notice::StableInstalled(version)) => {
             let restart_button = DialogButton::new(&tr(MsgKey::ui_restart), Role::Suggested, restart);
             fetch(move || stable_notes(&version).map(|notes| (notes, version)), move |((body, url), version)| {
-                notes_dialog("Update installed", &format!("Kurobayomi {version}"), &body, Some(&url), Some(restart_button));
+                notes_dialog(&tr(MsgKey::ui_update_installed), &format!("Kurobayomi {version}"), &body, Some(&url), Some(restart_button));
             });
         }
         None => show_current(None),
@@ -159,7 +159,7 @@ pub fn open() {
 fn show_current(since: Option<Build>) {
     match Build::current() {
         Some(Build::Stable(version)) => {
-            let heading = if since.is_some() { format!("Updated to Kurobayomi {version}") } else { "What's new".to_owned() };
+            let heading = if since.is_some() { format!("Updated to Kurobayomi {version}") } else { tr(MsgKey::whats_new).to_owned() };
             fetch(move || stable_notes(&version).map(|notes| (notes, version)), move |((body, url), version)| {
                 notes_dialog(&heading, &format!("Kurobayomi {version}"), &body, Some(&url), None);
             });
@@ -169,7 +169,7 @@ fn show_current(since: Option<Build>) {
                 Some(Build::Nightly(old)) => Some(old),
                 _ => None,
             };
-            let heading = if old.is_some() { format!("Updated to nightly {}", short(&commit)) } else { "What's new".to_owned() };
+            let heading = if old.is_some() { format!("Updated to nightly {}", short(&commit)) } else { tr(MsgKey::whats_new).to_owned() };
             fetch(
                 move || {
                     let commits = match &old {
@@ -281,7 +281,7 @@ const MAX_SUBJECT_CHARS: usize = 140;
 /// [`MAX_COMMITS`], then how many more there are.
 fn commits_markdown(commits: &[(String, String)]) -> String {
     if commits.is_empty() {
-        return "No changes since your last version.".to_owned();
+        return tr(MsgKey::ui_no_changes_since_your_last_version).to_owned();
     }
     let mut notes = String::from("### Changes\n");
     for (sha, subject) in commits.iter().take(MAX_COMMITS) {

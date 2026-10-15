@@ -141,8 +141,8 @@ fn appearance_page() -> Option<Built> {
 fn browse_rows(prefs: &Prefs, counts: browse::RepoCounts, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let mut out = browse::page_rows(prefs, counts);
     out.extend(tracking::page_rows(prefs, Rc::clone(&changed)));
-    out.push(rows::group("Networking", maintenance::networking_rows()));
-    out.push(rows::group("Extensions", vec![maintenance::revoke_trust_row(prefs, changed)]));
+    out.push(rows::group(&tr(MsgKey::label_network), maintenance::networking_rows()));
+    out.push(rows::group(&tr(MsgKey::label_extensions), vec![maintenance::revoke_trust_row(prefs, changed)]));
     out
 }
 
@@ -214,10 +214,10 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
 /// the storage usage group. `changed` runs after a new folder is stored or the cache is cleared.
 fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let mut tree: Vec<Preference> = storage::rows(prefs, Rc::clone(&changed)).into_iter().map(rows::item).collect();
-    let interval = rows::ranged_choice("Automatic backup frequency", &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
-    tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
-    tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed))]));
-    tree.push(rows::group("Maintenance", maintenance::data_rows()));
+    let interval = rows::ranged_choice(&tr(MsgKey::pref_backup_interval), &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
+    tree.push(rows::group(&tr(MsgKey::label_backup), vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
+    tree.push(rows::group(&tr(MsgKey::pref_storage_usage), vec![cache::clear_row(Rc::clone(&changed))]));
+    tree.push(rows::group(&tr(MsgKey::ui_maintenance), maintenance::data_rows()));
     tree.push(library_export::group_row());
     tree
 }
@@ -271,7 +271,7 @@ fn choose_backup_file() {
     dialog.open(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, |result| {
         let path = match result {
             Ok(file) => file.path(),
-            Err(err) => return crate::toast::notify(chooser::failure_toast(&err).unwrap_or("No file selected".to_string())),
+            Err(err) => return crate::toast::notify(chooser::failure_toast(&err).unwrap_or(tr(MsgKey::file_null_uri_error).to_string())),
         };
         match path {
             Some(path) => {

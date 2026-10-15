@@ -7,6 +7,7 @@
 //! Reader preferences do not go through this actor: `Pref::set` updates the preference store's memory at once and
 //! the store's own flusher thread saves it, so the GTK thread never waits on a file (see `settings_window`).
 
+use kuro_i18n::{MsgKey, tr};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -106,9 +107,9 @@ impl ReaderStore for WriterHandle {
     fn set_bookmark(&self, chapter_id: i64, bookmark: bool) -> Result<(), String> {
         let (reply, answer) = mpsc::channel();
         if self.tx.send(Msg::Checked(Command::Bookmark { chapter_id, bookmark }, reply)).is_err() {
-            return Err("Unknown error".to_owned());
+            return Err(tr(MsgKey::unknown_error).to_owned());
         }
-        answer.recv_timeout(FLUSH_TIMEOUT).unwrap_or_else(|_| Err("Unknown error".to_owned()))
+        answer.recv_timeout(FLUSH_TIMEOUT).unwrap_or_else(|_| Err(tr(MsgKey::unknown_error).to_owned()))
     }
 
     fn mark_read(&self, chapter_id: i64) {

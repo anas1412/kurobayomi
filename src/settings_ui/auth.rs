@@ -44,7 +44,7 @@ impl<'a> Passphrase<'a> {
 
     /// `Ok(true)` for the right passphrase, `Ok(false)` for a wrong one, `Err` when the hash cannot be read.
     pub fn verify(&self, passphrase: &str) -> Result<bool, String> {
-        let stored = self.0.get(SERVICE, ACCOUNT).map_err(|e| e.to_string())?.ok_or("No passphrase is set")?;
+        let stored = self.0.get(SERVICE, ACCOUNT).map_err(|e| e.to_string())?.ok_or(tr(MsgKey::ui_no_passphrase_is_set))?;
         let hash = PasswordHash::new(&stored).map_err(|e| e.to_string())?;
         match Argon2::default().verify_password(passphrase.as_bytes(), &hash) {
             Ok(()) => Ok(true),

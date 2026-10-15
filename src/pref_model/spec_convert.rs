@@ -36,16 +36,18 @@ pub fn item_title(item: &Item) -> String {
     }
 }
 
+/// The row's text as drawn: the spec's English through `spec::shown`. The preference key and the action a row runs stay
+/// on the English title (`build_item` takes both from the spec item itself).
 fn common(title: &str, subtitle: &Option<String>) -> ItemCommon {
-    let common = ItemCommon::new(title);
+    let common = ItemCommon::new(&crate::spec::shown(title));
     match subtitle {
-        Some(text) => common.with_subtitle(text),
+        Some(text) => common.with_subtitle(&crate::spec::shown(text)),
         None => common,
     }
 }
 
 fn entries(options: &[String]) -> Vec<(String, String)> {
-    options.iter().map(|o| (o.clone(), o.clone())).collect()
+    options.iter().map(|o| (o.clone(), crate::spec::shown(o))).collect()
 }
 
 /// Builds the model item for one spec item. `navigate` receives a link's target screen id.
@@ -88,7 +90,7 @@ pub fn build_item(
             let last = (max.unwrap_or(100.0).round() as i32).max(first);
             let value = (default.as_f64().unwrap_or(f64::from(first)).round() as i32).clamp(first, last);
             PreferenceItem::Slider {
-                common: ItemCommon::new(title),
+                common: ItemCommon::new(&crate::spec::shown(title)),
                 value,
                 range: first..=last,
                 steps: slider_steps(first, last),
@@ -120,7 +122,7 @@ pub fn build_item(
             });
             PreferenceItem::Text { common: common(&title, subtitle), on_click: Some(on_click) }
         }
-        Item::Info { title } => PreferenceItem::Info { text: title.clone(), enabled: true },
+        Item::Info { title } => PreferenceItem::Info { text: crate::spec::shown(title), enabled: true },
         Item::Tristate { .. } => return Err(Skip::Unsupported("tristate")),
         Item::Sort { .. } => return Err(Skip::Unsupported("sort")),
         Item::Chips { .. } => return Err(Skip::Unsupported("chips")),
@@ -166,7 +168,7 @@ impl Registry {
             }
             match (&group.title, items.is_empty()) {
                 (_, true) => {}
-                (Some(title), false) => tree.push(Preference::Group(PreferenceGroup::new(title.clone(), items))),
+                (Some(title), false) => tree.push(Preference::Group(PreferenceGroup::new(crate::spec::shown(title), items))),
                 (None, false) => tree.extend(items.into_iter().map(Preference::Item)),
             }
         }

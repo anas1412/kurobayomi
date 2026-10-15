@@ -184,7 +184,7 @@ fn startup_check_row() -> PreferenceItem {
 /// manager already lists it, the row says so and has no switch.
 fn applications_menu_row() -> PreferenceItem {
     if crate::appimage_integrate::managed_elsewhere() {
-        return text(&menu_title(), Some("Your AppImage manager already lists it there"), false);
+        return text(&menu_title(), Some(&tr(MsgKey::ui_your_appimage_manager_already_lists_it_there)), false);
     }
     let trailing: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
         let switch = gtk::Switch::builder().valign(gtk::Align::Center).active(crate::appimage_integrate::in_menu()).build();
@@ -203,7 +203,7 @@ fn applications_menu_row() -> PreferenceItem {
             switch.set_active(!switch.is_active());
         }
     });
-    tap_item(&menu_title(), Some("With its icon, like an installed app"), true, Some(trailing), None, on_tap)
+    tap_item(&menu_title(), Some(&tr(MsgKey::ui_with_its_icon_like_an_installed_app)), true, Some(trailing), None, on_tap)
 }
 
 pub fn menu_title() -> String {
@@ -397,7 +397,7 @@ fn links_row() -> PreferenceItem {
     let build: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         bar.set_halign(gtk::Align::Center);
-        for (label, url) in [("GitHub", PROJECT_URL), ("Report an issue", ISSUES_URL)] {
+        for (label, url) in [("GitHub", PROJECT_URL), (&tr(MsgKey::ui_report_an_issue), ISSUES_URL)] {
             let button = gtk::Button::with_label(label);
             button.add_css_class("flat");
             button.connect_clicked(move |_| crate::ui::open_link(url, None));

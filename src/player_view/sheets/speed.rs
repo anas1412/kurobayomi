@@ -1,6 +1,7 @@
 //! The playback speed button and its menu. The menu offers six presets, and the button shows the speed that plays now.
 //! The speed is written to mpv, which keeps it while the page plays on. Label text comes from `kuro_player::speed`.
 
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use kuro_player::speed::speed_label;
@@ -13,7 +14,7 @@ pub const PRESETS: [f32; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
 /// The speed button. Its label follows the playing speed through [`refresh`].
 pub fn button(shared: &Shared) -> gtk::MenuButton {
-    let button = menu("Playback speed", {
+    let button = menu(&tr(MsgKey::ui_playback_speed), {
         let shared = Rc::clone(shared);
         move |column, popover| fill(column, popover, &shared)
     });

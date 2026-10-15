@@ -4,6 +4,7 @@
 //! Everything here lives on the GTK main thread, so shared ownership is `Rc` and mutation is `Cell` or `RefCell`.
 //! Background loaders report through events and never touch these types (plan 43, section 2).
 
+use kuro_i18n::{MsgKey, tr};
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::fmt;
@@ -167,7 +168,7 @@ impl ReaderChapter {
     /// error state, as in `ChapterLoader`. Indices must already be `0..n`.
     pub fn finish_loading(self: &Rc<Self>, pages: Vec<Rc<ReaderPage>>) -> Result<(), LoadError> {
         if pages.is_empty() {
-            let error = LoadError::new("Page list is empty");
+            let error = LoadError::new(tr(MsgKey::ui_page_list_is_empty));
             self.set_state(ChapterState::Error(Rc::new(error.clone())));
             return Err(error);
         }

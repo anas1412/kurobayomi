@@ -549,7 +549,7 @@ const HAS_RESULTS: &str = "has_results";
 /// The search options (B§10.1) on the shared view-options button next to the search box: Show only "Has results". The
 /// source filter has one value (All) since the pinned-only filter was cut, so it has no item.
 fn search_options(view: &Rc<SearchView>) -> ViewOptions {
-    let menu = ViewOptions::new(&search_options_label(), &[Section::filter("Show only", vec![MenuItem::toggle(HAS_RESULTS, tr(MsgKey::has_results))])]);
+    let menu = ViewOptions::new(&search_options_label(), &[Section::filter(tr(MsgKey::ui_show_only), vec![MenuItem::toggle(HAS_RESULTS, tr(MsgKey::has_results))])]);
     menu.set_toggle(HAS_RESULTS, view.chips.get().only_has_results);
     let toggled = Rc::clone(view);
     menu.connect(move |pick| {

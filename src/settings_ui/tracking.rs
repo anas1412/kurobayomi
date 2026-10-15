@@ -126,7 +126,7 @@ fn open_logout_dialog(tracker: Arc<dyn Tracker>, changed: Rc<dyn Fn()>) {
         &crate::ui::window(),
         &title,
         &body,
-        Some("Log out"),
+        Some(&tr(MsgKey::logout)),
         move |dialog| match run_logout(tracker.as_ref()) {
             Ok(key) => {
                 crate::toast::notify(english(&key));
@@ -239,8 +239,8 @@ pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     trackers.push(info(&tracking_info()));
     let mut rows = warning_rows(host.as_ref().is_some_and(|host| host.fallback));
     rows.extend([
-        item(switch("Update progress after reading/watching", &tracking.auto_update_track, true)),
-        group("Trackers", trackers),
+        item(switch(&tr(MsgKey::pref_auto_update_manga_sync), &tracking.auto_update_track, true)),
+        group(&tr(MsgKey::services), trackers),
     ]);
     rows
 }

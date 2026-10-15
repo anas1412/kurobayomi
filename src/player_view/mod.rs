@@ -3,6 +3,8 @@
 //! [`open_episode`] for a file, or [`open_source_episode`] for an episode of an online source. Logic lives in `playback` (mpv), `source` (the source's video) and `store` (watch progress); this
 //! file is widget wiring. Main thread only.
 
+use kuro_i18n::{MsgKey, tr};
+
 mod after_seen;
 mod auto_hide;
 mod controls;
@@ -31,7 +33,6 @@ use gtk::glib::translate::IntoGlib;
 use gtk::{gdk, glib};
 use kuro_data::entry::EntryRepo;
 use kuro_data::item::ItemRepo;
-use kuro_i18n::{MsgKey, tr};
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths as _;
 use kuro_player::keys::Modifiers;
@@ -215,7 +216,7 @@ impl Player {
             self.closed = true;
             self.save(true);
             self.playback.stop();
-            self.awake.sync_for(false, "Playing video");
+            self.awake.sync_for(false, &tr(MsgKey::ui_playing_video));
             after_seen::flush();
         }
     }
@@ -464,7 +465,7 @@ fn video_menu(shared: &Shared, page: &gtk::Box, servers: &sheets::quality::Serve
             })
             .collect();
         // the servers load on the first ask; the next right-click lists them
-        items.push(if choices.is_empty() { Item::new("Quality: loading…", 0, || {}) } else { Item::submenu("Quality", 0, choices) });
+        items.push(if choices.is_empty() { Item::new(tr(MsgKey::ui_quality_loading), 0, || {}) } else { Item::submenu("Quality", 0, choices) });
     }
     items.push(Item::submenu("Speed", 0, menu_items(sheets::speed::choices(shared))));
     let fullscreen = window_of(page).is_some_and(|w| w.is_fullscreen());
@@ -809,7 +810,7 @@ fn start_ticks(page: &gtk::Box, title: &page_header::TwoLineTitle, hiding: &Rc<a
             };
             (snapshot, failed, ended)
         };
-        shared.borrow().awake.sync_for(!snapshot.paused && !ended, "Playing video");
+        shared.borrow().awake.sync_for(!snapshot.paused && !ended, &tr(MsgKey::ui_playing_video));
         skip_button::tick(&shared, &skip);
         if failed {
             crate::toast::notify(tr(MsgKey::player_hoster_failed));

@@ -73,19 +73,19 @@ impl RepoOps {
 
 /// The toast after a repo link was added: how many sources its index lists.
 pub fn added_text(count: usize) -> String {
-    if count == 1 { "Added 1 source".to_owned() } else { format!("Added {count} sources") }
+    kuro_i18n::tr_plural(MsgKey::repos_added, i64::try_from(count).unwrap_or(i64::MAX), &[])
 }
 
 /// The toast text of a repo link that could not be added.
 pub fn repo_error_text(error: &RepoError) -> String {
     match error {
         RepoError::BadRepoLink => tr(MsgKey::invalid_repo_name),
-        RepoError::Network(_) | RepoError::Status(_) => "The repo could not be reached".to_owned(),
-        RepoError::TooMany { .. } => "The repo lists more than 10 sources of one kind".to_owned(),
-        RepoError::Mismatch => "A source does not match its checksum in the repo index".to_owned(),
+        RepoError::Network(_) | RepoError::Status(_) => tr(MsgKey::ui_the_repo_could_not_be_reached).to_owned(),
+        RepoError::TooMany { .. } => tr(MsgKey::ui_the_repo_lists_more_than_10_sources_of_one_k).to_owned(),
+        RepoError::Mismatch => tr(MsgKey::ui_a_source_does_not_match_its_checksum_in_the).to_owned(),
         RepoError::Write(_) => could_not_add_repo().to_owned(),
         RepoError::Parse(_) | RepoError::BadId(_) | RepoError::BadChecksum(_) | RepoError::BadLink(_) | RepoError::TooLarge => {
-            "The repo index is not valid".to_owned()
+            tr(MsgKey::ui_the_repo_index_is_not_valid).to_owned()
         }
     }
 }

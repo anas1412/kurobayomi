@@ -142,6 +142,19 @@ impl Spec {
     }
 }
 
+/// The text of a spec string as it is drawn: the message that reads exactly this English, in the active language, else the
+/// English itself. The spec data keeps its English as identity (a row's title names its stored preference, a label finds its
+/// action, an option is the stored value), so only the drawing code goes through here, never the logic. Do not use it on
+/// text a user or a source wrote.
+pub fn shown(text: &str) -> String {
+    kuro_i18n::translate_known(text).unwrap_or_else(|| text.to_owned())
+}
+
+/// [`shown`] over a list, for the labels of options and tabs.
+pub fn shown_all(texts: &[String]) -> Vec<String> {
+    texts.iter().map(|t| shown(t)).collect()
+}
+
 pub fn value_str(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -152,6 +165,37 @@ pub fn value_str(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    // The text the person sees from the spec, as the drawing code reads it, has a message in the string table: the sidebar,
+    // the settings list, the screens, the toolbars and menus, and the dialog buttons. (The spec holds more text, most of it
+    // sample data and notes of the mock-up, which is never drawn as it stands.)
+    #[test]
+    fn the_spec_text_that_is_drawn_has_messages() {
+        // sample text replaced when the dialog is shown (an episode title, a count)
+        const SAMPLES: [&str; 3] = ["Episode 1", "Update trackers to chapter 12?", "Update trackers to episode 12?"];
+        let spec = super::Spec::load();
+        let mut missing = std::collections::BTreeSet::new();
+        let mut check = |text: &str| {
+            if !text.is_empty() && !SAMPLES.contains(&text) && kuro_i18n::translate_known(text).is_none() {
+                missing.insert(text.to_owned());
+            }
+        };
+        for entry in spec.nav.iter().chain(&spec.settings_main) {
+            check(&entry.title);
+            entry.subtitle.iter().for_each(|s| check(s));
+        }
+        for screen in spec.screens.values() {
+            check(&screen.title);
+            screen.toolbar.iter().for_each(|tool| check(&tool.label));
+            screen.menu.iter().for_each(|entry| check(entry));
+            screen.sheets.iter().for_each(|sheet| check(&sheet.title));
+            for dialog in &screen.dialogs {
+                check(&dialog.title);
+                dialog.buttons.iter().for_each(|button| check(button));
+            }
+        }
+        assert!(missing.is_empty(), "spec text with no message in the string table (add one with the same English): {missing:?}");
+    }
+
     // Every spec file parses, has no unknown item types, and every link target exists.
     #[test]
     fn spec_is_consistent() {

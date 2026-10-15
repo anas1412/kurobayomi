@@ -26,6 +26,20 @@ const ALLOWED: &[(&str, &str, &str)] = &[
     ("src/shell/sidebar.rs", "Kurobayomi", "the name of the app"),
     ("src/player_view/hls_proxy.rs", "BROWSER_UA", "an HTTP user agent, not shown"),
     ("src/channel.rs", "REPOSITORY", "a GitHub owner/name, not shown"),
+    ("src/reader/viewers/nav.rs", "*", "overlay labels as message key plus English fallback"),
+    ("src/shell/desktop_labels.rs", "*", "the table of desktop action keys: each row names its message keys and keeps the English as a fallback"),
+    ("src/entry_core/details/torrent_server.rs", "*", "HTTP bytes of a local probe and a developer-facing error"),
+    ("src/library_update/store.rs", "*", "SQL"),
+    ("src/settings.rs", "SELECT count(*) FROM items i JOIN entries e ON e._id = i.entry_id WHERE e.kind = ?1", "SQL"),
+    ("src/player_view/hls_proxy.rs", "*", "HTTP bytes of the local relay"),
+    ("src/shell/intents/drops.rs", "*", "the registry of Android features dropped on Linux: notes for developers, not interface text"),
+    ("src/dropped/", "*", "as above"),
+    ("src/browse/fake_catalogue.rs", "*", "a fake catalogue for development and tests"),
+    ("src/channel.rs", "Kurobayomi Nightly", "the name of the app"),
+    ("src/ui.rs", "Clear WebView data", "compared with the English title of a spec action (the row shows the translated title)"),
+    ("src/settings_ui/route.rs", "Tracking guide", "compared with the English tooltip of a spec button"),
+    ("src/updates/mount.rs", "Update library", "the English label of a spec toolbar item, compared to find it"),
+    ("src/updates/mount.rs", "View Upcoming Updates", "as above"),
     ("src/updates/mount.rs", "UPDATE_LIBRARY", "the English label of a spec toolbar item, compared to find it (spec/*.json holds the text shown)"),
     ("src/updates/mount.rs", "VIEW_UPCOMING", "as above"),
     ("src/pref_model/stores_page.rs", "Discord", "the name of a product, the same in every language"),
@@ -43,7 +57,7 @@ fn source_files(dir: &Path, out: &mut Vec<PathBuf>) {
         } else if path.extension().is_some_and(|e| e == "rs") {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
             // files that are only tests, and this guard itself
-            if !(name.contains("test") || name == "i18n_guard.rs" || path.components().any(|c| c.as_os_str() == "testing")) {
+            if !(name.contains("test") || name == "i18n_guard.rs" || path.components().any(|c| c.as_os_str() == "testing" || c.as_os_str() == "t2")) {
                 out.push(path);
             }
         }
@@ -103,12 +117,20 @@ fn is_english_words(text: &str) -> bool {
         && !text.starts_with("http")
 }
 
+/// Lines that are for developers, not the interface: logging, assertions, panics, attributes and embedded files.
+const QUIET: &[&str] = &["tracing::", "debug!(", "info!(", "warn!(", "error!(", "trace!(", "expect(", "panic!(", "unreachable!(", "assert", "eprintln!(", "println!(", "include_str!(", "#[", "bail!("];
+
+/// Whether a literal reads as an English phrase for the interface: a capital first, a space, and some lower-case letters.
+fn is_english_phrase(text: &str) -> bool {
+    is_english_words(text) && text.contains(' ') && text.len() >= 5 && !text.contains('{') && !text.starts_with("Mozilla")
+}
+
 fn unescape(text: &str) -> String {
     text.replace("\\\"", "\"").replace("\\'", "'")
 }
 
 fn allowed(file: &str, what: &str) -> bool {
-    ALLOWED.iter().any(|(f, w, _)| file.ends_with(f) && *w == what)
+    ALLOWED.iter().any(|(f, w, _)| (file.ends_with(f) || (f.ends_with('/') && file.contains(f))) && (*w == "*" || *w == what))
 }
 
 #[test]
@@ -119,6 +141,10 @@ fn the_interface_text_comes_from_the_string_table() {
     assert!(files.len() > 100, "the guard found the sources");
     let sink = Regex::new(SINK).expect("a valid pattern");
     let constant = Regex::new(r#"(?m)\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:'static\s+)?str\s*=\s*\n?\s*"((?:[^"\\]|\\.)*)"\s*;"#).expect("a valid pattern");
+    // the settings row builders take the row's title first, and option lists pair a stored value with its label
+    let builder = Regex::new(r#"\b(?:group|switch|switch_with|exclusive_switch|ranged_choice|multi_choice|int_choice|text|info|edit_text|tap_item|list_row|choice|slider)\(\s*&?"((?:[^"\\]|\\.)+)""#).expect("a valid pattern");
+    let option = Regex::new(r#"\(\s*(?:-?\d+|"[a-z0-9_.\-]+")\s*,\s*"((?:[^"\\]|\\.)+)"\s*\)"#).expect("a valid pattern");
+    let literal = Regex::new(r#""((?:[^"\\]|\\.)+)""#).expect("a valid pattern");
     let mut found = Vec::new();
     for path in files {
         let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
@@ -127,6 +153,26 @@ fn the_interface_text_comes_from_the_string_table() {
             let text = unescape(&m[1]);
             if is_english_words(&text) && !allowed(&relative, &text) {
                 found.push(format!("{relative}: shown text {text:?}"));
+            }
+        }
+        for rule in [&builder, &option] {
+            for m in rule.captures_iter(&code) {
+                let text = unescape(&m[1]);
+                if is_english_words(&text) && !allowed(&relative, &text) && !found.iter().any(|f: &String| f.ends_with(&format!("{text:?}"))) {
+                    found.push(format!("{relative}: row text {text:?}"));
+                }
+            }
+        }
+        // any English phrase in the code, whatever call it is in (a line that logs, asserts or panics is for developers)
+        for line in code.lines() {
+            if QUIET.iter().any(|q| line.contains(q)) {
+                continue;
+            }
+            for m in literal.captures_iter(line) {
+                let text = unescape(&m[1]);
+                if is_english_phrase(&text) && !allowed(&relative, &text) {
+                    found.push(format!("{relative}: phrase {text:?}"));
+                }
             }
         }
         for m in constant.captures_iter(&code) {

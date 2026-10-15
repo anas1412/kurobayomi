@@ -1,5 +1,7 @@
 //! Errors of one library pass. The user message is what the failure list and the error log show.
 
+use kuro_i18n::{MsgKey, tr};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateError {
     /// The source returned no chapters and is not a local source.
@@ -17,9 +19,9 @@ pub enum UpdateError {
 impl UpdateError {
     pub fn user_message(&self) -> String {
         match self {
-            Self::NoChapters => "No chapters found".into(),
-            Self::NoEpisodes => "No episodes found".into(),
-            Self::SourceNotInstalled => "Source not installed".into(),
+            Self::NoChapters => tr(MsgKey::no_chapters_error).into(),
+            Self::NoEpisodes => tr(MsgKey::no_episodes_error).into(),
+            Self::SourceNotInstalled => tr(MsgKey::ui_source_not_installed).into(),
             Self::Cancelled => "Cancelled".into(),
             Self::Other(message) if message.trim().is_empty() => format!("{self:?}"),
             Self::Other(message) => message.clone(),

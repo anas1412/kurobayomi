@@ -1,5 +1,6 @@
 //! Library rows this module owns: the default category lists (task T-47a-020). The chapter and episode behavior groups
 //! (mark duplicate as read) and the hidden-category switch are cut (settings diet).
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use kuro_platform::kind::Kind;
@@ -55,7 +56,8 @@ pub fn default_category_row(title: &str, pref: &Pref<i32>, categories: &[Categor
     if normalized != stored {
         let _ = pref.set(normalized);
     }
-    let mut options: Vec<(i32, &str)> = vec![(ALWAYS_ASK, "Always ask")];
+    let binding = tr(MsgKey::default_category_summary);
+    let mut options: Vec<(i32, &str)> = vec![(ALWAYS_ASK, &binding)];
     options.extend(ordered.iter().map(|c| (c.id, c.name.as_str())));
     int_choice(title, pref, &options, true)
 }
@@ -70,12 +72,12 @@ pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc
     };
     let l = &prefs.library;
     let mut tree = vec![group(
-        "Categories",
+        &tr(MsgKey::general_categories),
         vec![
-            edit("Edit anime categories", Kind::Anime, anime.len()),
-            default_category_row("Default anime category", &l.default_anime_category, anime),
-            edit("Edit manga categories", Kind::Manga, manga.len()),
-            default_category_row("Default manga category", &l.default_manga_category, manga),
+            edit(&tr(MsgKey::action_edit_anime_categories), Kind::Anime, anime.len()),
+            default_category_row(&tr(MsgKey::default_anime_category), &l.default_anime_category, anime),
+            edit(&tr(MsgKey::action_edit_manga_categories), Kind::Manga, manga.len()),
+            default_category_row(&tr(MsgKey::default_manga_category), &l.default_manga_category, manga),
         ],
     )];
     tree.push(crate::settings_ui::library_update::global_update_group(prefs));

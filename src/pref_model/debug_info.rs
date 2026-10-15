@@ -107,8 +107,8 @@ pub fn tree() -> Vec<Preference> {
                     let target = target.clone();
                     let on_click: Rc<dyn Fn()> = Rc::new(move || crate::ui::open(&target));
                     let common = match subtitle {
-                        Some(text) => ItemCommon::new(title).with_subtitle(text),
-                        None => ItemCommon::new(title),
+                        Some(text) => ItemCommon::new(&crate::spec::shown(title)).with_subtitle(&crate::spec::shown(text)),
+                        None => ItemCommon::new(&crate::spec::shown(title)),
                     };
                     Some(PreferenceItem::Text { common: common.with_link(), on_click: Some(on_click) })
                 }
@@ -119,7 +119,7 @@ pub fn tree() -> Vec<Preference> {
     }
     let group = |title: Option<&String>, rows: Vec<(String, String)>| {
         let items = rows.iter().map(|(t, v)| copy_row(t, v)).collect();
-        Preference::Group(PreferenceGroup::new(title.cloned().unwrap_or_default(), items))
+        Preference::Group(PreferenceGroup::new(title.map(|t| crate::spec::shown(t)).unwrap_or_default(), items))
     };
     let model = model_text(read_file("/sys/class/dmi/id/sys_vendor").as_deref(), read_file("/sys/class/dmi/id/product_name").as_deref());
     tree.push(group(screen.groups.get(1).and_then(|g| g.title.as_ref()), app_rows(&title_of(1, 0), &title_of(1, 1))));

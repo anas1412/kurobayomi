@@ -54,7 +54,7 @@ enum Entry {
 }
 
 struct Group {
-    title: Option<&'static str>,
+    title: Option<String>,
     filter: bool,
     entries: Vec<Entry>,
 }
@@ -80,11 +80,11 @@ fn choice(name: &'static str, mask: i64, options: Vec<(i64, String)>) -> Entry {
 }
 
 fn reverse(asc: i64, desc: i64, mask: i64) -> Entry {
-    Entry::Bit(Bit { name: "reverse", label: "Reverse order".to_owned(), on: asc, off: desc, mask })
+    Entry::Bit(Bit { name: "reverse", label: tr(MsgKey::ui_reverse_order).to_owned(), on: asc, off: desc, mask })
 }
 
 fn default_group() -> Group {
-    Group { title: None, filter: false, entries: vec![Entry::Action(DEFAULT, "Use as default for all titles".to_owned())] }
+    Group { title: None, filter: false, entries: vec![Entry::Action(DEFAULT, tr(MsgKey::ui_use_as_default_for_all_titles).to_owned())] }
 }
 
 /// The item list of an entry (`Entry::item_flags`): the manga chapter list or the anime episode list. The two kinds differ
@@ -111,20 +111,20 @@ pub fn item_spec(kind: Kind) -> Spec {
     }
     Spec {
         groups: vec![
-            Group { title: Some("Show only"), filter: true, entries: show_only },
+            Group { title: Some(tr(MsgKey::ui_show_only)), filter: true, entries: show_only },
             Group {
-                title: Some("Sort by"),
+                title: Some(tr(MsgKey::ui_sort_by)),
                 filter: false,
                 entries: vec![
                     choice(
                         "sort",
                         c::SORTING_MASK,
-                        vec![(c::SORTING_SOURCE, "Source order".to_owned()), (c::SORTING_NUMBER, "Number".to_owned()), (c::SORTING_UPLOAD_DATE, "Upload date".to_owned())],
+                        vec![(c::SORTING_SOURCE, tr(MsgKey::ui_source_order).to_owned()), (c::SORTING_NUMBER, "Number".to_owned()), (c::SORTING_UPLOAD_DATE, tr(MsgKey::ui_upload_date).to_owned())],
                     ),
                     reverse(c::SORT_ASC, c::SORT_DESC, c::SORT_DIR_MASK),
                 ],
             },
-            Group { title: Some("Display"), filter: false, entries: display },
+            Group { title: Some("Display".to_string()), filter: false, entries: display },
             default_group(),
         ],
     }
@@ -150,14 +150,14 @@ pub fn season_spec() -> Spec {
     let sizes = (0..=10).map(|n| (n << sf::GRID_DISPLAY_SIZE_SHIFT, if n == 0 { "Auto".to_owned() } else { n.to_string() })).collect();
     let mut display = vec![
         choice("grid", sf::GRID_DISPLAY_MODE_MASK, grid_modes.iter().map(|(label, mode)| (mode.to_i64() << sf::GRID_DISPLAY_MODE_SHIFT, tr(*label))).collect()),
-        Entry::Choice(Choice { name: "size", mask: sf::GRID_DISPLAY_SIZE_MASK, options: sizes, submenu: Some("Items per row".to_owned()) }),
+        Entry::Choice(Choice { name: "size", mask: sf::GRID_DISPLAY_SIZE_MASK, options: sizes, submenu: Some(tr(MsgKey::pref_library_columns).to_owned()) }),
     ];
     display.extend(overlays.iter().zip(OVERLAY_NAMES).map(|((label, mask), name)| check(name, tr(*label), *mask, *mask)));
     display.push(choice("title", sf::DISPLAY_MODE_MASK, vec![(sf::DISPLAY_MODE_SOURCE, tr(MsgKey::show_title)), (sf::DISPLAY_MODE_NUMBER, tr(MsgKey::show_season_number))]));
     Spec {
         groups: vec![
             Group {
-                title: Some("Show only"),
+                title: Some(tr(MsgKey::ui_show_only)),
                 filter: true,
                 entries: vec![
                     check(DOWNLOADED, tr(MsgKey::label_downloaded), sf::SHOW_DOWNLOADED, sf::DOWNLOADED_MASK),
@@ -169,16 +169,16 @@ pub fn season_spec() -> Spec {
                 ],
             },
             Group {
-                title: Some("Sort by"),
+                title: Some(tr(MsgKey::ui_sort_by)),
                 filter: false,
                 entries: vec![
                     choice(
                         "sort",
                         sf::SORT_MASK,
                         vec![
-                            (sf::SORT_SOURCE, "Source order".to_owned()),
-                            (sf::SORT_SEASON, "Season number".to_owned()),
-                            (sf::SORT_UPLOAD, "Upload date".to_owned()),
+                            (sf::SORT_SOURCE, tr(MsgKey::ui_source_order).to_owned()),
+                            (sf::SORT_SEASON, tr(MsgKey::show_season_number).to_owned()),
+                            (sf::SORT_UPLOAD, tr(MsgKey::ui_upload_date).to_owned()),
                             (sf::SORT_ALPHABET, tr(MsgKey::action_sort_alpha)),
                             (sf::SORT_COUNT, tr(MsgKey::action_sort_unseen_count)),
                             (sf::SORT_LAST_SEEN, tr(MsgKey::action_sort_last_seen)),
@@ -188,7 +188,7 @@ pub fn season_spec() -> Spec {
                     reverse(sf::SORT_ASC, sf::SORT_DESC, sf::SORT_DIR_MASK),
                 ],
             },
-            Group { title: Some("Display"), filter: false, entries: display },
+            Group { title: Some("Display".to_string()), filter: false, entries: display },
             default_group(),
         ],
     }
@@ -214,7 +214,7 @@ impl Spec {
                         Entry::Action(name, label) => items.push(Item::action(*name, label.clone())),
                     }
                 }
-                Section { title: group.title.map(str::to_owned), filter: group.filter, items }
+                Section { title: group.title.clone(), filter: group.filter, items }
             })
             .collect()
     }
@@ -263,10 +263,10 @@ impl Spec {
 /// "Use as default for all titles": asks once, then runs `on_ok`. The list options of this title become the default of
 /// new titles and are written to every title of the library.
 pub fn confirm_default(on_ok: impl Fn() + 'static) {
-    let text = "Every title in your library takes these list options, and titles you open later start with them.";
-    let body = ui::message(text);
+    let text = tr(MsgKey::ui_every_title_in_your_library_takes_these_list);
+    let body = ui::message(&text);
     let buttons = vec![DialogButton::cancel(tr(MsgKey::action_cancel)), DialogButton::new(&tr(MsgKey::ui_use_for_all_titles), Role::Suggested, on_ok)];
-    ui::dialog("Use as default for all titles", &body, 380, buttons).present();
+    ui::dialog(&tr(MsgKey::ui_use_as_default_for_all_titles), &body, 380, buttons).present();
 }
 
 #[cfg(test)]

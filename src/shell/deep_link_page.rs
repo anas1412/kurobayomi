@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
 use gtk::prelude::*;
@@ -55,10 +56,10 @@ pub struct View {
 pub fn view(state: &State) -> View {
     match state {
         State::Loading => View { title: "Search…".into(), message: None, spinner: true, retry: false, search_instead: false },
-        State::NoResults { .. } => View { title: "No results".into(), message: None, spinner: false, retry: false, search_instead: false },
+        State::NoResults { .. } => View { title: tr(MsgKey::ui_no_results).into(), message: None, spinner: false, retry: false, search_instead: false },
         State::Found(_) => View { title: "Opening…".into(), message: None, spinner: true, retry: false, search_instead: false },
         State::Failed { reason } => View {
-            title: "Couldn't open this link".into(),
+            title: tr(MsgKey::ui_couldn_t_open_this_link).into(),
             message: Some(reason.clone()),
             spinner: false,
             retry: true,

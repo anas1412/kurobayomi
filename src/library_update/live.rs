@@ -6,6 +6,7 @@
 //! The lists are read at each call, so a source that starts later is found without a restart. The registry is
 //! stateless: it holds nothing that could go stale.
 
+use kuro_i18n::{MsgKey, tr};
 use std::sync::Arc;
 
 use kuro_platform::kind::Kind;
@@ -66,7 +67,7 @@ impl LiveRegistry {
 impl LiveSource {
     fn name(&self) -> String {
         match self {
-            Self::Local => "Local source".to_owned(),
+            Self::Local => tr(MsgKey::action_display_local_badge).to_owned(),
             Self::Manga(source) => source.name().to_owned(),
             Self::Anime(source) => source.name().to_owned(),
         }

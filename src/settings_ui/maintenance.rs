@@ -15,9 +15,9 @@ use crate::settings_ui::rows::text;
 
 /// Empties `jar` (memory and file) and returns the toast text on success. The jar is the one the running clients
 /// use (`net_client::app_jar`), so the cookies stop being sent at once and none is written back at exit.
-pub fn clear_cookies_in(jar: &kuro_net::cookies::CookieJar) -> std::io::Result<&'static str> {
+pub fn clear_cookies_in(jar: &kuro_net::cookies::CookieJar) -> std::io::Result<String> {
     jar.remove_all()?;
-    Ok("Cookies cleared")
+    Ok(tr(MsgKey::cookies_cleared))
 }
 
 fn clear_cookies() {
@@ -62,7 +62,7 @@ pub fn reset_reader_settings() {
 
 /// The "Reset per-series reader settings" row. The anime equivalent is not offered (Android parity).
 pub fn reset_reader_row() -> PreferenceItem {
-    let mut row = text(&tr(MsgKey::pref_reset_viewer_flags), Some("Resets reading mode of all series"), true);
+    let mut row = text(&tr(MsgKey::pref_reset_viewer_flags), Some(&tr(MsgKey::pref_reset_viewer_flags_summary)), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(reset_reader_settings));
     }
@@ -166,7 +166,7 @@ pub fn share_crash_logs_row() -> PreferenceItem {
     PreferenceItem::Custom {
         title: tr(MsgKey::pref_dump_crash_logs).to_owned(),
         build: Rc::new(|| {
-            let built = row::build(RowSpec { title: "Share crash logs", subtitle: Some(&share_subtitle()), icon: None, trailing: None, on_click: None });
+            let built = row::build(RowSpec { title: &tr(MsgKey::pref_dump_crash_logs), subtitle: Some(&share_subtitle()), icon: None, trailing: None, on_click: None });
             let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
             built.row.set_child(None::<&gtk::Widget>);
             content.set_focusable(true);
@@ -209,7 +209,7 @@ fn reindex_downloads() {
 
 /// The Reindex downloads row (task T-47a-074).
 pub fn reindex_downloads_row() -> PreferenceItem {
-    let mut row = text(&tr(MsgKey::pref_invalidate_download_cache), Some("Force app to recheck downloaded chapters and episodes"), true);
+    let mut row = text(&tr(MsgKey::pref_invalidate_download_cache), Some(&tr(MsgKey::pref_invalidate_download_cache_summary)), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(reindex_downloads));
     }

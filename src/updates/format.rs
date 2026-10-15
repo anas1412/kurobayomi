@@ -1,6 +1,7 @@
 //! Formatting helpers of area 42: duration text, progress clock, relative dates and times, and byte sizes.
 //! Pure; the caller passes the clock and the absolute date text (T-42a-002, T-42a-003, T-42a-004).
 
+use kuro_i18n::{MsgKey, tr};
 use chrono::NaiveDate;
 
 const MINUTE_MS: i64 = 60_000;
@@ -99,7 +100,7 @@ impl RelativeTime {
     pub fn text(&self) -> String {
         match self {
             RelativeTime::Never => "Never".to_owned(),
-            RelativeTime::JustNow => "Just now".to_owned(),
+            RelativeTime::JustNow => tr(MsgKey::updates_last_update_info_just_now).to_owned(),
             RelativeTime::Ago(text) => text.clone(),
         }
     }

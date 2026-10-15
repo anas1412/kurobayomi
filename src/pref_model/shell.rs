@@ -155,7 +155,7 @@ fn entries() -> Vec<NavEntry> {
         .into_iter()
         .map(|e| {
             let subtitle = if e.id == "settings_about" { Some(about_subtitle()) } else { e.subtitle };
-            NavEntry { id: e.id, title: e.title, subtitle, icon: e.icon }
+            NavEntry { id: e.id, title: crate::spec::shown(&e.title), subtitle: subtitle.map(|s| crate::spec::shown(&s)), icon: e.icon }
         })
         .collect()
 }

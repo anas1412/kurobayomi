@@ -11,6 +11,7 @@
 //! The download can be paused and cancelled from the About page (`pause`, `resume`, `cancel`), and it reads the file
 //! from the fastest of GitHub's download addresses (`fastest_route`).
 
+use kuro_i18n::{MsgKey, tr};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -257,7 +258,7 @@ fn fetch_checked(client: &reqwest::blocking::Client, update: &Newer, part: &Path
         }
         let mut response = request.send().and_then(|r| r.error_for_status()).map_err(|e| describe(&e))?;
         if total > 0 && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-            return Err("GitHub would not carry on the download".to_owned());
+            return Err(tr(MsgKey::ui_github_would_not_carry_on_the_download).to_owned());
         }
         let mut finished = false;
         while control.wish() == Wish::Run {
@@ -297,7 +298,7 @@ const GITHUB_API: &str = "https://api.github.com";
 /// failed to lookup address information)"), where reqwest alone says only "error sending request for url".
 fn describe(error: &reqwest::Error) -> String {
     let what = if error.is_timeout() {
-        "GitHub did not answer in time".to_owned()
+        tr(MsgKey::ui_github_did_not_answer_in_time).to_owned()
     } else if let Some(status) = error.status() {
         format!("GitHub answered {status}")
     } else if error.is_connect() || error.is_request() {
@@ -342,7 +343,7 @@ fn update(file: &Path, track: Track, api: &str, step: &dyn Fn(Step), control: &C
         && let Some(url) = &newer.sums_url
     {
         let sums = http(30)?.get(url).send().and_then(|r| r.error_for_status()).and_then(|r| r.text()).map_err(|e| describe(&e))?;
-        newer.sha256 = Some(sum_of(&sums, track.asset()).ok_or("SHA256SUMS does not list the AppImage")?);
+        newer.sha256 = Some(sum_of(&sums, track.asset()).ok_or(tr(MsgKey::ui_sha256sums_does_not_list_the_appimage))?);
     }
     step(Step::Found { build: newer.build.clone(), size: newer.size });
     let part = download(&http(900)?, &newer, file, &|bytes| step(Step::Bytes(bytes)), control)?;
@@ -387,8 +388,8 @@ impl Status {
         let short = |build: &str| build[..8.min(build.len())].to_owned();
         match self {
             Self::Idle => None,
-            Self::Checking => Some("Checking for updates…".to_owned()),
-            Self::UpToDate => Some("Up to date".to_owned()),
+            Self::Checking => Some(tr(MsgKey::ui_checking_for_updates).to_owned()),
+            Self::UpToDate => Some(tr(MsgKey::ui_up_to_date).to_owned()),
             Self::Downloading { build, done, total } => {
                 let percent = (*done * 100).checked_div(*total).unwrap_or(0);
                 Some(format!("Downloading {}: {percent}%", short(build)))
