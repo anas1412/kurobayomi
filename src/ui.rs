@@ -49,7 +49,27 @@ pub fn window_width() -> Option<i32> {
     [win.width(), win.default_width()].into_iter().find(|w| *w > 0)
 }
 
+thread_local! {
+    /// Set inside [`over_root`]: the next push goes straight over the root, and a pop to the root waits for it.
+    static OVER_ROOT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `open`, which leaves the pages on screen for one new page (a notification, a link, a launch request): the new
+/// page slides in once from the page on screen, and the pages between go. Without it a pop to the root and then a push
+/// played two slides. When `open` pushes nothing (a tab) the stack pops to the root as usual.
+pub fn over_root(open: impl FnOnce()) {
+    OVER_ROOT.with(|flag| flag.set(true));
+    open();
+    if OVER_ROOT.with(|flag| flag.replace(false)) {
+        pop_to_root();
+    }
+}
+
 pub fn push(page: &impl IsA<gtk::Widget>) {
+    if OVER_ROOT.with(|flag| flag.replace(false)) {
+        push_over_root(page);
+        return;
+    }
     let stack = nav().0;
     stack.add_child(page);
     crate::shell::transitions::apply(&stack, crate::shell::transitions::Direction::Push);
@@ -118,6 +138,10 @@ pub fn push_over_root(page: &impl IsA<gtk::Widget>) {
 
 /// Drop every pushed page and show the root (sidebar destination clicked).
 pub fn pop_to_root() {
+    // inside `over_root` the push that follows replaces the pages instead (one slide)
+    if OVER_ROOT.with(std::cell::Cell::get) {
+        return;
+    }
     let stack = nav().0;
     let Some(root) = stack.first_child() else { return };
     crate::shell::transitions::apply(&stack, crate::shell::transitions::Direction::Pop);
@@ -330,15 +354,6 @@ pub fn first_within(what: &'static str, window_ms: u64) -> bool {
         map.insert(what, now);
         true
     })
-}
-
-/// As [`open`] for a screen that is not a tab, pushed straight over the root (one slide; see [`push_over_root`]).
-pub fn open_over_root(id: &str) {
-    #[cfg(test)]
-    if OPENED.with(|o| o.borrow_mut().as_mut().map(|v| v.push(id.to_owned())).is_some()) {
-        return;
-    }
-    push_over_root(&crate::screens::build(id));
 }
 
 /// Open a screen by id: hand-built if one exists, otherwise rendered from its spec.
@@ -1284,6 +1299,27 @@ pub fn generic(s: &Screen) -> GBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn over_root_replaces_the_pages_with_one_push_or_pops_when_nothing_is_pushed() {
+        crate::testing::with_display(|| {
+            let (stack, _) = crate::testing::nav();
+            if stack.first_child().is_none() {
+                stack.add_child(&gtk::Label::new(Some("root")));
+            }
+            pop_to_root();
+            let (a, b) = (gtk::Label::new(Some("a")), gtk::Label::new(Some("b")));
+            push(&a);
+            over_root(|| {
+                pop_to_root();
+                push(&b);
+            });
+            assert_eq!(stack.visible_child().as_ref(), Some(b.upcast_ref::<gtk::Widget>()), "straight to the new page");
+            assert_eq!(stack.transition_type(), crate::shell::transitions::spec(crate::shell::transitions::Direction::Push, crate::shell::transitions::animations_enabled()).kind);
+            over_root(|| {});
+            assert_eq!(page_stack().1, 0, "nothing pushed: back at the root");
+        });
+    }
 
     #[test]
     fn a_list_search_hides_rows_whose_title_lacks_the_text_ignoring_case() {

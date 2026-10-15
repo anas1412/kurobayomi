@@ -394,11 +394,10 @@ fn item_rows_exist(kind: Kind, entry_id: i64, item_id: i64) -> bool {
 /// Raises the window and opens the entry page by its id.
 fn show_entry(kind: Kind, id: i64) {
     crate::ui::window().present();
-    crate::ui::pop_to_root();
-    match kind {
+    crate::ui::over_root(|| match kind {
         Kind::Manga => crate::entry_core::details::route::open_kind(Kind::Manga, id),
         Kind::Anime => crate::entry_core::details::route::open(id),
-    }
+    });
 }
 
 /// The GTK and runtime half of the router.

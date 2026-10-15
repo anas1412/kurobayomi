@@ -141,7 +141,7 @@ fn open_settings() {
     let (names, shown) = ui::page_stack();
     match names.iter().take(shown + 1).position(|n| n == SETTINGS_PAGE) {
         Some(at) => ui::pop_to(at),
-        None => ui::open_over_root("settings"),
+        None => ui::over_root(|| ui::open("settings")),
     }
 }
 

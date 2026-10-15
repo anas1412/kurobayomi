@@ -29,18 +29,17 @@ fn dest(link: &DeepLink) -> Dest {
     }
 }
 
-/// Pops to the root, then opens the destination. Called on the GTK thread.
+/// Opens the destination over the root, in one slide (`ui::over_root`). Called on the GTK thread.
 fn go(win: &gtk::ApplicationWindow, link: &DeepLink) {
     win.present();
-    ui::pop_to_root();
-    match dest(link) {
+    ui::over_root(|| match dest(link) {
         Dest::Open(id) => ui::open(id),
         Dest::Entry { kind, id } => {
             ui::open("library");
             crate::library::mount::show_kind(kind);
             screens::open_entry(kind, id);
         }
-    }
+    });
 }
 
 /// Adds `open-<name>` for every deep link to the application. `manga` and `anime` take the entry id as an int64.

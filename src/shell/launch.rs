@@ -133,13 +133,14 @@ pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &Lau
         Ok(Target::Link(link)) => crate::open_link::dispatch(app, win, &link.to_arg()),
         Ok(Target::Search { query, kind }) => {
             win.present();
-            crate::ui::pop_to_root();
-            if argv::is_web_address(&query) {
-                // EC-11: the address is resolved first; the page falls back to the search of the kind
-                super::deep_link_page::open(kind, &query);
-            } else {
-                super::deep_link_page::open_search(kind, &query);
-            }
+            crate::ui::over_root(|| {
+                if argv::is_web_address(&query) {
+                    // EC-11: the address is resolved first; the page falls back to the search of the kind
+                    super::deep_link_page::open(kind, &query);
+                } else {
+                    super::deep_link_page::open_search(kind, &query);
+                }
+            });
             if !crate::data::is_installed() {
                 put_query(win, &query);
             }
@@ -147,9 +148,8 @@ pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &Lau
         Ok(Target::Repo(route)) => {
             win.present();
             if let (Some(screen), Some(link)) = (uri::screen_of(&route), repo_address(&route)) {
-                crate::ui::pop_to_root();
                 uri::park_repo_url(link);
-                crate::ui::open(screen);
+                crate::ui::over_root(|| crate::ui::open(screen));
             }
         }
         Ok(Target::Restore(path)) => {
@@ -166,8 +166,7 @@ pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &Lau
         }
         Ok(Target::SettingsToast(message)) => {
             win.present();
-            crate::ui::pop_to_root();
-            crate::ui::open("settings");
+            crate::ui::over_root(|| crate::ui::open("settings"));
             crate::toast::notify(message);
         }
         Err(error) => {
