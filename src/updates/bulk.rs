@@ -68,7 +68,7 @@ pub fn after_bulk<T: Selectable>(
         (Err(_), BulkAction::MarkRead(_)) => {}
         _ => selection.toggle_all(items, false),
     }
-    result.err().map(|message| format!("Could not update the selection: {message}"))
+    result.err().map(|message| kuro_i18n::trf(kuro_i18n::MsgKey::updates_bulk_failed, &[("message", kuro_i18n::Arg::Str(&message.to_string()))]))
 }
 
 /// The ids of the rows the action changes: the ones whose flag is not already the target.

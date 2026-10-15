@@ -1,7 +1,7 @@
 //! The automatic library update interval (T-26a-104): the six choices stored as hours under
 //! `pref_library_update_interval_key`, and the feed that tells both kinds' schedule loops when it changes.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use kuro_prefs::pref::Pref;
 use tokio::sync::watch;
 
@@ -16,12 +16,14 @@ pub fn first_run_note() -> String {
 /// The label of one of the interval choices `kuro_prefs::ranges::LIBRARY_UPDATE_INTERVAL` allows. 0 is Off, the default.
 pub fn label(hours: i32) -> String {
     match hours {
-        0 => "Off".to_owned(),
-        24 => "Daily".to_owned(),
+        0 => tr(MsgKey::update_never),
+        12 => tr(MsgKey::update_12hour),
+        24 => tr(MsgKey::update_24hour),
         48 => tr(MsgKey::update_48hour).to_owned(),
-        168 => "Weekly".to_owned(),
-        h if h % 24 == 0 => format!("Every {} days", h / 24),
-        h => format!("Every {h} hours"),
+        72 => tr(MsgKey::update_72hour),
+        168 => tr(MsgKey::update_weekly),
+        // not offered (`LIBRARY_UPDATE_INTERVAL`), but a value stored by hand still reads
+        h => trf(MsgKey::interval_every_hours, &[("hours", Arg::Int(i64::from(h)))]),
     }
 }
 

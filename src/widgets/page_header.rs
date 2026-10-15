@@ -5,7 +5,7 @@
 //! The player and the reader both build their header with [`header`], so the two stay identical; the player adds its
 //! quality and tracks menus on the right.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use gtk::prelude::*;
 
 /// What the reader's and the player's bar title: the series (manga or anime) on top, the item (chapter or episode)
@@ -82,7 +82,7 @@ pub fn two_line_title(title: &MediaTitle) -> TwoLineTitle {
 
 /// `Page 3 of 12`, or `None` when there is no page on screen (a page or total not above zero, or a transition card).
 pub fn page_position(page: i32, total: i32) -> Option<String> {
-    (page > 0 && total > 0).then(|| format!("Page {page} of {total}"))
+    (page > 0 && total > 0).then(|| trf(MsgKey::page_header_page_of, &[("page", Arg::Str(&page.to_string())), ("total", Arg::Str(&total.to_string()))]))
 }
 
 /// The header with Back on the left (`on_back`) and `title` in the centre. The right side is left to the caller: the

@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use kuro_archive::EpubReader;
 use kuro_archive::reader::{ArchiveReader, EntryReader};
+use kuro_i18n::{Arg, MsgKey, trf};
 
 use super::LoadFailure;
 use crate::reader::model::{LoadError, PageSource, ReaderPage};
@@ -93,7 +94,7 @@ impl ArchiveLoader {
         let reader = guard.as_ref().ok_or_else(|| LoadError::new("Archive loader was recycled"))?;
         match reader.open_entry(entry).map_err(|e| LoadError::new(e.to_string()))? {
             Some(entry_reader) => Ok(entry_reader),
-            None => Err(LoadError::new(format!("Page not found in archive: {entry}"))),
+            None => Err(LoadError::new(trf(MsgKey::reader_page_not_in_archive, &[("entry", Arg::Str(entry))]))),
         }
     }
 }

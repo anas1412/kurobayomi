@@ -1,7 +1,7 @@
 //! Notification texts of a library pass (behaviour 8.3, 8.5, 8.6, 8.7). Pure string builders; the notifier
 //! only posts them.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use kuro_platform::kind::Kind;
 
 pub const PROGRESS_TITLE_CHOP: usize = 40;
@@ -50,7 +50,7 @@ pub fn percent(current: u64, total: u64) -> u32 {
 
 /// "Updating library… (N%)".
 pub fn progress_title(current: u64, total: u64) -> String {
-    format!("Updating library… ({}%)", percent(current, total))
+    trf(MsgKey::notification_updating_progress, &[("arg1", Arg::Str(&format!("{}%", percent(current, total))))])
 }
 
 /// The in-progress titles, one per line, each chopped to 40 characters.

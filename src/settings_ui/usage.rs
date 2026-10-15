@@ -2,7 +2,7 @@
 //! mount table, the usage state of each root (bar, caption, or "Storage size unavailable") and the SI size formatter.
 //! Mount points are read from `/proc/self/mountinfo` (proc(5)); sizes come from GIO, asked on a worker thread so a hung
 //! mount cannot block the page. The rows replace the one "Available: ... / Total: ..." row of the spec page.
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -137,7 +137,7 @@ pub fn usage(space: Option<Space>) -> Usage {
     match space {
         Some(Space { total, available }) if total > 0 => {
             let fraction = ((total as f64 - available as f64) / total as f64).clamp(0.0, 1.0);
-            Usage::Bar { fraction, caption: format!("Available: {} / Total: {}", si_size(available), si_size(total)) }
+            Usage::Bar { fraction, caption: trf(MsgKey::available_disk_space_info, &[("arg1", Arg::Str(&si_size(available))), ("arg2", Arg::Str(&si_size(total)))]) }
         }
         _ => Usage::Unavailable,
     }

@@ -10,7 +10,7 @@
 //! The webtoon sits in a `ZoomFrame`: a pinch (the GTK zoom gesture), a drag and a double tap drive `WebtoonZoom`, and
 //! the frame scales and moves the strip (T-44a-038, T-44a-039). The pager zooms inside each page view.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
@@ -147,9 +147,9 @@ fn item_row(item: &ItemKey, lookup: &Lookup, host: &PageHost) -> Row {
     match item {
         ItemKey::Page(p) => {
             let text = if p.is_insert() {
-                format!("Chapter {} page {} (split)", p.chapter.id, p.number())
+                trf(MsgKey::reader_page_label_split, &[("chapter", Arg::Int(p.chapter.id)), ("page", Arg::Int(i64::from(p.number())))])
             } else {
-                format!("Chapter {} page {}", p.chapter.id, p.number())
+                trf(MsgKey::reader_page_label, &[("chapter", Arg::Int(p.chapter.id)), ("page", Arg::Int(i64::from(p.number())))])
             };
             holder::page_row(text, lookup.page(p), Some(host))
         }

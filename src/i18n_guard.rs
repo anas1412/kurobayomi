@@ -2,7 +2,9 @@
 //! the source and fails on
 //!
 //! 1. a call that puts text on screen (a tooltip, a label, a title, a toast, a button...) with an English string literal, and
-//! 2. a `const NAME: &str = "Some English sentence";` (those are shown somewhere, so they belong in the table too).
+//! 2. a `const NAME: &str = "Some English sentence";` (those are shown somewhere, so they belong in the table too), and
+//! 3. a `format!` whose text, without its `{}` places, is an English phrase, or starts with a place and reads on in English
+//!    ("{name} is not answering"): a sentence with values in it belongs in the table with Fluent arguments.
 //!
 //! Fix a failure by adding a message to `crates/kuro-i18n/locales/en/kurobayomi-extra.ftl` and to `kurobayomi.ftl` (same
 //! text, at the end), then calling `tr(MsgKey::that_key)`. Other languages fall back to English until translated.
@@ -43,6 +45,16 @@ const ALLOWED: &[(&str, &str, &str)] = &[
     ("src/updates/mount.rs", "UPDATE_LIBRARY", "the English label of a spec toolbar item, compared to find it (spec/*.json holds the text shown)"),
     ("src/updates/mount.rs", "VIEW_UPCOMING", "as above"),
     ("src/pref_model/stores_page.rs", "Discord", "the name of a product, the same in every language"),
+    ("src/settings_ui/worker_info.rs", "*", "the job dump, printed as Android prints it, for developers"),
+    ("src/shell/search_provider.rs", "*", "the desktop's search provider file, not shown"),
+    ("src/pref_model/debug_info.rs", "*", "the debug info, kept in English so reports read the same everywhere"),
+    ("src/settings_ui/menu.rs", "{app} Stable {version}", "a build name: the app, its channel and version"),
+    ("src/settings_ui/menu.rs", "Debug {commit}", "a build name"),
+    ("src/whats_new.rs", "Nightly {}", "a build name: the channel and its commit"),
+    ("src/whats_new.rs", "Kurobayomi {version}", "a build name: the app and its version"),
+    ("src/library_update/fake.rs", "*", "a fake library for development and tests"),
+    ("src/cli.rs", "*", "the command line's own messages, for a terminal"),
+    ("src/misc/headless.rs", "*", "as above"),
 ];
 
 /// Calls that show their argument to the user.
@@ -145,6 +157,9 @@ fn the_interface_text_comes_from_the_string_table() {
     let builder = Regex::new(r#"\b(?:group|switch|switch_with|exclusive_switch|ranged_choice|multi_choice|int_choice|text|info|edit_text|tap_item|list_row|choice|slider)\(\s*&?"((?:[^"\\]|\\.)+)""#).expect("a valid pattern");
     let option = Regex::new(r#"\(\s*(?:-?\d+|"[a-z0-9_.\-]+")\s*,\s*"((?:[^"\\]|\\.)+)"\s*\)"#).expect("a valid pattern");
     let literal = Regex::new(r#""((?:[^"\\]|\\.)+)""#).expect("a valid pattern");
+    let formatted = Regex::new(r#"format!\(\s*"((?:[^"\\]|\\.)+)""#).expect("a valid pattern");
+    let places = Regex::new(r"\{[^}]*\}").expect("a valid pattern");
+    let place_first = Regex::new(r"^\{[^}]*\}\s+[a-z']+ [a-z']+ [a-z']+").expect("a valid pattern");
     let mut found = Vec::new();
     for path in files {
         let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
@@ -175,6 +190,16 @@ fn the_interface_text_comes_from_the_string_table() {
                 }
             }
         }
+        // a sentence built with format!, on lines that are not for developers
+        for line in code.lines().filter(|line| !QUIET.iter().any(|q| line.contains(q))) {
+            for m in formatted.captures_iter(line) {
+                let text = unescape(&m[1]);
+                let bare = places.replace_all(&text, "");
+                if (is_english_phrase(bare.trim_start_matches(|c: char| !c.is_ascii_alphabetic())) || place_first.is_match(&text)) && !allowed(&relative, &text) {
+                    found.push(format!("{relative}: formatted {text:?}"));
+                }
+            }
+        }
         for m in constant.captures_iter(&code) {
             let (name, text) = (&m[1], unescape(&m[2]));
             let sentence = is_english_words(&text) && (text.contains(' ') || text.ends_with(['.', '…', '?', '!', ':']));
@@ -195,6 +220,14 @@ fn the_cfg_test_items_are_left_out_of_the_check() {
     let code = code_of("fn a() { x.label(\"Shown\"); }\n#[cfg(test)]\nmod tests {\n    fn b() { x.label(\"Test only\"); }\n}\n// x.label(\"Comment\")\nfn c() {}\n#[cfg(test)]\nconst T: &str = \"Test const\";\nfn d() {}\n");
     assert!(code.contains("Shown") && code.contains("fn c()") && code.contains("fn d()"));
     assert!(!code.contains("Test only") && !code.contains("Comment") && !code.contains("Test const"), "{code}");
+}
+
+#[test]
+fn a_formatted_sentence_is_caught_and_values_alone_are_not() {
+    let places = Regex::new(r"\{[^}]*\}").expect("a valid pattern");
+    let bare = places.replace_all("Cache cleared, {n} files deleted", "");
+    assert!(is_english_phrase(&bare));
+    assert!(!is_english_phrase(&places.replace_all("{}: {}%", "")));
 }
 
 #[test]

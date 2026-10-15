@@ -286,7 +286,7 @@ pub fn reload() {
 
 /// The toast naming the sources that did not load.
 fn failed_text(ids: &[String]) -> String {
-    format!("Could not load: {}", ids.join(", "))
+    kuro_i18n::trf(kuro_i18n::MsgKey::recipe_could_not_load, &[("sources", kuro_i18n::Arg::Str(&ids.join(", ")))])
 }
 
 /// Reads the recipes of the scrapers folder and the saved copies of every repo link, instantiates the plug-ins, and

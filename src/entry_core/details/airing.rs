@@ -48,7 +48,9 @@ pub fn visible(remaining_ms: i64, show_pref: bool, status: i64) -> bool {
 /// `formatTime(ms, useDayFormat = true)`: `Airing in 01d 01h 01m 01s`. Zero and negative input show zeros.
 pub fn format_airing(ms: i64) -> String {
     let secs = ms.max(0) / 1000;
-    format!("Airing in {:02}d {:02}h {:02}m {:02}s", secs / 86_400, secs % 86_400 / 3600, secs % 3600 / 60, secs % 60)
+    let two = |n: i64| format!("{n:02}");
+    let (days, hours, minutes, seconds) = (two(secs / 86_400), two(secs % 86_400 / 3600), two(secs % 3600 / 60), two(secs % 60));
+    trf(MsgKey::airing_in_countdown, &[("days", Arg::Str(&days)), ("hours", Arg::Str(&hours)), ("minutes", Arg::Str(&minutes)), ("seconds", Arg::Str(&seconds))])
 }
 
 #[cfg(test)]

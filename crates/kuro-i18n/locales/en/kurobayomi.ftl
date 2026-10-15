@@ -4956,3 +4956,78 @@ whats_new_more_changes =
         [one] …and 1 more change.
        *[other] …and { NUMBER($count, useGrouping: "false") } more changes.
     }
+
+# source: kurobayomi
+recipe_could_not_load = Could not load: { $sources }
+
+# source: kurobayomi
+reader_page_not_in_archive = Page not found in archive: { $entry }
+
+# source: kurobayomi
+reader_page_label = Chapter { $chapter } page { $page }
+
+# source: kurobayomi
+reader_page_label_split = Chapter { $chapter } page { $page } (split)
+
+# source: kurobayomi
+ui_rescan_local_manga_folders = Rescan local manga folders
+
+# source: kurobayomi
+ui_rescan_local_anime_folders = Rescan local anime folders
+
+# source: kurobayomi
+airing_in_countdown = Airing in { $days }d { $hours }h { $minutes }m { $seconds }s
+
+# source: kurobayomi
+browse_couldnt_load_source = Couldn't load { $source }
+
+# source: kurobayomi
+browse_source_not_answering = { $source } is not answering. Try again in a moment.
+
+# source: kurobayomi
+browse_source_broken = { $source } isn't working right now. It may be down or need an update; the repository checks for fixes every day.
+
+# source: kurobayomi
+migration_failed_reason = Migration failed: { $reason }
+
+# source: kurobayomi
+storage_base_folder_unavailable = Base folder not available: { $path }
+
+# source: kurobayomi
+player_volume_custom = Custom ({ $percent }%)
+
+# source: kurobayomi
+updates_bulk_failed = Could not update the selection: { $message }
+
+# source: kurobayomi
+page_header_page_of = Page { $page } of { $total }
+
+# source: kurobayomi
+local_scan_failed = Could not scan the folder: { $error }
+
+# source: kurobayomi
+local_read_failed = Could not read the folder: { $error }
+
+# source: kurobayomi
+local_save_failed = Could not save { $title }: { $error }
+
+# source: kurobayomi
+local_manga_result = { $title }: { $added } new, { $renamed } renamed chapters
+
+# source: kurobayomi
+local_anime_result = Local anime: { $series } series, { $added } episodes added, { $removed } removed
+
+# source: kurobayomi
+interval_every_hours = Every { $hours } hours
+
+# source: kurobayomi
+library_selected_count = { $count } selected
+
+# source: kurobayomi
+library_selected_hidden = { $count } selected ({ $hidden } hidden by the current view)
+
+# source: kurobayomi
+browse_couldnt_load_this_source = Couldn't load this source
+
+# source: kurobayomi
+ui_source_by_id = Source { $id }

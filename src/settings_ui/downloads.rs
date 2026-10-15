@@ -12,9 +12,12 @@ use crate::settings_ui::rows::{group, item, ranged_choice, switch};
 /// The label of one delete-after-read choice (`remove_after_read_slots`): -1 is Disabled, then the n-th last read chapter.
 pub fn remove_after_read_label(slots: i32) -> String {
     match slots {
-        -1 => "Disabled".to_owned(),
+        -1 => tr(MsgKey::disabled),
         0 => tr(MsgKey::last_read_chapter).to_owned(),
-        n => format!("{} to last read chapter", ["Second", "Third", "Fourth", "Fifth"].get(n as usize - 1).copied().unwrap_or("Later")),
+        1 => tr(MsgKey::second_to_last),
+        2 => tr(MsgKey::third_to_last),
+        3 => tr(MsgKey::fourth_to_last),
+        _ => tr(MsgKey::fifth_to_last),
     }
 }
 

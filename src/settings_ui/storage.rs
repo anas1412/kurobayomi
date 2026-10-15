@@ -1,7 +1,7 @@
 //! Storage location row (tasks T-47a-088 and T-48a-051): the subtitle rule, the folder check, the info text and the
 //! "base folder not available" banner. The stored value is the base64 of the path bytes, as `StorageManager` writes
 //! it, so a folder chosen here is the one the backup, download and mpv-config code resolve.
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -34,13 +34,13 @@ pub fn subtitle(stored: &str, usable: bool) -> String {
     } else if usable {
         stored.to_owned()
     } else {
-        format!("Invalid location: {stored}")
+        trf(MsgKey::invalid_location, &[("arg1", Arg::Str(&stored.to_string()))])
     }
 }
 
 /// The banner shown on the page while a chosen base folder is gone (E-SY-05).
 pub fn banner(path: &str) -> String {
-    format!("Base folder not available: {path}")
+    trf(MsgKey::storage_base_folder_unavailable, &[("path", Arg::Str(&path.to_string()))])
 }
 
 /// The folder a stored value names; `None` for an empty value or one that does not decode.

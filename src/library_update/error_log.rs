@@ -36,7 +36,7 @@ pub fn path(paths: &dyn Paths) -> PathBuf {
 
 /// The text of the log. `source_name` gives the display name of a source id (an uninstalled source shows its id).
 pub fn render(kind: Kind, failures: &[Failure], source_name: &dyn Fn(i64) -> String) -> String {
-    let mut out = format!("For help on how to fix library update errors, see {}\n\n", help_url(kind));
+    let mut out = format!("{}\n\n", kuro_i18n::trf(kuro_i18n::MsgKey::library_errors_help, &[("arg1", kuro_i18n::Arg::Str(&help_url(kind).to_string()))]));
     // (message, sources of that message, entries of each source), each in order of first appearance.
     let mut messages: Vec<(&str, Vec<(i64, Vec<&str>)>)> = Vec::new();
     for failure in failures {

@@ -791,8 +791,8 @@ fn render_with(inner: &Rc<RefCell<Inner>>, selection_only: bool) {
         let selected = st.selection.len();
         let bar_text = match (selected, hidden) {
             (0, _) => String::new(),
-            (n, 0) => format!("{n} selected"),
-            (n, h) => format!("{n} selected ({h} hidden by the current view)"),
+            (n, 0) => kuro_i18n::trf(kuro_i18n::MsgKey::library_selected_count, &[("count", kuro_i18n::Arg::Str(&n.to_string()))]),
+            (n, h) => kuro_i18n::trf(kuro_i18n::MsgKey::library_selected_hidden, &[("count", kuro_i18n::Arg::Str(&n.to_string())), ("hidden", kuro_i18n::Arg::Str(&h.to_string()))]),
         };
         Rendered {
             title,

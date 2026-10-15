@@ -4,7 +4,7 @@
 //! error) goes to the log only. [`note`] counts the failures in a row of each source for the "Not working right now"
 //! badge of the Sources list.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -76,14 +76,17 @@ pub fn says(source: &str, trouble: Trouble) -> String {
     let name = if source.trim().is_empty() { tr(MsgKey::ui_this_source) } else { source.trim().to_string() };
     match trouble {
         Trouble::Offline => offline().to_owned(),
-        Trouble::Slow => format!("{name} is not answering. Try again in a moment."),
-        Trouble::Broken => format!("{name} isn't working right now. It may be down or need an update; the repository checks for fixes every day."),
+        Trouble::Slow => trf(MsgKey::browse_source_not_answering, &[("source", Arg::Str(&name))]),
+        Trouble::Broken => trf(MsgKey::browse_source_broken, &[("source", Arg::Str(&name))]),
     }
 }
 
 /// The one line of a source's section in the global search.
 pub fn couldnt_load(source: &str) -> String {
-    format!("Couldn't load {}", if source.trim().is_empty() { "this source" } else { source.trim() })
+    if source.trim().is_empty() {
+        return tr(MsgKey::browse_couldnt_load_this_source);
+    }
+    trf(MsgKey::browse_couldnt_load_source, &[("source", Arg::Str(source.trim()))])
 }
 
 fn device_online() -> bool {

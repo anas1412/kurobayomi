@@ -12,7 +12,7 @@ pub fn copied_message(content: &str) -> Option<String> {
         return None;
     }
     let shown = truncate_center(content, SHOWN_CHARS, "...").unwrap_or_else(|_| content.to_owned());
-    Some(format!("Copied to clipboard:\n{shown}"))
+    Some(kuro_i18n::trf(kuro_i18n::MsgKey::copied_to_clipboard, &[("arg1", kuro_i18n::Arg::Str(&shown))]))
 }
 
 /// Puts `content` on the clipboard and shows the confirmation. A missing clipboard is logged and nothing is shown.

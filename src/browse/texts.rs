@@ -2,7 +2,7 @@
 //! (T-41a-027, T-41a-036) that replace an upstream text bug or add a hint, and the catalogue crate is not part of this
 //! lane, so they live here as constants until `kuro-i18n` takes them: each constant names the key it will become.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 
 /// `browse_global_search_empty_hint`: the hint of an empty global search (T-41a-027, ui-parity S4).
 pub fn global_search_empty_hint() -> String {
@@ -26,7 +26,7 @@ pub fn migrate_tracks_always() -> String {
 
 /// `migration_failed`: the inline error of a failed migration (T-41a-035, a Proposal over Aniyomi's silent path).
 pub fn migration_failed(reason: &str) -> String {
-    format!("Migration failed: {reason}")
+    trf(MsgKey::migration_failed_reason, &[("reason", Arg::Str(&reason.to_string()))])
 }
 
 /// `action_open`: the first item of a cover's or a source's right-click menu.

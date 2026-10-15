@@ -53,7 +53,7 @@ fn clear_db(id: &str) -> Option<Built> {
             rows.into_iter()
                 .map(|(source, count)| {
                     let name = stubs.get(source).ok().flatten().map(|s| s.display_name());
-                    (source, name.filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Source {source}")), count)
+                    (source, name.filter(|n| !n.is_empty()).unwrap_or_else(|| kuro_i18n::trf(kuro_i18n::MsgKey::ui_source_by_id, &[("id", kuro_i18n::Arg::Int(source))])), count)
                 })
                 .collect()
         })
@@ -77,7 +77,7 @@ fn clear_db(id: &str) -> Option<Built> {
             .into_iter()
             .map(|(source, name, count)| {
                 let check = gtk::CheckButton::new();
-                let r = row(&name, Some(&format!("{count} non-library entries in database")), Some(check.clone().upcast()));
+                let r = row(&name, Some(&kuro_i18n::trf(kuro_i18n::MsgKey::clear_database_source_item_count, &[("arg1", kuro_i18n::Arg::Int(count))])), Some(check.clone().upcast()));
                 r.child().and_downcast::<GBox>().unwrap().prepend(&gtk::Image::from_icon_name("application-x-addon-symbolic"));
                 l.append(&r);
                 (source, check, r)

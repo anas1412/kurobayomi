@@ -1,7 +1,7 @@
 //! The player settings root page (task T-48a-010): the kept settings as rows, then the links to the pages that stay.
 //! The rows and the link targets are in `mod.rs`.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
@@ -35,7 +35,7 @@ pub fn volume_row(pref: &Pref<f32>) -> PreferenceItem {
     let in_list = stored == LAST_USED || volume_levels().iter().any(|level| (level - stored).abs() < 1e-6);
     let mut entries: Vec<(String, String)> = Vec::new();
     if !in_list {
-        entries.push((format!("{stored}"), format!("Custom ({stored:.0}%)")));
+        entries.push((format!("{stored}"), trf(MsgKey::player_volume_custom, &[("percent", Arg::Str(&format!("{stored:.0}")))])));
     }
     entries.push((format!("{LAST_USED}"), label(LAST_USED)));
     entries.extend(volume_levels().into_iter().map(|level| (format!("{level}"), label(level))));

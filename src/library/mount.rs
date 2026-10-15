@@ -403,12 +403,15 @@ pub fn build(kind: Kind) -> Option<Built> {
 /// library), the local folders, the categories. How the covers are filtered, sorted and shown is the view options button's.
 fn menu_sections(kind: Kind, view: &LibraryView) -> Vec<Vec<crate::ui::MenuEntry>> {
     use crate::ui::MenuEntry;
-    let what = kind.as_str();
     let (folder, rescan) = local_folder_actions(kind);
     let (update, count) = (view.clone(), view.clone());
     vec![
         vec![MenuEntry::new(tr(MsgKey::action_update_category), move || update.update_category()).when(move || count.category_count() > 1)],
-        vec![MenuEntry::new(format!("Add local {what} folder…"), folder), MenuEntry::new(format!("Rescan local {what} folders"), rescan)],
+        vec![
+            // the item opens a folder chooser, so it ends in "…"
+            MenuEntry::new(format!("{}…", tr(if kind == Kind::Anime { MsgKey::ui_add_local_anime_folder } else { MsgKey::ui_add_local_manga_folder })), folder),
+            MenuEntry::new(tr(if kind == Kind::Anime { MsgKey::ui_rescan_local_anime_folders } else { MsgKey::ui_rescan_local_manga_folders }), rescan),
+        ],
         vec![MenuEntry::new(tr(MsgKey::categories), || crate::ui::open("categories"))],
     ]
 }

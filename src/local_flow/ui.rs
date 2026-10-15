@@ -2,7 +2,7 @@
 //! folders" for both kinds, and the add-manga shortcut. Scanning and storing run on a worker thread; the toast and the
 //! library refresh run back on the GTK thread.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use std::sync::Arc;
 
 use gtk::gio;
@@ -67,22 +67,22 @@ fn run(kind: Kind, job: impl FnOnce(&Arc<Db>, &PrefStore, i64) -> Result<Vec<Out
 fn messages(kind: Kind, result: &Result<Vec<Outcome>, String>) -> Vec<String> {
     let outcomes = match result {
         Ok(outcomes) => outcomes,
-        Err(e) => return vec![format!("Could not scan the folder: {e}")],
+        Err(e) => return vec![trf(MsgKey::local_scan_failed, &[("error", Arg::Str(&e.to_string()))])],
     };
     match kind {
         Kind::Manga => outcomes
             .iter()
             .map(|o| match &o.result {
-                Ok(done) => format!("{}: {} new, {} renamed chapters", o.title, done.added, done.updated),
-                Err(Failure::Read(e)) => format!("Could not read the folder: {e}"),
-                Err(Failure::Save(e)) => format!("Could not save {}: {e}", o.title),
+                Ok(done) => trf(MsgKey::local_manga_result, &[("title", Arg::Str(&o.title)), ("added", Arg::Str(&done.added.to_string())), ("renamed", Arg::Str(&done.updated.to_string()))]),
+                Err(Failure::Read(e)) => trf(MsgKey::local_read_failed, &[("error", Arg::Str(&e.to_string()))]),
+                Err(Failure::Save(e)) => trf(MsgKey::local_save_failed, &[("title", Arg::Str(&o.title)), ("error", Arg::Str(&e.to_string()))]),
             })
             .collect(),
         Kind::Anime => {
             let done: Vec<&sync::Synced> = outcomes.iter().filter_map(|o| o.result.as_ref().ok()).collect();
             let added: usize = done.iter().map(|d| d.added).sum();
             let removed: usize = done.iter().map(|d| d.removed).sum();
-            vec![format!("Local anime: {} series, {added} episodes added, {removed} removed", done.len())]
+            vec![trf(MsgKey::local_anime_result, &[("series", Arg::Str(&done.len().to_string())), ("added", Arg::Str(&added.to_string())), ("removed", Arg::Str(&removed.to_string()))])]
         }
     }
 }

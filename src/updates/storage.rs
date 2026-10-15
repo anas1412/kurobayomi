@@ -207,7 +207,7 @@ pub fn delete_outcome(source_installed: bool) -> DeleteOutcome {
 
 /// The confirm text of a storage delete: `Are you sure you wish to delete "{title}"?`.
 pub fn delete_text(title: &str) -> String {
-    format!("Are you sure you wish to delete \"{title}\"?")
+    kuro_i18n::trf(kuro_i18n::MsgKey::delete_confirmation, &[("arg1", kuro_i18n::Arg::Str(&title.to_string()))])
 }
 
 #[cfg(test)]
