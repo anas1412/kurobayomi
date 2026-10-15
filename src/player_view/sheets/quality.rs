@@ -1,7 +1,7 @@
-//! The quality menu of an online episode, in the control bar (user, 2026-10-15). Its button shows the playing height
-//! ("1080p"). When the menu opens, the episode's servers and their videos load on the source's runtime (a spinner until
-//! they do, then the list is kept for the episode). The menu lists the heights ("1080p, 720p, 360p") and, when the
-//! source has several, the servers. Choosing a height plays it on the playing server (else on the first server that has
+//! The quality and server menus of an online episode, side by side in the control bar (user, 2026-10-15). The quality
+//! button shows the playing height ("1080p"), the server button the playing server. When a menu opens, the episode's servers and their videos load on the source's runtime (a spinner until
+//! they do, then the list is kept for the episode). One lists the heights ("1080p, 720p, 360p"), the other the
+//! servers. Choosing a height plays it on the playing server (else on the first server that has
 //! it); choosing a server plays the playing height there (else its first video). The stream resolves and reloads at the
 //! playing position, with that video's headers, subtitles and audio. The last choice is kept for the session: the next
 //! episode plays the same server and title when its list has them, else the default quality of the settings, else the
@@ -89,14 +89,45 @@ impl Servers {
     }
 }
 
+/// Which lists a menu shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lists {
+    Quality,
+    Server,
+    Both,
+}
+
 /// The quality button over `servers`, for the control bar. Its list loads the first time it opens for an episode.
 pub fn button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
-    let button = menu(&tr(MsgKey::ui_quality_and_server), {
+    let button = menu(&tr(MsgKey::player_quality), {
         let (shared, servers) = (Rc::clone(shared), servers.clone());
-        move |column, popover| fill(column, popover, &shared, &servers)
+        move |column, popover| fill(column, popover, &shared, &servers, Lists::Quality)
     });
     button.set_icon_name("video-display-symbolic");
     button
+}
+
+/// The server button over the same `servers`, next to the quality button.
+pub fn server_button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
+    let button = menu(&tr(MsgKey::player_server), {
+        let (shared, servers) = (Rc::clone(shared), servers.clone());
+        move |column, popover| fill(column, popover, &shared, &servers, Lists::Server)
+    });
+    button.set_icon_name("network-server-symbolic");
+    button
+}
+
+/// Shows the playing server on its button, or its icon while none is known (or the source lists no servers).
+pub fn refresh_server(button: &gtk::MenuButton) {
+    match last().and_then(|pick| heading(&pick.hoster).map(str::to_owned)) {
+        Some(name) => {
+            if button.label().as_deref() != Some(name.as_str()) {
+                button.set_label(&name);
+            }
+        }
+        None if button.icon_name().is_none() => button.set_icon_name("network-server-symbolic"),
+        None => {}
+    }
 }
 
 /// Shows the playing height on the button ("1080p"), or its icon while the height is unknown.
@@ -142,7 +173,7 @@ pub fn menu_sections(shared: &Shared, servers: &Servers) -> Option<Vec<(Option<S
             crate::toast::notify(text);
         }
     });
-    Some(states.map_or_else(Vec::new, |states| sections(shared, &source, &states)))
+    Some(states.map_or_else(Vec::new, |states| sections(shared, &source, &states, Lists::Both)))
 }
 
 /// Whether the playing episode is online, which is the only time the menu has servers to choose from.
@@ -225,7 +256,7 @@ fn online_episode(episode_id: i64) -> Option<(Arc<dyn AnimeSource>, SEpisode)> {
 }
 
 /// Reopening the menu while the servers load shows the spinner again but does not ask the source twice.
-fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Servers) {
+fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Servers, which: Lists) {
     let episode_id = shared.borrow().episode_id;
     let Some((source, episode)) = online_episode(episode_id) else {
         return;
@@ -235,7 +266,7 @@ fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Se
         Ok(states) => {
             if shown_popover.is_visible() {
                 clear(&shown_column);
-                list(&shown_column, &shown_popover, &shown_shared, &loaded_source, &states);
+                list(&shown_column, &shown_popover, &shown_shared, &loaded_source, &states, which);
             }
         }
         Err(text) => {
@@ -244,16 +275,16 @@ fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Se
         }
     });
     match states {
-        Some(states) => list(column, popover, shared, &source, &states),
+        Some(states) => list(column, popover, shared, &source, &states, which),
         // a load that failed at once has already shown its toast
         None if servers.0.pending.get() == Some(episode_id) => column.append(&gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build()),
         None => {}
     }
 }
 
-/// The Quality list, then the Server list when there are several servers.
-fn list(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) {
-    for (heading, choices) in sections(shared, source, states) {
+/// The lists of `which`, each under its heading.
+fn list(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState], which: Lists) {
+    for (heading, choices) in sections(shared, source, states, which) {
         section(column, heading.as_deref(), choices, popover);
     }
 }
@@ -294,8 +325,9 @@ fn key_label(key: &Key) -> String {
     }
 }
 
-/// The Quality list (every height any server has, highest first) and, with more than one server, the Server list.
-fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) -> Vec<(Option<String>, Vec<Choice>)> {
+/// The Quality list (every height any server has, highest first) and the Server list (a source that lists no servers
+/// has none), as `which` asks.
+fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState], which: Lists) -> Vec<(Option<String>, Vec<Choice>)> {
     let servers = ready(states);
     let playing = last();
     let playing_key = playing.as_ref().and_then(|pick| servers.iter().find(|(n, _)| *n == pick.hoster).and_then(|(_, vs)| vs.iter().find(|v| v.video_title == pick.title)).map(|v| key(v)));
@@ -320,12 +352,16 @@ fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterStat
             Some(choice(shared, source, server, video, key_label(k), playing_key.as_ref() == Some(k)))
         })
         .collect();
-    let mut out = vec![(Some(tr(MsgKey::player_quality)), qualities)];
+    let mut out = Vec::new();
+    if which != Lists::Server {
+        out.push((Some(tr(MsgKey::player_quality)), qualities));
+    }
     let failed: Vec<&str> = states.iter().filter_map(|s| match s {
         HosterState::Error { hoster_name } => Some(hoster_name.as_str()),
         _ => None,
     }).collect();
-    if servers.len() + failed.len() > 1 {
+    let named = servers.iter().map(|(name, _)| *name).chain(failed.iter().copied()).any(|name| heading(name).is_some());
+    if which != Lists::Quality && named {
         let mut rows: Vec<Choice> = servers
             .iter()
             .filter_map(|(name, videos)| {
