@@ -1,7 +1,7 @@
 //! The player's control bar and its behaviour. The bottom bar hides after three seconds without mouse movement or key
 //! press (`autohide`, 2.5 seconds in fullscreen, where the pointer hides with it). The header hides only in fullscreen.
 //! A click on the video toggles pause and a double click toggles fullscreen. The buttons follow the playing episode and file: previous and next are enabled only with a neighbour,
-//! the quality button shows only for an online episode, and the speed and chapter buttons show what plays now.
+//! the quality button shows only for an online episode and names the playing height, and the speed and chapter buttons show what plays now.
 //! Main thread only; the shared logic is in the parent module (`toggle_pause`, `toggle_fullscreen`, `neighbour`).
 
 mod autohide;
@@ -66,7 +66,7 @@ impl Live {
 
     /// A speed or chapter menu that is open keeps the bar shown.
     fn menu_open(&self) -> bool {
-        [&self.speed, &self.chapters].iter().any(|button| button.popover().is_some_and(|p| p.is_visible()))
+        [&self.quality, &self.speed, &self.chapters].iter().any(|button| button.popover().is_some_and(|p| p.is_visible()))
     }
 }
 
@@ -154,6 +154,7 @@ pub fn wire(parts: Parts, shared: &Shared) {
         if page.cursor().is_some() != pointer_hidden {
             page.set_cursor_from_name(pointer_hidden.then_some("none"));
         }
+        sheets::quality::refresh(&live.quality);
         sheets::speed::refresh(&live.speed, &shared);
         sheets::chapters::refresh(&live.chapters, &shared);
         glib::ControlFlow::Continue

@@ -283,6 +283,7 @@ define_prefs! {
     "__APP_STATE_last_kind", AppState, Str, "anime", "base", "last_kind";
     "__APP_STATE_appimage_menu_removed", AppState, Bool, false, "base", "appimage_menu_removed";
     "auto_hide_bars", Normal, Bool, true, "base", "auto_hide_bars";
+    "pref_player_default_quality", Normal, Int, 1080, "player", "default_quality";
 }
 
 /// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
@@ -672,14 +673,16 @@ mod tests {
         // four Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064), `muted_notification_channels`
         // (T-req-platform-004), `check_app_updates` (the update toggle, back from the settings diet, on by default) and
         // `last_kind` (the Anime | Manga choice every page shares), `appimage_menu_removed` (the user took the AppImage
-        // out of the applications menu) and `auto_hide_bars` (the reader's and the player's bars hide by themselves)
-        assert_eq!(REGISTRY.len(), rows.len() + 6);
+        // out of the applications menu), `auto_hide_bars` (the reader's and the player's bars hide by themselves) and
+        // `pref_player_default_quality` (the height an episode starts at)
+        assert_eq!(REGISTRY.len(), rows.len() + 7);
         assert_eq!(REGISTRY[rows.len()].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 1].key, "muted_notification_channels");
         assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
         assert_eq!(REGISTRY[rows.len() + 3].key, "__APP_STATE_last_kind");
         assert_eq!(REGISTRY[rows.len() + 4].key, "__APP_STATE_appimage_menu_removed");
         assert_eq!(REGISTRY[rows.len() + 5].key, "auto_hide_bars");
+        assert_eq!(REGISTRY[rows.len() + 6].key, "pref_player_default_quality");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

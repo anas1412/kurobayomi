@@ -23,6 +23,8 @@ define_prefs! {
     pub struct PlayerPrefs in "player" {
         player_volume_value: f32 = "player_volume_value" => -1.0f32;
         autoplay_enabled: bool = "pref_auto_play_enabled" => false;
+        /// The video height an episode starts at when its servers offer it (user, 2026-10-15: 1080p by default).
+        default_quality: i32 = "pref_player_default_quality" => 1080;
     }
 }
 
@@ -37,7 +39,7 @@ mod tests {
     fn every_player_section_matches_its_registry_rows() {
         let store = PrefStore::in_memory();
         let player = PlayerPrefs::new(store.clone());
-        assert_eq!(PlayerPrefs::FIELDS.len(), 2);
+        assert_eq!(PlayerPrefs::FIELDS.len(), 3);
         assert_section_registered(PlayerPrefs::TABLE, PlayerPrefs::FIELDS, &player.defaults());
     }
 
@@ -46,6 +48,7 @@ mod tests {
         let p = PlayerPrefs::new(PrefStore::in_memory());
         assert_eq!(p.player_volume_value.get(), -1.0);
         assert!(!p.autoplay_enabled.get());
+        assert_eq!(p.default_quality.get(), 1080);
     }
 
     #[test]

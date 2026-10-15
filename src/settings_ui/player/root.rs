@@ -56,6 +56,13 @@ pub fn volume_row(pref: &Pref<f32>) -> PreferenceItem {
     }
 }
 
+/// The heights the Default quality row offers. An episode whose servers lack it plays the source's best video.
+pub const QUALITIES: [i32; 5] = [2160, 1080, 720, 480, 360];
+
+fn quality_options() -> Vec<(i32, String)> {
+    QUALITIES.iter().map(|h| (*h, crate::player_view::quality_label(*h))).collect()
+}
+
 /// The root page rows: the kept settings, the mini player when the display allows it, and the links.
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let p = &prefs.player;
@@ -67,6 +74,7 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
         vec![
             language::language_row(&tr(MsgKey::ui_subtitle_language), &subtitles),
             language::language_row(&tr(MsgKey::ui_audio_language), &audio),
+            crate::settings_ui::rows::int_choice(&tr(MsgKey::player_default_quality), &p.default_quality, &quality_options(), true),
             volume_row(&p.player_volume_value),
             switch(&tr(MsgKey::ui_autoplay_next_episode), &p.autoplay_enabled, true),
             crate::settings_ui::rows::auto_hide_bars(&prefs.base),
@@ -103,7 +111,7 @@ mod tests {
         let tree = page_rows(&prefs);
         let Preference::Group(first) = &tree[0] else { panic!("group") };
         let titles: Vec<&str> = first.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, ["Subtitle language", "Audio language", &volume_title(), "Autoplay next episode", "Hide the bars automatically"]);
+        assert_eq!(titles, ["Subtitle language", "Audio language", "Default quality", &volume_title(), "Autoplay next episode", "Hide the bars automatically"]);
     }
 
     #[test]

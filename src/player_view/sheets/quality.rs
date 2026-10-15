@@ -1,9 +1,12 @@
-//! The quality and server menu of an online episode (docs/design/player-controls.md). When the menu opens, the episode's
-//! servers and their videos load on the source's runtime (a spinner until they do, then the list is kept for the
-//! episode). Choosing a video resolves its stream and reloads it at the playing position, with that video's headers,
-//! subtitles and audio. The last choice is kept for the session: the next episode plays the same server and title when
-//! its list has them, else the source's best video. A local episode has no menu. The video's right-click menu lists the
-//! same choices through [`menu_sections`], over the same loaded servers ([`Servers`]).
+//! The quality menu of an online episode, in the control bar (user, 2026-10-15). Its button shows the playing height
+//! ("1080p"). When the menu opens, the episode's servers and their videos load on the source's runtime (a spinner until
+//! they do, then the list is kept for the episode). The menu lists the heights ("1080p, 720p, 360p") and, when the
+//! source has several, the servers. Choosing a height plays it on the playing server (else on the first server that has
+//! it); choosing a server plays the playing height there (else its first video). The stream resolves and reloads at the
+//! playing position, with that video's headers, subtitles and audio. The last choice is kept for the session: the next
+//! episode plays the same server and title when its list has them, else the default quality of the settings, else the
+//! source's best video. A local episode has no menu. The video's right-click menu lists the same choices through
+//! [`menu_sections`], over the same loaded servers ([`Servers`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -86,7 +89,7 @@ impl Servers {
     }
 }
 
-/// The quality and server button over `servers`. Its list loads the first time it opens for an episode.
+/// The quality button over `servers`, for the control bar. Its list loads the first time it opens for an episode.
 pub fn button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
     let button = menu(&tr(MsgKey::ui_quality_and_server), {
         let (shared, servers) = (Rc::clone(shared), servers.clone());
@@ -95,6 +98,38 @@ pub fn button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
     button.set_icon_name("video-display-symbolic");
     button
 }
+
+/// Shows the playing height on the button ("1080p"), or its icon while the height is unknown.
+pub fn refresh(button: &gtk::MenuButton) {
+    match last().and_then(|pick| title_height(&pick.title)) {
+        Some(height) => {
+            let text = height_label(height);
+            if button.label().as_deref() != Some(text.as_str()) {
+                button.set_label(&text);
+            }
+        }
+        None if button.icon_name().is_none() => button.set_icon_name("video-display-symbolic"),
+        None => {}
+    }
+}
+
+/// "1080p".
+pub fn height_label(height: i32) -> String {
+    format!("{height}p")
+}
+
+/// The first height in a video title ("1080p", "SubsPlease · 720p (1280x720)").
+fn title_height(title: &str) -> Option<i32> {
+    static HEIGHT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)\b(\d{3,4})p\b").expect("a valid pattern"));
+    HEIGHT.captures(title).and_then(|c| c[1].parse().ok())
+}
+
+/// The height of a video: the source's `resolution`, else the one in its title.
+fn height(video: &Video) -> Option<i32> {
+    video.resolution.filter(|r| *r > 0).or_else(|| title_height(&video.video_title))
+}
+
+
 
 /// The choices of the quality menu for the video's right-click menu: one list per server, with its heading. `None` for
 /// an episode that is not online; an empty list while the servers load (the first ask starts the load, and a failure
@@ -117,7 +152,7 @@ pub fn is_online(episode_id: i64) -> bool {
 
 /// The video an episode plays (the source's stream choice; see `best_stream` in `source.rs`). The last choice is
 /// used when this episode's servers have the same server and title; the choice made here is then kept for the session.
-pub async fn choose(source: &dyn AnimeSource, hosters: &[Hoster]) -> Result<Option<Video>, SourceError> {
+pub async fn choose(source: &dyn AnimeSource, hosters: &[Hoster], quality: i32) -> Result<Option<Video>, SourceError> {
     if let Some(pick) = last() {
         if let Some(video) = remembered(source, hosters, &pick).await {
             if let Some(resolved) = resolve_once(source, video).await? {
@@ -126,9 +161,29 @@ pub async fn choose(source: &dyn AnimeSource, hosters: &[Hoster]) -> Result<Opti
             }
         }
     }
+    if let Some((pick, video)) = with_height(source, hosters, quality).await {
+        if let Some(resolved) = resolve_once(source, video).await? {
+            set_last(Some(pick));
+            return Ok(Some(resolved));
+        }
+    }
     let best = best_video(source, hosters).await?;
     set_last(best.as_ref().and_then(|video| identify(hosters, &video.video_title)));
     Ok(best)
+}
+
+/// The first video of `height`, servers in the source's order (its preferred first). A lazy server's list is fetched here.
+async fn with_height(source: &dyn AnimeSource, hosters: &[Hoster], wanted: i32) -> Option<(Pick, Video)> {
+    for hoster in hosters {
+        let videos = match &hoster.video_list {
+            Some(videos) => videos.clone(),
+            None => source.videos_for_hoster(hoster).await.unwrap_or_default(),
+        };
+        if let Some(video) = videos.into_iter().find(|v| height(v) == Some(wanted)) {
+            return Some((Pick { hoster: hoster.hoster_name.clone(), title: video.video_title.clone() }, video));
+        }
+    }
+    None
 }
 
 /// The video of `pick` among its server's videos. A lazy server's list is fetched here.
@@ -196,43 +251,105 @@ fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Se
     }
 }
 
-/// One heading per server (none for the list of a source without servers), then its videos. A server that failed to
-/// load shows one row that cannot be chosen; a server with no videos is left out.
+/// The Quality list, then the Server list when there are several servers.
 fn list(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) {
     for (heading, choices) in sections(shared, source, states) {
         section(column, heading.as_deref(), choices, popover);
     }
 }
 
-/// The lists `list` shows: each server's heading and its rows.
-fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) -> Vec<(Option<String>, Vec<Choice>)> {
-    let last = last();
+/// The servers that loaded and have videos, in the source's order: name and videos.
+fn ready(states: &[HosterState]) -> Vec<(&str, Vec<&Video>)> {
     states
         .iter()
         .filter_map(|state| match state {
-            HosterState::Ready { hoster_name, videos } if !videos.is_empty() => {
-                let choices = videos.iter().map(|entry| choice(shared, source, hoster_name, &entry.video, last.as_ref())).collect();
-                Some((heading(hoster_name).map(str::to_owned), choices))
-            }
-            HosterState::Error { hoster_name } => {
-                let failed = Choice { title: tr(MsgKey::ui_could_not_load).to_owned(), subtitle: None, current: false, enabled: false, pick: Box::new(|| {}) };
-                Some((heading(hoster_name).map(str::to_owned), vec![failed]))
-            }
+            HosterState::Ready { hoster_name, videos } if !videos.is_empty() => Some((hoster_name.as_str(), videos.iter().map(|e| &e.video).collect())),
             _ => None,
         })
         .collect()
+}
+
+/// What a pick of the menu plays: `height` on `server` (else the first server that has it), or for a video without a
+/// height, its own title.
+fn find<'a>(servers: &[(&'a str, Vec<&'a Video>)], server: Option<&str>, wanted: &Key) -> Option<(&'a str, &'a Video)> {
+    let on = |name: &'a str, videos: &[&'a Video]| videos.iter().find(|v| key(v) == *wanted).map(|v| (name, *v));
+    server.and_then(|s| servers.iter().find(|(name, _)| *name == s)).and_then(|(name, videos)| on(name, videos)).or_else(|| servers.iter().find_map(|(name, videos)| on(name, videos)))
+}
+
+/// A row of the Quality list: a height, or the title of a video that names none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Key {
+    Height(i32),
+    Title(String),
+}
+
+fn key(video: &Video) -> Key {
+    height(video).map_or_else(|| Key::Title(video.video_title.clone()), Key::Height)
+}
+
+fn key_label(key: &Key) -> String {
+    match key {
+        Key::Height(h) => height_label(*h),
+        Key::Title(t) => t.clone(),
+    }
+}
+
+/// The Quality list (every height any server has, highest first) and, with more than one server, the Server list.
+fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) -> Vec<(Option<String>, Vec<Choice>)> {
+    let servers = ready(states);
+    let playing = last();
+    let playing_key = playing.as_ref().and_then(|pick| servers.iter().find(|(n, _)| *n == pick.hoster).and_then(|(_, vs)| vs.iter().find(|v| v.video_title == pick.title)).map(|v| key(v)));
+    let playing_server = playing.as_ref().map(|pick| pick.hoster.clone());
+    let mut keys: Vec<Key> = Vec::new();
+    for video in servers.iter().flat_map(|(_, videos)| videos) {
+        let k = key(video);
+        if !keys.contains(&k) {
+            keys.push(k);
+        }
+    }
+    keys.sort_by(|a, b| match (a, b) {
+        (Key::Height(x), Key::Height(y)) => y.cmp(x),
+        (Key::Height(_), Key::Title(_)) => std::cmp::Ordering::Less,
+        (Key::Title(_), Key::Height(_)) => std::cmp::Ordering::Greater,
+        (Key::Title(_), Key::Title(_)) => std::cmp::Ordering::Equal,
+    });
+    let qualities = keys
+        .iter()
+        .filter_map(|k| {
+            let (server, video) = find(&servers, playing_server.as_deref(), k)?;
+            Some(choice(shared, source, server, video, key_label(k), playing_key.as_ref() == Some(k)))
+        })
+        .collect();
+    let mut out = vec![(Some(tr(MsgKey::player_quality)), qualities)];
+    let failed: Vec<&str> = states.iter().filter_map(|s| match s {
+        HosterState::Error { hoster_name } => Some(hoster_name.as_str()),
+        _ => None,
+    }).collect();
+    if servers.len() + failed.len() > 1 {
+        let mut rows: Vec<Choice> = servers
+            .iter()
+            .filter_map(|(name, videos)| {
+                // the playing height on this server, else its first video
+                let video = playing_key.as_ref().and_then(|k| videos.iter().find(|v| key(v) == *k)).or_else(|| videos.first())?;
+                let label = heading(name).unwrap_or_default().to_owned();
+                Some(choice(shared, source, name, video, label, playing_server.as_deref() == Some(*name)))
+            })
+            .collect();
+        rows.extend(failed.iter().map(|name| Choice { title: (*name).to_owned(), subtitle: Some(tr(MsgKey::ui_could_not_load)), current: false, enabled: false, pick: Box::new(|| {}) }));
+        out.push((Some(tr(MsgKey::player_server)), rows));
+    }
+    out
 }
 
 fn heading(hoster_name: &str) -> Option<&str> {
     (hoster_name != NO_HOSTER_LIST).then_some(hoster_name)
 }
 
-fn choice(shared: &Shared, source: &Arc<dyn AnimeSource>, hoster: &str, video: &Video, last: Option<&Pick>) -> Choice {
+fn choice(shared: &Shared, source: &Arc<dyn AnimeSource>, hoster: &str, video: &Video, title: String, current: bool) -> Choice {
     let pick = Pick { hoster: hoster.to_owned(), title: video.video_title.clone() };
-    let current = last == Some(&pick);
     let (shared, source, video) = (Rc::clone(shared), Arc::clone(source), video.clone());
     Choice {
-        title: video.video_title.clone(),
+        title,
         subtitle: None,
         current,
         enabled: true,
@@ -352,6 +469,26 @@ mod tests {
     fn a_server_with_a_lazy_list_cannot_be_identified_yet() {
         let lazy = Hoster { hoster_name: "Lazy".into(), lazy: true, ..Hoster::default() };
         assert_eq!(identify(&[lazy], "1080p"), None);
+    }
+
+    #[test]
+    fn the_height_comes_from_the_resolution_or_the_title() {
+        assert_eq!(title_height("1080p"), Some(1080));
+        assert_eq!(title_height("SubsPlease · 720p (1280x720)"), Some(720));
+        assert_eq!(title_height("Default"), None);
+        let titled = Video::new("u", "Server - 480p");
+        assert_eq!(height(&titled), Some(480));
+        assert_eq!(height(&Video { resolution: Some(360), ..titled }), Some(360), "the source's resolution first");
+        assert_eq!(height_label(1080), "1080p");
+    }
+
+    #[test]
+    fn a_height_plays_on_the_playing_server_else_the_first_that_has_it() {
+        let (a1080, a720, b480) = (Video::new("a1", "1080p"), Video::new("a2", "720p"), Video::new("b1", "480p"));
+        let servers = vec![("A", vec![&a1080, &a720]), ("B", vec![&b480])];
+        assert_eq!(find(&servers, Some("B"), &Key::Height(480)).map(|(s, v)| (s, v.video_url.as_str())), Some(("B", "b1")));
+        assert_eq!(find(&servers, Some("B"), &Key::Height(720)).map(|(s, _)| s), Some("A"), "B has no 720p");
+        assert_eq!(find(&servers, None, &Key::Height(2160)), None);
     }
 
     #[test]

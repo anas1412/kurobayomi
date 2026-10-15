@@ -861,3 +861,15 @@ browse_couldnt_load_this_source = Couldn't load this source
 
 # source: kurobayomi
 ui_source_by_id = Source { $id }
+
+# source: kurobayomi
+player_quality = Quality
+
+# source: kurobayomi
+player_server = Server
+
+# source: kurobayomi
+player_speed_menu = Speed
+
+# source: kurobayomi
+player_default_quality = Default quality

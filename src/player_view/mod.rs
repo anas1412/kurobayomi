@@ -15,6 +15,11 @@ mod neighbours;
 mod playback;
 mod sheets;
 mod skip_button;
+
+/// "1080p": how the player and its settings name a video height.
+pub fn quality_label(height: i32) -> String {
+    sheets::quality::height_label(height)
+}
 mod source;
 mod store;
 #[cfg(test)]
@@ -278,7 +283,8 @@ fn apply_action(shared: &Shared, page: &gtk::Box, action: Action) -> bool {
     true
 }
 
-/// The player page: a slim header (Back, title, the quality and tracks menus) over the video and its control bar. The
+/// The player page: a slim header (Back, title, the tracks menu) over the video and its control bar (with the quality
+/// menu). The
 /// page is named `screen:player`, so the main window hides its sidebar while it shows. The caller pushes it.
 fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let area = gtk::GLArea::new();
@@ -301,6 +307,8 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let fullscreen = gtk::Button::from_icon_name("view-fullscreen-symbolic");
     let speed = sheets::speed::button(shared);
     let chapters = sheets::chapters::button(shared);
+    let servers = sheets::quality::Servers::default();
+    let quality = sheets::quality::button(shared, &servers);
     let skip = skip_button::Ui::new(shared);
 
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -310,7 +318,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     bar.set_margin_end(12);
     bar.set_margin_bottom(12);
     bar.set_valign(gtk::Align::End);
-    for widget in [previous.upcast_ref::<gtk::Widget>(), play.upcast_ref(), next.upcast_ref(), seek.upcast_ref(), time.upcast_ref(), speed.upcast_ref(), chapters.upcast_ref(), volume.upcast_ref(), fullscreen.upcast_ref()] {
+    for widget in [previous.upcast_ref::<gtk::Widget>(), play.upcast_ref(), next.upcast_ref(), seek.upcast_ref(), time.upcast_ref(), quality.upcast_ref(), speed.upcast_ref(), chapters.upcast_ref(), volume.upcast_ref(), fullscreen.upcast_ref()] {
         bar.append(widget);
     }
 
@@ -340,10 +348,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
         }
     });
     let menu = menu::tracks_menu(shared);
-    let servers = sheets::quality::Servers::default();
-    let quality = sheets::quality::button(shared, &servers);
     header.pack_end(&menu);
-    header.pack_end(&quality);
     // the buttons packed here came after page_header::header made its pass, so they need their own
     crate::ui::no_sticky_focus(&header);
     // the bars hide by themselves while the video plays (`auto_hide`); with the setting off the header sits above it
@@ -450,24 +455,18 @@ fn video_menu(shared: &Shared, page: &gtk::Box, servers: &sheets::quality::Serve
         .filter(|item| !item.children.is_empty())
         .collect();
     if let Some(sections) = sheets::quality::menu_sections(shared, servers) {
-        // one section per server, each row named with its server
-        let choices: Vec<Item> = sections
-            .into_iter()
-            .enumerate()
-            .flat_map(|(index, (heading, choices))| {
-                choices.into_iter().filter(|choice| choice.enabled).map(move |choice| {
-                    let label = match &heading {
-                        Some(server) => format!("{server} · {}", choice.title),
-                        None => choice.title,
-                    };
-                    Item::new(label, u8::try_from(index).unwrap_or(u8::MAX), choice.pick).checked(choice.current)
-                })
-            })
-            .collect();
-        // the servers load on the first ask; the next right-click lists them
-        items.push(if choices.is_empty() { Item::new(tr(MsgKey::ui_quality_loading), 0, || {}) } else { Item::submenu("Quality", 0, choices) });
+        // the servers load on the first ask; the next right-click lists them: Quality, then Server
+        if sections.is_empty() {
+            items.push(Item::new(tr(MsgKey::ui_quality_loading), 0, || {}));
+        }
+        for (heading, choices) in sections {
+            let choices: Vec<sheets::Choice> = choices.into_iter().filter(|choice| choice.enabled).collect();
+            if !choices.is_empty() {
+                items.push(Item::submenu(heading.unwrap_or_default(), 0, menu_items(choices)));
+            }
+        }
     }
-    items.push(Item::submenu("Speed", 0, menu_items(sheets::speed::choices(shared))));
+    items.push(Item::submenu(tr(MsgKey::player_speed_menu), 0, menu_items(sheets::speed::choices(shared))));
     let fullscreen = window_of(page).is_some_and(|w| w.is_fullscreen());
     let page = page.downgrade();
     let toggle = move || {
@@ -613,6 +612,11 @@ fn realize(area: &gtk::GLArea, shared: &Shared, start: i64, loaded: &Cell<bool>)
 /// The preference sections of the player, or `None` before the app data is installed.
 fn player_prefs() -> Option<kuro_prefs::player::PlayerPrefs> {
     crate::data::is_installed().then(|| kuro_prefs::player::PlayerPrefs::new(crate::data::app().base.store().clone()))
+}
+
+/// The default quality of the settings (`pref_player_default_quality`): 1080 by default and before the app data exists.
+fn default_quality() -> i32 {
+    player_prefs().map_or(1080, |p| p.default_quality.get())
 }
 
 /// A text preference as stored, or empty before the app data is installed.

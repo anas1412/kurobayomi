@@ -94,10 +94,12 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
     let s_episode = to_s_episode(&episode);
     let preferred = super::stored_text("pref_subtitle_lang");
     let preferred_audio = super::stored_text("pref_audio_lang");
+    // read here: the app data lives on the GTK thread, the stream is chosen on the source's runtime
+    let quality = super::default_quality();
     let (tx, rx) = async_channel::bounded(1);
     handle.spawn(async move {
         // the "Loading…" card never stays: after 30 seconds the toast says the source is not answering
-        let answer = crate::browse::errors::settle(crate::browse::errors::LOAD_TIMEOUT, source.name(), best_stream(source.as_ref(), &s_episode)).await;
+        let answer = crate::browse::errors::settle(crate::browse::errors::LOAD_TIMEOUT, source.name(), best_stream(source.as_ref(), &s_episode, quality)).await;
         let _ = tx.send(answer).await;
     });
     let busy = crate::toast::busy(&tr(MsgKey::loading));
@@ -111,8 +113,8 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
 }
 
 /// The video to play: the source's hosters (or its plain video list, as one hoster) through `choose`, which keeps the
-/// session's last quality choice and otherwise picks the best video. The error is the text of the toast.
-async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Video, String> {
+/// session's last quality choice, else plays the `quality` height, else the best video. The error is the text of the toast.
+async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode, quality: i32) -> Result<Video, String> {
     use crate::browse::errors::plain;
     let name = source.name();
     // every call of the source ends within 30 seconds with a sentence for the toast; the technical text is in the log
@@ -124,7 +126,7 @@ async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Vid
     if hosters.is_empty() {
         return Err(tr(MsgKey::no_hosters));
     }
-    plain(name, super::sheets::quality::choose(source, &hosters)).await?.ok_or_else(|| tr(MsgKey::video_list_empty_error))
+    plain(name, super::sheets::quality::choose(source, &hosters, quality)).await?.ok_or_else(|| tr(MsgKey::video_list_empty_error))
 }
 
 /// Side tracks are added with the `auto` flag, which selects a track only when it matches `alang` or `slang`; the source's
@@ -236,7 +238,7 @@ mod tests {
 
     fn resolve(fake: &Fake) -> Result<Video, String> {
         let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().expect("runtime");
-        rt.block_on(best_stream(fake, &SEpisode::default()))
+        rt.block_on(best_stream(fake, &SEpisode::default(), 1080))
     }
 
     #[test]
@@ -255,6 +257,17 @@ mod tests {
         let only_fr = select_defaults(vec![strings(&["sub-add", "s1", "auto", "French (fr)"])], "", "");
         assert_eq!(only_fr[0][2], "select");
         assert!(select_defaults(Vec::new(), "", "").is_empty());
+    }
+
+    #[test]
+    fn the_default_quality_plays_when_a_server_has_it_else_the_best() {
+        // a server name of its own: the session's last choice (a static) names another server, so it does not apply
+        let hoster = |videos| Hoster { hoster_name: "Quality".into(), video_list: Some(videos), ..Hoster::default() };
+        let fake = Fake { hosters: vec![hoster(vec![video("https://cdn.test/q1080.m3u8", 1080), video("https://cdn.test/q480.m3u8", 480)])], fail: false };
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().expect("runtime");
+        assert_eq!(rt.block_on(best_stream(&fake, &SEpisode::default(), 480)).expect("a video").video_url, "https://cdn.test/q480.m3u8");
+        let fake = Fake { hosters: vec![Hoster { hoster_name: "Other".into(), ..hoster(vec![video("https://cdn.test/o1080.m3u8", 1080)]) }], fail: false };
+        assert_eq!(rt.block_on(best_stream(&fake, &SEpisode::default(), 720)).expect("a video").video_url, "https://cdn.test/o1080.m3u8", "no 720p: the best");
     }
 
     #[test]
