@@ -122,7 +122,7 @@ pub enum CoverKind {
 pub fn cover_kind(thumbnail: Option<&str>, remote_loader: bool) -> CoverKind {
     match thumbnail {
         Some(url) if url.starts_with("file://") => CoverKind::File(url.to_owned()),
-        Some(url) if remote_loader && (url.starts_with("https://") || url.starts_with("http://")) => CoverKind::Remote(url.to_owned()),
+        Some(url) if remote_loader && (url.starts_with("https://") || url.starts_with("http://") || url.starts_with(kuro_images::fetch::COVER_MARKER)) => CoverKind::Remote(url.to_owned()),
         _ => CoverKind::Initials,
     }
 }
@@ -238,6 +238,7 @@ mod tests {
     fn file_covers_draw_remote_ones_need_the_loader_and_the_rest_is_initials() {
         assert_eq!(cover_kind(Some("file:///a/cover.jpg"), false), CoverKind::File("file:///a/cover.jpg".into()));
         assert_eq!(cover_kind(Some("https://x/c.jpg"), true), CoverKind::Remote("https://x/c.jpg".into()));
+        assert_eq!(cover_kind(Some("kb-cover:/a/1"), true), CoverKind::Remote("kb-cover:/a/1".into()), "a poster asked of the source");
         assert_eq!(cover_kind(Some("https://x/c.jpg"), false), CoverKind::Initials);
         assert_eq!(cover_kind(Some(""), true), CoverKind::Initials);
         assert_eq!(cover_kind(None, true), CoverKind::Initials);

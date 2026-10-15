@@ -1,6 +1,6 @@
 //! Extension repositories, the link flow of `docs/design/app-flow.md`. A repository is one link to an `index.min.json`
 //! that lists its sources. Adding the link makes the sources available at once; each source's file is fetched on first
-//! use and checked against the sha256 in the index. The daily check re-reads the index (see [`refresh_due`]).
+//! use and checked against the sha256 in the index. Each start of the app re-reads the index.
 //!
 //! A source's file is a recipe (`.toml`, `docs/source-recipes.md`) or a plug-in component (`.wasm`, `wit/kuro-source.wit`).
 //! The index is read here; the GTK side stores the links and the index text, and decides where a fetched file goes.
@@ -8,7 +8,6 @@
 use kuro_platform::kind::Kind;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -183,26 +182,6 @@ pub fn remove_link(links: &mut Vec<String>, link: &str) -> bool {
     links.len() != before
 }
 
-/// The minimum gap between two scheduled index checks.
-pub const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// How long to wait before the next check. Zero when no check is stored or the stored one is a day old or more. A stored
-/// time in the future counts as a full day. `now` and `last_check` are Unix seconds.
-pub fn next_delay(last_check: Option<i64>, now: i64) -> Duration {
-    let Some(last) = last_check else {
-        return Duration::ZERO;
-    };
-    match u64::try_from(now.saturating_sub(last)) {
-        Ok(elapsed) => CHECK_INTERVAL.saturating_sub(Duration::from_secs(elapsed)),
-        Err(_) => CHECK_INTERVAL,
-    }
-}
-
-/// Whether the daily index check is due. `last_check` and `now` are Unix seconds.
-pub fn refresh_due(last_check: Option<i64>, now: i64) -> bool {
-    next_delay(last_check, now) == Duration::ZERO
-}
-
 /// Fetches a repository's index and checks it. A link that is not https is refused before any request.
 pub async fn fetch_index(client: &reqwest::Client, link: &str) -> Result<Index, RepoError> {
     if !link.starts_with("https://") {
@@ -290,12 +269,6 @@ pub fn read_index(dir: &Path) -> Option<Index> {
 pub fn read_source(dir: &Path, entry: &Entry) -> Option<Vec<u8>> {
     let bytes = std::fs::read(cached_path(dir, entry)).ok()?;
     (sha256_hex(&bytes) == entry.sha256.to_ascii_lowercase()).then_some(bytes)
-}
-
-/// When the saved index was written, in Unix seconds. The daily check compares it with [`refresh_due`].
-pub fn checked_at(dir: &Path) -> Option<i64> {
-    let modified = std::fs::metadata(dir.join(INDEX_FILE)).ok()?.modified().ok()?;
-    i64::try_from(modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()
 }
 
 /// Fetches a repository's index and each source it lists, and saves them under `dir`. A source is fetched again only when
@@ -456,7 +429,6 @@ mod tests {
         assert_eq!(read_source(dir.path(), source), Some(b"abc".to_vec()));
         std::fs::write(cached_path(dir.path(), source), b"changed").expect("overwrite source");
         assert_eq!(read_source(dir.path(), source), None, "a changed copy is not used");
-        assert!(checked_at(dir.path()).is_some(), "the index file dates the last check");
     }
 
     #[test]
@@ -494,14 +466,6 @@ mod tests {
         assert_eq!(add_link(&mut links, "http://host/index.min.json"), Err(RepoError::BadRepoLink));
         assert!(remove_link(&mut links, "https://host/index.min.json"));
         assert!(!remove_link(&mut links, "https://host/index.min.json"));
-    }
-
-    #[test]
-    fn the_daily_check_is_due_when_none_is_stored_or_a_day_has_passed() {
-        let day = 24 * 60 * 60;
-        assert!(refresh_due(None, 1_000));
-        assert!(!refresh_due(Some(1_000), 1_000 + day - 1));
-        assert!(refresh_due(Some(1_000), 1_000 + day));
     }
 
     #[tokio::test]

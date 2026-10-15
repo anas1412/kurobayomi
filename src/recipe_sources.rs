@@ -406,23 +406,17 @@ fn load_sources() -> Vec<String> {
     failed
 }
 
-/// The daily check: each link whose saved index is older than a day is fetched again on a thread of its own, so the window
-/// does not wait for the network. The Browse pages are reloaded when it ends.
-fn schedule_daily_check(links: &[String]) {
-    let Some(root) = repo_root() else { return };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
-        .unwrap_or_default();
-    let due: Vec<String> = links.iter().filter(|link| repo::refresh_due(repo::checked_at(&repo::link_dir(&root, link)), now)).cloned().collect();
-    if due.is_empty() {
+/// The start check: every link is fetched again on a thread of its own, so the window does not wait for the network and a
+/// source's new version is in use from the next start (user, 2026-10-15). A source file is fetched only when it changed.
+/// The Browse pages are reloaded when it ends.
+fn check_on_start(links: Vec<String>) {
+    if links.is_empty() {
         return;
     }
     std::thread::spawn(move || {
-        for link in &due {
+        for link in &links {
             if let Err(error) = sync_link(link) {
-                tracing::warn!(link = link.as_str(), %error, "the daily repo check failed; the saved copy is kept");
+                tracing::warn!(link = link.as_str(), %error, "the start repo check failed; the saved copy is kept");
             }
         }
         reload();
@@ -520,7 +514,7 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
     kuro_extensions::instantiate::set_compile_cache_dir(paths.wasm_cache_dir());
     reload();
     let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
-    schedule_daily_check(&links);
+    check_on_start(links);
 }
 
 #[cfg(test)]
