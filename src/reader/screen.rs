@@ -457,11 +457,6 @@ impl ReaderCore {
         self.mode()
     }
 
-    /// The raw reading mode of the manga, Default included. The bottom bar shows this value.
-    pub fn manga_mode(&self) -> ReadingMode {
-        self.session.borrow().as_ref().map_or(ReadingMode::Default, |s| flags::reading_mode_of(s.viewer_flags()))
-    }
-
     /// The visible page (1-based, `-1` before any page) and the page total of the current chapter.
     pub fn page_counts(&self) -> (i32, i32) {
         self.session.borrow().as_ref().map_or((-1, 0), |s| {
@@ -470,8 +465,11 @@ impl ReaderCore {
         })
     }
 
-    /// Writes the manga's reading mode and reloads the viewers (T-043a-036).
+    /// Stores the picked reading mode for every manga (the global preference) and reloads the viewers.
     pub fn apply_mode(&self, mode: ReadingMode) {
+        if let Err(error) = self.deps.prefs.default_reading_mode.set(mode.flag_value()) {
+            tracing::warn!(%error, "the reading mode could not be stored");
+        }
         if let Some(session) = self.session.borrow_mut().as_mut() {
             session.set_reading_mode(mode);
         }
@@ -529,8 +527,7 @@ impl ReaderCore {
     }
 
     fn mode(&self) -> kuro_prefs::reader::ReadingMode {
-        let flags_value = self.session.borrow().as_ref().map_or(0, |s| s.viewer_flags());
-        flags::resolve_reading_mode(flags_value, self.deps.prefs.default_reading_mode.get())
+        flags::global_reading_mode(self.deps.prefs.default_reading_mode.get())
     }
 }
 
@@ -1191,7 +1188,7 @@ fn toggle_crop(screen: &Screen) {
     refresh(screen);
 }
 
-/// The reader settings window (T-043a-046, T-043a-047). Its mode row applies to this manga at once; the other rows write
+/// The reader settings window (T-043a-046, T-043a-047). Its mode row applies to every manga at once; the other rows write
 /// their keys, which the open reader follows.
 fn open_settings(screen: &Rc<Screen>) {
     let Some(window) = window_of(screen) else { return };
@@ -1203,7 +1200,7 @@ fn open_settings(screen: &Rc<Screen>) {
             refresh(&s);
         }
     });
-    settings_window::open(&window, &screen.core.deps.prefs, screen.core.manga_mode(), on_mode);
+    settings_window::open(&window, &screen.core.deps.prefs, screen.core.reading_mode(), on_mode);
 }
 
 /// The initial load. Clears a failure card, shows the spinner, waits for the source manager, then loads.

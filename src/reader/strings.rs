@@ -199,10 +199,6 @@ pub fn custom_filter() -> String {
     tr(MsgKey::custom_filter)
 }
 
-pub fn pref_category_for_this_series() -> String {
-    tr(MsgKey::pref_category_for_this_series)
-}
-
 pub fn pager_viewer() -> String {
     tr(MsgKey::pager_viewer)
 }

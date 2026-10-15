@@ -1,5 +1,6 @@
 //! The reader settings window (T-043a-046, T-043a-047): a native modal window with its own header bar, opened from the
-//! reader's menu. Its page is a boxed-list page of the shared pref_model rows: this manga's reading mode first, then the
+//! reader's menu. Its page is a boxed-list page of the shared pref_model rows: the reading mode first (one for every
+//! manga), then the
 //! kept reader rows of `settings_ui::reader::page` (background colour, scale type, zoom start position, crop borders,
 //! split wide pages). Each row writes its own key to `ReaderPrefs` at once, so the open reader follows the change live;
 //! the mode row hands the chosen mode to the reader.
@@ -22,9 +23,10 @@ use crate::settings_ui::reader::page::layout_rows;
 use crate::settings_ui::rows::group;
 use crate::ui::{DialogButton, Role};
 
-/// The reading mode of this manga. The pick goes to `on_mode`, which applies it to the open reader at once.
+/// The reading mode, the same for every manga. The pick goes to `on_mode`, which stores it and applies it to the open
+/// reader at once. "Default" is not offered: there is nothing for it to defer to.
 fn mode_row(mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) -> PreferenceItem {
-    let entries = ReadingMode::ALL.iter().map(|m| (m.flag_value().to_string(), mode_label(*m).to_owned())).collect();
+    let entries = ReadingMode::ALL.iter().filter(|m| **m != ReadingMode::Default).map(|m| (m.flag_value().to_string(), mode_label(*m).to_owned())).collect();
     let on_change = bind::veto(move |key: String| {
         let result = key.parse::<i32>().map(ReadingMode::from_preference).map_err(|err| err.to_string());
         if let Ok(picked) = &result {
@@ -35,9 +37,9 @@ fn mode_row(mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) -> PreferenceIt
     PreferenceItem::BasicList { common: ItemCommon::bound(strings::viewer()), value: mode.flag_value().to_string(), entries, on_change }
 }
 
-/// The rows of the page: this manga's reading mode, then the shared Display and Paged groups.
+/// The rows of the page: the reading mode, then the shared Display and Paged groups.
 pub fn page_rows(prefs: &ReaderPrefs, mode: ReadingMode, on_mode: Rc<dyn Fn(ReadingMode)>) -> Vec<Preference> {
-    let mut rows = vec![group(&strings::pref_category_for_this_series(), vec![mode_row(mode, on_mode)])];
+    let mut rows = vec![group(&strings::pref_category_reading_mode(), vec![mode_row(mode, on_mode)])];
     rows.extend(layout_rows(prefs));
     rows
 }
@@ -84,14 +86,14 @@ mod tests {
     }
 
     #[test]
-    fn the_page_is_this_manga_mode_then_the_display_and_paged_groups() {
+    fn the_page_is_the_reading_mode_then_the_display_and_paged_groups() {
         let prefs = ReaderPrefs::new(PrefStore::in_memory());
         let rows = page_rows(&prefs, ReadingMode::LeftToRight, Rc::new(|_| {}));
-        assert_eq!(group_titles(&rows), ["For this series", "Display", "Paged"]);
+        assert_eq!(group_titles(&rows), [strings::pref_category_reading_mode().as_str(), "Display", "Paged"]);
     }
 
     #[test]
-    fn the_mode_row_shows_this_manga_mode_and_hands_the_pick_to_the_reader() {
+    fn the_mode_row_shows_the_mode_and_hands_the_pick_to_the_reader() {
         let prefs = ReaderPrefs::new(PrefStore::in_memory());
         let picked = Rc::new(Cell::new(None));
         let sink = Rc::clone(&picked);

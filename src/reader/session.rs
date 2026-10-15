@@ -415,11 +415,9 @@ impl ReaderSession {
         }
     }
 
-    /// `setMangaReadingMode` (036): the mode is written under its mask, the requested page becomes the saved
-    /// page, and the viewers reload.
-    pub fn set_reading_mode(&mut self, mode: ReadingMode) {
-        self.store.set_viewer_flags(self.manga_id, i64::from(mode.flag_value()), i64::from(READING_MODE_MASK));
-        self.viewer_flags = flags::set_reading_mode(self.viewer_flags, mode);
+    /// A new reading mode is in effect (the caller stored it for every manga): the requested page becomes the saved
+    /// page, and the viewers reload. Nothing is written to the manga.
+    pub fn set_reading_mode(&mut self, _mode: ReadingMode) {
         self.restore_saved_page();
         let _ = self.events.send(ReaderEvent::ReloadViewerChapters);
     }
@@ -828,13 +826,13 @@ mod tests {
     }
 
     #[test]
-    fn reading_mode_write_is_masked_and_reloads_the_viewers() {
+    fn a_new_reading_mode_reloads_the_viewers_and_writes_nothing_to_the_manga() {
         let rec = Rc::new(Recorder::default());
         let a = chapter(1, false);
         a.last_page_read.set(2);
         let (mut s, rx) = session(Rc::clone(&rec), vec![Rc::clone(&a)], 0, false);
         s.set_reading_mode(ReadingMode::Webtoon);
-        assert_eq!(rec.flags.borrow().as_slice(), [(7, 4, 0x7)]);
+        assert!(rec.flags.borrow().is_empty(), "the mode is global: nothing is written to the manga");
         assert_eq!(a.requested_page.get(), 2);
         assert_eq!(rx.try_recv(), Ok(ReaderEvent::ReloadViewerChapters));
     }
