@@ -20,7 +20,9 @@ pub const UPDATE_REPOSITORY: &str = match option_env!("KB_UPDATE_REPOSITORY") {
 };
 
 /// The title of the About row that starts a manual check (`spec/settings.json`, `settings_about`).
-pub const CHECK_ROW_TITLE: &str = "Check for updates";
+pub fn check_row_title() -> String {
+    tr(MsgKey::check_for_updates)
+}
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -35,7 +37,7 @@ pub fn available() -> bool {
 
 /// The About row is only listed when the check exists (`notes` of `settings_about`).
 pub fn hides_row(title: &str) -> bool {
-    title == CHECK_ROW_TITLE && !available()
+    title == check_row_title() && !available()
 }
 
 /// The GET behind [`GithubReleases`], over a blocking reqwest client. Built on the worker thread that runs the check.
@@ -116,7 +118,7 @@ pub fn manual() {
 
 /// Runs the About row's action. False for every other row.
 pub fn on_action(screen: &str, title: &str) -> bool {
-    if screen != "settings_about" || title != CHECK_ROW_TITLE || !available() {
+    if screen != "settings_about" || title != check_row_title() || !available() {
         return false;
     }
     manual();
@@ -163,7 +165,7 @@ mod tests {
 
     #[test]
     fn the_about_row_is_listed_only_when_the_check_exists() {
-        assert_eq!(hides_row(CHECK_ROW_TITLE), !available());
+        assert_eq!(hides_row(&check_row_title()), !available());
         assert!(!hides_row("Version"));
     }
 

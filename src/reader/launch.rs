@@ -333,7 +333,7 @@ mod tests {
         let downloads = Some(&locate as &dyn Fn(&Item) -> Option<PathBuf>);
         assert!(matches!(loader_for(&named("Chapter 1"), downloads, Some(&online)), Ok(Loader::Download(_))), "the download wins");
         assert_eq!(source.0.load(Ordering::SeqCst), 0, "a download asks the source for nothing");
-        assert_eq!(loader_for(&named("Chapter 2"), downloads, Some(&online)).err().unwrap().message, super::super::source_pages::STILL_LOADING);
+        assert_eq!(loader_for(&named("Chapter 2"), downloads, Some(&online)).err().unwrap().message, super::super::source_pages::still_loading());
         let entry = super::super::loader::PageEntry { url: "p0".into(), image_url: None };
         cache.put_page_list(0, "/Chapter 2", &[entry]).unwrap();
         assert!(matches!(loader_for(&named("Chapter 2"), downloads, Some(&online)), Ok(Loader::Http(_))));

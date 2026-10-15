@@ -4,6 +4,7 @@
 //! error) goes to the log only. [`note`] counts the failures in a row of each source for the "Not working right now"
 //! badge of the Sources list.
 
+use kuro_i18n::{MsgKey, tr};
 use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -20,15 +21,21 @@ pub const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 pub const BACKSTOP: Duration = Duration::from_secs(35);
 
 /// The sentence when the device has no connection.
-pub const OFFLINE: &str = "You're offline. Check your connection and try again.";
+pub fn offline() -> String {
+    tr(MsgKey::browse_errors_offline)
+}
 
 /// The sentence for a failure that is not the source's (the library file, for example).
-pub const GENERIC: &str = "Something went wrong. Try again in a moment.";
+pub fn generic() -> String {
+    tr(MsgKey::browse_errors_generic)
+}
 
 /// The badge of a source that failed [`BADGE_AFTER`] times in a row.
-pub const NOT_WORKING_BADGE: &str = "Not working right now";
+pub fn not_working_badge() -> String {
+    tr(MsgKey::browse_errors_not_working_badge)
+}
 
-/// Failures in a row after which the Sources list shows [`NOT_WORKING_BADGE`].
+/// Failures in a row after which the Sources list shows [`not_working_badge()`].
 pub const BADGE_AFTER: u32 = 3;
 
 /// What went wrong, in the three kinds the user is told apart.
@@ -68,7 +75,7 @@ pub fn classify(error: &SourceError, online: bool) -> Trouble {
 pub fn says(source: &str, trouble: Trouble) -> String {
     let name = if source.trim().is_empty() { "This source" } else { source.trim() };
     match trouble {
-        Trouble::Offline => OFFLINE.to_owned(),
+        Trouble::Offline => offline().to_owned(),
         Trouble::Slow => format!("{name} is not answering. Try again in a moment."),
         Trouble::Broken => format!("{name} isn't working right now. It may be down or need an update; the repository checks for fixes every day."),
     }

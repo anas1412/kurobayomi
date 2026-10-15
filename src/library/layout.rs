@@ -1,6 +1,7 @@
 //! Grid geometry and badge text (T-37a-018 to T-37a-020, T-37a-024). Pure numbers and strings, so the card widgets
 //! only place them.
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 use kuro_prefs::library::LibraryDisplayMode;
 
@@ -16,7 +17,9 @@ pub fn tabs_visible(category_tabs: bool, search_active: bool) -> bool {
 }
 
 /// The hint under the header while the search text starts with `-` (E-04).
-pub const EXCLUDE_HINT: &str = "Use -term to exclude";
+pub fn exclude_hint() -> String {
+    tr(MsgKey::library_exclude_hint)
+}
 
 /// Whether the exclude hint shows for this search text.
 pub fn shows_exclude_hint(text: &str) -> bool {
@@ -84,7 +87,9 @@ pub const SPACE_L: i32 = 16;
 pub const CARD_EDGE: i32 = 12 + 4 + (SPACE_S - 2);
 
 /// The text of the local badge.
-pub const LOCAL_BADGE: &str = "Local";
+pub fn local_badge() -> String {
+    tr(MsgKey::local_source_badge)
+}
 
 /// The placeholder tile text: the first letter or digit of the first two words, upper case; "?" when there is none.
 pub fn initials(title: &str) -> String {
@@ -226,7 +231,7 @@ mod tests {
         assert_eq!(unread_badge(-1, Kind::Manga), None, "not computed while the badge switch is off");
         assert_eq!(download_badge(3).as_deref(), Some("3"));
         assert_eq!(download_badge(0), None);
-        assert_eq!(LOCAL_BADGE, "Local");
+        assert_eq!(local_badge(), "Local");
     }
 
     #[test]

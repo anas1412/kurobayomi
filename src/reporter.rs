@@ -1,6 +1,7 @@
 //! The `--crash-report <file>` window. It shows a report written by the panic hook and can copy it,
 //! reveal it, or restart the app. It opens no database, settings, runtime or stylesheet.
 
+use kuro_i18n::{MsgKey, tr};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -9,8 +10,12 @@ use gtk::{Align, Justification, Orientation as O, gio, glib, pango};
 
 const APP_ID: &str = crate::channel::APP_ID;
 const REPORTER_ID: &str = "io.github.anas1412.Kurobayomi.CrashReporter";
-const NO_DETAILS: &str = "No crash details available";
-const SUBTITLE: &str = "Kurobayomi ran into an unexpected error. Share the crash logs when you report the problem.";
+fn no_details() -> String {
+    tr(MsgKey::crash_no_details)
+}
+fn subtitle() -> String {
+    tr(MsgKey::crash_subtitle)
+}
 
 /// Shows the report at `path` and returns the exit code.
 pub fn run(path: PathBuf) -> glib::ExitCode {
@@ -40,12 +45,12 @@ fn build(app: &gtk::Application, path: &Path, text: Option<&str>) {
     let icon = bug_glyph();
     icon.add_css_class("accent");
 
-    let heading = gtk::Label::builder().label("Whoops!").css_classes(["title-2"]).halign(Align::Center).build();
-    let subtitle = gtk::Label::builder().label(SUBTITLE).wrap(true).justify(Justification::Center).css_classes(["dim-label"]).build();
+    let heading = gtk::Label::builder().label(&tr(MsgKey::crash_screen_title)).css_classes(["title-2"]).halign(Align::Center).build();
+    let subtitle = gtk::Label::builder().label(subtitle()).wrap(true).justify(Justification::Center).css_classes(["dim-label"]).build();
 
     let attrs = pango::AttrList::new();
     attrs.insert(pango::AttrFontDesc::new(&pango::FontDescription::from_string("monospace")));
-    let details = gtk::Label::builder().label(text.unwrap_or(NO_DETAILS)).selectable(true).xalign(0.0).yalign(0.0).build();
+    let details = gtk::Label::builder().label(text.unwrap_or(&no_details())).selectable(true).xalign(0.0).yalign(0.0).build();
     details.set_attributes(Some(&attrs));
     details.set_margin_start(12);
     details.set_margin_end(12);
@@ -56,7 +61,7 @@ fn build(app: &gtk::Application, path: &Path, text: Option<&str>) {
     well.add_css_class("card");
     well.append(&scroll);
 
-    let share = gtk::Button::with_label("Share crash logs");
+    let share = gtk::Button::with_label(&tr(MsgKey::pref_dump_crash_logs));
     share.set_sensitive(text.is_some());
     let text = text.map(str::to_owned);
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -69,7 +74,7 @@ fn build(app: &gtk::Application, path: &Path, text: Option<&str>) {
         }
     });
 
-    let restart = gtk::Button::with_label("Restart the application");
+    let restart = gtk::Button::with_label(&tr(MsgKey::crash_screen_restart_application));
     restart.add_css_class("suggested-action");
     let quit = app.clone();
     restart.connect_clicked(move |_| {

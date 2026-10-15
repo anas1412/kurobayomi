@@ -7,6 +7,7 @@
 //! and waited for. The GTK thread never asks the source: [`Prefetch`] fetches page lists on threads, and the reader
 //! reads them from the cache.
 
+use kuro_i18n::{MsgKey, tr};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -26,11 +27,13 @@ use super::loader::http::HttpPageSource;
 
 /// What the reader's loader reports for a chapter whose page list is still being fetched. It is a wait, not a failure:
 /// the reader shows its spinner and asks again (see [`is_pending`]).
-pub const STILL_LOADING: &str = "The page list is still loading. Try again in a moment.";
+pub fn still_loading() -> String {
+    tr(MsgKey::reader_still_loading)
+}
 
 /// Whether a load error is the wait for a page list that is still being fetched.
 pub fn is_pending(message: &str) -> bool {
-    message == STILL_LOADING
+    message == still_loading()
 }
 
 pub struct SourcePages {
@@ -192,7 +195,7 @@ impl Prefetch {
             let outcome = me.pages.page_list(&url).and_then(|list| {
                 me.cache.put_page_list(me.manga_id, &url, &list).map_err(|e| {
                     tracing::warn!(error = %e, "the page list could not be cached");
-                    crate::browse::errors::GENERIC.to_owned()
+                    crate::browse::errors::generic().to_owned()
                 })
             });
             let mut fetches = me.lock();
@@ -210,7 +213,7 @@ impl Prefetch {
         SourceGate::new(ready)
     }
 
-    /// The reader's error for a chapter whose list is not cached: the last fetch's error, or [`STILL_LOADING`]. A fetch
+    /// The reader's error for a chapter whose list is not cached: the last fetch's error, or [`still_loading()`]. A fetch
     /// is started again when none runs, so the next try can read the list.
     pub fn missing(self: &Arc<Self>, chapter_url: &str) -> String {
         let failed = match self.lock().get(chapter_url) {
@@ -218,7 +221,7 @@ impl Prefetch {
             _ => None,
         };
         self.fetch(chapter_url);
-        failed.unwrap_or_else(|| STILL_LOADING.to_owned())
+        failed.unwrap_or_else(|| still_loading().to_owned())
     }
 }
 
@@ -353,7 +356,7 @@ mod tests {
 
     #[test]
     fn only_the_still_loading_message_is_a_wait() {
-        assert!(is_pending(STILL_LOADING));
+        assert!(is_pending(&still_loading()));
         assert!(!is_pending("Failed to load pages: 404"));
     }
 

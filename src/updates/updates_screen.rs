@@ -382,7 +382,7 @@ impl UpdatesScreen {
             }
         }
         if let Some(footer) = updates_page::limit_footer(all.len()) {
-            self.col.append(&crate::ui::dim(footer));
+            self.col.append(&crate::ui::dim(&footer));
         }
     }
 
@@ -625,7 +625,7 @@ impl UpdatesScreen {
             let skipped = download_actions::delete_skipped(&targets, |entry| facts(&*backend, entry));
             if !skipped.is_empty() {
                 tracing::warn!(?skipped, "delete skipped entries whose source is not installed");
-                self.show_toast(copy::DELETE_SOURCE_MISSING);
+                self.show_toast(&copy::delete_source_missing());
             }
         }
         download_host::spawn_detached(move || {

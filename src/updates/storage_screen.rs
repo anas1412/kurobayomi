@@ -93,11 +93,11 @@ impl StorageScreen {
             let scanning = GBox::new(O::Horizontal, 8);
             scanning.set_halign(Align::Center);
             scanning.append(&crate::ui::loading(crate::ui::LoadSize::Inline));
-            scanning.append(&Label::new(Some(copy::STORAGE_SCANNING)));
+            scanning.append(&Label::new(Some(&copy::storage_scanning())));
 
             let list = crate::ui::boxed_list();
             let search = crate::ui::list_search(&list);
-            let helper = crate::ui::dim(copy::STORAGE_EMPTY_CATEGORY);
+            let helper = crate::ui::dim(&copy::storage_empty_category());
             helper.set_visible(false);
 
             let split = GBox::new(O::Vertical, 12);
@@ -271,7 +271,7 @@ impl StorageScreen {
                     None => DeleteOutcome::SourceMissing,
                 };
                 if outcome == DeleteOutcome::SourceMissing {
-                    crate::toast::notify_for(copy::STORAGE_SOURCE_MISSING, Duration::from_millis(NOT_FOUND_TOAST_MS));
+                    crate::toast::notify_for(&copy::storage_source_missing(), Duration::from_millis(NOT_FOUND_TOAST_MS));
                 }
             },
             || {},

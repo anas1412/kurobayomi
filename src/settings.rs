@@ -1,4 +1,5 @@
 // Settings pages that are not plain preference lists (the main list and shell are in pref_model).
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -92,7 +93,7 @@ fn clear_db(id: &str) -> Option<Built> {
     });
     col.append(&l);
     b.append(&scrolled(&col));
-    let del = Button::builder().label("Delete").css_classes(["destructive-action"]).sensitive(false).build();
+    let del = Button::builder().label(&tr(MsgKey::action_delete)).css_classes(["destructive-action"]).sensitive(false).build();
     margins(&del, 12);
     {
         let (entries, db, list, del_btn, id) = (Rc::clone(&entries), Arc::clone(&db), l.clone(), del.clone(), id.to_string());
@@ -134,8 +135,8 @@ fn clear_db(id: &str) -> Option<Built> {
         let (d, all) = (del.clone(), Rc::clone(&entries));
         c.connect_toggled(move |_| d.set_sensitive(all.iter().any(|(_, c, _)| c.is_active())));
     }
-    let all = icon_button("edit-select-all-symbolic", "Select all");
-    let inv = icon_button("object-flip-horizontal-symbolic", "Select inverse");
+    let all = icon_button("edit-select-all-symbolic", &tr(MsgKey::action_select_all));
+    let inv = icon_button("object-flip-horizontal-symbolic", &tr(MsgKey::action_select_inverse));
     let (e1, e2) = (Rc::clone(&entries), Rc::clone(&entries));
     all.connect_clicked(move |_| e1.iter().for_each(|(_, c, _)| c.set_active(true)));
     inv.connect_clicked(move |_| e2.iter().for_each(|(_, c, _)| c.set_active(!c.is_active())));
@@ -165,7 +166,7 @@ fn after_clear(_kind: Kind, removed: usize) {
     if !after.offer_vacuum {
         return;
     }
-    let compact = DialogButton::new("Compact", Role::Suggested, move || {
+    let compact = DialogButton::new(&tr(MsgKey::ui_compact), Role::Suggested, move || {
         let path = path.clone();
         std::thread::spawn(move || {
             if let Err(e) = kuro_db::schema_unified::open_file(&path).and_then(|c| kuro_db::maintenance::vacuum(&c)) {
@@ -174,7 +175,7 @@ fn after_clear(_kind: Kind, removed: usize) {
         });
     });
     let body = crate::ui::message("This can take a while. The app stays usable, but do not close it until it is done.");
-    crate::ui::dialog("Compact the database to free the space?", &body, 420, vec![DialogButton::cancel("Not now"), compact]).present();
+    crate::ui::dialog("Compact the database to free the space?", &body, 420, vec![DialogButton::cancel(&tr(MsgKey::action_not_now)), compact]).present();
 }
 
 /// Advanced > "Clear WebView data" (T-12a-034): the toast text for the outcome of `clear_data`.

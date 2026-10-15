@@ -1,6 +1,7 @@
 //! Row builders shared by the settings pages. Each one binds a row to a typed preference; a value the list does not
 //! offer shows the preference default (the stored value is kept).
 // Not reachable from `route.rs` yet: text rows are used by pages that are not routed yet.
+use kuro_i18n::{MsgKey, tr};
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -202,7 +203,9 @@ pub fn ranged_choice(title: &str, pref: &Pref<i32>, label: impl Fn(i32) -> Strin
 }
 
 /// The subtitle of a row whose change applies at the next launch (task T-47a-010).
-pub const REQUIRES_RESTART: &str = "Requires app restart to take effect";
+pub fn requires_restart() -> String {
+    tr(MsgKey::requires_app_restart)
+}
 
 /// A list of a Rust enum stored by its constant name (`pref_enum!` types).
 pub fn enum_choice<T>(title: &str, pref: &Pref<T>, options: &[(T, &str)], enabled: bool) -> PreferenceItem

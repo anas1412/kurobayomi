@@ -1,6 +1,7 @@
 //! The automatic library update interval (T-26a-104): the six choices stored as hours under
 //! `pref_library_update_interval_key`, and the feed that tells both kinds' schedule loops when it changes.
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 use tokio::sync::watch;
 
@@ -8,7 +9,9 @@ use crate::pref_model::model::Preference;
 use crate::settings_ui::rows::{group, info, ranged_choice};
 
 /// Shown under the interval choice: when the first automatic run happens (T-26a-010).
-pub const FIRST_RUN_NOTE: &str = "The first automatic update runs as soon as the conditions are met after you turn this on.";
+pub fn first_run_note() -> String {
+    tr(MsgKey::misc_interval_first_run_note)
+}
 
 /// The label of one of the interval choices `kuro_prefs::ranges::LIBRARY_UPDATE_INTERVAL` allows. 0 is Off, the default.
 pub fn label(hours: i32) -> String {
@@ -31,7 +34,7 @@ pub fn hours(stored: i32) -> u32 {
 /// The settings row. The library settings page merges it over the spec row of the same group and title, so the
 /// choice reads and writes the real preference.
 pub fn rows(pref: &Pref<i32>) -> Vec<Preference> {
-    vec![group("Global update", vec![ranged_choice("Automatic updates", pref, label, true), info(FIRST_RUN_NOTE)])]
+    vec![group("Global update", vec![ranged_choice("Automatic updates", pref, label, true), info(&first_run_note())])]
 }
 
 /// Sends `stored` as hours to every schedule loop. Each loop restarts its wait on the change (`run_schedule`).

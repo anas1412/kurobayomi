@@ -135,7 +135,7 @@ impl Shell {
             let quit = win.clone();
             let buttons = vec![
                 DialogButton::cancel(tr(MsgKey::action_cancel)),
-                DialogButton::new("Quit", Role::Destructive, move || quit.destroy()),
+                DialogButton::new(&tr(MsgKey::ui_quit), Role::Destructive, move || quit.destroy()),
             ];
             let dialog = crate::ui::dialog("Downloads running", &crate::ui::message(CLOSE_PROMPT), 360, buttons);
             dialog.set_transient_for(Some(win));

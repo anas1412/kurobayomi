@@ -170,7 +170,7 @@ impl LibraryView {
         title.set_xalign(0.0);
         title.set_margin_start(layout::SPACE_L);
         title.set_margin_top(layout::SPACE_S);
-        let hint = gtk::Label::new(Some(layout::EXCLUDE_HINT));
+        let hint = gtk::Label::new(Some(&layout::exclude_hint()));
         hint.add_css_class("dim-label");
         hint.set_xalign(0.0);
         hint.set_margin_start(layout::SPACE_L);
@@ -658,7 +658,9 @@ fn submit(inner: &Rc<RefCell<Inner>>) {
 }
 
 /// The toast when the library cannot be read; the error itself goes to the log.
-const LOAD_FAILED: &str = "Could not load the library";
+fn load_failed() -> String {
+    tr(MsgKey::library_load_failed)
+}
 
 fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
     {
@@ -675,7 +677,7 @@ fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
             Err(e) => {
                 tracing::error!(error = %e, "loading the library failed");
                 drop(st);
-                crate::toast::notify_for(LOAD_FAILED, crate::library::TOAST_TIME);
+                crate::toast::notify_for(&load_failed(), crate::library::TOAST_TIME);
                 return;
             }
         }
@@ -1260,10 +1262,10 @@ fn resume_entry(inner: &Rc<RefCell<Inner>>, row: &LibraryRow) {
     };
     match actions::next_item(&db, row, downloaded_only, |item| item_downloaded(item)) {
         Ok(Some(item)) => resume(Resume { entry: row.id, item, external: always_external() }),
-        Ok(None) => crate::toast::notify_for(actions::NO_NEXT_ITEM, crate::library::TOAST_TIME),
+        Ok(None) => crate::toast::notify_for(&actions::no_next_item(), crate::library::TOAST_TIME),
         Err(e) => {
             tracing::error!(error = %e, entry = row.id, "finding the next item failed");
-            crate::toast::notify_for(actions::NO_NEXT_ITEM, crate::library::TOAST_TIME);
+            crate::toast::notify_for(&actions::no_next_item(), crate::library::TOAST_TIME);
         }
     }
 }

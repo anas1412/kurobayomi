@@ -541,13 +541,15 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
 }
 
 /// The tooltip of the search options button, and the name of its one check.
-pub const SEARCH_OPTIONS: &str = "Search options";
+pub fn search_options_label() -> String {
+    tr(MsgKey::browse_search_options)
+}
 const HAS_RESULTS: &str = "has_results";
 
 /// The search options (B§10.1) on the shared view-options button next to the search box: Show only "Has results". The
 /// source filter has one value (All) since the pinned-only filter was cut, so it has no item.
 fn search_options(view: &Rc<SearchView>) -> ViewOptions {
-    let menu = ViewOptions::new(SEARCH_OPTIONS, &[Section::filter("Show only", vec![MenuItem::toggle(HAS_RESULTS, tr(MsgKey::has_results))])]);
+    let menu = ViewOptions::new(&search_options_label(), &[Section::filter("Show only", vec![MenuItem::toggle(HAS_RESULTS, tr(MsgKey::has_results))])]);
     menu.set_toggle(HAS_RESULTS, view.chips.get().only_has_results);
     let toggled = Rc::clone(view);
     menu.connect(move |pick| {
@@ -928,7 +930,7 @@ pub(crate) mod tests {
         assert!(toggles.iter().all(|c| c.label().is_none()), "no chips: {:?}", toggles.iter().map(|c| c.label()).collect::<Vec<_>>());
         // the options button is a header action of the page, next to the shared search toggle
         let menus: Vec<gtk::MenuButton> = page.actions().iter().flat_map(|w| descendants::<gtk::MenuButton>(w)).collect();
-        let menu = menus.iter().find(|b| b.tooltip_text().as_deref() == Some(SEARCH_OPTIONS)).expect("the search options");
+        let menu = menus.iter().find(|b| b.tooltip_text().as_deref() == Some(search_options_label().as_str())).expect("the search options");
         let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("the menu"));
         assert_eq!(labels, ["Show only".to_owned(), tr(MsgKey::has_results)]);
         menu.activate_action("viewopt.has_results", None).expect("the Has results check");

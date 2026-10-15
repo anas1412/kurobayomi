@@ -107,7 +107,7 @@ impl RelativeTime {
 
 /// The "Library last updated: ..." line of the Updates feed (T-42b-016, E-U41, E-U42).
 pub fn last_updated_line(last_updated_ms: i64, now_ms: i64) -> String {
-    format!("{}{}", crate::updates::copy::LAST_UPDATED_PREFIX, relative_time_span(last_updated_ms, now_ms).text())
+    kuro_i18n::trf(kuro_i18n::MsgKey::updates_last_update_info, &[("arg1", kuro_i18n::Arg::Str(&relative_time_span(last_updated_ms, now_ms).text()))])
 }
 
 /// `relative_time_span`: `Never` for an unset timestamp, `JustNow` under a minute, else minutes, hours or days.

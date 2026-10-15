@@ -44,7 +44,7 @@ mod tests {
         let prefs = Prefs::in_memory();
         let Preference::Group(g) = global_update_group(&prefs) else { panic!("a group") };
         assert_eq!(g.title, "Global update");
-        assert_eq!(titles(&g.items), ["Automatic updates", interval::FIRST_RUN_NOTE]);
+        assert_eq!(titles(&g.items), ["Automatic updates", &interval::first_run_note()]);
     }
 
     #[test]

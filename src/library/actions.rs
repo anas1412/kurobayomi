@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use kuro_data::entry::{Entry, EntryRepo};
+use kuro_i18n::{MsgKey, tr};
 use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
 use kuro_domain::category::bulk;
@@ -297,7 +298,9 @@ pub fn empty_library_action(page: EmptyPage, has_repositories: bool) -> Option<E
 }
 
 /// The toast when the continue button finds nothing to open (E-25).
-pub const NO_NEXT_ITEM: &str = "Next chapter not found";
+pub fn no_next_item() -> String {
+    tr(MsgKey::no_next_chapter)
+}
 
 /// The item the continue button opens: the first pending chapter or episode of the entry's own list, after the
 /// entry's filters and sort (the last pending one when sorted descending). `is_downloaded` takes the item id.
@@ -482,7 +485,7 @@ mod tests {
         let (_dir2, db2) = db();
         let row = manga_with_chapters(&db2, SORTING_NUMBER | SORT_ASC, &[(1, true, false)]);
         assert_eq!(next_item(&db2, &row, false, |_| false).expect("target"), None);
-        assert_eq!(NO_NEXT_ITEM, "Next chapter not found", "the toast text of E-25");
+        assert_eq!(no_next_item(), "Next chapter not found", "the toast text of E-25");
     }
 
     #[test]

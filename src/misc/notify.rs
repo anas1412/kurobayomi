@@ -199,8 +199,8 @@ pub fn progress_post(kind: Kind, title: &str, body: Option<&str>) -> Post {
 pub fn warning_post(kind: Kind) -> Post {
     Post {
         id: ids::library_size_warning(kind),
-        title: text::QUEUE_WARNING_TITLE.to_owned(),
-        body: Some(text::QUEUE_WARNING_TEXT.to_owned()),
+        title: text::queue_warning_title().to_owned(),
+        body: Some(text::queue_warning_text().to_owned()),
         low_priority: false,
         timeout: Some(Duration::from_millis(text::QUEUE_WARNING_TIMEOUT_MS)),
         tap: Some(Target::Url(text::QUEUE_WARNING_URL.to_owned())),
@@ -572,7 +572,7 @@ mod tests {
         let post = warning_post(Kind::Manga);
         assert_eq!(post.timeout, Some(Duration::from_secs(30)));
         assert_eq!(post.tap, Some(Target::Url(text::QUEUE_WARNING_URL.to_owned())));
-        assert_eq!(post.body.as_deref(), Some(text::QUEUE_WARNING_TEXT));
+        assert_eq!(post.body.as_deref(), Some(text::queue_warning_text()).as_deref());
         assert_ne!(post.id, warning_post(Kind::Anime).id);
     }
 
@@ -610,7 +610,7 @@ mod tests {
     fn hidden_content_suppresses_the_entry_notice_but_not_the_warning() {
         assert!(entry_post(Kind::Manga, &update(&[(1.0, 0)]), true).is_none());
         assert!(entry_post(Kind::Manga, &update(&[]), false).is_none());
-        assert_eq!(warning_post(Kind::Manga).title, text::QUEUE_WARNING_TITLE);
+        assert_eq!(warning_post(Kind::Manga).title, text::queue_warning_title());
     }
 
     #[test]

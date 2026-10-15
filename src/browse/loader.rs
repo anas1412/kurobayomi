@@ -148,7 +148,7 @@ async fn list_page(source: &Catalogue, store: Arc<dyn FavoriteStore>, query: Bro
     .and_then(|stored| stored)
     .map_err(|text| {
         tracing::warn!(source = name.as_str(), error = text.as_str(), "a listing could not be stored");
-        errors::GENERIC.to_owned()
+        errors::generic().to_owned()
     })
 }
 
@@ -239,7 +239,7 @@ mod tests {
         store.fail.lock().expect("lock").push("local_entry");
         let loader = SourceLoader::new(Catalogue::Manga(FakeCatalogue::new(3)), Arc::new(store));
         let error = run(loader.load(BrowseQuery::Popular, FilterList::default(), 1)).expect_err("store error");
-        assert_eq!(error, errors::GENERIC);
+        assert_eq!(error, errors::generic());
     }
 
     #[test]

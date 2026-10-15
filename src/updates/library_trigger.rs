@@ -2,14 +2,21 @@
 //! lock belong to the library's update pass. The app registers that runner here at start-up ([`install`]), and this
 //! module asks it to start a pass of one kind and turns the answer into the page's message. Pure apart from the host.
 
+use kuro_i18n::{MsgKey, tr};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use kuro_platform::kind::Kind;
 
-pub const UPDATING: &str = "Updating library";
-pub const ALREADY_RUNNING: &str = "An update is already running";
-pub const COULD_NOT_START: &str = "Could not start library update";
+pub fn updating() -> String {
+    tr(MsgKey::updating_library)
+}
+pub fn already_running() -> String {
+    tr(MsgKey::update_already_running)
+}
+pub fn could_not_start() -> String {
+    tr(MsgKey::library_update_could_not_start)
+}
 
 /// The app's update runner, as the Updates page sees it.
 #[derive(Clone)]
@@ -69,11 +76,11 @@ pub fn running(kind: Kind) -> bool {
 }
 
 /// The toast for an outcome.
-pub fn message(outcome: Outcome) -> &'static str {
+pub fn message(outcome: Outcome) -> String {
     match outcome {
-        Outcome::Started => UPDATING,
-        Outcome::AlreadyRunning => ALREADY_RUNNING,
-        Outcome::Refused => COULD_NOT_START,
+        Outcome::Started => updating(),
+        Outcome::AlreadyRunning => already_running(),
+        Outcome::Refused => could_not_start(),
     }
 }
 

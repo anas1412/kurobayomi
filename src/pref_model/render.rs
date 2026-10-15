@@ -130,7 +130,7 @@ fn confirm_logout(name: &str, on_logout: std::rc::Rc<dyn Fn()>) {
     let body = gtk::Label::builder().label(name).xalign(0.0).build();
     dialog::show(
         &crate::ui::window(),
-        strings::LOG_OUT_OF_TRACKER,
+        &strings::log_out_of_tracker(),
         &body,
         Some(&strings::ok()),
         move |confirmed| {

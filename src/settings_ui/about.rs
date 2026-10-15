@@ -25,9 +25,15 @@ use crate::settings_ui::clipboard::copy_to_clipboard;
 use crate::settings_ui::rows::{item, tap_item, text, TapRow};
 use crate::ui::{DialogButton, Role};
 
-pub const VERSION_TITLE: &str = "Version";
-pub const BUILD_TIME_TITLE: &str = "Build time";
-pub const MODEL_TITLE: &str = "Device model";
+pub fn version_title() -> String {
+    tr(MsgKey::ext_info_version)
+}
+pub fn build_time_title() -> String {
+    tr(MsgKey::about_build_time_title)
+}
+pub fn model_title() -> String {
+    tr(MsgKey::about_model_title)
+}
 
 /// The Version subtitle: the build's version line (`debug_info::current_version_text`) and its build time in brackets.
 pub fn version_subtitle() -> String {
@@ -44,14 +50,14 @@ pub fn current_debug_block() -> String {
     let read = |path: &str| std::fs::read_to_string(path).ok();
     let model = model_text(read("/sys/class/dmi/id/sys_vendor").as_deref(), read("/sys/class/dmi/id/product_name").as_deref());
     let gtk_version = format!("{}.{}.{}", gtk::major_version(), gtk::minor_version(), gtk::micro_version());
-    let app = app_rows(VERSION_TITLE, BUILD_TIME_TITLE);
-    let device = device_rows(MODEL_TITLE, model, &kuro_platform::system::facts(), gtk_version);
+    let app = app_rows(&version_title(), &build_time_title());
+    let device = device_rows(&model_title(), model, &kuro_platform::system::facts(), gtk_version);
     debug_block(&app, &device)
 }
 
 /// The Version row: the build subtitle, and a tap copies the debug information.
 pub fn version_row() -> PreferenceItem {
-    let mut row = text(VERSION_TITLE, Some(&version_subtitle()), true);
+    let mut row = text(&version_title(), Some(&version_subtitle()), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(std::rc::Rc::new(|| copy_to_clipboard(&current_debug_block())));
     }
@@ -66,7 +72,7 @@ fn update_center_row() -> PreferenceItem {
     use crate::appimage_update::{self as update, Status};
     use crate::pref_model::widgets::row::{self, RowSpec};
     PreferenceItem::Custom {
-        title: VERSION_TITLE.to_owned(),
+        title: version_title().to_owned(),
         build: Rc::new(|| {
             let button = gtk::Button::new();
             button.set_valign(gtk::Align::Center);
@@ -83,7 +89,7 @@ fn update_center_row() -> PreferenceItem {
             end.append(&cancel);
             end.append(&button);
             let subtitle = version_subtitle();
-            let built = row::build(RowSpec { title: VERSION_TITLE, subtitle: Some(&subtitle), icon: None, trailing: Some(end.upcast_ref()), on_click: None });
+            let built = row::build(RowSpec { title: &version_title(), subtitle: Some(&subtitle), icon: None, trailing: Some(end.upcast_ref()), on_click: None });
             let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
             built.row.set_child(None::<&gtk::Widget>);
             let state = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(built.subtitle.css_classes()).build();
@@ -137,13 +143,13 @@ fn update_center_row() -> PreferenceItem {
                 let installed = matches!(status, Status::Installed(_));
                 if installed {
                     button.set_icon_name("");
-                    button.set_label("Restart");
+                    button.set_label(&tr(MsgKey::ui_restart));
                     button.set_tooltip_text(None);
                     button.remove_css_class("flat");
                     button.add_css_class("suggested-action");
                 } else {
                     button.set_icon_name("view-refresh-symbolic");
-                    button.set_tooltip_text(Some(app_update::CHECK_ROW_TITLE));
+                    button.set_tooltip_text(Some(&app_update::check_row_title()));
                     button.add_css_class("flat");
                 }
                 true
@@ -171,14 +177,14 @@ fn startup_check_row() -> PreferenceItem {
             switch.set_active(!switch.is_active());
         }
     });
-    tap_item(STARTUP_CHECK_TITLE, Some(STARTUP_CHECK_SUBTITLE), true, Some(trailing), None, on_tap)
+    tap_item(&startup_check_title(), Some(&startup_check_subtitle()), true, Some(trailing), None, on_tap)
 }
 
 /// The switch that adds the AppImage to the applications menu or takes it out (`appimage_integrate`). When an AppImage
 /// manager already lists it, the row says so and has no switch.
 fn applications_menu_row() -> PreferenceItem {
     if crate::appimage_integrate::managed_elsewhere() {
-        return text(MENU_TITLE, Some("Your AppImage manager already lists it there"), false);
+        return text(&menu_title(), Some("Your AppImage manager already lists it there"), false);
     }
     let trailing: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
         let switch = gtk::Switch::builder().valign(gtk::Align::Center).active(crate::appimage_integrate::in_menu()).build();
@@ -197,13 +203,19 @@ fn applications_menu_row() -> PreferenceItem {
             switch.set_active(!switch.is_active());
         }
     });
-    tap_item(MENU_TITLE, Some("With its icon, like an installed app"), true, Some(trailing), None, on_tap)
+    tap_item(&menu_title(), Some("With its icon, like an installed app"), true, Some(trailing), None, on_tap)
 }
 
-pub const MENU_TITLE: &str = "Show in applications menu";
+pub fn menu_title() -> String {
+    tr(MsgKey::about_menu_title)
+}
 
-pub const STARTUP_CHECK_TITLE: &str = "Check for updates at startup";
-const STARTUP_CHECK_SUBTITLE: &str = "A newer version is downloaded in the background and runs after a restart";
+pub fn startup_check_title() -> String {
+    tr(MsgKey::about_startup_check_title)
+}
+fn startup_check_subtitle() -> String {
+    tr(MsgKey::about_startup_check_subtitle)
+}
 
 /// Whether the release check exists in this build (the updater feature and a repository).
 pub fn check_available() -> bool {
@@ -311,7 +323,7 @@ pub fn notes_dialog(heading: &str, version: &str, notes_markdown: &str, link: Op
 
     let buttons = match primary {
         Some(primary) => vec![DialogButton::cancel(tr(MsgKey::action_not_now)), primary],
-        None => vec![DialogButton::cancel("Close")],
+        None => vec![DialogButton::cancel(&tr(MsgKey::action_close))],
     };
     crate::ui::dialog(heading, &column, 520, buttons).present();
 }
@@ -356,14 +368,14 @@ fn check_tapped(row: &TapRow) {
 /// The Check for updates row. Where the build has no updater the row is a disabled twin, which drops the spec row.
 pub fn check_row() -> PreferenceItem {
     if !check_available() {
-        return text(app_update::CHECK_ROW_TITLE, None, false);
+        return text(&app_update::check_row_title(), None, false);
     }
     let spinner: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
         let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
         spinner.set_visible(false);
         spinner.upcast()
     });
-    tap_item(app_update::CHECK_ROW_TITLE, None, true, Some(spinner), None, Rc::new(check_tapped))
+    tap_item(&app_update::check_row_title(), None, true, Some(spinner), None, Rc::new(check_tapped))
 }
 
 /// This app's project page. Aniyomi's website, Discord and privacy page describe the Android app, so none is linked.
@@ -373,7 +385,7 @@ pub const ISSUES_URL: &str = "https://github.com/anas1412/kurobayomi/issues";
 /// What's new: the waiting update when there is one (its subtitle says which), else the notes of this build
 /// (`whats_new`). Off in a local build, which has no release to show.
 fn whats_new_row() -> PreferenceItem {
-    let mut row = text("What's new", crate::whats_new::row_subtitle().as_deref(), crate::whats_new::row_enabled());
+    let mut row = text(&tr(MsgKey::whats_new), crate::whats_new::row_subtitle().as_deref(), crate::whats_new::row_enabled());
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(crate::whats_new::open));
     }
@@ -393,7 +405,7 @@ fn links_row() -> PreferenceItem {
         }
         bar.upcast()
     });
-    PreferenceItem::Custom { title: "Links".to_owned(), build }
+    PreferenceItem::Custom { title: tr(MsgKey::ui_links).to_owned(), build }
 }
 
 /// The typed rows of the About page, merged over the spec rows of the same titles. The links row has no spec twin and
@@ -402,7 +414,7 @@ pub fn page_rows() -> Vec<Preference> {
     // an AppImage that updates itself shows it all on the Version row; another build keeps the plain row and the check row
     // (the disabled twin of the check row drops the spec's row of that title)
     let (version, check) = if crate::appimage_update::can_update() {
-        (update_center_row(), text(app_update::CHECK_ROW_TITLE, None, false))
+        (update_center_row(), text(&app_update::check_row_title(), None, false))
     } else {
         (version_row(), check_row())
     };
@@ -461,7 +473,7 @@ mod tests {
     #[test]
     fn the_check_row_is_a_dropped_twin_where_the_updater_is_not_built() {
         let row = check_row();
-        assert_eq!(row.title(), app_update::CHECK_ROW_TITLE);
+        assert_eq!(row.title(), app_update::check_row_title());
         assert_eq!(matches!(row, PreferenceItem::Custom { .. }), check_available());
         assert!(row.enabled() || !check_available());
     }
@@ -487,7 +499,7 @@ mod tests {
     #[test]
     fn the_version_row_carries_the_build_subtitle_and_copies_on_tap() {
         let PreferenceItem::Text { common, on_click, .. } = version_row() else { panic!("a text row") };
-        assert_eq!(common.title, VERSION_TITLE);
+        assert_eq!(common.title, version_title());
         assert_eq!(common.subtitle.as_deref(), Some(version_subtitle().as_str()));
         assert!(on_click.is_some());
     }

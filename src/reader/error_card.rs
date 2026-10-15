@@ -2,12 +2,15 @@
 //! in place of its image: the message, Retry (which loads the page again) and, only for an http or https image url,
 //! Open in browser. The rules are pure; [`card`] is the thin widget around them.
 
+use kuro_i18n::{MsgKey, tr};
 use gtk::prelude::*;
 
 use super::strings;
 
 /// The message of a failed page (`reader_error`).
-pub const PAGE_ERROR_TEXT: &str = "The image couldn't be loaded";
+pub fn page_error_text() -> String {
+    tr(MsgKey::decode_image_error)
+}
 
 /// Height of the webtoon's error card as a share of the viewport (B§8.5).
 pub const WEBTOON_CARD_RATIO: f64 = 0.8;
@@ -33,7 +36,7 @@ pub fn card(on_retry: impl Fn() + 'static, image_url: Option<String>) -> gtk::Bo
     root.set_valign(gtk::Align::Center);
     root.set_margin_start(16);
     root.set_margin_end(16);
-    let message = gtk::Label::new(Some(PAGE_ERROR_TEXT));
+    let message = gtk::Label::new(Some(&page_error_text()));
     message.set_justify(gtk::Justification::Center);
     message.set_wrap(true);
     root.append(&message);
@@ -78,6 +81,6 @@ mod tests {
 
     #[test]
     fn the_message_is_the_upstream_text() {
-        assert_eq!(PAGE_ERROR_TEXT, "The image couldn't be loaded");
+        assert_eq!(page_error_text(), "The image couldn't be loaded");
     }
 }

@@ -166,3 +166,207 @@ reader_pref_restore_after_crash = Restore the chapter and page after a crash
 
 # source: kurobayomi
 reader_requested_chapter_not_found = Requested chapter of id { NUMBER($arg1, useGrouping: "false") } not found in chapter list
+
+# source: kurobayomi
+browse_errors_offline = You're offline. Check your connection and try again.
+
+# source: kurobayomi
+browse_errors_generic = Something went wrong. Try again in a moment.
+
+# source: kurobayomi
+browse_errors_not_working_badge = Not working right now
+
+# source: kurobayomi
+browse_global_search_empty_hint = Search a source by title
+
+# source: kurobayomi
+browse_loading_sources = Loading sources…
+
+# source: kurobayomi
+entry_list_options_tooltip = List options
+
+# source: kurobayomi
+library_exclude_hint = Use -term to exclude
+
+# source: kurobayomi
+misc_interval_first_run_note = The first automatic update runs as soon as the conditions are met after you turn this on.
+
+# source: kurobayomi
+repos_adding_repo = Adding repository…
+
+# source: kurobayomi
+repos_could_not_add_repo = Could not add the repo
+
+# source: kurobayomi
+reader_still_loading = The page list is still loading. Try again in a moment.
+
+# source: kurobayomi
+crash_no_details = No crash details available
+
+# source: kurobayomi
+crash_subtitle = Kurobayomi ran into an unexpected error. Share the crash logs when you report the problem.
+
+# source: kurobayomi
+about_build_time_title = Build time
+
+# source: kurobayomi
+about_model_title = Device model
+
+# source: kurobayomi
+about_menu_title = Show in applications menu
+
+# source: kurobayomi
+about_startup_check_title = Check for updates at startup
+
+# source: kurobayomi
+about_startup_check_subtitle = A newer version is downloaded in the background and runs after a restart
+
+# source: kurobayomi
+settings_auth_unlock_button = Unlock
+
+# source: kurobayomi
+settings_auth_wrong_passphrase = Wrong passphrase
+
+# source: kurobayomi
+settings_browse_source_languages = Source languages
+
+# source: kurobayomi
+browse_nsfw_refused = Authentication is required to change this setting
+
+# source: kurobayomi
+settings_chooser_unavailable = No file chooser available
+
+# source: kurobayomi
+settings_library_csv_failed = Could not export library
+
+# source: kurobayomi
+settings_maintenance_copied_text = Crash logs copied to the clipboard
+
+# source: kurobayomi
+settings_maintenance_failed_text = Failed to get logs
+
+# source: kurobayomi
+settings_notifications_new_items_title = Notify about new chapters and episodes
+
+# source: kurobayomi
+player_default_volume = Default volume
+
+# source: kurobayomi
+settings_storage_info = Holds downloads (Anime, Manga), backups and local folders. A new location is used for new downloads after a restart; files already there stay where they are.
+
+# source: kurobayomi
+settings_tracking_not_ready = Tracker services are not available yet
+
+# source: kurobayomi
+settings_tracking_waiting = Waiting for the browser login…
+
+# source: kurobayomi
+settings_usage_unavailable = Storage size unavailable
+
+# source: kurobayomi
+shell_incognito_label = Incognito
+
+# source: kurobayomi
+storage_storage_scanning = Scanning downloads…
+
+# source: kurobayomi
+storage_storage_empty_category = No downloads in this category
+
+# source: kurobayomi
+storage_storage_source_missing = Source not installed; files not deleted
+
+# source: kurobayomi
+storage_delete_source_missing = Source not installed, downloads were not deleted
+
+# source: kurobayomi
+history_row_open_details = Open details
+
+# source: kurobayomi
+history_row_remove_from_history = Remove from history
+
+# source: kurobayomi
+library_update_could_not_start = Could not start library update
+
+# source: kurobayomi
+ui_use_for_all_titles = Use for all titles
+
+# source: kurobayomi
+ui_download_all = Download all
+
+# source: kurobayomi
+ui_connect_anilist = Connect AniList
+
+# source: kurobayomi
+ui_tracking_keeps_your_progress_on_anilist = Tracking keeps your progress on AniList.
+
+# source: kurobayomi
+ui_stop_tracking = Stop tracking
+
+# source: kurobayomi
+ui_from_a_local_folder = From a local folder
+
+# source: kurobayomi
+ui_checking_the_downloaded_files_again = Checking the downloaded files again
+
+# source: kurobayomi
+ui_compact = Compact
+
+# source: kurobayomi
+ui_restart = Restart
+
+# source: kurobayomi
+ui_links = Links
+
+# source: kurobayomi
+ui_failed_to_reindex_downloads = Failed to reindex downloads
+
+# source: kurobayomi
+ui_search_instead = Search instead
+
+# source: kurobayomi
+ui_restart_kurobayomi_to_use_the_new_version = Restart Kurobayomi to use the new version
+
+# source: kurobayomi
+ui_could_not_load_whats_new = Could not load what's new
+
+# source: kurobayomi
+ui_new = New
+
+# source: kurobayomi
+ui_update_waiting_open_about = An update is waiting: open About, What's new
+
+# source: kurobayomi
+settings_log_out_of_tracker = Log out of this tracker?
+
+# source: kurobayomi
+repos_page_repos_empty = No repositories yet. Add a link someone gave you to get sources.
+
+# source: kurobayomi
+repos_page_add_title = Add a repository
+
+# source: kurobayomi
+repos_page_add_intro = Paste the repository link.
+
+# source: kurobayomi
+repos_page_input_label = Repository link
+
+# source: kurobayomi
+library_load_failed = Could not load the library
+
+# source: kurobayomi
+browse_migrate_tracks_always = Tracking data is always transferred.
+
+# source: kurobayomi
+browse_open_website = Open website
+
+# source: kurobayomi
+browse_search_options = Search options
+
+# source: kurobayomi
+storage_showing_latest_500 = Showing latest 500
+
+# source: kurobayomi
+ui_quit = Quit
+
+# source: kurobayomi
+ui_ascending_descending = Ascending / descending

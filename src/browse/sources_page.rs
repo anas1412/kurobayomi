@@ -224,7 +224,7 @@ fn loading_sources() -> gtk::Box {
     let spinner = crate::ui::loading(crate::ui::LoadSize::Page);
     spinner.set_vexpand(false);
     page.append(&spinner);
-    page.append(&gtk::Label::new(Some(super::texts::LOADING_SOURCES)));
+    page.append(&gtk::Label::new(Some(&super::texts::loading_sources())));
     page
 }
 
@@ -233,7 +233,7 @@ fn row_menu(nav: &SourcesNav, id: i64, home: Option<String>) -> Vec<Item> {
     let mut items = vec![Item::new(super::texts::OPEN, 0, move || open(id, BrowseQuery::Popular))];
     if let Some(url) = home {
         let open_url = Rc::clone(&nav.open_url);
-        items.push(Item::new(super::texts::OPEN_WEBSITE, 0, move || open_url(&url)));
+        items.push(Item::new(super::texts::open_website(), 0, move || open_url(&url)));
     }
     items
 }
@@ -299,7 +299,7 @@ pub(crate) mod tests {
         let plain = row_menu(&nav, 1, None);
         assert_eq!(plain.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN]);
         let both = row_menu(&nav, 2, Some("https://two.test".into()));
-        assert_eq!(both.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN, crate::browse::texts::OPEN_WEBSITE]);
+        assert_eq!(both.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN, &crate::browse::texts::open_website()]);
         for item in &both {
             (item.run)();
         }

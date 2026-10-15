@@ -34,7 +34,9 @@ pub const NOT_INCLUDED: &str = "Not included";
 pub const INCLUDED: &str = "Included";
 #[cfg(test)]
 pub const EXCLUDED: &str = "Excluded";
-pub const LOG_OUT_OF_TRACKER: &str = "Log out of this tracker?";
+pub fn log_out_of_tracker() -> String {
+    tr(MsgKey::settings_log_out_of_tracker)
+}
 #[cfg(test)]
 pub const COULD_NOT_SAVE: &str = "Could not save this setting";
 
@@ -54,7 +56,7 @@ mod tests {
     #[test]
     fn the_kurobayomi_only_words_are_the_proposal_text() {
         assert_eq!([NOT_INCLUDED, INCLUDED, EXCLUDED], ["Not included", "Included", "Excluded"]);
-        assert_eq!(LOG_OUT_OF_TRACKER, "Log out of this tracker?");
+        assert_eq!(log_out_of_tracker(), "Log out of this tracker?");
         assert_eq!(COULD_NOT_SAVE, "Could not save this setting");
     }
 }

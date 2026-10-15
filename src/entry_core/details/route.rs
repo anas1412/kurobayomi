@@ -422,7 +422,7 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
     stack.add_named(&ready, Some("ready"));
 
     let (episode_spec, season_spec) = (list_options::item_spec(kind), list_options::season_spec());
-    let options = ViewOptions::new(list_options::TOOLTIP, &episode_spec.sections());
+    let options = ViewOptions::new(&list_options::tooltip(), &episode_spec.sections());
     let refresh_button = crate::ui::refresh_button(&tr(MsgKey::action_webview_refresh));
     // the header row every page shares (`ui::HeaderActions`); the "more" menu holds the items `overflow_menu::items` gives
     // for this entry and its source (T-39a-075), and Download all is in the head of the list
@@ -1842,7 +1842,7 @@ mod tests {
             let options: Vec<gtk::MenuButton> = descendants(page.upcast_ref())
                 .into_iter()
                 .filter_map(|w| w.downcast::<gtk::MenuButton>().ok())
-                .filter(|b| b.tooltip_text().as_deref() == Some(list_options::TOOLTIP))
+                .filter(|b| b.tooltip_text().as_deref() == Some(&list_options::tooltip()))
                 .collect();
             assert_eq!(options.len(), 1, "one list options button");
             let labels = crate::widgets::view_options::menu_labels(&options[0].menu_model().expect("the menu"));

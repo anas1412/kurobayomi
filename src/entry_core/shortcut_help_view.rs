@@ -1,6 +1,7 @@
 //! The in-app shortcut help dialog (T-38a-046): a two-column list of `shortcuts::HELP`, opened with F1 or `?` on the
 //! manga and anime details pages.
 
+use kuro_i18n::{MsgKey, tr};
 use gtk::prelude::*;
 use gtk::Label;
 
@@ -26,7 +27,7 @@ pub fn grid() -> gtk::Grid {
 
 /// Opens the dialog.
 pub fn open() {
-    let buttons = vec![DialogButton::new("Close", Role::Suggested, || {})];
+    let buttons = vec![DialogButton::new(&tr(MsgKey::action_close), Role::Suggested, || {})];
     ui::dialog("Keyboard shortcuts", &grid(), 420, buttons).present();
 }
 

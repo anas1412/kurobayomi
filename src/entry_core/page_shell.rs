@@ -51,7 +51,7 @@ pub fn item_header_row() -> ItemHeaderRow {
     // the inset of a card (`list_view`), so the count lines up with the first row
     row.set_margin_start(16);
     row.set_margin_end(16);
-    let download_all = Button::builder().label("Download all").css_classes(["flat"]).valign(gtk::Align::Center).visible(false).build();
+    let download_all = Button::builder().label(&tr(MsgKey::ui_download_all)).css_classes(["flat"]).valign(gtk::Align::Center).visible(false).build();
     row.append(&count);
     row.append(&missing);
     row.append(&download_all);

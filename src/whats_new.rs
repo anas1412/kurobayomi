@@ -4,6 +4,7 @@
 //! After an update, the first start shows the notes of the new build once; the build of the last run is kept in
 //! `Paths::last_build_file`. A local build has no channel build and shows none of this.
 
+use kuro_i18n::{MsgKey, tr};
 use std::cell::RefCell;
 use std::time::Duration;
 
@@ -91,8 +92,8 @@ fn refresh_pills() {
 
 /// The "New" pill for the sidebar's About row, shown while an update notice is unseen.
 pub fn pill() -> gtk::Label {
-    let pill = gtk::Label::builder().label("New").css_classes(["kb-nav-badge"]).valign(gtk::Align::Center).visible(unseen()).build();
-    pill.set_tooltip_text(Some("An update is waiting: open About, What's new"));
+    let pill = gtk::Label::builder().label(&tr(MsgKey::ui_new)).css_classes(["kb-nav-badge"]).valign(gtk::Align::Center).visible(unseen()).build();
+    pill.set_tooltip_text(Some(&tr(MsgKey::ui_update_waiting_open_about)));
     PILLS.with(|pills| pills.borrow_mut().push(pill.downgrade()));
     pill
 }
@@ -139,13 +140,13 @@ pub fn open() {
         Some(Notice::Stable(release)) => crate::settings_ui::about::show_update(&release),
         Some(Notice::Nightly(new)) => {
             let Some(Build::Nightly(running)) = Build::current() else { return };
-            let restart_button = DialogButton::new("Restart", Role::Suggested, restart);
+            let restart_button = DialogButton::new(&tr(MsgKey::ui_restart), Role::Suggested, restart);
             fetch(move || commits_between(&running, &new).map(|c| (commits_markdown(&c), new)), move |(notes, new)| {
                 notes_dialog("Nightly update installed", &format!("Nightly {}", short(&new)), &notes, None, Some(restart_button));
             });
         }
         Some(Notice::StableInstalled(version)) => {
-            let restart_button = DialogButton::new("Restart", Role::Suggested, restart);
+            let restart_button = DialogButton::new(&tr(MsgKey::ui_restart), Role::Suggested, restart);
             fetch(move || stable_notes(&version).map(|notes| (notes, version)), move |((body, url), version)| {
                 notes_dialog("Update installed", &format!("Kurobayomi {version}"), &body, Some(&url), Some(restart_button));
             });
@@ -207,7 +208,7 @@ pub fn restart() {
     if relaunched {
         crate::ui::window().close();
     } else {
-        crate::toast::notify("Restart Kurobayomi to use the new version");
+        crate::toast::notify(&tr(MsgKey::ui_restart_kurobayomi_to_use_the_new_version));
     }
 }
 
@@ -226,7 +227,7 @@ fn fetch<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 's
             Ok(Ok(value)) => done(value),
             Ok(Err(error)) => {
                 tracing::debug!(%error, "What's new could not be loaded");
-                crate::toast::notify("Could not load what's new");
+                crate::toast::notify(&tr(MsgKey::ui_could_not_load_whats_new));
             }
             Err(_) => {}
         }

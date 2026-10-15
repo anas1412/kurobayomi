@@ -1,6 +1,7 @@
 //! Browse rows this module binds to the typed preferences: the Source languages filter and the extension repo rows
 //! with their counts (task T-47a-062) of the Sources group, and the NSFW (18+) group (task T-47a-061). The two "hide
 //! entries already in library" switches are cut (settings diet).
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use kuro_prefs::pref::Pref;
@@ -11,12 +12,24 @@ use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::auth;
 use crate::settings_ui::rows::{group, info, multi_choice, switch_with, text};
 
-pub const SOURCE_LANGUAGES_TITLE: &str = "Source languages";
-pub const NSFW_SUBTITLE: &str = "Requires app restart to take effect";
-pub const NSFW_INFO: &str = "This does not prevent unofficial or potentially incorrectly flagged extensions from surfacing NSFW (18+) content within the app.";
-pub const NSFW_GATE_TITLE: &str = "NSFW (18+) sources";
-pub const NSFW_REFUSED: &str = "Authentication is required to change this setting";
-pub const REPOS_TITLE: &str = "Repositories";
+pub fn source_languages_title() -> String {
+    tr(MsgKey::settings_browse_source_languages)
+}
+pub fn nsfw_subtitle() -> String {
+    tr(MsgKey::requires_app_restart)
+}
+pub fn nsfw_info() -> String {
+    tr(MsgKey::parental_controls_info)
+}
+pub fn nsfw_gate_title() -> String {
+    tr(MsgKey::pref_category_nsfw_content)
+}
+pub fn nsfw_refused() -> String {
+    tr(MsgKey::browse_nsfw_refused)
+}
+pub fn repos_title() -> String {
+    tr(MsgKey::label_extension_repos)
+}
 pub const REPOS_SCREEN: &str = "settings_extension_repos";
 
 /// The number of repository links the one repo row shows.
@@ -43,7 +56,7 @@ pub fn source_languages_row(prefs: &Prefs) -> PreferenceItem {
     kuro_i18n::source_names::sort_keys(&mut keys);
     let labels: Vec<String> = keys.iter().map(|key| kuro_i18n::source_names::display_name(key)).collect();
     let options: Vec<(&str, &str)> = keys.iter().map(String::as_str).zip(labels.iter().map(String::as_str)).collect();
-    multi_choice(SOURCE_LANGUAGES_TITLE, pref, &options, true)
+    multi_choice(&source_languages_title(), pref, &options, true)
 }
 
 /// The Sources group, the NSFW (18+) group. `counts` is the number of repository links the repo row shows.
@@ -53,14 +66,14 @@ pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
             "Sources",
             vec![
                 source_languages_row(prefs),
-                repo_row(REPOS_TITLE, counts.repos, REPOS_SCREEN),
+                repo_row(&repos_title(), counts.repos, REPOS_SCREEN),
             ],
         ),
         group(
             "NSFW (18+) sources",
             vec![
                 nsfw_switch("Show in sources and extensions lists", &prefs.sources.show_nsfw_source),
-                info(NSFW_INFO),
+                info(&nsfw_info()),
             ],
         ),
     ]
@@ -79,13 +92,13 @@ fn repo_row(title: &str, count: i64, screen: &'static str) -> PreferenceItem {
 /// The NSFW switch: a change passes the unlock confirm (T-47a-068); a refused or cancelled unlock keeps the value.
 fn nsfw_switch(title: &str, pref: &Pref<bool>) -> PreferenceItem {
     let veto: Veto<bool> = bind::veto(move |_on: bool| async move {
-        let confirmed = auth::confirm(NSFW_GATE_TITLE, auth::CONFIRM_LOCK_CHANGE).await;
+        let confirmed = auth::confirm(&nsfw_gate_title(), &auth::confirm_lock_change()).await;
         if !confirmed {
-            crate::toast::notify(NSFW_REFUSED);
+            crate::toast::notify(nsfw_refused());
         }
         Ok(confirmed)
     });
-    switch_with(title, Some(NSFW_SUBTITLE), pref, true, veto)
+    switch_with(title, Some(&nsfw_subtitle()), pref, true, veto)
 }
 
 #[cfg(test)]
@@ -108,7 +121,7 @@ mod tests {
         let tree = page_rows(&prefs, RepoCounts::default());
         let sources = group_of(&tree, "Sources");
         let titles: Vec<&str> = sources.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, [SOURCE_LANGUAGES_TITLE, REPOS_TITLE]);
+        assert_eq!(titles, [source_languages_title(), repos_title()]);
         let PreferenceItem::MultiSelect { pref, entries, .. } = &sources.items[0] else { panic!("a multi-select") };
         assert_eq!(pref.key(), prefs.sources.enabled_languages.key());
         assert!(entries.iter().any(|(key, _)| key == "all") && entries.iter().any(|(key, _)| key == "en"));
@@ -123,7 +136,7 @@ mod tests {
         let tree = page_rows(&Prefs::in_memory(), RepoCounts { repos: 3 });
         let sources = group_of(&tree, "Sources");
         let PreferenceItem::Text { common, on_click } = &sources.items[1] else { panic!("an action row") };
-        assert_eq!(common.title, REPOS_TITLE);
+        assert_eq!(common.title, repos_title());
         assert_eq!(common.subtitle.as_deref(), Some("3 repos"));
         assert!(on_click.is_some());
     }
@@ -134,9 +147,9 @@ mod tests {
         let nsfw = group_of(&tree, "NSFW (18+) sources");
         let PreferenceItem::Switch { common, pref, .. } = &nsfw.items[0] else { panic!("a switch") };
         assert_eq!(common.title, "Show in sources and extensions lists");
-        assert_eq!(common.subtitle.as_deref(), Some(NSFW_SUBTITLE));
+        assert_eq!(common.subtitle.as_deref(), Some(nsfw_subtitle()).as_deref());
         assert!(pref.get(), "shown by default");
-        assert!(matches!(&nsfw.items[1], PreferenceItem::Info { text, .. } if text == NSFW_INFO));
+        assert!(matches!(&nsfw.items[1], PreferenceItem::Info { text, .. } if *text == nsfw_info()));
     }
 
     #[test]

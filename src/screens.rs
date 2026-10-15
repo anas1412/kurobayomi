@@ -1,5 +1,6 @@
 // Hand-built screens. Labels, menus, sheets and dialogs come from spec/*.json; layout follows the
 // "notes" Aniyomi layouts. Anything without a builder here falls back to ui::generic.
+use kuro_i18n::{MsgKey, tr};
 use crate::ui::*;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
@@ -257,7 +258,7 @@ fn downloads_view(kind: Kind) -> Built {
             crate::ui::spin_once(button);
             if let Some(downloads) = crate::shell::host::Shell::get().and_then(|shell| shell.download_service()) {
                 downloads.reindex(Some(kind));
-                crate::toast::notify("Checking the downloaded files again");
+                crate::toast::notify(&tr(MsgKey::ui_checking_the_downloaded_files_again));
             }
         });
         let end = crate::ui::HeaderActions { search: Some(search), refresh: Some(refresh.upcast()), menu: vec![menu], ..Default::default() }.widgets();

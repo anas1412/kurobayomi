@@ -2,6 +2,7 @@
 //! rows and the trusted-extension revoke sit on Sources and tracking, the reindex, cover refresh and reader reset rows
 //! sit on Backup and restore, and the Share crash logs row sits on About. The verbose logging, DNS, user agent and
 //! onboarding rows are cut.
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -28,7 +29,7 @@ fn clear_cookies() {
 
 /// The "Clear cookies" row: empties the HTTP cookie jar and says "Cookies cleared".
 pub fn clear_cookies_row() -> PreferenceItem {
-    let mut row = text("Clear cookies", None, true);
+    let mut row = text(&tr(MsgKey::pref_clear_cookies), None, true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(clear_cookies));
     }
@@ -37,7 +38,7 @@ pub fn clear_cookies_row() -> PreferenceItem {
 
 /// The WebView data clear (the cache, cookies and local storage of the WebKit view).
 pub fn clear_webview_row() -> PreferenceItem {
-    let mut row = text("Clear WebView data", None, true);
+    let mut row = text(&tr(MsgKey::pref_clear_webview_data), None, true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(crate::settings::clear_webview_data));
     }
@@ -53,15 +54,15 @@ pub fn networking_rows() -> Vec<PreferenceItem> {
 pub fn reset_reader_settings() {
     let repo = EntryRepo::new(crate::data::app().db.clone());
     if kuro_domain::entries::viewer_flags::reset_viewer_flags(&repo, Kind::Manga) {
-        crate::toast::notify("All reader settings reset");
+        crate::toast::notify(&tr(MsgKey::pref_reset_viewer_flags_success));
     } else {
-        crate::toast::notify("Couldn't reset reader settings");
+        crate::toast::notify(&tr(MsgKey::pref_reset_viewer_flags_error));
     }
 }
 
 /// The "Reset per-series reader settings" row. The anime equivalent is not offered (Android parity).
 pub fn reset_reader_row() -> PreferenceItem {
-    let mut row = text("Reset per-series reader settings", Some("Resets reading mode of all series"), true);
+    let mut row = text(&tr(MsgKey::pref_reset_viewer_flags), Some("Resets reading mode of all series"), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(reset_reader_settings));
     }
@@ -71,9 +72,15 @@ pub fn reset_reader_row() -> PreferenceItem {
 /// How long the Share crash logs row shows its success and failure status before the subtitle comes back.
 const COPIED_STATUS: std::time::Duration = std::time::Duration::from_secs(4);
 const FAILED_STATUS: std::time::Duration = std::time::Duration::from_secs(2);
-const SHARE_SUBTITLE: &str = "Saves error logs to a file for sharing with the developers";
-const COPIED_TEXT: &str = "Crash logs copied to the clipboard";
-const FAILED_TEXT: &str = "Failed to get logs";
+fn share_subtitle() -> String {
+    tr(MsgKey::pref_dump_crash_logs_summary)
+}
+fn copied_text() -> String {
+    tr(MsgKey::settings_maintenance_copied_text)
+}
+fn failed_text() -> String {
+    tr(MsgKey::settings_maintenance_failed_text)
+}
 
 /// The debug block of the crash dump. Components this build has not loaded say `not loaded`, as the crash report does.
 fn dump_debug_info() -> kuro_core::crash_dump::DebugInfo {
@@ -140,16 +147,16 @@ fn share_crash_logs(row: &gtk::Widget, subtitle: &gtk::Label) {
         let (text, shown) = match done {
             Ok((path, text)) => {
                 reveal_dump(&path, &text);
-                (COPIED_TEXT, COPIED_STATUS)
+                (copied_text(), COPIED_STATUS)
             }
             Err(err) => {
                 tracing::warn!(%err, "the crash logs could not be written");
-                (FAILED_TEXT, FAILED_STATUS)
+                (failed_text(), FAILED_STATUS)
             }
         };
-        crate::pref_model::widgets::row::set_subtitle(&subtitle, Some(text));
+        crate::pref_model::widgets::row::set_subtitle(&subtitle, Some(&text));
         row.set_sensitive(true);
-        gtk::glib::timeout_add_local_once(shown, move || crate::pref_model::widgets::row::set_subtitle(&subtitle, Some(SHARE_SUBTITLE)));
+        gtk::glib::timeout_add_local_once(shown, move || crate::pref_model::widgets::row::set_subtitle(&subtitle, Some(&share_subtitle())));
     });
 }
 
@@ -157,9 +164,9 @@ fn share_crash_logs(row: &gtk::Widget, subtitle: &gtk::Label) {
 pub fn share_crash_logs_row() -> PreferenceItem {
     use crate::pref_model::widgets::row::{self, RowSpec};
     PreferenceItem::Custom {
-        title: "Share crash logs".to_owned(),
+        title: tr(MsgKey::pref_dump_crash_logs).to_owned(),
         build: Rc::new(|| {
-            let built = row::build(RowSpec { title: "Share crash logs", subtitle: Some(SHARE_SUBTITLE), icon: None, trailing: None, on_click: None });
+            let built = row::build(RowSpec { title: "Share crash logs", subtitle: Some(&share_subtitle()), icon: None, trailing: None, on_click: None });
             let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
             built.row.set_child(None::<&gtk::Widget>);
             content.set_focusable(true);
@@ -194,15 +201,15 @@ fn reindex_downloads() {
     match crate::shell::host::Shell::get().and_then(|shell| shell.download_service()) {
         Some(downloads) => {
             downloads.reindex(None);
-            crate::toast::notify("Downloads index invalidated");
+            crate::toast::notify(&tr(MsgKey::download_cache_invalidated));
         }
-        None => crate::toast::notify("Failed to reindex downloads"),
+        None => crate::toast::notify(&tr(MsgKey::ui_failed_to_reindex_downloads)),
     }
 }
 
 /// The Reindex downloads row (task T-47a-074).
 pub fn reindex_downloads_row() -> PreferenceItem {
-    let mut row = text("Reindex downloads", Some("Force app to recheck downloaded chapters and episodes"), true);
+    let mut row = text(&tr(MsgKey::pref_invalidate_download_cache), Some("Force app to recheck downloaded chapters and episodes"), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(reindex_downloads));
     }
@@ -220,7 +227,7 @@ pub fn refresh_covers() {
 
 /// The Refresh library covers row (task T-47a-079).
 pub fn refresh_covers_row() -> PreferenceItem {
-    let mut row = text("Refresh library covers", None, true);
+    let mut row = text(&tr(MsgKey::pref_refresh_library_covers), None, true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(refresh_covers));
     }
@@ -236,7 +243,7 @@ pub fn data_rows() -> Vec<PreferenceItem> {
 /// page is redrawn. The extension lists read the set when they are shown, so nothing waits for a restart.
 pub fn revoke_trust_row(prefs: &Prefs, changed: Rc<dyn Fn()>) -> PreferenceItem {
     let trusted = prefs.sources.trusted_extensions.clone();
-    let mut row = text("Revoke trusted unknown extensions", None, true);
+    let mut row = text(&tr(MsgKey::ext_revoke_trust), None, true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(move || match trusted.set(std::collections::BTreeSet::new()) {
             Ok(()) => changed(),

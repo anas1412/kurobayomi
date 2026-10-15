@@ -1,6 +1,7 @@
 //! The one notification switch of the Library page: Notify about new chapters and episodes. It stores into the
 //! `muted_notification_channels` set (the channel is muted while the switch is off), which the app notifier reads on
 //! every send, so a backup of the 13-channel list still imports. The other channels follow the system settings.
+use kuro_i18n::{MsgKey, tr};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -13,7 +14,9 @@ use crate::settings_ui::rows::tap_item;
 /// The channel the switch turns on or off.
 pub const NEW_ITEMS_CHANNEL: &str = "new_chapters_episodes_channel";
 /// The title of the switch.
-pub const NEW_ITEMS_TITLE: &str = "Notify about new chapters and episodes";
+pub fn new_items_title() -> String {
+    tr(MsgKey::settings_notifications_new_items_title)
+}
 
 /// `muted` with the new-items channel added or taken out; every other channel keeps its state.
 fn with_channel_muted(muted: &BTreeSet<String>, mute: bool) -> BTreeSet<String> {
@@ -46,7 +49,7 @@ pub fn notify_row(base: &BasePrefs) -> PreferenceItem {
             switch.set_active(!switch.is_active());
         }
     });
-    tap_item(NEW_ITEMS_TITLE, None, true, Some(trailing), None, on_tap)
+    tap_item(&new_items_title(), None, true, Some(trailing), None, on_tap)
 }
 
 #[cfg(test)]
@@ -70,6 +73,6 @@ mod tests {
     #[test]
     fn the_row_has_the_diet_title() {
         let prefs = kuro_prefs::prefs::Prefs::in_memory();
-        assert_eq!(notify_row(&prefs.base).title(), NEW_ITEMS_TITLE);
+        assert_eq!(notify_row(&prefs.base).title(), new_items_title());
     }
 }

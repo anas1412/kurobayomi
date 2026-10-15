@@ -1,5 +1,6 @@
 //! The chapter and episode page cache of Data and storage (task T-47a-089): its size, clearing it (the journal file
 //! stays, as Aniyomi's `ChapterCache` keeps it) and the messages. The auto-clear switch is in `data_storage_rows`.
+use kuro_i18n::{MsgKey, tr};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -63,7 +64,7 @@ pub fn cleared_message(result: &io::Result<usize>) -> String {
 pub fn clear_row(changed: Rc<dyn Fn()>) -> PreferenceItem {
     let dir = cache_dir();
     let used = dir.as_deref().map(used_bytes).unwrap_or(0);
-    let mut row = text("Clear chapter and episode cache", Some(&format!("Used: {}", si_size(used))), true);
+    let mut row = text(&tr(MsgKey::pref_clear_chapter_cache), Some(&format!("Used: {}", si_size(used))), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(move || {
             let result = match &dir {

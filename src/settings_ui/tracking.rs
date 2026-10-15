@@ -10,6 +10,7 @@
 //!
 //! Decisions: a failed credentials login keeps the old session and the dialog open (the rule of
 //! `kuro_track::dialog`, which does not port Aniyomi's logout on failure).
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -27,11 +28,17 @@ use crate::settings_ui::rows::{group, info, item, switch, tap_item, TapRow};
 use crate::settings_ui::tracker_host::{self, now_ms, Host};
 
 /// Shown when a row is tapped before the tracker services are built, or when they could not be.
-pub const NOT_READY: &str = "Tracker services are not available yet";
+pub fn not_ready() -> String {
+    tr(MsgKey::settings_tracking_not_ready)
+}
 /// The subtitle of a browser login that waits for its redirect.
-pub const WAITING: &str = "Waiting for the browser login…";
+pub fn waiting_text() -> String {
+    tr(MsgKey::settings_tracking_waiting)
+}
 /// The info text under the tracker rows (`tracking_info`).
-pub const TRACKING_INFO: &str = "One-way sync to update the chapter progress in external tracker services. Set up tracking for individual entries from their tracking button.";
+pub fn tracking_info() -> String {
+    tr(MsgKey::tracking_info)
+}
 
 /// Whether the login button is enabled: both fields have text and no login is in flight.
 pub fn login_enabled(username: &str, password: &str, in_flight: bool) -> bool {
@@ -53,7 +60,7 @@ fn open_login_dialog(tracker: Arc<dyn Tracker>, changed: Rc<dyn Fn()>) {
     let form = LoginForm::for_tracker(tracker.as_ref());
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let user = gtk::Entry::builder().placeholder_text(username_label(tracker.id())).text(&form.username).build();
-    let pass = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("Password").text(&form.password).build();
+    let pass = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text(&tr(MsgKey::password)).text(&form.password).build();
     column.append(&user);
     column.append(&pass);
     let shown: Rc<std::cell::RefCell<Option<dialog::Dialog>>> = Rc::default();
@@ -135,7 +142,7 @@ fn open_logout_dialog(tracker: Arc<dyn Tracker>, changed: Rc<dyn Fn()>) {
 /// What a tap on a login row does: the decision is `kuro_track::login_rows::tap_row`, this carries it out.
 fn tapped(index: usize, changed: &Rc<dyn Fn()>) {
     let Some(host) = tracker_host::host() else {
-        crate::toast::notify(NOT_READY);
+        crate::toast::notify(not_ready());
         return;
     };
     let Some(view) = login_row_views(&host.manager).get(index).copied() else { return };
@@ -188,7 +195,7 @@ fn subtitle(host: Option<&Host>, row: LoginRow) -> Option<String> {
     let waiting = host.is_waiting(row.tracker, now_ms()) && !tracker.is_logged_in();
     row_subtitle(tracker.as_ref(), waiting)
         .map(|key| english(&key))
-        .or_else(|| waiting.then(|| WAITING.to_owned()))
+        .or_else(|| waiting.then(waiting_text))
 }
 
 /// The tracker row for one login row: a check when logged in, a subtitle for pending or expired states, and a tap that
@@ -229,7 +236,7 @@ pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
         .filter(|(_, view)| tracker_enabled(view.row.tracker))
         .map(|(index, view)| tracker_item(index, *view, host.as_deref(), &changed))
         .collect();
-    trackers.push(info(TRACKING_INFO));
+    trackers.push(info(&tracking_info()));
     let mut rows = warning_rows(host.as_ref().is_some_and(|host| host.fallback));
     rows.extend([
         item(switch("Update progress after reading/watching", &tracking.auto_update_track, true)),
@@ -284,7 +291,7 @@ mod tests {
             panic!("the Trackers group")
         };
         let names: Vec<&str> = trackers.items.iter().map(|row| row.title()).collect();
-        assert_eq!(names, ["AniList", TRACKING_INFO]);
+        assert_eq!(names, ["AniList", &tracking_info()]);
     }
 
     #[test]

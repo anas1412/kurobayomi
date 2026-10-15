@@ -1,6 +1,7 @@
 //! Notification texts of a library pass (behaviour 8.3, 8.5, 8.6, 8.7). Pure string builders; the notifier
 //! only posts them.
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
 pub const PROGRESS_TITLE_CHOP: usize = 40;
@@ -12,9 +13,12 @@ pub const MAX_LISTED_NUMBERS: usize = 5;
 pub const QUEUE_WARNING_THRESHOLD: usize = 60;
 /// How long the large-queue warning stays on screen.
 pub const QUEUE_WARNING_TIMEOUT_MS: u64 = 30_000;
-pub const QUEUE_WARNING_TITLE: &str = "Warning";
-pub const QUEUE_WARNING_TEXT: &str =
-    "Large updates harm sources and may lead to slower updates and also increased battery usage. Tap to learn more.";
+pub fn queue_warning_title() -> String {
+    tr(MsgKey::label_warning)
+}
+pub fn queue_warning_text() -> String {
+    tr(MsgKey::notification_size_warning)
+}
 /// The help page the warning opens (the Kotlin FAQ anchor, kept until the Kurobayomi site has its own).
 pub const QUEUE_WARNING_URL: &str =
     "https://aniyomi.org/docs/faq/library#why-am-i-warned-about-large-bulk-updates-and-downloads";

@@ -44,16 +44,20 @@ pub trait Ops<T>: Send + Sync + 'static {
         false
     }
     /// The text of the busy card the page shows over the window while `add` runs. `None` shows none.
-    fn busy_text(&self) -> Option<&'static str> {
+    fn busy_text(&self) -> Option<String> {
         None
     }
 }
 
 /// The busy card text while a repo link's index and sources download.
-pub const ADDING_REPO: &str = "Adding repository…";
+pub fn adding_repo() -> String {
+    tr(MsgKey::repos_adding_repo)
+}
 
 /// The toast of an add that failed for a reason the domain does not name (a deliberate deviation: Kotlin is silent).
-pub const COULD_NOT_ADD_REPO: &str = "Could not add the repo";
+pub fn could_not_add_repo() -> String {
+    tr(MsgKey::repos_could_not_add_repo)
+}
 
 /// The repository links of the Browse page (`docs/design/app-flow.md`): one https link to an `index.min.json` lists the
 /// sources. The links are kept in the `[sources]` preference, so a backup carries them.
@@ -79,7 +83,7 @@ pub fn repo_error_text(error: &RepoError) -> String {
         RepoError::Network(_) | RepoError::Status(_) => "The repo could not be reached".to_owned(),
         RepoError::TooMany { .. } => "The repo lists more than 10 sources of one kind".to_owned(),
         RepoError::Mismatch => "A source does not match its checksum in the repo index".to_owned(),
-        RepoError::Write(_) => COULD_NOT_ADD_REPO.to_owned(),
+        RepoError::Write(_) => could_not_add_repo().to_owned(),
         RepoError::Parse(_) | RepoError::BadId(_) | RepoError::BadChecksum(_) | RepoError::BadLink(_) | RepoError::TooLarge => {
             "The repo index is not valid".to_owned()
         }
@@ -91,8 +95,8 @@ impl Ops<RepoLink> for RepoOps {
         true
     }
 
-    fn busy_text(&self) -> Option<&'static str> {
-        Some(ADDING_REPO)
+    fn busy_text(&self) -> Option<String> {
+        Some(adding_repo())
     }
 
     fn card(&self, repo: &RepoLink) -> Card {
@@ -121,7 +125,7 @@ impl Ops<RepoLink> for RepoOps {
         }
         if let Err(error) = self.links.set(links.into_iter().collect()) {
             tracing::error!(%error, link, "saving the repo link failed");
-            return AddOutcome::Notice(COULD_NOT_ADD_REPO.to_owned());
+            return AddOutcome::Notice(could_not_add_repo().to_owned());
         }
         crate::recipe_sources::reload();
         crate::toast::notify(added_text(count));
@@ -213,10 +217,10 @@ mod tests {
         assert_eq!(repo_error_text(&RepoError::TooMany { kind: Kind::Manga, count: 11, limit: 10 }), "The repo lists more than 10 sources of one kind");
         assert_eq!(repo_error_text(&RepoError::Parse("x".into())), "The repo index is not valid");
         assert_eq!(repo_error_text(&RepoError::Mismatch), "A source does not match its checksum in the repo index");
-        assert_eq!(repo_error_text(&RepoError::Write("disk".into())), COULD_NOT_ADD_REPO);
+        assert_eq!(repo_error_text(&RepoError::Write("disk".into())), could_not_add_repo());
         let (_saved, ops) = repo_ops(&[]);
         assert!(ops.closes_on_submit(), "T-47b-024: Add closes the dialog at once");
-        assert_eq!(ops.busy_text(), Some("Adding repository…"));
+        assert_eq!(ops.busy_text(), Some("Adding repository…".to_owned()));
         assert_eq!((added_text(1), added_text(3)), ("Added 1 source".to_owned(), "Added 3 sources".to_owned()));
     }
 

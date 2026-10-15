@@ -10,7 +10,7 @@ use kuro_prefs::ui::StartScreen;
 
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::pref_model::widgets::theme_mode;
-use crate::settings_ui::rows::{enum_choice, group, REQUIRES_RESTART};
+use crate::settings_ui::rows::{enum_choice, group, requires_restart};
 
 /// The Theme mode row: System, Light and Dark as linked toggle buttons (`widgets::theme_mode`). A click stores the
 /// mode and applies it through `theme::apply`; a click on the selected segment writes nothing.
@@ -46,7 +46,7 @@ pub const START_SCREENS: [(StartScreen, &str); 5] = [
 pub fn start_screen_row(prefs: &Prefs) -> PreferenceItem {
     let mut row = enum_choice("Start Screen", &prefs.ui.start_screen, &START_SCREENS, true);
     if let PreferenceItem::BasicList { common, .. } = &mut row {
-        common.subtitle = Some(REQUIRES_RESTART.to_owned());
+        common.subtitle = Some(requires_restart());
     }
     row
 }
@@ -164,6 +164,6 @@ mod tests {
         let prefs = Prefs::in_memory();
         let PreferenceItem::BasicList { value, common, .. } = start_screen_row(&prefs) else { panic!("list") };
         assert_eq!(value, "ANIME");
-        assert_eq!(common.subtitle.as_deref(), Some(REQUIRES_RESTART));
+        assert_eq!(common.subtitle.as_deref(), Some(requires_restart().as_str()));
     }
 }

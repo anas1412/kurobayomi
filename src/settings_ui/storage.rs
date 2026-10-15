@@ -1,6 +1,7 @@
 //! Storage location row (tasks T-47a-088 and T-48a-051): the subtitle rule, the folder check, the info text and the
 //! "base folder not available" banner. The stored value is the base64 of the path bytes, as `StorageManager` writes
 //! it, so a folder chosen here is the one the backup, download and mpv-config code resolve.
+use kuro_i18n::{MsgKey, tr};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -16,14 +17,20 @@ use gtk::gio::prelude::FileExt;
 use crate::pref_model::model::PreferenceItem;
 use crate::settings_ui::rows::{info, text};
 
-pub const NO_LOCATION: &str = "No storage location set";
-pub const INFO_TEXT: &str = "Holds downloads (Anime, Manga), backups and local folders. A new location is used for new downloads after a restart; files already there stay where they are.";
-pub const REFUSED: &str = "Failed to acquire persistent folder access. The app may behave unexpectedly.";
+pub fn no_location() -> String {
+    tr(MsgKey::no_location_set)
+}
+pub fn info_text() -> String {
+    tr(MsgKey::settings_storage_info)
+}
+pub fn refused() -> String {
+    tr(MsgKey::file_picker_uri_permission_unsupported)
+}
 
 /// `No storage location set`, the stored path when it is usable, or `Invalid location: <path>`.
 pub fn subtitle(stored: &str, usable: bool) -> String {
     if stored.is_empty() {
-        NO_LOCATION.to_owned()
+        no_location().to_owned()
     } else if usable {
         stored.to_owned()
     } else {
@@ -50,11 +57,11 @@ pub fn is_readable_dir(path: &Path) -> bool {
 }
 
 /// A chosen folder is accepted when it is a directory the app can write to (a probe file is created and removed).
-pub fn accept_choice(path: &Path) -> Result<(), &'static str> {
+pub fn accept_choice(path: &Path) -> Result<(), String> {
     if !path.is_dir() {
-        return Err(REFUSED);
+        return Err(refused());
     }
-    tempfile::tempfile_in(path).map(drop).map_err(|_| REFUSED)
+    tempfile::tempfile_in(path).map(drop).map_err(|_| refused())
 }
 
 /// The storage manager over the stored base folder: the one resolver of the storage folders (downloads per kind,
@@ -66,12 +73,12 @@ pub fn manager(store: &PrefStore) -> Option<StorageManager> {
 }
 
 /// Stores `path` as the base folder and creates the mpv-config tree under it. A folder that cannot be used is refused.
-pub fn apply_choice(store: &PrefStore, path: &Path) -> Result<(), &'static str> {
+pub fn apply_choice(store: &PrefStore, path: &Path) -> Result<(), String> {
     accept_choice(path)?;
-    let manager = manager(store).ok_or(REFUSED)?;
+    let manager = manager(store).ok_or_else(refused)?;
     manager.set_base(path).map_err(|err| {
         tracing::warn!(%err, "the storage location could not be saved");
-        REFUSED
+        refused()
     })
 }
 
@@ -123,11 +130,11 @@ pub fn banner_row(prefs: &Prefs) -> Option<PreferenceItem> {
 pub fn rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<PreferenceItem> {
     let store = prefs.store().clone();
     let (shown, usable) = stored(prefs).unwrap_or_default();
-    let mut location = text("Storage location", Some(&subtitle(&shown, usable)), true);
+    let mut location = text(&tr(MsgKey::pref_storage_location), Some(&subtitle(&shown, usable)), true);
     if let PreferenceItem::Text { on_click, .. } = &mut location {
         *on_click = Some(Rc::new(move || choose_folder(store.clone(), Rc::clone(&changed))));
     }
-    vec![location, info(INFO_TEXT)]
+    vec![location, info(&info_text())]
 }
 
 #[cfg(test)]
@@ -136,7 +143,7 @@ mod tests {
 
     #[test]
     fn subtitle_covers_unset_valid_and_invalid() {
-        assert_eq!(subtitle("", false), NO_LOCATION);
+        assert_eq!(subtitle("", false), no_location());
         assert_eq!(subtitle("/data/kuro", true), "/data/kuro");
         assert_eq!(subtitle("/gone", false), "Invalid location: /gone");
     }
@@ -147,8 +154,8 @@ mod tests {
         assert_eq!(accept_choice(dir.path()), Ok(()));
         let file = dir.path().join("plain.txt");
         std::fs::write(&file, b"x").unwrap();
-        assert_eq!(accept_choice(&file), Err(REFUSED));
-        assert_eq!(accept_choice(&dir.path().join("missing")), Err(REFUSED));
+        assert_eq!(accept_choice(&file), Err(refused()));
+        assert_eq!(accept_choice(&dir.path().join("missing")), Err(refused()));
     }
 
     fn encoded(path: &str) -> kuro_prefs::values::PrefValue {
@@ -194,6 +201,6 @@ mod tests {
         }
         let raw = Pref::new(store.clone(), STORAGE_DIR_KEY, String::new()).get();
         assert_eq!(decode(&raw).as_deref(), Some(dir.path()));
-        assert_eq!(apply_choice(&store, &dir.path().join("missing")), Err(REFUSED));
+        assert_eq!(apply_choice(&store, &dir.path().join("missing")), Err(refused()));
     }
 }

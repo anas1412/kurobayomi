@@ -50,6 +50,8 @@ mod window_size;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]
+mod i18n_guard;
+#[cfg(test)]
 mod header_guard;
 mod updates;
 mod pref_model;

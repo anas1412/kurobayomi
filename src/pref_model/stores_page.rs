@@ -58,18 +58,26 @@ pub struct Texts {
 }
 
 /// Plain words for a first-time user: the Aniyomi strings ('repo', 'URL', 'index.min.json') are not.
-const REPOS_EMPTY: &str = "No repositories yet. Add a link someone gave you to get sources.";
-const ADD_TITLE: &str = "Add a repository";
-const ADD_INTRO: &str = "Paste the repository link.";
-const INPUT_LABEL: &str = "Repository link";
+fn repos_empty() -> String {
+    tr(MsgKey::repos_page_repos_empty)
+}
+fn add_title() -> String {
+    tr(MsgKey::repos_page_add_title)
+}
+fn add_intro() -> String {
+    tr(MsgKey::repos_page_add_intro)
+}
+fn input_label() -> String {
+    tr(MsgKey::repos_page_input_label)
+}
 
 impl Texts {
     pub fn repos() -> Self {
         Self {
-            empty: REPOS_EMPTY.to_owned(),
-            add_title: ADD_TITLE.to_owned(),
-            add_intro: Some(ADD_INTRO.to_owned()),
-            input_label: INPUT_LABEL.to_owned(),
+            empty: repos_empty().to_owned(),
+            add_title: add_title().to_owned(),
+            add_intro: Some(add_intro().to_owned()),
+            input_label: input_label().to_owned(),
             deep_link_intro: None,
             remove_title: tr(MsgKey::action_delete_repo),
             remove_body: super::stores_backend::repo_remove_body,
@@ -340,7 +348,7 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                     self.dispatch(Event::Dismiss);
                 }
                 // a spinner card over the window while the fetch runs, as the repo link has no dialog left to show it
-                let busy = ops.busy_text().map(crate::toast::busy);
+                let busy = ops.busy_text().map(|text| crate::toast::busy(&text));
                 glib::spawn_future_local(async move {
                     let outcome = gio::spawn_blocking(move || ops.add(&url)).await;
                     drop(busy);
@@ -663,10 +671,10 @@ mod tests {
     #[test]
     fn t_47b_016_the_texts_come_from_the_string_table() {
         let repos = Texts::repos();
-        assert_eq!(repos.empty, REPOS_EMPTY);
+        assert_eq!(repos.empty, repos_empty());
         assert_eq!(repos.add_title, "Add a repository");
         assert_eq!(repos.input_label, "Repository link");
-        assert_eq!(repos.add_intro.as_deref(), Some(ADD_INTRO));
+        assert_eq!(repos.add_intro.as_deref(), Some(add_intro()).as_deref());
     }
 
     #[test]

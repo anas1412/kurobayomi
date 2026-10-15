@@ -5,7 +5,7 @@
 use kuro_i18n::{MsgKey, tr};
 use kuro_source::SourceError;
 
-use crate::browse::errors::{GENERIC, Trouble, plain_message, says};
+use crate::browse::errors::{Trouble, generic, plain_message, says};
 
 /// A failure from the source fetch or the store. The variants are the cases `formattedMessage` distinguishes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,7 +56,7 @@ impl DetailError {
             Self::Cancelled => String::new(),
             Self::Other { class, message } => {
                 tracing::warn!(class = class.as_str(), message = message.as_deref().unwrap_or(""), "an entry page failure");
-                GENERIC.to_owned()
+                generic()
             }
         }
     }

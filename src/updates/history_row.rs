@@ -13,9 +13,13 @@ use kuro_domain::dates::item_row_text;
 use kuro_i18n::{MsgKey, tr};
 
 /// The right-click item that opens the entry's page (no catalogue key yet, as in `updates::copy`).
-pub const OPEN_DETAILS: &str = "Open details";
+pub fn open_details() -> String {
+    tr(MsgKey::history_row_open_details)
+}
 /// The right-click item that asks to remove the row, as the trash button does.
-pub const REMOVE_FROM_HISTORY: &str = "Remove from history";
+pub fn remove_from_history() -> String {
+    tr(MsgKey::history_row_remove_from_history)
+}
 
 /// The subtitle: `Ch. {n} - {time}` (or `Ep.`) when the unit number is above -1, else the time only.
 pub fn subtitle(prefix: &str, number: f64, time: &str) -> String {
@@ -79,8 +83,8 @@ fn menu(actions: &RowActions) -> Vec<Item> {
     let (resume, open, remove) = (actions.resume.clone(), actions.open_entry.clone(), actions.remove.clone());
     vec![
         Item::new(tr(MsgKey::action_resume), 0, move || resume()),
-        Item::new(OPEN_DETAILS, 0, move || open()),
-        Item::new(REMOVE_FROM_HISTORY, 1, move || remove()),
+        Item::new(open_details(), 0, move || open()),
+        Item::new(remove_from_history(), 1, move || remove()),
     ]
 }
 
@@ -97,7 +101,7 @@ mod tests {
         };
         let actions = RowActions { open_entry: call("open"), resume: call("resume"), remove: call("remove"), add_to_library: call("add") };
         let items = menu(&actions);
-        assert_eq!(items.iter().map(|i| i.label.clone()).collect::<Vec<_>>(), [tr(MsgKey::action_resume), OPEN_DETAILS.to_owned(), REMOVE_FROM_HISTORY.to_owned()]);
+        assert_eq!(items.iter().map(|i| i.label.clone()).collect::<Vec<_>>(), [tr(MsgKey::action_resume), open_details().to_owned(), remove_from_history().to_owned()]);
         for item in &items {
             (item.run)();
         }

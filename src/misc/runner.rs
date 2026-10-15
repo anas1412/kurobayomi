@@ -163,7 +163,7 @@ impl Host for ToastHost {
 
     fn show_queue_warning(&self, kind: Kind) {
         if !notify::post(notify::warning_post(kind)) {
-            crate::toast::notify(format!("{}: {}", text::QUEUE_WARNING_TITLE, text::QUEUE_WARNING_TEXT));
+            crate::toast::notify(format!("{}: {}", text::queue_warning_title(), text::queue_warning_text()));
         }
     }
 }

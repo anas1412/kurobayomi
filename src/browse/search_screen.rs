@@ -202,7 +202,7 @@ pub fn search_page(env: &SearchEnv, start: &Start, migrating: bool) -> (gtk::Wid
         edit_categories: Rc::new(move || super::glue::open_categories(kind)),
     };
     *flow_slot.borrow_mut() = Some(FavoriteFlow::new_for(Arc::clone(&env.store), page.widget(), hooks, kind));
-    page.set_hint(super::texts::GLOBAL_SEARCH_EMPTY_HINT);
+    page.set_hint(&super::texts::global_search_empty_hint());
     let hooks = RunnerHooks { changed: Rc::new(page.updater()), open_entry: Rc::clone(&env.replace_with_entry) };
     let loaders: Loaders = {
         let directory = Arc::clone(&directory);
@@ -478,7 +478,7 @@ pub(crate) mod tests {
     fn the_has_results_toggle_filters_the_open_page_and_is_not_stored() {
         // the search options menu: its button, and the dot that shows while a Show only filter is on
         fn options(root: &gtk::Widget) -> Option<(gtk::MenuButton, gtk::Widget)> {
-            if let Some(button) = root.downcast_ref::<gtk::MenuButton>().filter(|b| b.tooltip_text().as_deref() == Some(super::super::pages::SEARCH_OPTIONS)) {
+            if let Some(button) = root.downcast_ref::<gtk::MenuButton>().filter(|b| b.tooltip_text().as_deref() == Some(super::super::pages::search_options_label().as_str())) {
                 let dot = button.parent()?.last_child()?;
                 return Some((button.clone(), dot));
             }
@@ -587,7 +587,7 @@ pub(crate) mod tests {
             }
             find(&page).expect("search entry")
         };
-        assert_eq!(search.placeholder_text().as_deref(), Some(crate::browse::texts::GLOBAL_SEARCH_EMPTY_HINT), "T-41a-027: the anime hint");
+        assert_eq!(search.placeholder_text().as_deref(), Some(crate::browse::texts::global_search_empty_hint()).as_deref(), "T-41a-027: the anime hint");
     }
 
     pub(crate) fn smoke() {

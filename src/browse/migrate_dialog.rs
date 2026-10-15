@@ -206,7 +206,7 @@ pub fn show(slot: &DialogSlot, anchor: &impl IsA<gtk::Widget>, facts: Facts, sav
             row.append(&gtk::Label::builder().label(message).wrap(true).xalign(0.0).css_classes(["error"]).build());
             body.append(&row);
         }
-        None => body.append(&gtk::Label::builder().label(super::texts::MIGRATE_TRACKS_ALWAYS).xalign(0.0).css_classes(["dim-label"]).build()),
+        None => body.append(&gtk::Label::builder().label(super::texts::migrate_tracks_always()).xalign(0.0).css_classes(["dim-label"]).build()),
     }
     let error = gtk::Label::builder().visible(false).wrap(true).xalign(0.0).max_width_chars(50).css_classes(["error"]).build();
     body.append(&error);
@@ -394,7 +394,7 @@ pub(crate) mod tests {
             rig.log.borrow_mut().clear();
             let window = rig.plain(kind);
             assert_eq!(labels(&window), [Action::ShowEntry.label(kind), Action::Copy.label(kind), Action::Migrate.label(kind)], "{kind:?}");
-            let disclosure = all::<gtk::Label>(&window).into_iter().find(|l| l.label() == crate::browse::texts::MIGRATE_TRACKS_ALWAYS).expect("disclosure");
+            let disclosure = all::<gtk::Label>(&window).into_iter().find(|l| l.label() == crate::browse::texts::migrate_tracks_always()).expect("disclosure");
             assert!(disclosure.has_css_class("dim-label"), "{kind:?}: the tracking line is dim");
             let checks = all::<gtk::CheckButton>(&window);
             assert_eq!(checks.len(), 2, "{kind:?}: the items and the categories");

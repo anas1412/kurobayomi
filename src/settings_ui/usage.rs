@@ -2,6 +2,7 @@
 //! mount table, the usage state of each root (bar, caption, or "Storage size unavailable") and the SI size formatter.
 //! Mount points are read from `/proc/self/mountinfo` (proc(5)); sizes come from GIO, asked on a worker thread so a hung
 //! mount cannot block the page. The rows replace the one "Available: ... / Total: ..." row of the spec page.
+use kuro_i18n::{MsgKey, tr};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -16,7 +17,9 @@ pub const ROOT_FS_TYPES: [&str; 11] = ["ext2", "ext3", "ext4", "btrfs", "xfs", "
 pub const SIZE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The caption of a root whose size is unknown.
-pub const UNAVAILABLE: &str = "Storage size unavailable";
+pub fn unavailable() -> String {
+    tr(MsgKey::settings_usage_unavailable)
+}
 
 /// The mount table of this process.
 const MOUNT_INFO: &str = "/proc/self/mountinfo";
@@ -121,7 +124,7 @@ fn query(path: &Path) -> Option<Space> {
     Some(Space { total: info.attribute_uint64("filesystem::size"), available: info.attribute_uint64("filesystem::free") })
 }
 
-/// What a root's row shows: a bar at `fraction` with its caption, or no bar and [`UNAVAILABLE`].
+/// What a root's row shows: a bar at `fraction` with its caption, or no bar and [`unavailable()`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Usage {
     Bar { fraction: f64, caption: String },
@@ -194,7 +197,7 @@ fn root_widget(root: &Path, usage: &Usage) -> gtk::ListBoxRow {
             column.append(&bar);
             column.append(&dim(caption));
         }
-        Usage::Unavailable => column.append(&dim(UNAVAILABLE)),
+        Usage::Unavailable => column.append(&dim(&unavailable())),
     }
     gtk::ListBoxRow::builder().child(&column).activatable(false).selectable(false).build()
 }

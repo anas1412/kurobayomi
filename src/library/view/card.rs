@@ -2,6 +2,7 @@
 //! compact grid, none in the cover-only grid), and the List mode row. What shows is decided by `layout::card_model`;
 //! this file only places widgets, and the click handling lives in the view.
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 use gtk::prelude::*;
 use gtk::{Align, Orientation as O};
@@ -58,9 +59,9 @@ fn origin_badge(model: &CardModel) -> gtk::Box {
     let group = gtk::Box::new(O::Horizontal, SPACE_XS);
     if model.local {
         group.add_css_class("kb-badge");
-        group.set_tooltip_text(Some("From a local folder"));
+        group.set_tooltip_text(Some(&tr(MsgKey::ui_from_a_local_folder)));
         group.append(&gtk::Image::from_icon_name("folder-symbolic"));
-        group.append(&gtk::Label::new(Some(layout::LOCAL_BADGE)));
+        group.append(&gtk::Label::new(Some(&layout::local_badge())));
     } else if let Some(text) = &model.language {
         group.append(&badge(text, Some("Source language"), false));
     }
@@ -72,7 +73,7 @@ fn continue_button(mode: LibraryDisplayMode) -> gtk::Button {
     let button = gtk::Button::from_icon_name("media-playback-start-symbolic");
     button.set_css_classes(&["circular", "osd"]);
     button.set_size_request(size, size);
-    button.set_tooltip_text(Some("Resume"));
+    button.set_tooltip_text(Some(&tr(MsgKey::action_resume)));
     button
 }
 

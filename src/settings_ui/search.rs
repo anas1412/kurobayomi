@@ -1,5 +1,6 @@
 //! The contract every settings screen of this module meets (task T-47a-006), and the settings search (tasks T-47a-004
 //! and T-47a-008): the index of every row of the main and player screens, the matcher, and the results page.
+use kuro_i18n::{MsgKey, tr};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -197,7 +198,7 @@ fn scoped_index(player_only: bool) -> Vec<Row> {
 /// to type; a query with no hit says so.
 fn search_page(player_only: bool) -> Option<Built> {
     let col = crate::ui::column();
-    let entry = gtk::SearchEntry::builder().placeholder_text("Search settings").hexpand(true).build();
+    let entry = gtk::SearchEntry::builder().placeholder_text(&tr(MsgKey::action_search_settings)).hexpand(true).build();
     entry.update_property(&[gtk::accessible::Property::Label("Search settings")]);
     let results = crate::ui::boxed_list();
     results.set_visible(false);

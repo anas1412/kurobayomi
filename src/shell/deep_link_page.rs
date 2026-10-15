@@ -97,7 +97,7 @@ pub fn widget(state: &State, on_retry: impl Fn() + 'static, on_search_instead: i
             buttons.push(retry);
         }
         if shown.search_instead {
-            let search = gtk::Button::with_label("Search instead");
+            let search = gtk::Button::with_label(&tr(MsgKey::ui_search_instead));
             search.connect_clicked(move |_| on_search_instead());
             buttons.push(search);
         }

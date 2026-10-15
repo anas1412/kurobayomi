@@ -2,6 +2,7 @@
 //! renders once, then again on the GTK main loop whenever its live query publishes (see [`crate::watch::bind_watch`]).
 //! The library, history and updates screens have their own modules (`library`, `updates`).
 
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use gtk::glib;
@@ -30,11 +31,13 @@ fn clear_list(list: &ListBox) {
 }
 
 /// The error shown when a category name is already taken (`spec/app.json`, categories screen notes).
-const DUPLICATE_CATEGORY: &str = "A category with this name already exists!";
+fn duplicate_category() -> String {
+    tr(MsgKey::error_category_exists)
+}
 
 /// The name dialog of the categories screen: the spec's title and buttons, with a text entry. The last button
 /// calls `on_ok` with the trimmed name. An empty name keeps the dialog open, and so does a name that `taken`
-/// reports as used, with [`DUPLICATE_CATEGORY`] shown under the entry.
+/// reports as used, with [`duplicate_category()`] shown under the entry.
 fn name_dialog(dialog: &str, initial: &str, taken: impl Fn(&str) -> bool + 'static, on_ok: impl Fn(String) + 'static) {
     let Some(spec) = screen("categories").dialogs.into_iter().find(|d| d.id == dialog) else { return };
     let labels = if spec.buttons.is_empty() { vec!["Cancel".to_owned(), "OK".to_owned()] } else { spec.buttons.clone() };
@@ -52,7 +55,7 @@ fn name_dialog(dialog: &str, initial: &str, taken: impl Fn(&str) -> bool + 'stat
                 return false;
             }
             if taken(&name) {
-                error.set_text(DUPLICATE_CATEGORY);
+                error.set_text(&duplicate_category());
                 error.set_visible(true);
                 return false;
             }
@@ -99,7 +102,7 @@ impl CategoryList {
         self.empty.set_visible(cats.is_empty());
         for c in cats {
             let (id, name, kind) = (c.id, c.name.clone(), self.kind);
-            let edit = icon_button("document-edit-symbolic", "Rename category");
+            let edit = icon_button("document-edit-symbolic", &tr(MsgKey::action_rename_category));
             let rename_from = name.clone();
             edit.connect_clicked(move |_| {
                 let app = data::app();
@@ -113,7 +116,7 @@ impl CategoryList {
             });
             let hide = gtk::ToggleButton::builder()
                 .icon_name(if c.hidden { "view-conceal-symbolic" } else { "view-reveal-symbolic" })
-                .tooltip_text("Hide")
+                .tooltip_text(&tr(MsgKey::action_hide))
                 .active(c.hidden)
                 .build();
             hide.connect_toggled(move |_| {
@@ -122,7 +125,7 @@ impl CategoryList {
                     report(app.categories(kind).toggle_hidden(id).await);
                 });
             });
-            let del = icon_button("user-trash-symbolic", "Delete");
+            let del = icon_button("user-trash-symbolic", &tr(MsgKey::action_delete));
             let delete_name = name.clone();
             del.connect_clicked(move |_| {
                 dialog_then_named("categories", "category_delete", &delete_name, move || {
@@ -175,7 +178,7 @@ pub fn categories_content(kind: Kind) -> crate::screens::Built {
     let view = Rc::new(CategoryList { kind, list, empty });
     view.render();
     bind_watch(data::app().categories(kind).repo().watch_all(), move |_| view.render());
-    let header_add = icon_button("list-add-symbolic", "Add category");
+    let header_add = icon_button("list-add-symbolic", &tr(MsgKey::action_add_category));
     header_add.connect_clicked(move |_| add_category(kind));
     crate::screens::Built { content: scrolled(&column).upcast(), end: vec![search.upcast(), header_add.upcast()] }
 }
@@ -259,7 +262,7 @@ mod tests {
             let (window, buttons) = create("Reading");
             let (_, _, again) = dialog();
             assert_eq!(again.len(), buttons.len(), "the dialog is still the one on screen");
-            let error = descendants(window.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.text() == DUPLICATE_CATEGORY).expect("the duplicate error label");
+            let error = descendants(window.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.text() == duplicate_category()).expect("the duplicate error label");
             assert!(error.is_visible(), "the duplicate-name error shows");
             buttons.first().expect("Cancel").emit_clicked();
             assert!(!window.is_visible(), "Cancel closes the dialog");

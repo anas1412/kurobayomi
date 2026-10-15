@@ -153,7 +153,7 @@ pub fn source_row_with(
         text.append(&note);
     }
     if failing && !stub {
-        let note = Label::new(Some(super::errors::NOT_WORKING_BADGE));
+        let note = Label::new(Some(&super::errors::not_working_badge()));
         note.set_xalign(0.0);
         note.add_css_class("error");
         text.append(&note);

@@ -5,6 +5,7 @@
 //! The player and the reader both build their header with [`header`], so the two stay identical; the player adds its
 //! quality and tracks menus on the right.
 
+use kuro_i18n::{MsgKey, tr};
 use gtk::prelude::*;
 
 /// What the reader's and the player's bar title: the series (manga or anime) on top, the item (chapter or episode)
@@ -90,7 +91,7 @@ pub fn header(title: &impl IsA<gtk::Widget>, on_back: impl Fn() + 'static) -> gt
     let header = crate::ui::header_bar();
     header.set_decoration_layout(Some(&crate::ui::decoration(false)));
     header.set_title_widget(Some(title.upcast_ref()));
-    let back = crate::ui::icon_button("go-previous-symbolic", "Back");
+    let back = crate::ui::icon_button("go-previous-symbolic", &tr(MsgKey::action_webview_back));
     back.connect_clicked(move |_| on_back());
     header.pack_start(&back);
     crate::ui::no_sticky_focus(&header);

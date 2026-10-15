@@ -1,6 +1,7 @@
 //! The player settings root page (task T-48a-010): the kept settings as rows, then the links to the pages that stay.
 //! The rows and the link targets are in `mod.rs`.
 
+use kuro_i18n::{MsgKey, tr};
 use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
@@ -13,7 +14,9 @@ use crate::screens::{built, Built};
 use crate::settings_ui::rows::{group, switch};
 use crate::settings_ui::search;
 
-pub const VOLUME_TITLE: &str = "Default volume";
+pub fn volume_title() -> String {
+    tr(MsgKey::player_default_volume)
+}
 /// The stored value that means "the volume the player was last left at" (`player_volume_value`, not stored yet).
 pub const LAST_USED: f32 = -1.0;
 
@@ -46,7 +49,7 @@ pub fn volume_row(pref: &Pref<f32>) -> PreferenceItem {
         async move { result.map(|()| true) }
     });
     PreferenceItem::BasicList {
-        common: ItemCommon::bound(VOLUME_TITLE),
+        common: ItemCommon::bound(volume_title()),
         value,
         entries,
         on_change,
@@ -73,7 +76,7 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
 }
 
 fn search_button() -> gtk::Widget {
-    let button = crate::ui::icon_button("system-search-symbolic", "Search");
+    let button = crate::ui::icon_button("system-search-symbolic", &tr(MsgKey::action_search));
     button.update_property(&[gtk::accessible::Property::Label("Search")]);
     button.connect_clicked(|_| {
         if let Some(page) = search::player_page() {
@@ -100,7 +103,7 @@ mod tests {
         let tree = page_rows(&prefs);
         let Preference::Group(first) = &tree[0] else { panic!("group") };
         let titles: Vec<&str> = first.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, ["Subtitle language", "Audio language", VOLUME_TITLE, "Autoplay next episode", "Hide the bars automatically"]);
+        assert_eq!(titles, ["Subtitle language", "Audio language", &volume_title(), "Autoplay next episode", "Hide the bars automatically"]);
     }
 
     #[test]

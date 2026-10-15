@@ -177,7 +177,7 @@ fn update_library(button: &gtk::Button, kind: Kind) {
     let outcome = library_trigger::trigger(kind);
     UPDATES.with(|u| {
         if let Some(screen) = u.borrow().iter().find(|screen| screen.kind() == kind) {
-            screen.show_toast(library_trigger::message(outcome));
+            screen.show_toast(&library_trigger::message(outcome));
         }
     });
     if outcome == Outcome::Started {

@@ -24,7 +24,9 @@ pub const DEFAULT: &str = "default";
 /// The manga's scanlator exclusion list, a plain action of its Show only block.
 pub const SCANLATORS: &str = "scanlators";
 /// The tooltip and accessible name of the button.
-pub const TOOLTIP: &str = "List options";
+pub fn tooltip() -> String {
+    tr(MsgKey::entry_list_options_tooltip)
+}
 /// The name of the Downloaded check, held on under downloaded-only.
 const DOWNLOADED: &str = "downloaded";
 
@@ -263,7 +265,7 @@ impl Spec {
 pub fn confirm_default(on_ok: impl Fn() + 'static) {
     let text = "Every title in your library takes these list options, and titles you open later start with them.";
     let body = ui::message(text);
-    let buttons = vec![DialogButton::cancel(tr(MsgKey::action_cancel)), DialogButton::new("Use for all titles", Role::Suggested, on_ok)];
+    let buttons = vec![DialogButton::cancel(tr(MsgKey::action_cancel)), DialogButton::new(&tr(MsgKey::ui_use_for_all_titles), Role::Suggested, on_ok)];
     ui::dialog("Use as default for all titles", &body, 380, buttons).present();
 }
 

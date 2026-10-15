@@ -157,11 +157,11 @@ fn render(root: &GBox) {
 
 /// The page while AniList is not logged in: one plain sentence and the connect button.
 fn connect_section(root: &GBox, waiting: bool) {
-    root.append(&Label::builder().label("Tracking keeps your progress on AniList.").wrap(true).xalign(0.0).build());
+    root.append(&Label::builder().label(&tr(MsgKey::ui_tracking_keeps_your_progress_on_anilist)).wrap(true).xalign(0.0).build());
     if waiting {
-        root.append(&ui::dim(tracking::WAITING));
+        root.append(&ui::dim(&tracking::waiting_text()));
     }
-    let connect = Button::with_label("Connect AniList");
+    let connect = Button::with_label(&tr(MsgKey::ui_connect_anilist));
     connect.add_css_class("suggested-action");
     connect.set_halign(Align::Start);
     let changed = redraw(root);
@@ -174,7 +174,7 @@ fn connect_section(root: &GBox, waiting: bool) {
 fn track_section(root: &GBox, tracker: &Arc<dyn Tracker>, ctx: Arc<TrackCtx>) {
     let Some(entry) = entry() else { return };
     let slot = GBox::new(O::Vertical, 0);
-    slot.append(&ui::dim("Loading…"));
+    slot.append(&ui::dim(&tr(MsgKey::loading)));
     root.append(&slot);
     let again = redraw(root);
     let (weak, tracker, id, kind) = (slot.downgrade(), Arc::clone(tracker), entry.id, entry.kind);
@@ -422,7 +422,7 @@ fn confirm_stop(bound: &Bound, deletable: bool, redraw: Rc<dyn Fn()>) {
     let bound = bound.clone();
     let buttons = vec![
         ui::DialogButton::cancel(tr(MsgKey::action_cancel)),
-        ui::DialogButton::new("Stop tracking", ui::Role::Destructive, move || {
+        ui::DialogButton::new(&tr(MsgKey::ui_stop_tracking), ui::Role::Destructive, move || {
             let also_remote = remove::remote_delete(deletable, also.is_active());
             match &bound {
                 Bound::Anime(track) => finish(actions::remove_anime(track.clone(), also_remote), |key| english(&key), Rc::clone(&redraw)),
@@ -464,7 +464,7 @@ fn write_edit(entry: &Entry, edit: Edit, redraw: Rc<dyn Fn()>) {
 /// failure shows `failure`'s text as a toast, and the rows stay as they were. No job means the services are not up.
 fn finish<T: Send + 'static, E: Send + 'static>(job: Option<JoinHandle<Result<T, E>>>, failure: impl FnOnce(E) -> String + 'static, redraw: Rc<dyn Fn()>) {
     let Some(job) = job else {
-        crate::toast::notify(tracking::NOT_READY);
+        crate::toast::notify(tracking::not_ready());
         return;
     };
     crate::source_bridge::call_on_main(async move { job.await }, move |result| match result {
@@ -497,7 +497,7 @@ fn summary(tracker: &dyn Tracker, bound: &Bound) -> String {
 /// Runs the AniList search for `query` and shows its results. Only the latest search may show anything.
 fn run_search(entry: &Entry, query: String, status: &Label, results: &GBox, generation: &Rc<Cell<u64>>) {
     let Some(host) = tracker_host::host() else {
-        say(status, tracking::NOT_READY);
+        say(status, &tracking::not_ready());
         return;
     };
     let Some(tracker) = host.manager.get(TrackerId::ANILIST) else { return };
@@ -559,7 +559,7 @@ fn hits_list(entry: &Entry, found: Vec<Found>) -> ListBox {
 /// Binds the entry to `hit` on AniList, then returns to the tracking page, which shows the new binding.
 fn bind(entry: Entry, hit: Found) {
     let Some(ctx) = tracker_host::ctx() else {
-        crate::toast::notify(tracking::NOT_READY);
+        crate::toast::notify(tracking::not_ready());
         return;
     };
     crate::source_bridge::call_on_main(

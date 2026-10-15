@@ -7,6 +7,7 @@
 //! The settings diet cut every other reader setting (colour filters, E-Ink flash, tap zones, volume keys, long tap,
 //! rotate-to-fit, the webtoon copies and the restore switch).
 
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -49,7 +50,7 @@ pub fn open(parent: &impl IsA<gtk::Window>, prefs: &ReaderPrefs, mode: ReadingMo
     body.scrolled.set_vexpand(false);
     body.scrolled.set_propagate_natural_height(true);
     body.scrolled.set_max_content_height(max_height);
-    let window = crate::ui::dialog(&strings::action_settings(), &body.widget, 420, vec![DialogButton::new("Close", Role::Suggested, || {})]);
+    let window = crate::ui::dialog(&strings::action_settings(), &body.widget, 420, vec![DialogButton::new(&tr(MsgKey::action_close), Role::Suggested, || {})]);
     window.set_transient_for(Some(parent));
     window.present();
 }

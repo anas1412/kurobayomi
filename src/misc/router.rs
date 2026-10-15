@@ -8,6 +8,7 @@
 //! - A notice-carrying action withdraws its notice before the work starts, as the plan says.
 //! - Ids at or below 0, more than 10 000 urls and a url longer than 2048 bytes are rejected with a warning.
 
+use kuro_i18n::{MsgKey, tr};
 use std::path::PathBuf;
 
 use kuro_platform::kind::Kind;
@@ -20,7 +21,9 @@ pub const MAX_PAYLOAD_BYTES: usize = 1 << 20;
 const MAX_URLS: usize = 10_000;
 const MAX_URL_BYTES: usize = 2048;
 /// The toast of `notify.error.item_missing`.
-pub const ITEM_MISSING_TOAST: &str = "Error";
+pub fn item_missing_toast() -> String {
+    tr(MsgKey::download_error)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -202,7 +205,7 @@ pub fn open_or_toast(found: bool, open: impl FnOnce(), toast: impl FnOnce(&str))
     if found {
         open();
     } else {
-        toast(ITEM_MISSING_TOAST);
+        toast(&item_missing_toast());
     }
 }
 

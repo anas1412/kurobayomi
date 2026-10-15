@@ -5,6 +5,7 @@
 //! between the two kinds. Here an entry id is FNV-1a over the kind and the entry id, and each kind has its own pass
 //! ids (progress, error, warning). Documented deviation: the shared ids of Kotlin are split per kind.
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::kind::Kind;
 
 use crate::library_update::pass::EntryUpdate;
@@ -28,7 +29,9 @@ pub const ERROR_CHANNEL: &str = "error";
 pub const WARNING_CHANNEL: &str = "warning";
 
 /// The "N update(s) failed" notification text and its tap line.
-pub const ERROR_TEXT: &str = "Tap to see details";
+pub fn error_text() -> String {
+    tr(MsgKey::action_show_errors)
+}
 
 /// 32-bit FNV-1a.
 pub fn fnv1a(bytes: &[u8]) -> u32 {
@@ -122,12 +125,12 @@ pub fn entry_notice(kind: Kind, update: &EntryUpdate, hide_content: bool) -> Opt
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorNotice {
     pub title: String,
-    pub text: &'static str,
+    pub text: String,
     pub opens_log: bool,
 }
 
 pub fn error_notice(failed: usize, log_exists: bool) -> Option<ErrorNotice> {
-    (failed > 0).then(|| ErrorNotice { title: format!("{failed} update(s) failed"), text: ERROR_TEXT, opens_log: log_exists })
+    (failed > 0).then(|| ErrorNotice { title: format!("{failed} update(s) failed"), text: error_text(), opens_log: log_exists })
 }
 
 #[cfg(test)]

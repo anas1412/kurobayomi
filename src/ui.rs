@@ -1,4 +1,5 @@
 // Generic building blocks: navigation stack, spec item rows, sheets, dialogs, generic screens.
+use kuro_i18n::{MsgKey, tr};
 use crate::spec::{value_str, Dialog, Group, Item, Screen, Sheet, Spec};
 use gtk::prelude::*;
 use gtk::{glib, Align, Box as GBox, Button, Label, ListBox, Orientation as O};
@@ -170,7 +171,7 @@ pub fn switch_with_narrow_row(header: &gtk::HeaderBar, switch: &gtk::StackSwitch
 /// The Back button of a pushed page's header.
 pub fn back_button() -> Button {
     let b = Button::from_icon_name("go-previous-symbolic");
-    b.set_tooltip_text(Some("Back"));
+    b.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
     b.update_property(&[gtk::accessible::Property::Label("Back")]);
     b.connect_clicked(|_| pop());
     b
@@ -699,7 +700,7 @@ pub fn menu_button(sections: Vec<Vec<MenuEntry>>) -> Option<gtk::MenuButton> {
     if n == 0 {
         return None;
     }
-    let button = quiet_menu(gtk::MenuButton::builder().icon_name(OVERFLOW_ICON).menu_model(&model).tooltip_text("More").build());
+    let button = quiet_menu(gtk::MenuButton::builder().icon_name(OVERFLOW_ICON).menu_model(&model).tooltip_text(&tr(MsgKey::player_sheets_more_title)).build());
     button.update_property(&[gtk::accessible::Property::Label("More")]);
     button.add_css_class(MORE_MENU);
     button.insert_action_group("more", Some(&group));
@@ -873,7 +874,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             let h = GBox::new(O::Horizontal, 6);
             h.append(&gtk::DropDown::from_strings(&opts));
             let dir = Button::from_icon_name("view-sort-ascending-symbolic");
-            dir.set_tooltip_text(Some("Ascending / descending"));
+            dir.set_tooltip_text(Some(&tr(MsgKey::ui_ascending_descending)));
             dir.connect_clicked(|b| {
                 let up = b.icon_name().as_deref() == Some("view-sort-ascending-symbolic");
                 b.set_icon_name(if up { "view-sort-descending-symbolic" } else { "view-sort-ascending-symbolic" });

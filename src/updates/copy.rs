@@ -19,13 +19,23 @@ pub fn delete_title_episodes() -> String {
     tr(MsgKey::delete_downloads_for_anime)
 }
 /// Additions of T-42a-062 (no key yet, see the module comment).
-pub const STORAGE_SCANNING: &str = "Scanning downloads…";
-pub const STORAGE_EMPTY_CATEGORY: &str = "No downloads in this category";
-pub const STORAGE_SOURCE_MISSING: &str = "Source not installed; files not deleted";
+pub fn storage_scanning() -> String {
+    tr(MsgKey::storage_storage_scanning)
+}
+pub fn storage_empty_category() -> String {
+    tr(MsgKey::storage_storage_empty_category)
+}
+pub fn storage_source_missing() -> String {
+    tr(MsgKey::storage_storage_source_missing)
+}
 
 /// Updates copy (T-42a-032, T-42a-038, T-42b-003, T-42b-016).
-pub const SHOWING_LATEST_500: &str = "Showing latest 500";
-pub const DELETE_SOURCE_MISSING: &str = "Source not installed, downloads were not deleted";
+pub fn showing_latest_500() -> String {
+    tr(MsgKey::storage_showing_latest_500)
+}
+pub fn delete_source_missing() -> String {
+    tr(MsgKey::storage_delete_source_missing)
+}
 pub fn confirm_delete_chapters() -> String {
     tr(MsgKey::confirm_delete_chapters)
 }
@@ -35,4 +45,3 @@ pub fn confirm_delete_episodes() -> String {
 pub fn internal_error() -> String {
     tr(MsgKey::internal_error)
 }
-pub const LAST_UPDATED_PREFIX: &str = "Library last updated: ";

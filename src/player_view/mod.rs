@@ -286,8 +286,8 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     area.set_auto_render(false);
 
     let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
-    let previous = crate::ui::icon_button("media-skip-backward-symbolic", "Previous episode");
-    let next = crate::ui::icon_button("media-skip-forward-symbolic", "Next episode");
+    let previous = crate::ui::icon_button("media-skip-backward-symbolic", &tr(MsgKey::action_previous_episode));
+    let next = crate::ui::icon_button("media-skip-forward-symbolic", &tr(MsgKey::action_next_episode));
     let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.001);
     seek.set_hexpand(true);
     seek.set_draw_value(false);

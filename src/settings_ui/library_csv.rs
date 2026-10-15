@@ -6,12 +6,18 @@
 //! Decision: the Library List dialog keeps Android's rule for Title. Unchecking it clears the other three, so the file
 //! then has one empty line per favourite (the Android output).
 
+use kuro_i18n::{MsgKey, tr};
+
 /// The default save name (the Android `aniyomi_library.csv`, renamed for this app).
 pub const FILE_NAME: &str = "kurobayomi_library.csv";
 /// The toast after a successful write.
-pub const EXPORTED: &str = "Library Exported";
+pub fn exported() -> String {
+    tr(MsgKey::library_exported)
+}
 /// The toast after a failed write (a proposal: Android shows no error toast).
-pub const FAILED: &str = "Could not export library";
+pub fn failed() -> String {
+    tr(MsgKey::settings_library_csv_failed)
+}
 
 /// Which columns the export includes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

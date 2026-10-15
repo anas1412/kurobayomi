@@ -8,6 +8,7 @@
 //! not installed here and the build script is not in this lane). The snapshot leaves out the seven crates of the
 //! platform D-Bus stack, because the platform boundary check rejects their names outside `kuro-platform`; their
 //! attribution has to be added by the platform owner.
+use kuro_i18n::{MsgKey, tr};
 use gtk::prelude::*;
 use serde::Deserialize;
 
@@ -51,7 +52,7 @@ pub fn detail_page(library: &Library) -> gtk::Box {
     margins(&label, 16);
     let mut end: Vec<gtk::Widget> = vec![];
     if let Some(site) = library.site() {
-        let button = crate::ui::icon_button("web-browser-symbolic", "Website");
+        let button = crate::ui::icon_button("web-browser-symbolic", &tr(MsgKey::website));
         let site = site.to_owned();
         button.connect_clicked(move |_| crate::ui::open_link(&site, None));
         end.push(button.upcast());

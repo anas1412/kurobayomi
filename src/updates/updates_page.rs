@@ -85,8 +85,8 @@ pub fn progress_text(kind: Kind, done: bool, progress: i64, total_ms: i64) -> Op
 }
 
 /// The footer under a feed that hit the query limit (EC-42-U-02): the older rows are not shown.
-pub fn limit_footer(rows: usize) -> Option<&'static str> {
-    (rows == kuro_domain::UPDATES_LIMIT as usize).then_some(copy::SHOWING_LATEST_500)
+pub fn limit_footer(rows: usize) -> Option<String> {
+    (rows == kuro_domain::UPDATES_LIMIT as usize).then(copy::showing_latest_500)
 }
 
 
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn updates_limit_footer_only_at_five_hundred() {
-        assert_eq!(limit_footer(500), Some("Showing latest 500"));
+        assert_eq!(limit_footer(500), Some("Showing latest 500".to_owned()));
         assert_eq!(limit_footer(499), None);
     }
 }

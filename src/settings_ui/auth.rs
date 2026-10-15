@@ -5,6 +5,7 @@
 //! The method exists while the Require unlock switch is on: turning the switch on sets the passphrase, turning it off
 //! (after an unlock) removes it. [`confirm`] passes at once when no passphrase is set (T-47a-067), so the Hide
 //! content, lock-when-idle and NSFW rows ask only while the lock is on.
+use kuro_i18n::{MsgKey, tr};
 use std::sync::{Arc, OnceLock};
 
 use argon2::password_hash::phc::PasswordHash;
@@ -15,9 +16,15 @@ use kuro_platform::secrets::SecretStore;
 
 use crate::pref_model::widgets::dialog;
 
-pub const CONFIRM_LOCK_CHANGE: &str = "Authenticate to confirm change";
-pub const UNLOCK_BUTTON: &str = "Unlock";
-pub const WRONG_PASSPHRASE: &str = "Wrong passphrase";
+pub fn confirm_lock_change() -> String {
+    tr(MsgKey::confirm_lock_change)
+}
+pub fn unlock_button() -> String {
+    tr(MsgKey::settings_auth_unlock_button)
+}
+pub fn wrong_passphrase() -> String {
+    tr(MsgKey::settings_auth_wrong_passphrase)
+}
 
 const SERVICE: &str = "kurobayomi-applock";
 const ACCOUNT: &str = "passphrase";
@@ -121,7 +128,7 @@ pub async fn confirm(title: &str, subtitle: &str) -> bool {
         &parent,
         title,
         &body(subtitle, &[&field]),
-        Some(UNLOCK_BUTTON),
+        Some(&unlock_button()),
         {
             let field = field.clone();
             move |dialog| {
@@ -135,7 +142,7 @@ pub async fn confirm(title: &str, subtitle: &str) -> bool {
                             dialog.finish();
                         }
                         Ok(false) => {
-                            dialog.set_error(Some(WRONG_PASSPHRASE));
+                            dialog.set_error(Some(&wrong_passphrase()));
                             dialog.set_confirm_enabled(true);
                             field.select_region(0, -1);
                         }
@@ -172,7 +179,7 @@ mod tests {
 
     #[test]
     fn no_method_set_means_confirm_passes_without_a_dialog() {
-        assert!(block_on(confirm("Title", CONFIRM_LOCK_CHANGE)));
+        assert!(block_on(confirm("Title", &confirm_lock_change())));
     }
 
 }

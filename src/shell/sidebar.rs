@@ -149,7 +149,9 @@ fn open_help() {
 /// A menu button with the app menu: Incognito mode (the `app.incognito` check item), then Keyboard shortcuts, Help and
 /// About, whose actions (`appmenu.*`) live on the button itself.
 /// The name of the Incognito switch, in the panel and in the narrow window's menu.
-const INCOGNITO_LABEL: &str = "Incognito";
+fn incognito_label() -> String {
+    tr(MsgKey::shell_incognito_label)
+}
 
 /// The app's own pages under the places, in the panel and in the narrow window's menu: icon, label, action name, opener.
 fn app_pages() -> [(&'static str, String, &'static str, fn()); 4] {
@@ -171,7 +173,7 @@ fn app_menu_button() -> gtk::MenuButton {
 
 fn app_menu() -> gtk::MenuButton {
     let toggles = gio::Menu::new();
-    toggles.append(Some(INCOGNITO_LABEL), Some(crate::incognito::TOGGLE_ACTION));
+    toggles.append(Some(&incognito_label()), Some(crate::incognito::TOGGLE_ACTION));
     let pages = gio::Menu::new();
     let actions = gio::SimpleActionGroup::new();
     for (_, label, name, run) in app_pages() {
@@ -212,7 +214,7 @@ fn bottom_rows() -> gtk::ListBox {
     list.set_margin_bottom(rail::PAD_V);
     // the switch is bound to app.incognito, so it shows the state and flips it like the menu item did
     let switch = gtk::Switch::builder().valign(gtk::Align::Center).action_name(crate::incognito::TOGGLE_ACTION).build();
-    let incognito = nav_row(crate::incognito::ICON, INCOGNITO_LABEL, &[switch.upcast_ref()]);
+    let incognito = nav_row(crate::incognito::ICON, &incognito_label(), &[switch.upcast_ref()]);
     list.append(&incognito);
     let rows = app_pages();
     let runs: Vec<fn()> = rows.iter().map(|(_, _, _, run)| *run).collect();
@@ -349,7 +351,7 @@ mod tests {
         crate::testing::with_display(|| {
             let panel = build(&gtk::Stack::new());
             let texts = labels(panel.upcast_ref());
-            let wanted = [INCOGNITO_LABEL.to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about)];
+            let wanted = [incognito_label().to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about)];
             for title in ["Library", "Browse", "Updates", "History", "Downloads", "Settings", "Kurobayomi"].map(str::to_owned).iter().chain(&wanted) {
                 assert!(texts.iter().any(|l| l == title), "{title}");
             }
@@ -382,7 +384,7 @@ mod tests {
                     labels.extend(part.item_attribute_value(i, "label", None).and_then(|v| v.get::<String>()));
                 }
             }
-            assert_eq!(labels, [INCOGNITO_LABEL.to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about), tr(MsgKey::label_settings)]);
+            assert_eq!(labels, [incognito_label().to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about), tr(MsgKey::label_settings)]);
         });
     }
 }

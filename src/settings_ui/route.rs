@@ -2,6 +2,7 @@
 //! module builds shows rows bound to the typed preferences, so the rule table decides which rows exist. Where the
 //! typed rows do not yet cover the whole spec page, the spec page is built and its rows are replaced one by one
 //! (`merge.rs`).
+use kuro_i18n::{MsgKey, tr};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -224,25 +225,27 @@ fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
 /// The spec group of the Library List dialog's switches (`export_columns`): the dialog is `library_export`, so the spec
 /// group is left out of the page.
 fn without_export_dialog(mut tree: Vec<Preference>) -> Vec<Preference> {
-    tree.retain(|entry| !matches!(entry, Preference::Group(group) if group.title == library_export::DIALOG_TITLE));
+    tree.retain(|entry| !matches!(entry, Preference::Group(group) if group.title == library_export::dialog_title()));
     tree
 }
 
 /// The static backup info line of the spec page. The typed line below replaces it: it carries the last automatic backup.
-pub const KEEP_COPIES: &str = "You should keep copies of backups in other places as well. Backups may contain sensitive data including any stored passwords; be careful if sharing.";
+pub fn keep_copies() -> String {
+    tr(MsgKey::backup_info)
+}
 
 /// The backup info line: the advice to keep copies, then when the last automatic backup ran (`backup_interval` page).
 fn backup_info(prefs: &Prefs) -> String {
     let now = i64::try_from(kuro_core::crash::now_ms()).unwrap_or(i64::MAX);
     let last = prefs.backup.last_auto_backup_timestamp.get();
-    format!("{KEEP_COPIES}\n\n{}", kuro_backup::settings::last_auto_info(last, now))
+    format!("{}\n\n{}", keep_copies(), kuro_backup::settings::last_auto_info(last, now))
 }
 
 /// The spec rows without the static backup info line, which the typed one replaces.
 fn without_backup_info(mut tree: Vec<Preference>) -> Vec<Preference> {
     for entry in &mut tree {
         if let Preference::Group(group) = entry {
-            group.items.retain(|item| !matches!(item, PreferenceItem::Info { text, .. } if text.starts_with(KEEP_COPIES)));
+            group.items.retain(|item| !matches!(item, PreferenceItem::Info { text, .. } if text.starts_with(&keep_copies())));
         }
     }
     tree
@@ -251,7 +254,7 @@ fn without_backup_info(mut tree: Vec<Preference>) -> Vec<Preference> {
 /// The Restore backup row: a file chooser (`Select backup file`), then the Restore backup page on that file. A restore
 /// that is already running keeps the chooser shut.
 fn restore_backup_row() -> PreferenceItem {
-    let mut row = rows::text("Restore backup", None, true);
+    let mut row = rows::text(&tr(MsgKey::pref_restore_backup), None, true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(choose_backup_file));
     }
@@ -260,22 +263,22 @@ fn restore_backup_row() -> PreferenceItem {
 
 fn choose_backup_file() {
     if crate::backup_host::restore_running() {
-        crate::toast::notify("Restore is already in progress");
+        crate::toast::notify(&tr(MsgKey::restore_in_progress));
         return;
     }
     let dialog = gtk::FileDialog::new();
-    dialog.set_title("Select backup file");
+    dialog.set_title(&tr(MsgKey::file_select_backup));
     dialog.open(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, |result| {
         let path = match result {
             Ok(file) => file.path(),
-            Err(err) => return crate::toast::notify(chooser::failure_toast(&err).unwrap_or("No file selected")),
+            Err(err) => return crate::toast::notify(chooser::failure_toast(&err).unwrap_or("No file selected".to_string())),
         };
         match path {
             Some(path) => {
                 crate::pref_model::backup_pages::set_restore_file(path);
                 crate::ui::open("settings_restore_backup");
             }
-            None => crate::toast::notify("No file selected"),
+            None => crate::toast::notify(&tr(MsgKey::file_null_uri_error)),
         }
     });
 }
