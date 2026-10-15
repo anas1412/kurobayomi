@@ -1,6 +1,9 @@
 //! The player header's audio and subtitle menu: the tracks of the loaded file, read from mpv each time the menu opens.
 //! Both lists start with Off (audio Off comes from `load_track_lists`, subtitle Off is added here). The current track
 //! carries the check mark. A row click selects the track. The lists use the shared popover helper in `sheets`.
+//!
+//! Only five languages are listed (user, 2026-10-15): English, Arabic, French, Spanish and Japanese (the original
+//! audio of most anime). A track with no language tag, and the track playing now, are always listed.
 
 use std::rc::Rc;
 
@@ -35,11 +38,11 @@ impl TrackProps for MpvTracks<'_> {
 pub fn tracks_menu(shared: &Shared, servers: &sheets::quality::Servers) -> gtk::MenuButton {
     let (shared, servers) = (Rc::clone(shared), servers.clone());
     let menu = sheets::menu("Tracks", move |column, popover| {
-        fill(column, popover, &shared);
-        // an online episode also lists its servers here
+        // an online episode lists its servers first, then the tracks
         if sheets::quality::is_online(shared.borrow().episode_id) {
             sheets::quality::fill_servers(column, popover, &shared, &servers);
         }
+        fill(column, popover, &shared);
     });
     menu.set_icon_name("view-more-symbolic");
     menu
@@ -64,8 +67,31 @@ pub fn track_sections(shared: &Shared) -> Vec<(&'static str, Vec<Choice>)> {
     subtitles.extend(lists.subtitles);
     [("Audio", "aid", lists.audio, aid), ("Subtitles", "sid", subtitles, sid)]
         .into_iter()
-        .map(|(heading, property, tracks, selected)| (heading, tracks.into_iter().map(|track| choice(shared, property, track, selected)).collect()))
+        .map(|(heading, property, tracks, selected)| {
+            let shown = tracks.into_iter().filter(|track| track.id == selected || listed_language(language_of(track).as_deref()));
+            (heading, shown.map(|track| choice(shared, property, track, selected)).collect())
+        })
         .collect()
+}
+
+/// The language tags the menus list, ISO 639-1 and both 639-2 forms: English, Arabic, French, Spanish, Japanese. A
+/// regional tag ("es-419") counts by its first part.
+const LISTED: [&str; 11] = ["en", "eng", "ar", "ara", "fr", "fre", "fra", "es", "spa", "ja", "jpn"];
+
+/// A track's language tag: mpv's, else the one a side track carries at the end of its title ("Portuguese (por)").
+fn language_of(track: &VideoTrack) -> Option<String> {
+    track.language.clone().filter(|l| !l.trim().is_empty()).or_else(|| {
+        let inner = track.name.trim().strip_suffix(')')?.rsplit_once('(')?.1.trim();
+        (2..=6).contains(&inner.len()).then(|| inner.to_owned())
+    })
+}
+
+/// Whether a track of `language` is listed: one of the five languages, or no language tag at all.
+fn listed_language(language: Option<&str>) -> bool {
+    let Some(tag) = language.map(str::trim).filter(|t| !t.is_empty()) else { return true };
+    let tag = tag.to_ascii_lowercase();
+    let primary = tag.split(['-', '_']).next().unwrap_or(&tag);
+    LISTED.contains(&primary)
 }
 
 /// One track row. Choosing it selects the track in mpv under `property` (`aid` or `sid`).
@@ -82,5 +108,25 @@ fn choice(shared: &Shared, property: &'static str, track: VideoTrack, selected: 
                 tracing::warn!(error = %e, property, "player: the track was not selected");
             }
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn five_languages_and_untagged_tracks_are_listed() {
+        for tag in ["eng", "en", "ara", "fre", "fra", "spa", "es-419", "jpn", "JA"] {
+            assert!(listed_language(Some(tag)), "{tag}");
+        }
+        for tag in ["por", "rus", "ger", "it"] {
+            assert!(!listed_language(Some(tag)), "{tag}");
+        }
+        assert!(listed_language(None) && listed_language(Some("")), "a track without a tag stays");
+        let side = |name: &str| VideoTrack { id: 4, name: name.to_owned(), language: None };
+        assert_eq!(language_of(&side("Portuguese (por)")).as_deref(), Some("por"));
+        assert_eq!(language_of(&side("English")), None, "no tag: listed");
+        assert_eq!(language_of(&VideoTrack { language: Some("jpn".into()), ..side("x (por)") }).as_deref(), Some("jpn"), "mpv's tag first");
     }
 }

@@ -1,4 +1,4 @@
-//! The quality menu of an online episode, in the control bar, and its server list, in the top bar's ⋮ menu (user,
+//! The quality menu of an online episode, in the control bar, and its server list, at the top of the top bar's ⋮ menu (user,
 //! 2026-10-15). The quality button shows the playing height ("1080p"). When a menu opens, the episode's servers and their videos load on the source's runtime (a spinner until
 //! they do, then the list is kept for the episode). One lists the heights ("1080p, 720p, 360p"), the other the
 //! servers. Choosing a height plays it on the playing server (else on the first server that has
