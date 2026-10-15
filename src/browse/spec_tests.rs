@@ -7,7 +7,7 @@
 //! |---|---|
 //! | T18 | `shell::tests::enter_runs_a_global_search_of_the_visible_kind` |
 //! | T20, T21, T22 | `sources::tests`, `header::tests` |
-//! | T23 | `lang_pages::tests::the_language_switches_write_the_set_and_a_switched_off_language_has_no_list` |
+//! | T23 | `shell::tests::the_view_options_list_the_languages_and_a_pick_switches_one` |
 //! | T29, T38, T40, T41 | here |
 //! | T28 | `trust::tests::trust_and_uninstall_act_only_while_the_entry_is_still_untrusted` |
 //! | T42, T43, T44, T45, T49 | `primitives` and `sources` tests |

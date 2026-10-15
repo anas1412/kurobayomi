@@ -11,7 +11,6 @@ fn browse_widgets_smoke() {
         super::favorite_flow::tests::smoke();
         super::header_bar::tests::smoke();
         super::sources_page::tests::smoke();
-        super::lang_pages::tests::smoke();
         super::source_prefs_page::tests::smoke();
         super::shell::tests::smoke();
         super::pages::tests::smoke();

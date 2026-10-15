@@ -11,13 +11,11 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use kuro_domain::source::model::Source;
-use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 use kuro_prefs::source::SourcePrefs;
 use tokio::sync::watch;
 
 use super::glue;
-use super::lang_pages::SourcesFilterPage;
 use super::route::{BrowsePage, BrowseRoute};
 use kuro_platform::kind::Kind;
 use super::shell::{BrowseShell, ShellDeps};
@@ -105,37 +103,9 @@ fn watch_check<T: kuro_prefs::values::PrefType + 'static>(pref: &Pref<T>) -> Box
     Box::new(move || watch.try_changed().is_some())
 }
 
-/// Pushes a page of the tab with a title and a Back button.
-fn push_page(title: &str, content: &impl IsA<gtk::Widget>) {
-    crate::ui::push(&crate::ui::page(title, content, Vec::new(), true));
-}
-
 /// Opens the screen of a route with its request parked for the screen that builds (`pending`).
 fn open_route(route: &BrowseRoute) {
     super::pending::open(route.clone());
-}
-
-/// The language filter of a kind's Sources page (B§4): one switch per language, which decides which sources show.
-fn open_filter(kind: Kind, prefs: &Rc<SourcePrefs>) {
-    let filter = SourcesFilterPage::new(prefs.enabled_languages.clone());
-    let sources_now = Rc::new(move || installed_sources(kind));
-    filter.set_sources(sources_now());
-    // an error shows the `internal_error` toast and pops the page (E-SF-05)
-    filter.set_on_error(Rc::new(|| {
-        crate::toast::notify(tr(MsgKey::internal_error));
-        crate::ui::pop();
-    }));
-    // the switches of an open page follow the languages (T-40b-015)
-    let checks: Vec<Box<dyn Fn() -> bool>> = vec![watch_check(&prefs.enabled_languages)];
-    let alive = {
-        let widget = filter.widget().downgrade();
-        move || widget.upgrade().is_some()
-    };
-    let shown = filter.clone();
-    let by_pref = (shown.clone(), Rc::clone(&sources_now));
-    glue::poll_pref_changes(checks, alive, move || by_pref.0.set_sources((by_pref.1)()));
-    follow_loads(filter.widget(), move || shown.set_sources(sources_now()));
-    push_page(&tr(MsgKey::label_sources), filter.widget());
 }
 
 /// The Sources page of `kind` over `snapshot`, which reads the directory and the prefs. It reads again each time the page
@@ -182,11 +152,23 @@ pub fn browse() -> Option<Built> {
         (BrowsePage::AnimeSources, anime_sources.widget().clone().upcast()),
         (BrowsePage::MangaSources, manga_sources.widget().clone().upcast()),
     ];
-    let filter_prefs = Rc::clone(&prefs);
+    let (lang_prefs, toggle_prefs) = (Rc::clone(&prefs), Rc::clone(&prefs));
     let deps = ShellDeps {
         pages,
         on_route: Rc::new(|route| open_route(&route)),
-        on_filter: Rc::new(move |page: BrowsePage| open_filter(page.kind(), &filter_prefs)),
+        languages: Rc::new(move |kind| {
+            let groups = super::lang_pages::sources_filter_groups(&installed_sources(kind), &lang_prefs.enabled_languages.get());
+            groups.into_iter().map(|group| (group.lang, group.title, group.enabled)).collect()
+        }),
+        on_language: Rc::new(move |lang, on| {
+            let mut set = toggle_prefs.enabled_languages.get();
+            if set.contains(&lang) != on {
+                kuro_domain::source::toggles::toggle_language(&mut set, &lang);
+                if let Err(error) = toggle_prefs.enabled_languages.set(set) {
+                    tracing::warn!(%error, "the source languages could not be stored");
+                }
+            }
+        }),
         on_repos: Rc::new(|_kind| open_repos()),
         on_refresh: Rc::new(refresh_repositories),
         on_leave: Rc::new(crate::ui::pop),
@@ -200,6 +182,7 @@ pub fn browse() -> Option<Built> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_i18n::{MsgKey, tr};
 
     /// The page is built before the sources start (main builds the tabs first): a source that arrives afterwards is
     /// listed once the page is shown, with no pref written in between.
