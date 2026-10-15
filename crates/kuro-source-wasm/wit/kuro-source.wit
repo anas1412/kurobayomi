@@ -43,5 +43,7 @@ world source {
     ///               image and video request of this source. Replaces the app's default set.
     ///   "unscramble"      args {"body": base64, "headers": [[name, value]]} → {"body": base64 | null}: the page image
     ///               fix-up. null means show the bytes as fetched. Err("Failed to decode image") fails the page.
+    ///   "cover"           args {"anime": {"url", "title"}} → string | null: the poster of one anime. A list that does not know it
+    ///               yet gives the thumbnail "kb-cover:<anime url>", and the app asks this op when the card shows.
     export invoke: func(op: string, input-json: string) -> result<string, string>;
 }

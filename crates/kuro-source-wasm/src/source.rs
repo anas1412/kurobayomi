@@ -356,6 +356,10 @@ impl AnimeSource for WasmAnimeSource {
         self.0.anime_page("search", search_args(page, query, filters)).await
     }
 
+    async fn cover_url(&self, anime: &SAnime) -> Result<Option<String>, SourceError> {
+        Ok(self.0.optional::<Option<String>>("cover", json!({ "anime": WireAnime::from(anime) })).await?.flatten())
+    }
+
     async fn episode_list(&self, anime: &SAnime) -> Result<Vec<SEpisode>, SourceError> {
         let wire: Vec<WireEpisode> = self.0.typed("episodes", json!({ "anime": WireAnime::from(anime) })).await?;
         Ok(wire.into_iter().map(SEpisode::from).collect())

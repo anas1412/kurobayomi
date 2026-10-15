@@ -3,8 +3,10 @@
 //! The service returns the image as a file to read or as the response bytes. Decoding belongs to the
 //! decode lane, which holds one of the `decode_permit` slots while it decodes.
 
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
 use ::http::HeaderMap;
@@ -74,7 +76,17 @@ pub struct SourceClient {
 /// fall back to the shared client without extra headers (edge E-IMG-31).
 pub trait SourceHttp: Send + Sync {
     fn http_source(&self, source_id: i64) -> Option<SourceClient>;
+
+    /// The real picture URL of a listing's [`COVER_MARKER`] thumbnail (`anime_url` is the rest of it). `None`: no picture.
+    fn cover_url<'a>(&'a self, _source_id: i64, _anime_url: &'a str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async { None })
+    }
 }
+
+/// The start of a thumbnail URL that is no picture but a request for the source's poster: a listing gives
+/// `kb-cover:<anime url>` for an anime whose poster it does not know yet, and the image service asks the source when the
+/// card needs it (so the list itself never waits on lookups).
+pub const COVER_MARKER: &str = "kb-cover:";
 
 pub struct ImageService {
     shared: NetworkClient,
@@ -254,7 +266,12 @@ impl ImageService {
                 return Ok(Fetched::file(DataSource::Disk, custom));
             }
         }
-        let url = art.url.as_deref().ok_or(ImageError::NoCoverSpecified)?;
+        let mut url = art.url.as_deref().ok_or(ImageError::NoCoverSpecified)?;
+        let found;
+        if let Some(anime_url) = url.strip_prefix(COVER_MARKER) {
+            found = self.sources.cover_url(art.source_id, anime_url).await.ok_or(ImageError::NoCoverSpecified)?;
+            url = &found;
+        }
         match resource::classify(Some(url)) {
             Some(Resource::Http) => self.fetch_http(art, opts, cancel, url).await,
             Some(Resource::File) => Ok(Fetched::file(
@@ -377,6 +394,39 @@ mod tests {
         ImageService::new(test_client(root), sources, paths)
             .await
             .unwrap()
+    }
+
+    /// A source that answers every cover request with one URL, and keeps the anime url it was asked for.
+    struct CoverSource(String, std::sync::Mutex<Vec<String>>);
+
+    impl SourceHttp for CoverSource {
+        fn http_source(&self, _source_id: i64) -> Option<SourceClient> {
+            None
+        }
+
+        fn cover_url<'a>(&'a self, _source_id: i64, anime_url: &'a str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> {
+            self.1.lock().unwrap().push(anime_url.to_owned());
+            let url = (!self.0.is_empty()).then(|| self.0.clone());
+            Box::pin(async move { url })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cover_marker_is_asked_of_the_source_and_the_poster_is_fetched() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path_matcher("/poster.jpg")).respond_with(ResponseTemplate::new(200).set_body_bytes(JPEG)).mount(&server).await;
+        let tmp = tempfile::tempdir().unwrap();
+        let source = Arc::new(CoverSource(format!("{}/poster.jpg", server.uri()), Default::default()));
+        let svc = service(tmp.path(), source.clone()).await;
+        let art = cover(Some("kb-cover:/a/42"), false, 1);
+        svc.fetch(&art, &LoadOptions::default(), &CancellationToken::new()).await.unwrap();
+        assert_eq!(*source.1.lock().unwrap(), ["/a/42"]);
+        // the second look asks again (the marker is the cache key); the poster itself comes from the cache
+        svc.fetch(&art, &LoadOptions::default(), &CancellationToken::new()).await.unwrap();
+        assert_eq!(source.1.lock().unwrap().len(), 2);
+        let none = Arc::new(CoverSource(String::new(), Default::default()));
+        let svc = service(&tmp.path().join("other"), none).await;
+        assert!(svc.fetch(&art, &LoadOptions::default(), &CancellationToken::new()).await.is_err(), "no poster: no picture");
     }
 
     #[tokio::test]

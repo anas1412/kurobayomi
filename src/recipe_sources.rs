@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ use kuro_prefs::network::NetworkPrefs;
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::CatalogueSource;
-use kuro_source::anime::AnimeSource;
+use kuro_source::anime::{AnimeSource, SAnime};
 use kuro_platform::kind::Kind;
 use kuro_source_scrape::{Recipe, ScrapeAnime, ScrapeManga};
 
@@ -480,6 +481,15 @@ impl SourceHttp for RecipeImageHeaders {
             return None;
         }
         Some(SourceClient { client: client()?, headers })
+    }
+
+    /// The poster a source gives for an anime of its list that came without one (the `cover` op).
+    fn cover_url<'a>(&'a self, source_id: i64, anime_url: &'a str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let source = anime_sources().into_iter().find(|source| source.id() == source_id)?;
+            let anime = SAnime { url: anime_url.to_owned(), ..SAnime::default() };
+            source.cover_url(&anime).await.ok().flatten()
+        })
     }
 }
 

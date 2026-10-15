@@ -57,6 +57,10 @@ pub trait AnimeSource: Send + Sync {
     async fn anime_details(&self, _anime: &SAnime) -> Result<SAnime, SourceError> {
         Err(SourceError::Unsupported("anime_details"))
     }
+    /// The poster of one anime, for a listing that gave only a `kb-cover:<anime url>` picture (see `kuro_images::COVER_MARKER`). `None` when the source has none.
+    async fn cover_url(&self, _anime: &SAnime) -> Result<Option<String>, SourceError> {
+        Ok(None)
+    }
     /// The episodes of one anime, in source order.
     async fn episode_list(&self, _anime: &SAnime) -> Result<Vec<SEpisode>, SourceError> {
         Err(SourceError::Unsupported("episode_list"))
