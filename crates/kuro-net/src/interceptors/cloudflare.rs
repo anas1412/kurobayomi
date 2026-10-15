@@ -248,8 +248,8 @@ impl CloudflareInterceptor {
     }
 
     /// Sends a challenged request from a hidden page of its site instead of solving the check for the app's own client:
-    /// the pass is tied to the browser that earned it (its TLS fingerprint), so the app's client cannot reuse it. Only a
-    /// page that cannot answer falls back to the solve through [`WebViewHost`].
+    /// the pass is tied to the browser that earned it (its TLS fingerprint), so the app's client cannot reuse it. With hidden
+    /// pages the solve through [`WebViewHost`] (the system browser) is not used at all, even when a page fails.
     pub fn with_hidden_pages(mut self, pages: Option<Arc<dyn HiddenPages>>) -> Self {
         self.pages = pages;
         self
@@ -325,9 +325,13 @@ impl Interceptor for CloudflareInterceptor {
             };
             match answer.as_deref().map(|a| response_of(a).ok_or("the page's answer did not read")) {
                 Ok(Ok(page_response)) => return Ok(page_response),
-                Ok(Err(why)) => tracing::warn!(url = %retry.url, why, "the hidden page could not answer; the check is solved the other way"),
-                Err(why) => tracing::warn!(url = %retry.url, why = %why, request = %sent, "the hidden page could not answer; the check is solved the other way"),
+                Ok(Err(why)) => tracing::warn!(url = %retry.url, why, "the hidden page could not answer"),
+                Err(why) => tracing::warn!(url = %retry.url, why = %why, request = %sent, "the hidden page could not answer"),
             }
+            // a platform with hidden pages does not open the system browser: the person would have to export cookies by hand,
+            // and a cookie cannot clear a check that is tied to the browser that solved it. The challenge comes back as the
+            // answer, and the source shows that it is not answering.
+            return Ok(response);
         }
         if !self.webview.available() {
             self.toaster.show(WEBKIT_MISSING_TEXT, ToastLength::Long);
@@ -540,16 +544,16 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_page_that_cannot_answer_falls_back_to_the_solve() {
-        let server = challenge_server_for(Some(1)).await;
+    async fn a_page_that_cannot_answer_leaves_the_challenge_and_does_not_open_the_browser() {
+        let server = challenge_server_for(None).await;
         let dir = tempfile::tempdir().unwrap();
         let webview = FakeWebView::new(cleared(), Duration::from_millis(10));
         let pages = Arc::new(FakePages { answer: Err("no engine".into()), calls: AtomicUsize::new(0), last: Mutex::new(String::new()) });
         let client = client_with_pages(webview.clone(), pages.clone(), dir.path());
         let resp = client.execute(request::get(&format!("{}/", server.uri())).unwrap()).await.unwrap();
-        assert_eq!(resp.status, StatusCode::OK);
+        assert_eq!(resp.status, StatusCode::SERVICE_UNAVAILABLE, "the challenge comes back");
         assert_eq!(pages.calls.load(Ordering::SeqCst), 1);
-        assert_eq!(webview.solves.load(Ordering::SeqCst), 1);
+        assert_eq!(webview.solves.load(Ordering::SeqCst), 0, "the system browser was not asked");
     }
 
     /// A Cloudflare challenge for the first `challenges` requests, then a plain 200. `None` means always a challenge.

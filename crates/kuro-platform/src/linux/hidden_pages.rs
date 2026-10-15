@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use webkit6::glib;
 use webkit6::prelude::*;
@@ -120,7 +120,7 @@ async fn page_for(origin: &str, target: &str, data: &Path, cache: &Path, reload:
     let lock = LOADING.with(|loading| Rc::clone(loading.borrow_mut().entry(origin.to_owned()).or_default()));
     let _turn = lock.lock().await;
     let existing = VIEWS.with(|views| views.borrow().get(origin).cloned());
-    if let Some(view) = existing.as_ref().filter(|view| !reload && origin_of_view(view).as_deref() == Some(origin)) {
+    if let Some(view) = existing.as_ref().filter(|view| !reload && is_ready(view, origin)) {
         return Ok(view.clone());
     }
     let view = existing.unwrap_or_else(|| {
@@ -139,34 +139,71 @@ async fn page_for(origin: &str, target: &str, data: &Path, cache: &Path, reload:
         view
     });
     let front = format!("{origin}/");
-    if reload || view.uri().is_none() {
+    let result = async {
+        // a page that is not ready (new, left on the check, or moved to another site) loads the front page, or the address
+        // asked for when the front page is not enough (`reload`, or it lands on another origin)
         load(&view, if reload { target } else { &front }).await?;
+        if origin_of_view(&view).as_deref() != Some(origin) {
+            load(&view, target).await?;
+        }
+        Ok::<(), String>(())
     }
-    if origin_of_view(&view).as_deref() != Some(origin) {
-        load(&view, target).await?;
+    .await;
+    match result {
+        Ok(()) => Ok(view),
+        Err(error) => {
+            // a page that failed to load is not kept: the next request would take it for a ready one
+            tracing::warn!(site = origin, %error, "the hidden page was dropped");
+            VIEWS.with(|views| views.borrow_mut().remove(origin));
+            USED.with(|used| used.borrow_mut().remove(origin));
+            view.terminate_web_process();
+            Err(error)
+        }
     }
-    Ok(view)
 }
 
-/// Loads `uri` in `view` and waits until the load is finished and the page is not the site's browser check.
+/// Whether `view` can run a `fetch` for `origin` now: it shows a page of that origin that has finished loading and is not the
+/// site's browser check.
+fn is_ready(view: &webkit6::WebView, origin: &str) -> bool {
+    !view.is_loading() && origin_of_view(view).as_deref() == Some(origin) && !view.title().is_some_and(|t| is_check_page(&t))
+}
+
+/// Loads `uri` in `view` and waits until the load has finished and the page is not the site's browser check. The title is
+/// polled because the check may be solved in place, which changes the title without another load event.
 async fn load(view: &webkit6::WebView, uri: &str) -> Result<(), String> {
-    let (tx, rx) = async_channel::bounded::<Result<(), String>>(1);
-    let ready = tx.clone();
-    let loaded = view.connect_load_changed(move |view, event| {
-        if event == webkit6::LoadEvent::Finished && !view.title().is_some_and(|t| is_check_page(&t)) {
-            let _ = ready.try_send(Ok(()));
-        }
-    });
-    let failed = view.connect_load_failed(move |_, _, uri, error| {
-        let _ = tx.try_send(Err(format!("the site could not be opened ({uri}): {error}")));
-        false
-    });
+    let started = Instant::now();
+    let finished = Rc::new(Cell::new(false));
+    let failure = Rc::new(RefCell::new(None::<String>));
+    let loaded = {
+        let finished = Rc::clone(&finished);
+        view.connect_load_changed(move |_, event| {
+            if event == webkit6::LoadEvent::Finished {
+                finished.set(true);
+            }
+        })
+    };
+    let failed = {
+        let failure = Rc::clone(&failure);
+        view.connect_load_failed(move |_, _, uri, error| {
+            *failure.borrow_mut() = Some(format!("the site could not be opened ({uri}): {error}"));
+            false
+        })
+    };
     view.load_uri(uri);
-    let outcome = match glib::future_with_timeout(READY_TIMEOUT, rx.recv()).await {
-        Ok(Ok(result)) => result,
-        _ => Err("the site's browser check did not clear".to_owned()),
+    let outcome = loop {
+        glib::timeout_future(Duration::from_millis(250)).await;
+        if let Some(error) = failure.borrow_mut().take() {
+            break Err(error);
+        }
+        if finished.get() && !view.is_loading() && !view.title().is_some_and(|t| is_check_page(&t)) {
+            break Ok(());
+        }
+        if started.elapsed() > READY_TIMEOUT {
+            break Err(format!("the site's browser check did not clear within {} s", READY_TIMEOUT.as_secs()));
+        }
     };
     view.disconnect(loaded);
     view.disconnect(failed);
+    tracing::info!(uri, ms = started.elapsed().as_millis() as u64, ok = outcome.is_ok(), "a hidden page loaded");
     outcome
 }

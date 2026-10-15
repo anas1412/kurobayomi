@@ -31,8 +31,9 @@ pub fn hidden_pages(paths: &dyn Paths) -> Option<Arc<dyn HiddenPages>> {
     None
 }
 
-/// How long a site's check may take to clear in the hidden page.
-pub const READY_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a site's check may take to clear in the hidden page: less than the 30 s the app waits for a source, so a stuck
+/// check is reported (and the page dropped) before the person gives up.
+pub const READY_TIMEOUT: Duration = Duration::from_secs(25);
 /// How long a plug-in waits for one answer, the check included.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(90);
 /// A site's hidden page is closed after this long unused: each holds a web process. Its cookies stay, so reopening it
