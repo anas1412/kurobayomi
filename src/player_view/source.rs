@@ -158,7 +158,10 @@ fn select_defaults(mut commands: Vec<Vec<String>>, preferred: &str, preferred_au
 }
 
 pub(super) fn media_of(video: Video, title: crate::widgets::page_header::MediaTitle, preferred: &str, preferred_audio: &str) -> Media {
-    let tracks = |list: &[Track]| list.iter().map(|t| kuro_player::types::Track { url: t.url.clone(), lang: t.lang.clone() }).collect::<Vec<_>>();
+    // only the five languages of the menus are added: mpv fetches every side track it is given
+    let tracks = |list: &[Track]| {
+        list.iter().filter(|t| super::menu::listed(None, &t.lang)).map(|t| kuro_player::types::Track { url: t.url.clone(), lang: t.lang.clone() }).collect::<Vec<_>>()
+    };
     let headers = http_header_fields(true, video.headers.as_ref().map(|h| h.0.as_slice()), &[]).filter(|h| !h.is_empty());
     // a remote HLS stream plays through the local relay, which fetches it the way a browser does (`hls_proxy`)
     let target = if super::hls_proxy::wants_relay(&video.video_url) {
@@ -257,6 +260,18 @@ mod tests {
         let only_fr = select_defaults(vec![strings(&["sub-add", "s1", "auto", "French (fr)"])], "", "");
         assert_eq!(only_fr[0][2], "select");
         assert!(select_defaults(Vec::new(), "", "").is_empty());
+    }
+
+    #[test]
+    fn side_tracks_outside_the_five_languages_are_never_added() {
+        let mut v = video("https://cdn.test/x.m3u8", 1080);
+        v.subtitle_tracks = vec![
+            Track { url: "https://cdn.test/pt.vtt".into(), lang: "Portuguese (por)".into() },
+            Track { url: "https://cdn.test/ar.vtt".into(), lang: "Arabic (ar)".into() },
+        ];
+        let media = media_of(v, crate::widgets::page_header::MediaTitle::new("Show", "1"), "", "");
+        let urls: Vec<&str> = media.tracks.iter().map(|c| c[1].as_str()).collect();
+        assert!(urls.contains(&"https://cdn.test/ar.vtt") && !urls.contains(&"https://cdn.test/pt.vtt"), "{urls:?}");
     }
 
     #[test]

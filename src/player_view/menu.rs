@@ -68,7 +68,7 @@ pub fn track_sections(shared: &Shared) -> Vec<(&'static str, Vec<Choice>)> {
     [("Audio", "aid", lists.audio, aid), ("Subtitles", "sid", subtitles, sid)]
         .into_iter()
         .map(|(heading, property, tracks, selected)| {
-            let shown = tracks.into_iter().filter(|track| track.id == selected || listed_language(language_of(track).as_deref()));
+            let shown = tracks.into_iter().filter(|track| track.id == selected || listed(track.language.as_deref(), &track.name));
             (heading, shown.map(|track| choice(shared, property, track, selected)).collect())
         })
         .collect()
@@ -78,10 +78,15 @@ pub fn track_sections(shared: &Shared) -> Vec<(&'static str, Vec<Choice>)> {
 /// regional tag ("es-419") counts by its first part.
 const LISTED: [&str; 11] = ["en", "eng", "ar", "ara", "fr", "fre", "fra", "es", "spa", "ja", "jpn"];
 
-/// A track's language tag: mpv's, else the one a side track carries at the end of its title ("Portuguese (por)").
-fn language_of(track: &VideoTrack) -> Option<String> {
-    track.language.clone().filter(|l| !l.trim().is_empty()).or_else(|| {
-        let inner = track.name.trim().strip_suffix(')')?.rsplit_once('(')?.1.trim();
+/// Whether a track is one of the five languages (or names none): its tag, else the one a side track carries at the end
+/// of its title ("Portuguese (por)"). The player also adds only these side tracks (`source::media_of`).
+pub(super) fn listed(tag: Option<&str>, name: &str) -> bool {
+    listed_language(language_of(tag, name).as_deref())
+}
+
+fn language_of(tag: Option<&str>, name: &str) -> Option<String> {
+    tag.map(str::to_owned).filter(|l| !l.trim().is_empty()).or_else(|| {
+        let inner = name.trim().strip_suffix(')')?.rsplit_once('(')?.1.trim();
         (2..=6).contains(&inner.len()).then(|| inner.to_owned())
     })
 }
@@ -124,9 +129,9 @@ mod tests {
             assert!(!listed_language(Some(tag)), "{tag}");
         }
         assert!(listed_language(None) && listed_language(Some("")), "a track without a tag stays");
-        let side = |name: &str| VideoTrack { id: 4, name: name.to_owned(), language: None };
-        assert_eq!(language_of(&side("Portuguese (por)")).as_deref(), Some("por"));
-        assert_eq!(language_of(&side("English")), None, "no tag: listed");
-        assert_eq!(language_of(&VideoTrack { language: Some("jpn".into()), ..side("x (por)") }).as_deref(), Some("jpn"), "mpv's tag first");
+        assert_eq!(language_of(None, "Portuguese (por)").as_deref(), Some("por"));
+        assert_eq!(language_of(None, "English"), None, "no tag: listed");
+        assert_eq!(language_of(Some("jpn"), "x (por)").as_deref(), Some("jpn"), "mpv's tag first");
+        assert!(!listed(None, "Portuguese (por)") && listed(None, "Arabic (ar)") && listed(None, "English"));
     }
 }
