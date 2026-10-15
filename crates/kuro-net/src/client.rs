@@ -654,7 +654,9 @@ mod preference_and_extension_tests {
         std::fs::write(paths.cookies_import_file(), "127.0.0.1\tFALSE\t/\tFALSE\t0\tcf_clearance\texported\n").unwrap();
         let opened = Arc::new(Opened::default());
         let (toaster, _feed) = toast_channel();
-        let client = NetworkClient::for_desktop(&prefs(), &paths, None, Arc::new(Shared(Arc::clone(&opened))), toaster).unwrap();
+        // no hidden pages either: a machine with a web engine (CI) would answer the check through them instead
+        let host = Arc::new(BrowserHost::new(Arc::new(Shared(Arc::clone(&opened))), paths.cookies_import_file()));
+        let client = NetworkClient::with_cookies_and_pages(&prefs(), CookieJar::load(paths.cookie_jar_file()), host, toaster, None).unwrap();
         let url = format!("{}/", server.uri());
         let resp = client.get(&url).await.unwrap();
         assert_eq!(resp.status, http::StatusCode::OK);
