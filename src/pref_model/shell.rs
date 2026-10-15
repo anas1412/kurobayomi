@@ -148,11 +148,25 @@ fn entries() -> Vec<NavEntry> {
 }
 
 /// The settings list on a narrow window: one boxed list, a row per page (icon, title, summary, arrow).
+/// The update marks of the About page's row, the same as the sidebar's Settings row carries: a spinner while the app
+/// updates itself and the "New" pill while an update notice is unseen. Other rows have none.
+fn update_marks(id: &str) -> Vec<gtk::Widget> {
+    if id != "settings_about" {
+        return Vec::new();
+    }
+    vec![crate::appimage_update::busy_spinner().upcast(), crate::whats_new::pill().upcast()]
+}
+
 fn main_list(on_select: Rc<dyn Fn(&str)>) -> gtk::Widget {
     let column = crate::ui::column();
     let list = crate::ui::boxed_list();
     for entry in entries() {
-        let row = crate::ui::row(&entry.title, entry.subtitle.as_deref(), Some(crate::ui::chevron().upcast()));
+        let suffix = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        for mark in update_marks(&entry.id) {
+            suffix.append(&mark);
+        }
+        suffix.append(&crate::ui::chevron());
+        let row = crate::ui::row(&entry.title, entry.subtitle.as_deref(), Some(suffix.upcast()));
         // the page's icon goes in front of its title
         if let Some(inner) = row.child().and_downcast::<gtk::Box>() {
             inner.prepend(&gtk::Image::from_icon_name(&entry.icon));
@@ -185,6 +199,9 @@ pub fn split(entries: Vec<NavEntry>, current: &str) -> gtk::Widget {
         crate::ui::margins(&line, crate::widgets::rail::ROW_PAD);
         line.append(&gtk::Image::from_icon_name(&entry.icon));
         line.append(&gtk::Label::builder().label(&entry.title).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
+        for mark in update_marks(&entry.id) {
+            line.append(&mark);
+        }
         let row = gtk::ListBoxRow::builder().child(&line).build();
         row.set_tooltip_text(entry.subtitle.as_deref());
         list.append(&row);

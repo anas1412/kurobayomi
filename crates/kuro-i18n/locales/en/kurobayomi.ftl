@@ -4503,7 +4503,7 @@ ui_could_not_load_whats_new = Could not load what's new
 ui_new = New
 
 # source: kurobayomi
-ui_update_waiting_open_about = An update is waiting: open About, What's new
+ui_update_waiting_open_about = An update is waiting: open Settings, About, What's new
 
 # source: kurobayomi
 settings_log_out_of_tracker = Log out of this tracker?
@@ -4904,3 +4904,55 @@ spec_worker_info = Worker info
 
 # source: kurobayomi
 ui_maintenance = Maintenance
+
+# source: kurobayomi
+update_github_answered = GitHub answered { $status }
+
+# source: kurobayomi
+update_could_not_reach_github = could not reach GitHub
+
+# source: kurobayomi
+update_download_broke_off = the download from GitHub broke off
+
+# source: kurobayomi
+update_downloading = Downloading { $build }: { $percent }%
+
+# source: kurobayomi
+update_paused = Paused { $build }: { $percent }%
+
+# source: kurobayomi
+update_installed_restart = { $build } is installed: restart to use it
+
+# source: kurobayomi
+update_failed = The update failed: { $error }
+
+# source: kurobayomi
+whats_new_stable_available = Kurobayomi { $version } is available
+
+# source: kurobayomi
+whats_new_nightly_installed = Nightly { $commit } is installed
+
+# source: kurobayomi
+whats_new_stable_installed = Kurobayomi { $version } is installed
+
+# source: kurobayomi
+whats_new_nightly_restart = Nightly { $commit } is installed: restart to use it
+
+# source: kurobayomi
+whats_new_stable_restart = Kurobayomi { $version } is installed: restart to use it
+
+# source: kurobayomi
+whats_new_updated_to_stable = Updated to Kurobayomi { $version }
+
+# source: kurobayomi
+whats_new_updated_to_nightly = Updated to nightly { $commit }
+
+# source: kurobayomi
+whats_new_changes = Changes
+
+# source: kurobayomi
+whats_new_more_changes =
+    { $count ->
+        [one] …and 1 more change.
+       *[other] …and { NUMBER($count, useGrouping: "false") } more changes.
+    }

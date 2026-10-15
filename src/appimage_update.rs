@@ -11,7 +11,7 @@
 //! The download can be paused and cancelled from the About page (`pause`, `resume`, `cancel`), and it reads the file
 //! from the fastest of GitHub's download addresses (`fastest_route`).
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -300,11 +300,11 @@ fn describe(error: &reqwest::Error) -> String {
     let what = if error.is_timeout() {
         tr(MsgKey::ui_github_did_not_answer_in_time).to_owned()
     } else if let Some(status) = error.status() {
-        format!("GitHub answered {status}")
+        trf(MsgKey::update_github_answered, &[("status", Arg::Str(&status.to_string()))])
     } else if error.is_connect() || error.is_request() {
-        "could not reach GitHub".to_owned()
+        tr(MsgKey::update_could_not_reach_github)
     } else {
-        "the download from GitHub broke off".to_owned()
+        tr(MsgKey::update_download_broke_off)
     };
     let mut cause = None;
     let mut source = std::error::Error::source(error);
@@ -392,14 +392,14 @@ impl Status {
             Self::UpToDate => Some(tr(MsgKey::ui_up_to_date).to_owned()),
             Self::Downloading { build, done, total } => {
                 let percent = (*done * 100).checked_div(*total).unwrap_or(0);
-                Some(format!("Downloading {}: {percent}%", short(build)))
+                Some(trf(MsgKey::update_downloading, &[("build", Arg::Str(&short(build))), ("percent", Arg::Int(i64::try_from(percent).unwrap_or(0)))]))
             }
             Self::Paused { build, done, total } => {
                 let percent = (*done * 100).checked_div(*total).unwrap_or(0);
-                Some(format!("Paused {}: {percent}%", short(build)))
+                Some(trf(MsgKey::update_paused, &[("build", Arg::Str(&short(build))), ("percent", Arg::Int(i64::try_from(percent).unwrap_or(0)))]))
             }
-            Self::Installed(build) => Some(format!("{} is installed: restart to use it", short(build))),
-            Self::Failed(error) => Some(format!("The update failed: {error}")),
+            Self::Installed(build) => Some(trf(MsgKey::update_installed_restart, &[("build", Arg::Str(&short(build)))])),
+            Self::Failed(error) => Some(trf(MsgKey::update_failed, &[("error", Arg::Str(error))])),
         }
     }
 
@@ -443,7 +443,7 @@ fn set(next: Status) {
 }
 
 /// A small spinner that turns while the self-update checks or downloads, for any place that shows it is busy (the
-/// sidebar's About row).
+/// sidebar's Settings row and the About row of Settings).
 pub fn busy_spinner() -> gtk::Spinner {
     let spinner = crate::ui::loading(crate::ui::LoadSize::Inline);
     let weak = spinner.downgrade();

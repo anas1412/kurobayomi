@@ -1,10 +1,10 @@
 //! Updates and What's new, for both channels. The notice of an update (a stable release that is out, or a nightly that was
-//! installed and waits for a restart) shows as a toast with one action and as a "New" pill on the sidebar's About row until
+//! installed and waits for a restart) shows as a toast with one action and as a "New" pill on the sidebar's Settings row (and Settings, About) until
 //! it is looked at. The notes are a stable release's changelog section, or for a nightly the commits between two builds.
 //! After an update, the first start shows the notes of the new build once; the build of the last run is kept in
 //! `Paths::last_build_file`. A local build has no channel build and shows none of this.
 
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
 use std::cell::RefCell;
 use std::time::Duration;
 
@@ -90,7 +90,7 @@ fn refresh_pills() {
     });
 }
 
-/// The "New" pill for the sidebar's About row, shown while an update notice is unseen.
+/// The "New" pill, for the sidebar's Settings row and the About row of Settings, shown while an update notice is unseen.
 pub fn pill() -> gtk::Label {
     let pill = gtk::Label::builder().label(&tr(MsgKey::ui_new)).css_classes(["kb-nav-badge"]).valign(gtk::Align::Center).visible(unseen()).build();
     pill.set_tooltip_text(Some(&tr(MsgKey::ui_update_waiting_open_about)));
@@ -102,9 +102,9 @@ pub fn pill() -> gtk::Label {
 pub fn row_subtitle() -> Option<String> {
     NOTICE.with(|n| {
         n.borrow().as_ref().map(|(notice, _)| match notice {
-            Notice::Stable(release) => format!("Kurobayomi {} is available", release.version),
-            Notice::Nightly(commit) => format!("Nightly {} is installed: restart to use it", short(commit)),
-            Notice::StableInstalled(version) => format!("Kurobayomi {version} is installed: restart to use it"),
+            Notice::Stable(release) => trf(MsgKey::whats_new_stable_available, &[("version", Arg::Str(&release.version))]),
+            Notice::Nightly(commit) => trf(MsgKey::whats_new_nightly_restart, &[("commit", Arg::Str(short(commit)))]),
+            Notice::StableInstalled(version) => trf(MsgKey::whats_new_stable_restart, &[("version", Arg::Str(version))]),
         })
     })
 }
@@ -115,23 +115,23 @@ pub fn row_enabled() -> bool {
 
 /// A newer stable release is out (the startup check found it).
 pub fn stable_available(release: Release) {
-    let text = format!("Kurobayomi {} is available", release.version);
+    let text = trf(MsgKey::whats_new_stable_available, &[("version", Arg::Str(&release.version))]);
     set_notice(Notice::Stable(release));
     crate::toast::notify_action(&text, &tr(MsgKey::whats_new), Some(Duration::from_secs(10)), open);
 }
 
 /// The nightly AppImage was replaced by a newer build.
 pub fn nightly_installed(commit: String) {
-    let text = format!("Nightly {} is installed", short(&commit));
+    let text = trf(MsgKey::whats_new_nightly_installed, &[("commit", Arg::Str(short(&commit)))]);
     set_notice(Notice::Nightly(commit));
-    crate::toast::notify_action(&text, "Restart", Some(Duration::from_secs(10)), restart);
+    crate::toast::notify_action(&text, &tr(MsgKey::ui_restart), Some(Duration::from_secs(10)), restart);
 }
 
 /// The stable AppImage was replaced by a newer release.
 pub fn stable_installed(version: String) {
-    let text = format!("Kurobayomi {version} is installed");
+    let text = trf(MsgKey::whats_new_stable_installed, &[("version", Arg::Str(&version))]);
     set_notice(Notice::StableInstalled(version));
-    crate::toast::notify_action(&text, "Restart", Some(Duration::from_secs(10)), restart);
+    crate::toast::notify_action(&text, &tr(MsgKey::ui_restart), Some(Duration::from_secs(10)), restart);
 }
 
 /// What's new: the waiting update when there is one, else the notes of the running build.
@@ -159,7 +159,7 @@ pub fn open() {
 fn show_current(since: Option<Build>) {
     match Build::current() {
         Some(Build::Stable(version)) => {
-            let heading = if since.is_some() { format!("Updated to Kurobayomi {version}") } else { tr(MsgKey::whats_new).to_owned() };
+            let heading = if since.is_some() { trf(MsgKey::whats_new_updated_to_stable, &[("version", Arg::Str(&version))]) } else { tr(MsgKey::whats_new).to_owned() };
             fetch(move || stable_notes(&version).map(|notes| (notes, version)), move |((body, url), version)| {
                 notes_dialog(&heading, &format!("Kurobayomi {version}"), &body, Some(&url), None);
             });
@@ -169,7 +169,7 @@ fn show_current(since: Option<Build>) {
                 Some(Build::Nightly(old)) => Some(old),
                 _ => None,
             };
-            let heading = if old.is_some() { format!("Updated to nightly {}", short(&commit)) } else { tr(MsgKey::whats_new).to_owned() };
+            let heading = if old.is_some() { trf(MsgKey::whats_new_updated_to_nightly, &[("commit", Arg::Str(short(&commit)))]) } else { tr(MsgKey::whats_new).to_owned() };
             fetch(
                 move || {
                     let commits = match &old {
@@ -283,7 +283,7 @@ fn commits_markdown(commits: &[(String, String)]) -> String {
     if commits.is_empty() {
         return tr(MsgKey::ui_no_changes_since_your_last_version).to_owned();
     }
-    let mut notes = String::from("### Changes\n");
+    let mut notes = format!("### {}\n", tr(MsgKey::whats_new_changes));
     for (sha, subject) in commits.iter().take(MAX_COMMITS) {
         let subject = if subject.chars().count() > MAX_SUBJECT_CHARS {
             format!("{}…", subject.chars().take(MAX_SUBJECT_CHARS - 1).collect::<String>().trim_end())
@@ -293,7 +293,7 @@ fn commits_markdown(commits: &[(String, String)]) -> String {
         notes.push_str(&format!("- {subject} (`{}`)\n", short(sha)));
     }
     if let Some(more) = commits.len().checked_sub(MAX_COMMITS).filter(|more| *more > 0) {
-        notes.push_str(&format!("\n…and {more} more {}.\n", if more == 1 { "change" } else { "changes" }));
+        notes.push_str(&format!("\n{}\n", tr_plural(MsgKey::whats_new_more_changes, i64::try_from(more).unwrap_or(i64::MAX), &[])));
     }
     notes
 }
