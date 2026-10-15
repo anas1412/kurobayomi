@@ -132,14 +132,17 @@ fn select(tabs: &gtk::Stack, id: &str) {
     tabs.set_visible_child_name(id);
 }
 
-fn open_settings() {
-    ui::pop_to_root();
-    crate::pref_model::shell::open(None);
-}
+/// The widget name of the Settings page (`ui::screen_page`).
+const SETTINGS_PAGE: &str = "screen:settings";
 
-fn open_about() {
-    ui::pop_to_root();
-    crate::pref_model::shell::open(Some(crate::pref_model::router::Destination::About));
+/// Settings, from the panel: nothing moves while it is on screen, a page inside it goes back to it, and from anywhere
+/// else it slides in once.
+fn open_settings() {
+    let (names, shown) = ui::page_stack();
+    match names.iter().take(shown + 1).position(|n| n == SETTINGS_PAGE) {
+        Some(at) => ui::pop_to(at),
+        None => ui::open_over_root("settings"),
+    }
 }
 
 fn open_help() {
@@ -154,11 +157,11 @@ fn incognito_label() -> String {
 }
 
 /// The app's own pages under the places, in the panel and in the narrow window's menu: icon, label, action name, opener.
-fn app_pages() -> [(&'static str, String, &'static str, fn()); 4] {
+/// About is a page of Settings only (user, 2026-10-15: one place for it).
+fn app_pages() -> [(&'static str, String, &'static str, fn()); 3] {
     [
         ("input-keyboard-symbolic", tr(MsgKey::ui_keyboard_shortcuts).to_owned(), "shortcuts", crate::entry_core::shortcut_help_view::open),
         ("help-browser-symbolic", tr(MsgKey::label_help), "help", open_help),
-        ("help-about-symbolic", tr(MsgKey::pref_category_about), "about", open_about),
         ("emblem-system-symbolic", tr(MsgKey::label_settings), "settings", open_settings),
     ]
 }
@@ -205,25 +208,28 @@ fn title() -> GBox {
     title
 }
 
-/// The rows at the bottom of the panel: Incognito mode with its switch, Keyboard shortcuts, Help, About and Settings.
+/// The rows at the bottom of the panel: Incognito mode with its switch, Keyboard shortcuts, Help and Settings. Only
+/// Settings is ever selected: while it is the page on screen (`follow_pages`).
 fn bottom_rows() -> gtk::ListBox {
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
-    list.set_selection_mode(gtk::SelectionMode::None);
     list.set_margin_top(rail::PAD_V);
     list.set_margin_bottom(rail::PAD_V);
     // the switch is bound to app.incognito, so it shows the state and flips it like the menu item did
     let switch = gtk::Switch::builder().valign(gtk::Align::Center).action_name(crate::incognito::TOGGLE_ACTION).build();
     let incognito = nav_row(crate::incognito::ICON, &incognito_label(), &[switch.upcast_ref()]);
+    incognito.set_selectable(false);
     list.append(&incognito);
     let rows = app_pages();
     let runs: Vec<fn()> = rows.iter().map(|(_, _, _, run)| *run).collect();
-    // the About row turns a spinner while the app updates itself, then carries the "New" pill while an update notice is
-    // unseen (`whats_new`)
+    // the Settings row (About is in it) turns a spinner while the app updates itself, then carries the "New" pill while
+    // an update notice is unseen (`whats_new`)
     let (update_spinner, update_pill) = (crate::appimage_update::busy_spinner(), crate::whats_new::pill());
-    for (icon, label, _, _) in rows {
-        let extra: &[&gtk::Widget] = if icon == "help-about-symbolic" { &[update_spinner.upcast_ref(), update_pill.upcast_ref()] } else { &[] };
-        list.append(&nav_row(icon, &label, extra));
+    for (icon, label, name, _) in rows {
+        let extra: &[&gtk::Widget] = if name == "settings" { &[update_spinner.upcast_ref(), update_pill.upcast_ref()] } else { &[] };
+        let row = nav_row(icon, &label, extra);
+        row.set_selectable(name == "settings");
+        list.append(&row);
     }
     list.connect_row_activated(move |_, row| {
         match usize::try_from(row.index()).ok() {
@@ -240,6 +246,31 @@ fn bottom_rows() -> gtk::ListBox {
         }
     });
     list
+}
+
+/// Keeps one row of the panel selected, the place on screen: Settings while it (or a page inside it) shows, else the open
+/// tab, also over a page opened from the tab (an entry is still "in" Browse). Follows the tabs and the pushed pages, so the
+/// bottom bar, a link or Back moves it too.
+fn follow_pages(tabs: &gtk::Stack, places: &gtk::ListBox, bottom: &gtk::ListBox, ids: Vec<String>) {
+    let sync = {
+        let (tabs, places, bottom) = (tabs.clone(), places.clone(), bottom.clone());
+        Rc::new(move || {
+            let (names, shown) = ui::page_stack();
+            if names.iter().take(shown + 1).any(|n| n == SETTINGS_PAGE) {
+                places.unselect_all();
+                bottom.select_row(bottom.last_child().and_downcast::<gtk::ListBoxRow>().as_ref());
+                return;
+            }
+            bottom.unselect_all();
+            let tab = tabs.visible_child_name().and_then(|n| ids.iter().position(|x| *x == n)).unwrap_or(0);
+            places.select_row(places.row_at_index(i32::try_from(tab).unwrap_or(0)).as_ref());
+        })
+    };
+    let on_tab = Rc::clone(&sync);
+    tabs.connect_visible_child_name_notify(move |_| on_tab());
+    let on_page = Rc::clone(&sync);
+    ui::stack().connect_visible_child_notify(move |_| on_page());
+    sync();
 }
 
 /// The left panel: the app menu in a split header, one row per place from the top, and Settings at the bottom. Always
@@ -276,17 +307,8 @@ pub fn build(tabs: &gtk::Stack) -> GBox {
             }
         });
     }
-    // keep the selection in sync when the bottom bar (narrow mode) or a link switches tabs
-    let l2 = list.clone();
-    tabs.connect_visible_child_name_notify(move |t| {
-        let i = t.visible_child_name().and_then(|n| ids.iter().position(|x| *x == n));
-        if let Some(r) = i.and_then(|i| l2.row_at_index(i as i32)) {
-            l2.select_row(Some(&r));
-        }
-    });
-    list.select_row(list.row_at_index(0).as_ref());
-
     let settings = bottom_rows();
+    follow_pages(tabs, &list, &settings, ids);
 
     let b = GBox::new(O::Vertical, 0);
     b.set_size_request(rail::WIDTH, -1);
@@ -349,9 +371,11 @@ mod tests {
     #[test]
     fn the_panel_has_the_places_and_the_app_rows_at_the_bottom() {
         crate::testing::with_display(|| {
+            let _nav = crate::testing::nav();
             let panel = build(&gtk::Stack::new());
             let texts = labels(panel.upcast_ref());
-            let wanted = [incognito_label().to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about)];
+            assert!(!texts.iter().any(|l| *l == tr(MsgKey::pref_category_about)), "About is in Settings only");
+            let wanted = [incognito_label().to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help)];
             for title in ["Library", "Browse", "Updates", "History", "Downloads", "Settings", "Kurobayomi"].map(str::to_owned).iter().chain(&wanted) {
                 assert!(texts.iter().any(|l| l == title), "{title}");
             }
@@ -384,7 +408,40 @@ mod tests {
                     labels.extend(part.item_attribute_value(i, "label", None).and_then(|v| v.get::<String>()));
                 }
             }
-            assert_eq!(labels, [incognito_label().to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::pref_category_about), tr(MsgKey::label_settings)]);
+            assert_eq!(labels, [incognito_label().to_owned(), "Keyboard shortcuts".to_owned(), tr(MsgKey::label_help), tr(MsgKey::label_settings)]);
+        });
+    }
+
+    #[test]
+    fn one_row_is_selected_the_place_on_screen() {
+        crate::testing::with_display(|| {
+            let (stack, _) = crate::testing::nav();
+            if stack.first_child().is_none() {
+                stack.add_child(&gtk::Label::new(Some("root")));
+            }
+            ui::pop_to_root();
+            let tabs = gtk::Stack::new();
+            let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());
+            for id in &ids {
+                tabs.add_named(&gtk::Label::new(Some(id)), Some(id));
+            }
+            let panel = build(&tabs);
+            let lists: Vec<gtk::ListBox> = crate::screens::alone::descendants(panel.upcast_ref()).iter().filter_map(|w| w.downcast_ref::<gtk::ListBox>().cloned()).collect();
+            let (places, bottom) = (&lists[0], &lists[1]);
+            tabs.set_visible_child_name(&ids[1]);
+            assert_eq!(places.selected_row().map(|r| r.index()), Some(1), "the open tab");
+            assert!(bottom.selected_row().is_none());
+            let settings = gtk::Label::new(None);
+            settings.set_widget_name(SETTINGS_PAGE);
+            ui::push(&settings);
+            assert!(places.selected_row().is_none(), "no tab while Settings shows");
+            assert_eq!(bottom.selected_row().map(|r| r.index()), Some(3), "the Settings row");
+            let inside = gtk::Label::new(None);
+            ui::push(&inside);
+            assert_eq!(bottom.selected_row().map(|r| r.index()), Some(3), "a page inside Settings keeps it");
+            ui::pop_to_root();
+            assert_eq!(places.selected_row().map(|r| r.index()), Some(1), "back on the tab");
+            assert!(bottom.selected_row().is_none());
         });
     }
 }

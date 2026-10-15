@@ -83,6 +83,39 @@ pub fn page_stack() -> (Vec<String>, usize) {
     (names, shown)
 }
 
+/// Shows the page at `index` of the stack (0 is the root) with one slide back, and drops the pages above it.
+pub fn pop_to(index: usize) {
+    let stack = nav().0;
+    let mut target = stack.first_child();
+    for _ in 0..index {
+        target = target.and_then(|w| w.next_sibling());
+    }
+    let Some(target) = target else { return };
+    if stack.visible_child().as_ref() == Some(&target) {
+        return;
+    }
+    crate::shell::transitions::apply(&stack, crate::shell::transitions::Direction::Pop);
+    stack.set_visible_child(&target);
+    glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+        while let Some(w) = target.next_sibling() {
+            stack.remove(&w);
+        }
+    });
+}
+
+/// Pushes `page` straight over the root: one slide from the page on screen, then the pages that were between go.
+/// (Popping to the root first and then pushing played two slides.)
+pub fn push_over_root(page: &impl IsA<gtk::Widget>) {
+    let stack = nav().0;
+    let between: Vec<gtk::Widget> = std::iter::successors(stack.first_child().and_then(|r| r.next_sibling()), |w| w.next_sibling()).collect();
+    push(page);
+    glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+        for w in between {
+            stack.remove(&w);
+        }
+    });
+}
+
 /// Drop every pushed page and show the root (sidebar destination clicked).
 pub fn pop_to_root() {
     let stack = nav().0;
@@ -297,6 +330,15 @@ pub fn first_within(what: &'static str, window_ms: u64) -> bool {
         map.insert(what, now);
         true
     })
+}
+
+/// As [`open`] for a screen that is not a tab, pushed straight over the root (one slide; see [`push_over_root`]).
+pub fn open_over_root(id: &str) {
+    #[cfg(test)]
+    if OPENED.with(|o| o.borrow_mut().as_mut().map(|v| v.push(id.to_owned())).is_some()) {
+        return;
+    }
+    push_over_root(&crate::screens::build(id));
 }
 
 /// Open a screen by id: hand-built if one exists, otherwise rendered from its spec.

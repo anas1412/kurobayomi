@@ -9,7 +9,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
-use super::router::{self, Back, Destination, Page, Shell};
+use super::router::{self, Back, Page, Shell};
 use crate::screens::Built;
 
 thread_local! {
@@ -80,19 +80,6 @@ pub fn go_back() {
 
 fn window_size() -> (i32, i32) {
     crate::window_size::size_of(&crate::ui::window())
-}
-
-/// Opens settings on `dest`, or on the default page when it is `None`. A destination shows only its own page, with no
-/// main list underneath on a narrow window.
-pub fn open(dest: Option<Destination>) {
-    match dest {
-        None => crate::ui::open("settings"),
-        Some(d) => {
-            SHELL.with(|s| s.borrow_mut().open(Some(d), two_pane_now()));
-            ROOT.with(|r| *r.borrow_mut() = Some(widget_name(d.screen_id())));
-            crate::ui::open(d.screen_id());
-        }
-    }
 }
 
 fn two_pane_now() -> bool {
@@ -271,6 +258,7 @@ fn pane(id: &str) -> gtk::Widget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::router::Destination;
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|n| (*n).to_owned()).collect()
