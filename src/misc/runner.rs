@@ -377,6 +377,8 @@ pub fn start() {
     let running: std::rc::Rc<dyn Fn(Kind) -> bool> =
         std::rc::Rc::new(move |kind| running_runner.locks().holder(kind).is_some());
     register_update_action(start.clone());
+    // every app launch checks the library for new releases, whatever the automatic interval is
+    start_all(&*start);
     register_buttons(start, running);
 
     let mut senders = Vec::new();
