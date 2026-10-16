@@ -67,8 +67,9 @@ pub const LIBRARY_AUTO_CLEAR_CHAPTER_CACHE: bool = false;
 pub const LIBRARY_UPCOMING_HOME_RETURNS_TODAY: bool = false;
 /// The Upcoming week start: `auto`, so the locale decides.
 pub const UPCOMING_WEEK_START: &str = "auto";
-/// The default item restrictions of the library update (Smart update is cut): the four default skip rules.
-pub const LIBRARY_UPDATE_ITEM_RESTRICTIONS: [&str; 4] = ["manga_fully_read", "manga_ongoing", "manga_started", "manga_outside_release_period"];
+/// The item restrictions of the library update (Smart update is cut): only completed series are skipped, so entries with
+/// unread items, entries not started and entries outside their release window are checked too.
+pub const LIBRARY_UPDATE_ITEM_RESTRICTIONS: [&str; 1] = ["manga_ongoing"];
 
 // Entry pages (anime and manga details, seasons, the track dialog).
 pub const ENTRY_SHOW_AIRING_TIME: bool = true;
