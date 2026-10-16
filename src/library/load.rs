@@ -68,7 +68,8 @@ pub fn filters(
         interval_custom,
         tracking,
         downloaded_only,
-        skip_outside_release_period: diet::LIBRARY_UPDATE_ITEM_RESTRICTIONS.contains(&"manga_outside_release_period"),
+        // on: the "Customized update frequency" filter only applies with it (independent of what a library update skips)
+        skip_outside_release_period: true,
     }
 }
 
