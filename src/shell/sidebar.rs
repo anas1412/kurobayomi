@@ -194,16 +194,16 @@ fn app_menu() -> gtk::MenuButton {
 }
 
 /// The small icon beside the panel title while Incognito mode is on. It follows the state of `app.incognito`.
-/// The panel's title: the app's name, and on a nightly build a small "nightly" under it (a property of the build, not part
-/// of the name; it also leaves the header room for the search, the menu and the Incognito icon).
+/// The panel's title: the app's name, and a small channel line under it: "nightly", or "stable" with the version (a
+/// property of the build, not part of the name; it also leaves the header room for the search, the menu and the
+/// Incognito icon).
 fn title() -> GBox {
     let title = GBox::new(O::Horizontal, 6);
     let names = GBox::new(O::Vertical, 0);
     names.set_valign(gtk::Align::Center);
     names.append(&gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build());
-    if crate::channel::NIGHTLY {
-        names.append(&gtk::Label::builder().label("nightly").css_classes(["kb-subtitle", "dim-label"]).build());
-    }
+    let channel = if crate::channel::NIGHTLY { "nightly".to_string() } else { format!("stable {}", env!("CARGO_PKG_VERSION")) };
+    names.append(&gtk::Label::builder().label(channel).css_classes(["kb-subtitle", "dim-label"]).build());
     title.append(&names);
     title
 }

@@ -6,6 +6,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-18
+
 ### Added
 
 - Manga and anime in one desktop app (Rust and GTK 4): one library with categories, filters and sorting, an updates feed, a
