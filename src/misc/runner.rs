@@ -377,8 +377,15 @@ pub fn start() {
     let running: std::rc::Rc<dyn Fn(Kind) -> bool> =
         std::rc::Rc::new(move |kind| running_runner.locks().holder(kind).is_some());
     register_update_action(start.clone());
-    // every app launch checks the library for new releases, whatever the automatic interval is
-    start_all(&*start);
+    // every app launch checks the library for new releases, whatever the automatic interval is, once the sources have
+    // loaded: before that every entry would fail with "Source not installed"
+    {
+        let (start, mut ready) = (start.clone(), crate::recipe_sources::ready());
+        gtk::glib::spawn_future_local(async move {
+            let _ = ready.wait_for(|loaded| *loaded).await;
+            start_all(&*start);
+        });
+    }
     register_buttons(start, running);
 
     let mut senders = Vec::new();
