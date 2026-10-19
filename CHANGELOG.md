@@ -6,6 +6,21 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-19
+
+### Added
+
+- MyAnimeList tracking next to AniList: log in from Settings, then track any anime or manga from its Tracking page
+  (status, progress, score, start and finish dates). Progress after reading or watching goes to every tracker an entry
+  is bound to.
+
+### Fixed
+
+- The library update at launch, the refresh buttons and the automatic update waited for nothing, so an update that
+  started before the sources had loaded failed every entry with "Source not installed". They now wait for the sources.
+- Library updates gave sources only the entry's address, without its title, so AnimePahe entries whose link had
+  expired failed with "AnimePahe no longer lists". The stored title is now passed along.
+
 ## [0.1.0] - 2026-10-18
 
 ### Added
