@@ -457,9 +457,9 @@
      "items": [
       {
        "type": "switch",
-       "title": "Show in sources and extensions lists",
-       "subtitle": "Requires app restart to take effect",
-       "default": true
+       "title": "Show adult (18+) titles",
+       "subtitle": "While this is off, sources that know a title's rating leave adult titles out, and extensions marked 18+ are hidden.",
+       "default": false
       },
       {
        "type": "info",
