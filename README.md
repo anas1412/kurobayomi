@@ -22,9 +22,8 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
 
 ![The welcome screen](docs/images/getting-started/01-welcome.png)
 
-> **Status: early test version.** It runs, and the whole flow from adding a repository to watching or reading works, but
-> expect rough edges. A nightly AppImage is built from every change and updates itself; the first stable release is
-> coming. See [Install](#install).
+> **Status: first stable releases.** The whole flow from adding a repository to watching or reading works; expect some
+> rough edges. The stable AppImage is the one to use, and a nightly is built from every change. See [Install](#install).
 
 ## What it does
 
@@ -36,11 +35,14 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
   and endings, and a full-screen mode that shows only the video. Your own `mpv.conf` and `input.conf` are honoured.
 - **Manga reader inside the app**: left to right by default, right to left or long strip per title, the next chapter
   follows the last page.
-- **Library, Updates and History**, downloads for offline use, and AniList tracking (optional).
+- **Library, Updates and History**: at every launch the library checks your titles for new chapters and episodes, and
+  they show in Updates. Downloads for offline use.
+- **Tracking with AniList and MyAnimeList** (optional): log in from Settings, then follow a title's status, progress,
+  score and dates from its Tracking page. Progress moves on by itself as you read and watch.
 - **Aniyomi and Tachiyomi backups** (`.tachibk`) restore into Kurobayomi, and `aniyomi://` / `tachiyomi://` repository
   links open it.
-- **Keeps itself up to date.** The AppImage downloads a newer version in the background and runs it after a restart;
-  About shows the progress.
+- **Keeps itself up to date.** The AppImage downloads a newer version in the background and runs it after a restart
+  (not on a metered connection); About shows the progress.
 - **Fits any window size**, from a full screen down to a phone-sized 360 px: the sidebar turns into a bar at the bottom.
 
 <table>
@@ -79,18 +81,18 @@ that lists sources; anyone can publish one. The format, the plug-in interface an
 Download the AppImage, make it executable and run it. It carries its own libraries and needs glibc 2.39 or newer
 (Ubuntu 24.04, Fedora 40, Debian 13, Arch and newer).
 
+- **Stable** (recommended): [Kurobayomi-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage)
 - **Nightly** (built from every change, may be unstable, keeps its data apart from the stable app):
   [Kurobayomi-nightly-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage)
-- **Stable**: [Kurobayomi-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage)
-  once the first release is out.
 
 ```bash
-chmod +x Kurobayomi-nightly-x86_64.AppImage
-./Kurobayomi-nightly-x86_64.AppImage
+chmod +x Kurobayomi-x86_64.AppImage
+./Kurobayomi-x86_64.AppImage
 ```
 
-The AppImage updates itself: at start it looks for a newer version, downloads it in the background and runs it after a
-restart. **About** shows the progress, and **Check for updates at startup** there turns it off. AppImage managers
+The AppImage updates itself: at start it looks for a newer version (stable: a higher version number; nightly: the latest
+build), downloads it in the background, checks it, and runs it after a restart. It skips this on a metered connection.
+**Settings → About** shows the progress, and **Check for updates at startup** there turns it off. AppImage managers
 (Gear Lever, AppImageLauncher) work too.
 
 A Flatpak is planned.
@@ -125,7 +127,7 @@ every open window as a PNG; used for the guide's screenshots).
 | `crates/kuro-prefs`, `kuro-db`, `kuro-data`, `kuro-domain` | settings, databases, repositories, domain rules |
 | `crates/kuro-extensions`, `kuro-source*`, `kuro-net` | repositories, the recipe engine, the WASM plug-in host, HTTP |
 | `crates/kuro-player`, `kuro-downloads`, `kuro-images`, `kuro-local`, `kuro-archive` | mpv player, downloads, images, local files, CBZ |
-| `crates/kuro-backup`, `kuro-track` | backups (Aniyomi compatible), AniList tracking |
+| `crates/kuro-backup`, `kuro-track` | backups (Aniyomi compatible), AniList and MyAnimeList tracking |
 | `docs/` | the user guide, design notes and audits |
 
 ## Licence
