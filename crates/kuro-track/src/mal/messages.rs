@@ -14,6 +14,8 @@ pub const UNKNOWN_SCORE: &str = "MAL: Unknown score";
 
 /// Toast when the redirect did not arrive within five minutes (E-LOGIN-5).
 pub const LOGIN_TIMED_OUT: &str = "Login timed out. Start again in Kurobayomi.";
+/// Toast when the loopback redirect port is taken by another program, so the browser login cannot come back.
+pub const PORT_BUSY: &str = "MyAnimeList login needs port 8765, which another program is using";
 /// Toast after the user refused consent, or the redirect carried no code (D-04).
 pub const LOGIN_NOT_COMPLETED: &str = "Login was not completed";
 /// Error text of the paste field when the input is neither a redirect URL nor a code (E-LOGIN-9).

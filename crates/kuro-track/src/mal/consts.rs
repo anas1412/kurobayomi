@@ -1,10 +1,14 @@
 //! Tracker id and endpoint constants (`p1-behavior.md` section 0, `p1-data-and-config.md` section 8).
-//! The OAuth client id is not a constant: it comes from the user's config (`p1-rust-design.md` section 5).
+//! The app's own OAuth client id is built in; the user's config or `KUROBAYOMI_MAL_CLIENT_ID` can replace it.
 
 use crate::model::TrackerId;
 
 /// `TrackerManager.kt:27`: MAL is tracker 1.
 pub const MAL_TRACKER_ID: TrackerId = TrackerId::MYANIMELIST;
+
+/// Kurobayomi's MAL API client (app type "other": no secret, PKCE). Its one registered redirect is
+/// `http://localhost:8765/myanimelist-auth` (`redirect::redirect_uri(DEFAULT_PORT)`).
+pub const BUILT_IN_CLIENT_ID: &str = "d13312aeeb4264a8c7ce633952a615fb";
 
 pub const OAUTH_BASE: &str = "https://myanimelist.net/v1/oauth2";
 pub const API_BASE: &str = "https://api.myanimelist.net/v2";

@@ -1,6 +1,6 @@
 //! The Tracking rows this module binds (tasks T-47a-053 to T-47a-059), now on the Sources and tracking page: the one
-//! progress switch and the AniList row with its login and logout dialogs. AniList is the only tracker with a row; the
-//! other trackers keep their code and their token keys but are not shown (settings diet). The three cut switches
+//! progress switch and the MyAnimeList and AniList rows with their login and logout dialogs. Those two are the only
+//! trackers with a row; the other trackers keep their code and their token keys but are not shown (settings diet). The three cut switches
 //! (open the track menu, next airing time, progress on mark) are not shown either.
 //!
 //! The rows are driven by `kuro_track::login_rows` over the services of [`tracker_host`]: the check mark follows the
@@ -157,8 +157,9 @@ fn tapped(index: usize, changed: &Rc<dyn Fn()>) {
             crate::ui::open_link(&url, None);
             changed();
         }
-        // MyAnimeList and Simkl are switched off: their rows are not shown, so no tap reaches these arms
-        Some(RowTap::StartMalLogin | RowTap::StartSimklLogin(_)) => {}
+        Some(RowTap::StartMalLogin) => tracker_host::start_mal_login(&host, Rc::clone(changed)),
+        // Simkl is switched off: its row is not shown, so no tap reaches this arm
+        Some(RowTap::StartSimklLogin(_)) => {}
         Some(RowTap::Toast(key)) => crate::toast::notify(english(&key)),
         None => {
             if let Some(hint) = tracker.setup_message() {
@@ -211,17 +212,21 @@ fn tracker_item(index: usize, view: LoginRowView, host: Option<&Host>, changed: 
     tap_item(view.row.name, subtitle(host, view.row).as_deref(), true, trailing, logo, on_tap)
 }
 
-/// Starts the AniList browser login from the tracking page: the same action as the AniList row here. `changed` redraws
-/// the page when the login starts, and again when it finishes (the redirect calls the page's refresh).
-pub fn connect_anilist(changed: Rc<dyn Fn()>) {
-    if let Some(index) = LOGIN_ROWS.iter().position(|row| row.tracker == kuro_track::model::TrackerId::ANILIST) {
+/// Starts a tracker's browser login from the tracking page: the same action as its row here. `changed` redraws the page
+/// when the login starts, and again when it finishes.
+pub fn connect(tracker: kuro_track::model::TrackerId, changed: Rc<dyn Fn()>) {
+    if let Some(index) = LOGIN_ROWS.iter().position(|row| row.tracker == tracker) {
         tapped(index, &changed);
     }
 }
 
-/// The trackers that have a row: AniList only. The others keep their code and their token keys.
+/// The trackers the app switches on, in the order the entry's tracking page shows them. The others keep their code and
+/// their token keys, but get no row, no progress write and no refresh.
+pub const ENABLED: [kuro_track::model::TrackerId; 2] = [kuro_track::model::TrackerId::ANILIST, kuro_track::model::TrackerId::MYANIMELIST];
+
+/// The trackers that have a row: the [`ENABLED`] ones.
 pub fn tracker_enabled(tracker: kuro_track::model::TrackerId) -> bool {
-    tracker == kuro_track::model::TrackerId::ANILIST
+    ENABLED.contains(&tracker)
 }
 
 /// The typed rows of the Tracking screen. `changed` redraws the page after a login, a logout or a pending state.
@@ -279,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_holds_the_progress_switch_and_a_tracker_group_with_only_anilist() {
+    fn the_page_holds_the_progress_switch_and_a_tracker_group_with_myanimelist_and_anilist() {
         let prefs = Prefs::in_memory();
         let rows = page_rows(&prefs, Rc::new(|| {}));
         let titles: Vec<&str> = rows.iter().filter_map(|entry| match entry {
@@ -291,14 +296,15 @@ mod tests {
             panic!("the Trackers group")
         };
         let names: Vec<&str> = trackers.items.iter().map(|row| row.title()).collect();
-        assert_eq!(names, ["AniList", &tracking_info()]);
+        assert_eq!(names, ["MyAnimeList", "AniList", &tracking_info()]);
     }
 
     #[test]
-    fn only_anilist_can_log_in_until_the_others_are_fixed() {
+    fn only_anilist_and_myanimelist_can_log_in_until_the_others_are_fixed() {
         use kuro_track::model::TrackerId;
         assert!(tracker_enabled(TrackerId::ANILIST));
-        for other in [TrackerId::MYANIMELIST, TrackerId::KITSU, TrackerId::SIMKL] {
+        assert!(tracker_enabled(TrackerId::MYANIMELIST));
+        for other in [TrackerId::KITSU, TrackerId::SIMKL] {
             assert!(!tracker_enabled(other));
         }
     }

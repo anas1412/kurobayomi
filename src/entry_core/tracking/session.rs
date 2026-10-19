@@ -6,7 +6,6 @@
 use std::sync::{Arc, Mutex};
 
 use kuro_platform::kind::Kind;
-use kuro_track::model::TrackerId;
 use kuro_track::tracker::Tracker;
 
 use super::facts::{facts_of, summarize, Summary};
@@ -28,9 +27,10 @@ pub fn refresh_from_host() -> bool {
     let Some(host) = crate::settings_ui::tracker_host::host() else {
         return false;
     };
-    // AniList is the only tracker switched on: the others are built, but get no progress write and no refresh
-    host.manager.restrict_to(TrackerId::ANILIST);
-    publish(host.manager.get(TrackerId::ANILIST).into_iter().collect());
+    // only the switched-on trackers get progress writes and refreshes: the others are built, but stay out
+    let enabled = crate::settings_ui::tracking::ENABLED;
+    host.manager.restrict_to(&enabled);
+    publish(enabled.iter().filter_map(|id| host.manager.get(*id)).collect());
     true
 }
 

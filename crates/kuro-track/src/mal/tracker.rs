@@ -10,7 +10,7 @@ use url::Url;
 
 use super::api::MalApi;
 use super::auth::MalAuth;
-use super::consts::{API_BASE, OAUTH_BASE};
+use super::consts::{API_BASE, BUILT_IN_CLIENT_ID, OAUTH_BASE};
 use super::dates::{now_ms, to_mal_date};
 use super::dto::{AnimeListStatus, MangaListStatus};
 use super::error::MalError;
@@ -54,16 +54,16 @@ pub struct MalTracker {
 }
 
 impl MalTracker {
-    /// The tracker with the real endpoints and the client id from the config file or
-    /// `KUROBAYOMI_MAL_CLIENT_ID` (T-29a-040). A missing id disables login, it does not fail the app.
+    /// The tracker with the real endpoints and the client id from `KUROBAYOMI_MAL_CLIENT_ID` or the config file
+    /// (T-29a-040), else the app's built-in one.
     pub fn from_config(config_dir: &Path, tokens: Arc<dyn TokenStore>) -> Result<Self, MalError> {
         let file_id = MalSettings::open(config_dir)?.client_id();
         let env_id = std::env::var(CLIENT_ID_ENV).ok();
-        let client_id = resolve_client_id(file_id.as_deref(), env_id.as_deref());
+        let client_id = resolve_client_id(file_id.as_deref(), env_id.as_deref()).or_else(|| Some(BUILT_IN_CLIENT_ID.to_owned()));
         Self::new(config_dir, tokens, client_id)
     }
 
-    /// The tracker with the real endpoints. `client_id` comes from the user's config, never from the code.
+    /// The tracker with the real endpoints and the given client id (`None` refuses login).
     pub fn new(
         config_dir: &Path,
         tokens: Arc<dyn TokenStore>,

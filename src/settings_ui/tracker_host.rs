@@ -6,7 +6,8 @@
 //!
 //! Decisions:
 //! - Shikimori and Bangumi read their OAuth client from `config.toml`; without one their rows say they are not
-//!   configured. MyAnimeList reads its client id from the config file or `KUROBAYOMI_MAL_CLIENT_ID`.
+//!   configured. MyAnimeList uses the app's built-in client id unless the config file or `KUROBAYOMI_MAL_CLIENT_ID`
+//!   names another; its login comes back to a loopback listener (`http://localhost:8765/myanimelist-auth`).
 //! - The enhanced trackers see no installed-source directory yet (they are built over an empty one), so they cannot
 //!   start a sync; this screen only needs their names and accepted source identities.
 //! - The shell hands `kurobayomi://` and `aniyomi://` login links to [`on_redirect`]. A login is pending in this process
@@ -24,6 +25,9 @@ use kuro_track::ctx::{BindingLocks, RefreshLimit, TrackCtx};
 use kuro_track::events::EventBus;
 use kuro_track::kitsu::KitsuTracker;
 use kuro_track::login_rows::LOGIN_ROWS;
+use kuro_track::mal::error::MalError;
+use kuro_track::mal::login::LoginDialog;
+use kuro_track::mal::redirect::DEFAULT_PORT;
 use kuro_track::mal::store::{SecretTokenStore, TokenStore};
 use kuro_track::mal::tracker::MalTracker;
 use kuro_track::manager::TrackerManager;
@@ -59,10 +63,12 @@ impl Connectivity for GioNetwork {
     }
 }
 
-/// The services of the Tracking screen. Only AniList is switched on in this build: the other trackers are built (the
-/// registry holds all eleven) but no screen shows them and no session reads them.
+/// The services of the Tracking screen. AniList and MyAnimeList are switched on in this build: the other trackers are
+/// built (the registry holds all eleven) but no screen shows them and no session reads them.
 pub struct Host {
     pub manager: Arc<TrackerManager>,
+    /// The MyAnimeList service as itself: its loopback login is not part of the `Tracker` trait.
+    pub mal: Arc<MalTracker>,
     pub pending: RefCell<PendingLogins>,
     /// Browser logins whose redirect has not arrived, with the time (ms) each one began.
     waiting: RefCell<HashMap<TrackerId, i64>>,
@@ -201,7 +207,7 @@ fn build(secrets: Arc<kuro_platform::secrets::FallbackSecrets>, config_dir: &std
     let jellyfin = JellyfinTracker::new(dir, flags).map_err(|e| text(&e))?;
 
     let all: Vec<Arc<dyn Tracker>> = vec![
-        mal,
+        Arc::clone(&mal) as Arc<dyn Tracker>,
         anilist,
         Arc::new(kitsu),
         shikimori,
@@ -238,7 +244,7 @@ fn build(secrets: Arc<kuro_platform::secrets::FallbackSecrets>, config_dir: &std
     // The retry loop runs for the life of the app, and the binders of the add flow reach the same context.
     let _ = ctx.start_retry();
     crate::updates::track_binding::install(Arc::clone(&ctx));
-    Ok(Host { manager, pending: RefCell::default(), waiting: RefCell::default(), fallback, ctx })
+    Ok(Host { manager, mal, pending: RefCell::default(), waiting: RefCell::default(), fallback, ctx })
 }
 
 /// The time `PendingLogins` measures attempts by.
@@ -252,6 +258,45 @@ fn finished(name: &str, result: Result<(), kuro_track::error::TrackError>) -> St
         Ok(()) => english(&MsgKey::TrackerLoggedIn(name.to_owned())),
         Err(err) => english(&kuro_track::dialog::failure_message(&err)),
     }
+}
+
+/// Starts the MyAnimeList login: binds the loopback listener, opens MAL's authorise page in the browser, and finishes
+/// the login when MAL redirects back to it. The row shows its waiting state meanwhile; `changed` redraws it when the
+/// login starts and when it ends, and the outcome is a toast.
+pub fn start_mal_login(host: &Rc<Host>, changed: Rc<dyn Fn()>) {
+    // a login that still waits holds the port and the verifier: a second start would break it
+    if host.is_waiting(TrackerId::MYANIMELIST, now_ms()) {
+        return crate::toast::notify(kuro_track::mal::messages::WAITING_FOR_LOGIN.to_owned());
+    }
+    let mal = Arc::clone(&host.mal);
+    let host = Rc::clone(host);
+    crate::source_bridge::call_on_main(
+        {
+            let mal = Arc::clone(&mal);
+            async move { LoginDialog::open(&mal, DEFAULT_PORT).await }
+        },
+        move |opened| {
+            let mut login = match opened {
+                Ok(login) => login,
+                Err(err) => return crate::toast::notify(finished(kuro_track::mal::tracker_impl::NAME, Err(err.into()))),
+            };
+            if !login.redirect_listening() {
+                login.cancel(&mal);
+                return crate::toast::notify(kuro_track::mal::messages::PORT_BUSY.to_owned());
+            }
+            host.begin_waiting(TrackerId::MYANIMELIST, now_ms());
+            crate::ui::open_link(login.authorize_url(), None);
+            changed();
+            crate::source_bridge::call_on_main(
+                async move { login.wait_redirect(&mal).await.unwrap_or(Err(MalError::LoginTimedOut)) },
+                move |result| {
+                    host.stop_waiting(TrackerId::MYANIMELIST);
+                    crate::toast::notify(finished(kuro_track::mal::tracker_impl::NAME, result.map_err(Into::into)));
+                    changed();
+                },
+            );
+        },
+    );
 }
 
 /// A login link arrived (`kurobayomi://anilist-auth#access_token=...` and the like). Routes it to the pending attempt and

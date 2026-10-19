@@ -31,8 +31,8 @@ pub struct TrackerManager {
     /// Source identities `"{name}/{lang}"` installed now. The app publishes them with
     /// [`TrackerManager::set_installed_sources`] (T-27a-077).
     installed: watch::Sender<Vec<String>>,
-    /// The only tracker that receives progress and refreshes, once the app sets it. Unset: every tracker does.
-    only: std::sync::OnceLock<TrackerId>,
+    /// The only trackers that receive progress and refreshes, once the app sets them. Unset: every tracker does.
+    only: std::sync::OnceLock<Vec<TrackerId>>,
 }
 
 /// One enhanced tracker and whether an installed source serves it.
@@ -99,14 +99,14 @@ impl TrackerManager {
         self.trackers.iter().find(|t| t.id() == id).cloned()
     }
 
-    /// Limits the progress writes and refreshes to `id` (AniList is the only tracker the app switches on). Set once.
-    pub fn restrict_to(&self, id: TrackerId) {
-        let _ = self.only.set(id);
+    /// Limits the progress writes and refreshes to `ids` (the trackers the app switches on). Set once.
+    pub fn restrict_to(&self, ids: &[TrackerId]) {
+        let _ = self.only.set(ids.to_vec());
     }
 
     /// Whether `id` takes part in progress writes and refreshes: always, until [`TrackerManager::restrict_to`] is set.
     pub fn is_enabled(&self, id: TrackerId) -> bool {
-        self.only.get().is_none_or(|only| *only == id)
+        self.only.get().is_none_or(|only| only.contains(&id))
     }
 
     /// The trackers that are logged in, in registry order.
@@ -249,8 +249,9 @@ mod tests {
         let secrets = MemSecrets::new();
         let m = TrackerManager::new(registry(&secrets)).unwrap();
         assert!(m.is_enabled(TrackerId::KITSU));
-        m.restrict_to(TrackerId::ANILIST);
+        m.restrict_to(&[TrackerId::ANILIST, TrackerId::MYANIMELIST]);
         assert!(m.is_enabled(TrackerId::ANILIST));
+        assert!(m.is_enabled(TrackerId::MYANIMELIST));
         assert!(!m.is_enabled(TrackerId::KITSU));
     }
 

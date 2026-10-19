@@ -5043,3 +5043,15 @@ player_speed_menu = Speed
 
 # source: kurobayomi
 player_default_quality = Default quality
+
+# source: kurobayomi
+ui_connect_myanimelist = Connect MyAnimeList
+
+# source: kurobayomi
+ui_tracking_keeps_your_progress_on_myanimelist = Tracking keeps your progress on MyAnimeList.
+
+# source: kurobayomi
+ui_search_myanimelist = Search MyAnimeList
+
+# source: kurobayomi
+ui_open_on_myanimelist = Open on MyAnimeList
