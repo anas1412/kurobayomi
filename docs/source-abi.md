@@ -19,7 +19,12 @@ an episode's upload date). It is not monotonic.
 
 ## The envelope
 
-Every op gets `input-json` = `{"sourceId": <i64>, "args": {...}}` and returns JSON text, or an `Err` string.
+Every op gets `input-json` = `{"sourceId": <i64>, "showAdult": <bool>, "args": {...}}` and returns JSON text, or an `Err`
+string.
+
+`showAdult` is the user's "Show adult (18+) titles" switch (Settings, NSFW group; off by default), read at each call. A
+source that knows a title's rating leaves adult titles out of `popular`, `latest` and `search` while it is `false`. It is
+additive to ABI 1.5: an older guest ignores it, and an older app sends no key, which a guest reads as `false`.
 
 - An op the guest does not know returns `Err("unknown op: <op>")`.
 - The host treats that exact text as **no change** for the ABI 1.5 additions below. Any other `Err` is a failure of that

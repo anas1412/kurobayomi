@@ -4,7 +4,7 @@
 //! Each source owns one guest instance. Calls to that source are serialised by its mutex (R5). A call that traps drops
 //! the instance, and the next call starts a fresh one, so a trapped instance is never entered again.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -225,6 +225,21 @@ impl Guest {
     }
 }
 
+/// Reads whether the user lets sources show adult (18+) titles. Set once by the app; unset means no.
+type ShowAdult = Box<dyn Fn() -> bool + Send + Sync>;
+
+static SHOW_ADULT: OnceLock<ShowAdult> = OnceLock::new();
+
+/// Gives the plug-ins the user's adult-content choice: every call's envelope carries `showAdult` (ABI 1.5, additive; a
+/// guest that does not read it ignores it), read at the call, so a change applies to the next list. Set once at start.
+pub fn set_show_adult(read: impl Fn() -> bool + Send + Sync + 'static) {
+    let _ = SHOW_ADULT.set(Box::new(read));
+}
+
+fn show_adult() -> bool {
+    SHOW_ADULT.get().is_some_and(|read| read())
+}
+
 /// A source of a loaded package. Identity comes from the descriptor, and every listing or detail call goes to the guest.
 pub struct WasmSource {
     info: SourceDescriptor,
@@ -232,9 +247,9 @@ pub struct WasmSource {
 }
 
 impl WasmSource {
-    /// Sends `args` to `op`, inside the `{"sourceId", "args"}` envelope, on a blocking thread.
+    /// Sends `args` to `op`, inside the `{"sourceId", "showAdult", "args"}` envelope, on a blocking thread.
     async fn call(&self, op: &'static str, args: serde_json::Value) -> Result<String, SourceError> {
-        let input = json!({ "sourceId": self.info.id, "args": args }).to_string();
+        let input = json!({ "sourceId": self.info.id, "showAdult": show_adult(), "args": args }).to_string();
         let channel = Arc::clone(&self.channel);
         let outcome = tokio::task::spawn_blocking(move || channel.call(op, &input))
             .await
@@ -546,7 +561,8 @@ mod tests {
         let sent = source.call("popular", json!({ "page": 2 })).await.expect("echo");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&sent).unwrap(),
-            json!({ "args": { "page": 2 }, "sourceId": 7 })
+            json!({ "args": { "page": 2 }, "showAdult": false, "sourceId": 7 }),
+            "adult titles are hidden until the app says otherwise"
         );
         let channel = Arc::clone(&source.channel);
         let text = tokio::task::spawn_blocking(move || channel.call("pages", "{}"))

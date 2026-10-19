@@ -888,3 +888,9 @@ ui_open_on_myanimelist = Open on MyAnimeList
 
 # source: kurobayomi
 welcome_self_update = Kurobayomi updates itself from its GitHub releases. You can turn this off in Settings, under About.
+
+# source: kurobayomi
+pref_show_adult_titles = Show adult (18+) titles
+
+# source: kurobayomi
+pref_show_adult_titles_summary = While this is off, sources that know a title's rating leave adult titles out, and extensions marked 18+ are hidden.

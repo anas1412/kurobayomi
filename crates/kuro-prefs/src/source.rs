@@ -32,7 +32,8 @@ define_prefs! {
     /// `[sources]` section: the keys of Aniyomi `SourcePreferences`, minus the derived `animeext_updates_count` (T-19a-064).
     pub struct SourcePrefs in "sources" {
         enabled_languages: BTreeSet<String> = "source_languages" => kuro_i18n::source_names::default_enabled_languages(&system_locale());
-        show_nsfw_source: bool = "show_nsfw_source" => true;
+        // off by default (Aniyomi: on): adult titles stay hidden until the user turns them on
+        show_nsfw_source: bool = "show_nsfw_source" => false;
         anime_extension_repos: BTreeSet<String> = "anime_extension_repos" => BTreeSet::new();
         manga_extension_repos: BTreeSet<String> = "extension_repos" => BTreeSet::new();
         trusted_extensions: BTreeSet<String> = "__APP_STATE_trusted_extensions" => BTreeSet::new();
@@ -77,7 +78,7 @@ mod tests {
     fn defaults_match_the_registry_and_the_plan() {
         let store = PrefStore::in_memory();
         let prefs = SourcePrefs::new(store);
-        assert!(prefs.show_nsfw_source.get());
+        assert!(!prefs.show_nsfw_source.get(), "adult titles are hidden by default");
         assert!(prefs.disabled_manga_sources.get().is_empty());
         assert!(prefs.enabled_languages.get().contains("en"));
         assert!(prefs.enabled_languages.get().contains("all"));

@@ -55,7 +55,7 @@ mod tests {
     fn defaults_match_the_upstream_settings() {
         let p = prefs();
         assert_eq!(p.display_mode(), LibraryDisplayMode::CompactGrid);
-        assert!(p.sources.show_nsfw_source.get());
+        assert!(!p.sources.show_nsfw_source.get(), "adult titles are hidden by default");
         assert!(p.sources.enabled_languages.get().contains("all"));
         assert_eq!(p.default_category.get(), -1);
         assert!(!p.hide_in_library(), "the hide switch is cut, so nothing is hidden");

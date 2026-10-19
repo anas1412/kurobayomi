@@ -16,7 +16,7 @@ pub fn source_languages_title() -> String {
     tr(MsgKey::settings_browse_source_languages)
 }
 pub fn nsfw_subtitle() -> String {
-    tr(MsgKey::requires_app_restart)
+    tr(MsgKey::pref_show_adult_titles_summary)
 }
 pub fn nsfw_info() -> String {
     tr(MsgKey::parental_controls_info)
@@ -72,7 +72,7 @@ pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
         group(
             &tr(MsgKey::pref_category_nsfw_content),
             vec![
-                nsfw_switch(&tr(MsgKey::pref_show_nsfw_source), &prefs.sources.show_nsfw_source),
+                nsfw_switch(&tr(MsgKey::pref_show_adult_titles), &prefs.sources.show_nsfw_source),
                 info(&nsfw_info()),
             ],
         ),
@@ -146,9 +146,9 @@ mod tests {
         let tree = page_rows(&Prefs::in_memory(), RepoCounts::default());
         let nsfw = group_of(&tree, "NSFW (18+) sources");
         let PreferenceItem::Switch { common, pref, .. } = &nsfw.items[0] else { panic!("a switch") };
-        assert_eq!(common.title, "Show in sources and extensions lists");
+        assert_eq!(common.title, "Show adult (18+) titles");
         assert_eq!(common.subtitle.as_deref(), Some(nsfw_subtitle()).as_deref());
-        assert!(pref.get(), "shown by default");
+        assert!(!pref.get(), "hidden by default");
         assert!(matches!(&nsfw.items[1], PreferenceItem::Info { text, .. } if *text == nsfw_info()));
     }
 

@@ -25,4 +25,4 @@ mod bindings {
 }
 
 pub use error::WasmError;
-pub use source::{HostEnv, WasmAnimeSource, WasmSource, instantiate, instantiate_anime};
+pub use source::{HostEnv, WasmAnimeSource, WasmSource, instantiate, instantiate_anime, set_show_adult};

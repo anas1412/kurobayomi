@@ -9,6 +9,12 @@ pub fn set_compile_cache_dir(dir: std::path::PathBuf) {
     kuro_source_wasm::cache::set_dir(dir);
 }
 
+/// Whether the plug-ins may show adult (18+) titles, read at each call (see `kuro_source_wasm::set_show_adult`). Call once
+/// at start.
+pub fn set_show_adult(read: impl Fn() -> bool + Send + Sync + 'static) {
+    kuro_source_wasm::set_show_adult(read);
+}
+
 /// The sources of one plug-in of a repository link, by the kind its index entry names.
 pub enum RepoPlugin {
     Manga(Vec<std::sync::Arc<dyn kuro_source::CatalogueSource>>),

@@ -221,7 +221,7 @@ define_prefs! {
     "pref_theme_mode_key", Normal, Str, "SYSTEM", "ui", "theme_mode";
     "start_screen", Normal, Str, "ANIME", "ui", "start_screen";
     "source_languages", Normal, Set, &["all", "en"], "sources", "enabled_languages";
-    "show_nsfw_source", Normal, Bool, true, "sources", "show_nsfw_source";
+    "show_nsfw_source", Normal, Bool, false, "sources", "show_nsfw_source";
     "anime_extension_repos", Normal, Set, &[], "sources", "anime_extension_repos";
     "extension_repos", Normal, Set, &[], "sources", "manga_extension_repos";
     "__APP_STATE_trusted_extensions", AppState, Set, &[], "sources", "trusted_extensions";
@@ -597,7 +597,12 @@ mod tests {
                     .replace("${id}", "{id}");
                 // T-19a-064: the anime update badge count is derived in memory, never registered
                 // the default reading mode is left to right (1) by the user's decision of 2026-10-11, not the plan's 2
-                let default = if key == "pref_default_reading_mode_key" { "1" } else { cells[6] };
+                // adult titles are hidden by default by the user's decision of 2026-10-19, not the plan's true
+                let default = match key.as_str() {
+                    "pref_default_reading_mode_key" => "1",
+                    "show_nsfw_source" => "false",
+                    _ => cells[6],
+                };
                 (key != "animeext_updates_count" && !DROPPED_KEYS.contains(&key.as_str())).then(|| (
                     key,
                     cells[4].to_owned(),

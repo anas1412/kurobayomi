@@ -512,6 +512,9 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
         }
     });
     kuro_extensions::instantiate::set_compile_cache_dir(paths.wasm_cache_dir());
+    // the NSFW switch of Settings: while it is off, the plug-ins leave adult titles out of their lists
+    let show_adult = SourcePrefs::new(store.clone()).show_nsfw_source;
+    kuro_extensions::instantiate::set_show_adult(move || show_adult.get());
     reload();
     let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
     check_on_start(links);
