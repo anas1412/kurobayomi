@@ -526,11 +526,18 @@ pub fn check_at_startup() -> bool {
     !crate::data::is_installed() || crate::data::app().base.check_app_updates.get()
 }
 
-/// The startup check, when the user lets it run.
+/// The startup check, when the user lets it run. On a metered connection (a phone hotspot) it does not run: the AppImage
+/// is large, and About's "Check for updates" still downloads it when asked.
 pub fn startup() {
-    if check_at_startup() {
-        check();
+    use gtk::gio::prelude::NetworkMonitorExt as _;
+    if !check_at_startup() {
+        return;
     }
+    if gtk::gio::NetworkMonitor::default().is_network_metered() {
+        tracing::info!("metered connection: the startup update check is skipped");
+        return;
+    }
+    check();
 }
 
 #[cfg(test)]

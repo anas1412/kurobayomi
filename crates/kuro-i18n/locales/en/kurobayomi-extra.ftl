@@ -885,3 +885,6 @@ ui_search_myanimelist = Search MyAnimeList
 
 # source: kurobayomi
 ui_open_on_myanimelist = Open on MyAnimeList
+
+# source: kurobayomi
+welcome_self_update = Kurobayomi updates itself from its GitHub releases. You can turn this off in Settings, under About.

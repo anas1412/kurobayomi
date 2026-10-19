@@ -1,6 +1,6 @@
 //! The welcome view of an empty library before any source repository exists (docs/design/app-flow.md, first run). One
 //! focused screen in the app's empty-state style: the app icon, a title, one line, the one main action, and two quiet
-//! links underneath. Everything else (storage folder, AniList) has a working default and lives in Settings.
+//! links underneath, and in an AppImage a small line saying it updates itself. Everything else (storage folder, AniList) has a working default and lives in Settings.
 
 use gtk::prelude::*;
 use gtk::{Align, Justification, Orientation as O};
@@ -47,6 +47,13 @@ impl Welcome {
         }));
         links.append(&link(&tr(MsgKey::welcome_guide), || crate::ui::open_link(GUIDE_URL, None)));
         page.append(&links);
+
+        // an AppImage updates itself at start, so the first-run screen says so and where to turn it off
+        if crate::appimage_update::can_update() {
+            let notice = label(&tr(MsgKey::welcome_self_update), &["dim-label", "caption"], 0);
+            notice.set_margin_top(24);
+            page.append(&notice);
+        }
 
         Self { page }
     }
