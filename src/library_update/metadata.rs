@@ -350,7 +350,7 @@ where
     };
     let details = {
         let _gate = politeness::acquire(entry.source).await;
-        source.refresh(entry.kind, &entry.url, RemoteFlags::DETAILS_ONLY).await
+        source.refresh(entry.kind, &entry.url, &entry.title, RemoteFlags::DETAILS_ONLY).await
     };
     let result = match details {
         Ok(Some(details)) => deps.writer.apply(entry, &details, now_ms).await.map(|()| true),

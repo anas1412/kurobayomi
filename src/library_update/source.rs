@@ -53,11 +53,13 @@ pub trait Source: Send + Sync {
     fn is_local(&self) -> bool;
     /// The `UnmeteredSource` marker: exempt from the large-update warning.
     fn is_unmetered(&self) -> bool;
-    /// The entry's details (when `with_details`) and its chapter or episode list.
+    /// The entry's details (when `with_details`) and its chapter or episode list. `title` is the stored title: some
+    /// sources find an entry again by it (AnimePahe's sessions expire), as Aniyomi hands them the whole stored entry.
     fn fetch(
         &self,
         kind: Kind,
         url: &str,
+        title: &str,
         with_details: bool,
     ) -> impl Future<Output = Result<Fetched, UpdateError>> + Send;
     /// The metadata call of the manual metadata passes: only the parts `flags` asks for are fetched, so with
@@ -66,6 +68,7 @@ pub trait Source: Send + Sync {
         &self,
         kind: Kind,
         url: &str,
+        title: &str,
         flags: RemoteFlags,
     ) -> impl Future<Output = Result<Option<SourceDetails>, UpdateError>> + Send;
 }
@@ -91,9 +94,9 @@ pub enum SourceSlot<S> {
 }
 
 impl<S: Source> SourceSlot<S> {
-    pub async fn fetch(&self, kind: Kind, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
+    pub async fn fetch(&self, kind: Kind, url: &str, title: &str, with_details: bool) -> Result<Fetched, UpdateError> {
         match self {
-            Self::Installed(source) => source.fetch(kind, url, with_details).await,
+            Self::Installed(source) => source.fetch(kind, url, title, with_details).await,
             Self::Missing => Err(UpdateError::SourceNotInstalled),
         }
     }
@@ -176,7 +179,7 @@ pub(crate) mod fake {
             false
         }
 
-        async fn fetch(&self, _kind: Kind, _url: &str, _with_details: bool) -> Result<Fetched, UpdateError> {
+        async fn fetch(&self, _kind: Kind, _url: &str, _title: &str, _with_details: bool) -> Result<Fetched, UpdateError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(now, Ordering::SeqCst);
@@ -188,7 +191,7 @@ pub(crate) mod fake {
             self.reply.clone()
         }
 
-        async fn refresh(&self, _kind: Kind, _url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
+        async fn refresh(&self, _kind: Kind, _url: &str, _title: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
             self.refreshes.lock().unwrap().push(flags);
             self.details.clone()
         }
@@ -218,7 +221,7 @@ mod tests {
         // P-05
         let registry = FakeRegistry::default();
         let slot = registry.get_or_stub(Kind::Manga, 9999);
-        let result = slot.fetch(Kind::Manga, "/x", false).await;
+        let result = slot.fetch(Kind::Manga, "/x", "X", false).await;
         assert_eq!(result, Err(UpdateError::SourceNotInstalled));
         assert_eq!(UpdateError::SourceNotInstalled.user_message(), "Source not installed");
     }
@@ -238,7 +241,7 @@ mod tests {
         registry.sources.insert(1001, FakeSource::ok(vec![SourceItem { name: "c1".into(), ..SourceItem::default() }]));
         let slot = registry.get_or_stub(Kind::Manga, 1001);
         assert!(!slot.is_unmetered());
-        let fetched = slot.fetch(Kind::Manga, "/x", false).await.expect("installed source answers");
+        let fetched = slot.fetch(Kind::Manga, "/x", "X", false).await.expect("installed source answers");
         assert_eq!(fetched.items.len(), 1);
         assert!(!SourceSlot::<FakeSource>::Missing.is_local());
     }

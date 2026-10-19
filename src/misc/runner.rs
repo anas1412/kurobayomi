@@ -613,7 +613,7 @@ mod tests {
         use crate::library_update::source::SourceSlot;
         let slot = LiveRegistry.get_or_stub(Kind::Manga, 9);
         assert!(matches!(slot, SourceSlot::Missing));
-        assert_eq!(slot.fetch(Kind::Manga, "/m", false).await, Err(UpdateError::SourceNotInstalled));
+        assert_eq!(slot.fetch(Kind::Manga, "/m", "M", false).await, Err(UpdateError::SourceNotInstalled));
     }
 
     #[test]

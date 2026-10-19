@@ -100,29 +100,29 @@ impl Source for LiveSource {
         }
     }
 
-    async fn fetch(&self, _kind: Kind, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
+    async fn fetch(&self, _kind: Kind, url: &str, title: &str, with_details: bool) -> Result<Fetched, UpdateError> {
         match self {
             Self::Local => Ok(Fetched::default()),
-            Self::Manga(source) => fetch_manga(&**source, url, with_details).await,
-            Self::Anime(source) => fetch_anime(&**source, url, with_details).await,
+            Self::Manga(source) => fetch_manga(&**source, url, title, with_details).await,
+            Self::Anime(source) => fetch_anime(&**source, url, title, with_details).await,
         }
     }
 
     /// The details only: a metadata pass never reads the item list, so `fetch_items` is not answered here.
-    async fn refresh(&self, _kind: Kind, url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
+    async fn refresh(&self, _kind: Kind, url: &str, title: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
         if !flags.fetch_details {
             return Ok(None);
         }
         match self {
             Self::Local => Ok(None),
-            Self::Manga(source) => manga_details(&**source, url).await.map(Some),
-            Self::Anime(source) => anime_details(&**source, url).await,
+            Self::Manga(source) => manga_details(&**source, url, title).await.map(Some),
+            Self::Anime(source) => anime_details(&**source, url, title).await,
         }
     }
 }
 
-async fn fetch_manga(source: &dyn MangaSource, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
-    let request = SManga::new(url, "");
+async fn fetch_manga(source: &dyn MangaSource, url: &str, title: &str, with_details: bool) -> Result<Fetched, UpdateError> {
+    let request = SManga::new(url, title);
     let details = if with_details {
         let manga = kuro_source::isolate(source.get_manga_details(&request)).await?;
         Some(manga_details_of(&manga))
@@ -133,25 +133,25 @@ async fn fetch_manga(source: &dyn MangaSource, url: &str, with_details: bool) ->
     Ok(Fetched { details, items: chapters.iter().enumerate().map(|(at, chapter)| chapter_item(chapter, at)).collect() })
 }
 
-async fn fetch_anime(source: &dyn AnimeSource, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
-    let details = if with_details { anime_details(source, url).await? } else { None };
-    let request = SAnime { url: url.to_owned(), ..SAnime::default() };
+async fn fetch_anime(source: &dyn AnimeSource, url: &str, title: &str, with_details: bool) -> Result<Fetched, UpdateError> {
+    let details = if with_details { anime_details(source, url, title).await? } else { None };
+    let request = SAnime { url: url.to_owned(), title: title.to_owned(), ..SAnime::default() };
     let episodes = if source.supports_episode_list() { kuro_source::isolate(source.episode_list(&request)).await? } else { Vec::new() };
     Ok(Fetched { details, items: episodes.iter().enumerate().map(|(at, episode)| episode_item(episode, at)).collect() })
 }
 
-async fn manga_details(source: &dyn MangaSource, url: &str) -> Result<SourceDetails, UpdateError> {
-    let request = SManga::new(url, "");
+async fn manga_details(source: &dyn MangaSource, url: &str, title: &str) -> Result<SourceDetails, UpdateError> {
+    let request = SManga::new(url, title);
     let manga = kuro_source::isolate(source.get_manga_details(&request)).await?;
     Ok(manga_details_of(&manga))
 }
 
 /// `None` when the source has no details call, so the pass keeps what the library has.
-async fn anime_details(source: &dyn AnimeSource, url: &str) -> Result<Option<SourceDetails>, UpdateError> {
+async fn anime_details(source: &dyn AnimeSource, url: &str, title: &str) -> Result<Option<SourceDetails>, UpdateError> {
     if !source.supports_details() {
         return Ok(None);
     }
-    let request = SAnime { url: url.to_owned(), ..SAnime::default() };
+    let request = SAnime { url: url.to_owned(), title: title.to_owned(), ..SAnime::default() };
     let anime = kuro_source::isolate(source.anime_details(&request)).await?;
     Ok(Some(anime_details_of(&anime)))
 }
@@ -267,7 +267,7 @@ mod tests {
     async fn the_local_source_lists_nothing_without_an_error() {
         let slot = LiveRegistry.get_or_stub(Kind::Anime, LOCAL_SOURCE_ID);
         assert!(slot.is_local() && slot.is_unmetered());
-        assert_eq!(slot.fetch(Kind::Anime, "Show", true).await, Ok(Fetched::default()));
+        assert_eq!(slot.fetch(Kind::Anime, "Show", "Show", true).await, Ok(Fetched::default()));
     }
 
     #[test]

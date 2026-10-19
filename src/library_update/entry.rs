@@ -53,7 +53,7 @@ where
     }
 
     let slot = deps.registry.get_or_stub(kind, entry.source);
-    let fetched = slot.fetch(kind, &entry.url, cx.settings.auto_update_metadata).await?;
+    let fetched = slot.fetch(kind, &entry.url, &entry.title, cx.settings.auto_update_metadata).await?;
     if fetched.items.is_empty() && !slot.is_local() {
         return Err(match kind {
             Kind::Manga => UpdateError::NoChapters,
