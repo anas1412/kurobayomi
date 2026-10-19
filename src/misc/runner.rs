@@ -373,19 +373,13 @@ pub fn start() {
     let (start_runner, start_inputs) = (runner.clone(), inputs.clone());
     let running_runner = runner.clone();
     let start: std::rc::Rc<dyn Fn(Kind, Option<i64>) -> bool> =
-        std::rc::Rc::new(move |kind, category| start_runner.start_now(pass_settings(kind, category, &start_inputs)));
+        std::rc::Rc::new(move |kind, category| start_runner.start_after(pass_settings(kind, category, &start_inputs), sources_loaded()));
     let running: std::rc::Rc<dyn Fn(Kind) -> bool> =
         std::rc::Rc::new(move |kind| running_runner.locks().holder(kind).is_some());
     register_update_action(start.clone());
-    // every app launch checks the library for new releases, whatever the automatic interval is, once the sources have
-    // loaded: before that every entry would fail with "Source not installed"
-    {
-        let (start, mut ready) = (start.clone(), crate::recipe_sources::ready());
-        gtk::glib::spawn_future_local(async move {
-            let _ = ready.wait_for(|loaded| *loaded).await;
-            start_all(&*start);
-        });
-    }
+    // every app launch checks the library for new releases, whatever the automatic interval is (the pass waits for the
+    // sources like every other)
+    start_all(&*start);
     register_buttons(start, running);
 
     let mut senders = Vec::new();
@@ -396,6 +390,7 @@ pub fn start() {
         handle.spawn(run_schedule(rx, move || {
             let (runner, inputs) = (runner.clone(), inputs.clone());
             async move {
+                sources_loaded().await;
                 if !device_allows(&inputs).await {
                     return PassStatus::Retry;
                 }
@@ -405,6 +400,13 @@ pub fn start() {
     }
     let pref = LibraryPrefs::new(app.base.store().clone()).auto_update_interval;
     crate::misc::interval::pump(&pref, senders);
+}
+
+/// Resolves once the repository sources (anime and manga, one load installs both) have loaded. Every pass of the app
+/// waits for it: a pass that ran before would find no source and fail each entry with "Source not installed".
+async fn sources_loaded() {
+    let mut ready = crate::recipe_sources::ready();
+    let _ = ready.wait_for(|loaded| *loaded).await;
 }
 
 /// The application action a second process activates on the primary instance (T-26a-029).
