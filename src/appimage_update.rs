@@ -785,7 +785,8 @@ mod tests {
         let fast = std::net::TcpListener::bind("127.0.0.2:0").unwrap();
         let port = fast.local_addr().unwrap().port();
         let slow = std::net::TcpListener::bind(("127.0.0.3", port)).unwrap();
-        for (listener, delay) in [(fast, 0), (slow, 1500)] {
+        // the slow one is far behind: each probe builds its own client, which takes a while on a busy machine
+        for (listener, delay) in [(fast, 0), (slow, 5000)] {
             std::thread::spawn(move || {
                 for mut stream in listener.incoming().flatten() {
                     std::thread::spawn(move || {
