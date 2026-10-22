@@ -14,7 +14,7 @@ use crate::LOCAL_SOURCE_ID;
 use crate::browse::browse;
 use crate::error::LocalSourceError;
 use crate::format::is_anime_episode;
-use crate::fs::{FsEntry, file_url, find_child, list_dir, safe_join};
+use crate::fs::{FsEntry, file_url, find_child, list_dir, resolve};
 use crate::images::find_image;
 use crate::json_side::{AnimeDetails, apply_anime_details, details_file, read_details_json};
 use crate::media::FrameExtractor;
@@ -209,8 +209,9 @@ impl AnimeSource for LocalAnimeSource {
         let url = episode.url.clone();
         let hosters = crate::blocking(move || {
             let file = root
-                .and_then(|root| safe_join(&root, &url))
-                .filter(|path| path.is_file())
+                .and_then(|root| resolve(&root, &url))
+                // a url may be absolute (a linked folder), so only a video file of a supported format is ever played
+                .filter(|path| path.is_file() && path.file_name().and_then(|n| n.to_str()).is_some_and(is_anime_episode))
                 .and_then(|path| file_url(&path));
             Ok(local_hosters(&url, file))
         })

@@ -56,9 +56,20 @@ pub fn safe_join(base: &Path, rel: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-/// Kotlin `findFile(name)` on a folder, for a nested `a/b` path. `None` when missing or unsafe.
+/// The path a local url names. A relative url is a title (or a file of one) inside the Local folder `root`; an absolute
+/// url is a linked folder outside it (or a file of one), checked the same way: no `.`, `..`, empty part, NUL or
+/// backslash. The one place a local url becomes a path, for the source and the app alike.
+pub fn resolve(root: &Path, url: &str) -> Option<PathBuf> {
+    match url.strip_prefix('/') {
+        Some(absolute) => safe_join(Path::new("/"), absolute),
+        None => safe_join(root, url),
+    }
+}
+
+/// Kotlin `findFile(name)` on a folder, for a nested `a/b` path or a linked folder's absolute path ([`resolve`]). `None`
+/// when missing or unsafe.
 pub fn find_child(dir: &Path, rel: &str) -> Option<PathBuf> {
-    safe_join(dir, rel).filter(|path| path.exists())
+    resolve(dir, rel).filter(|path| path.exists())
 }
 
 /// Kotlin `DiskUtil.createNoMediaFile`: an empty `.nomedia` in `dir`, created only when `dir` exists and has none.
@@ -125,6 +136,21 @@ mod tests {
         assert_eq!(safe_join(base, ""), None);
         assert_eq!(safe_join(base, "a\0b"), None);
         assert_eq!(safe_join(base, "a\\b"), None);
+    }
+
+    #[test]
+    fn a_linked_folder_resolves_by_its_absolute_path_with_the_same_checks() -> io::Result<()> {
+        let local = tempfile::tempdir()?;
+        let linked = tempfile::tempdir()?;
+        fs::create_dir(linked.path().join("Show"))?;
+        let show = linked.path().join("Show");
+        let url = show.to_str().expect("utf-8 temp path");
+        assert_eq!(find_child(local.path(), url), Some(show.clone()), "an absolute url is the linked folder itself");
+        assert_eq!(find_child(local.path(), &format!("{url}/missing.mkv")), None);
+        assert_eq!(resolve(local.path(), "Title/ep.mkv"), Some(local.path().join("Title/ep.mkv")), "a relative url stays under Local");
+        assert_eq!(resolve(local.path(), "/tmp/../etc"), None, "traversal is refused in both forms");
+        assert_eq!(resolve(local.path(), "/a//b"), None);
+        Ok(())
     }
 
     #[test]
