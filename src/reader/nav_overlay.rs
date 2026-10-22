@@ -1,5 +1,5 @@
 //! The navigation overlay (G-27, `ReaderNavigationOverlayView.kt`): the tap zones drawn over the pages, each with its
-//! colour and its label, fading in over one second and fading out on the next click or touch.
+//! colour and its label, fading in over one second and fading out on its own [`HOLD_MS`] later. A click does not hide it.
 //!
 //! The overlay is shown when the navigation is set for the first time and the user asked for it (`show_navigation_overlay_on_start`,
 //! or the one-time new-user flag), and whenever the navigation changes after that. A disabled navigation never shows it.
@@ -19,6 +19,8 @@ use super::viewers::settings::ViewerSettings;
 
 /// How long a fade takes (`FADE_DURATION`).
 pub const FADE_MS: u64 = 1000;
+/// How long the overlay stays fully shown before it fades out.
+pub const HOLD_MS: u64 = 2000;
 /// The label size in pixels (`textSize = 64f`); a zone too narrow for its label shrinks it.
 const LABEL_SIZE: f64 = 64.0;
 
@@ -68,7 +70,7 @@ struct State {
     generation: u64,
 }
 
-/// The overlay widget. It never takes input; [`NavOverlay::new`] watches clicks on the page layer to fade it out.
+/// The overlay widget. It never takes input, and it fades out on its own after it was shown.
 pub struct NavOverlay {
     area: gtk::DrawingArea,
     state: Rc<RefCell<State>>,
@@ -76,7 +78,7 @@ pub struct NavOverlay {
 }
 
 impl NavOverlay {
-    /// Adds the overlay over `layer`, hidden. A click anywhere on `layer` fades it out and still reaches the viewer.
+    /// Adds the overlay over `layer`, hidden. It never takes a click, so every click reaches the viewer.
     pub fn new(layer: &gtk::Overlay) -> Self {
         let state = Rc::new(RefCell::new(State { zones: Vec::new(), first_set: true, generation: 0 }));
         let area = gtk::DrawingArea::new();
@@ -89,16 +91,7 @@ impl NavOverlay {
         let drawn = Rc::clone(&state);
         area.set_draw_func(move |_, cr, width, height| draw(&drawn.borrow().zones, cr, f64::from(width), f64::from(height)));
         layer.add_overlay(&area);
-        let this = Self { area, state, shown: Rc::new(Cell::new(false)) };
-
-        // the capture phase sees the click first and does not claim it, so the viewer still gets it
-        let click = gtk::GestureClick::new();
-        click.set_button(0);
-        click.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let (area, state, shown) = (this.area.clone(), Rc::clone(&this.state), Rc::clone(&this.shown));
-        click.connect_pressed(move |_, _, _, _| fade(&area, &state, &shown, false));
-        layer.add_controller(click);
-        this
+        Self { area, state, shown: Rc::new(Cell::new(false)) }
     }
 
     /// Sets the zones and fades the overlay in when [`should_fade_in`] says so. `wanted_on_start` is the on-start preference
@@ -127,7 +120,8 @@ impl NavOverlay {
     }
 }
 
-/// Fades the overlay to visible or hidden over [`FADE_MS`], from its present opacity.
+/// Fades the overlay to visible or hidden over [`FADE_MS`], from its present opacity. A shown overlay fades out
+/// [`HOLD_MS`] after it is fully visible, unless another fade started meanwhile.
 fn fade(area: &gtk::DrawingArea, state: &Rc<RefCell<State>>, shown: &Rc<Cell<bool>>, show: bool) {
     if shown.get() == show {
         return;
@@ -146,9 +140,12 @@ fn fade(area: &gtk::DrawingArea, state: &Rc<RefCell<State>>, shown: &Rc<Cell<boo
     if !gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations()) {
         area.set_opacity(to);
         area.set_visible(show);
+        if show {
+            hide_later(area, state, shown, generation);
+        }
         return;
     }
-    let (area, state) = (area.clone(), Rc::clone(state));
+    let (area, state, shown) = (area.clone(), Rc::clone(state), Rc::clone(shown));
     let started = Instant::now();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         if state.borrow().generation != generation {
@@ -159,10 +156,22 @@ fn fade(area: &gtk::DrawingArea, state: &Rc<RefCell<State>>, shown: &Rc<Cell<boo
         if elapsed < FADE_MS {
             return glib::ControlFlow::Continue;
         }
-        if !show {
+        if show {
+            hide_later(&area, &state, &shown, generation);
+        } else {
             area.set_visible(false);
         }
         glib::ControlFlow::Break
+    });
+}
+
+/// Fades the overlay out [`HOLD_MS`] from now, when fade `generation` is still the last one.
+fn hide_later(area: &gtk::DrawingArea, state: &Rc<RefCell<State>>, shown: &Rc<Cell<bool>>, generation: u64) {
+    let (area, state, shown) = (area.clone(), Rc::clone(state), Rc::clone(shown));
+    glib::timeout_add_local_once(Duration::from_millis(HOLD_MS), move || {
+        if state.borrow().generation == generation {
+            fade(&area, &state, &shown, false);
+        }
     });
 }
 

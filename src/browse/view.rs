@@ -293,7 +293,9 @@ fn title_label(text: &str, lines: i32) -> Label {
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     label.set_lines(lines);
     label.set_wrap(true);
-    label.set_max_width_chars(14);
+    // the label never asks for more than one character's width, so a long title wraps to the cover's width and never
+    // widens its card (a lone card in a global-search row is otherwise given its title's full width)
+    label.set_max_width_chars(1);
     label.set_xalign(0.0);
     label
 }
@@ -395,6 +397,16 @@ pub(crate) mod tests {
             let picture = row.first_child().and_downcast::<gtk::Image>().expect("the saved icon");
             assert!(picture.has_css_class("kb-row-cover"), "the letter tile's rounded corners");
             assert_eq!(picture.pixel_size(), ICON_HEIGHT_PX);
+        });
+    }
+
+    #[test]
+    fn a_long_title_never_makes_a_card_wider_than_its_cover() {
+        crate::testing::with_display(|| {
+            let item = ListItem { title: "Omniscient Reader's Viewpoint, the long edition".into(), ..ListItem::default() };
+            let cell = grid_cell_lines(Some(&item), LibraryDisplayMode::ComfortableGrid, &loader(), &always(), 96, 3);
+            let (_, natural, _, _) = cell.measure(O::Horizontal, -1);
+            assert!(natural <= 96 + 2 * CELL_MARGIN_PX, "the card asks for {natural} px");
         });
     }
 

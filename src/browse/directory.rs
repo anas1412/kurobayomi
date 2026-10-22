@@ -280,16 +280,19 @@ pub(crate) mod tests {
     fn the_installed_sources_of_a_kind_are_read_back_and_replaced() {
         let one = Catalogues::with_store(vec![(Catalogue::Manga(FakeCatalogue::new(1)), entry(1, "A", "en", ""))], Arc::new(|| None));
         install(Kind::Manga, one);
-        assert_eq!(current(Kind::Manga).sources().len(), 1);
+        // the local source is always listed after the installed ones
+        assert_eq!(current(Kind::Manga).sources().len(), 2);
         let two = Catalogues::with_store(
             vec![(Catalogue::Manga(FakeCatalogue::new(1)), entry(1, "A", "en", "")), (Catalogue::Manga(FakeCatalogue::new(2)), entry(2, "B", "en", ""))],
             Arc::new(|| None),
         );
         install(Kind::Manga, two);
         let manga = current(Kind::Manga);
-        assert_eq!(manga.sources().len(), 2);
+        assert_eq!(manga.sources().len(), 3);
+        assert!(manga.catalogue(kuro_local::LOCAL_SOURCE_ID).is_some());
         assert!(manga.catalogue(2).and_then(|source| source.manga()).is_some() && manga.catalogue(3).is_none());
         INSTALLED.lock().expect("lock").retain(|(kind, _)| *kind != Kind::Manga);
-        assert!(current(Kind::Manga).sources().is_empty(), "nothing installed lists nothing");
+        let left: Vec<i64> = current(Kind::Manga).sources().iter().map(|s| s.source.id).collect();
+        assert_eq!(left, [kuro_local::LOCAL_SOURCE_ID], "nothing installed lists only the local source");
     }
 }
