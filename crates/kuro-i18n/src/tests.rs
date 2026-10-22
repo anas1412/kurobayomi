@@ -162,8 +162,8 @@ fn english_file_has_no_android_escapes_or_entities() {
 fn every_plural_has_an_other_variant() {
     let selects = ENGLISH_FTL.matches("{ $count ->").count();
     let others = ENGLISH_FTL.matches("*[other]").count();
-    assert_eq!(selects, 39, "34 from the Aniyomi base plus ext_store_not_runnable_hidden, repos_added and whats_new_more_changes");
-    assert_eq!(others, 37);
+    assert_eq!(selects, 39, "34 from the Aniyomi base plus ext_store_not_runnable_hidden, repos_added, whats_new_more_changes, local_linked and local_folders_skipped");
+    assert_eq!(others, 39);
 }
 
 #[test]
