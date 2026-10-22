@@ -581,8 +581,8 @@ mod tests {
 
     #[test]
     fn the_reading_mode_names_match_the_base_strings() {
-        assert_eq!(vertical_plus_viewer(), "Long strip with gaps");
-        assert_eq!(webtoon_viewer(), "Long strip");
+        assert_eq!(vertical_plus_viewer(), "Continuous vertical");
+        assert_eq!(webtoon_viewer(), "Webtoon");
     }
 
     #[test]

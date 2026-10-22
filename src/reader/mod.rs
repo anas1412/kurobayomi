@@ -20,7 +20,7 @@
 //! Gap list G-01 to G-35 (`plans/43-reader-core/p1-ui-parity.md` section 12), the ones that were open at the review (T-43a-078):
 //! - G-27 navigation overlay labels with fade: done in `nav_overlay` (zones, colours, labels, 1000 ms fades, shown by the
 //!   on-start and new-user preferences and by a changed tap-zone layout). The tap zones themselves are area 44 (`viewers::nav`).
-//! - G-34 the "Long strip with gaps" label: `strings::vertical_plus_viewer()`.
+//! - G-34 the "Continuous vertical" label: `strings::vertical_plus_viewer()`.
 //! - G-35 Open in WebView: assigned to area 36 (T-36a-053, T-36a-054, `webkit6` window in `src/web/window.rs`). DEFERRED, not done
 //!   (T-43a-059): the in-app WebView with the source id and the manga title does not exist yet, so the reader keeps the entry in
 //!   the overflow menu and opens the chapter in the desktop browser until that window exists. Open in browser and Share are done.

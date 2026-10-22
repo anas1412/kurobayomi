@@ -152,7 +152,7 @@ fn the_menu_model_has_five_radio_modes_then_crop_and_settings_then_the_source_en
         .collect();
     assert_eq!(web[0].1, modes, "five radio items on one action, each with its mode as the target");
     assert_eq!(modes.len(), 5);
-    assert_eq!(modes[0].0, "Paged, left to right");
+    assert_eq!(modes[0].0, "Left to right");
     assert_eq!(web[1].1, [item(&strings::pref_crop_borders(), "reader.crop"), item(&strings::menu_reader_settings(), "reader.settings")]);
     assert_eq!(web[2].1, [item(&strings::action_open_in_browser(), "reader.open-browser"), item(&strings::action_share(), "reader.share")]);
     assert_eq!(sections_of(false)[2].1, [item(&strings::set_as_cover(), "reader.set-cover")], "a local manga sets the cover instead");

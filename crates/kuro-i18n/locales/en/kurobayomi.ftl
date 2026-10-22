@@ -2791,10 +2791,10 @@ nav_zone_left = Left
 nav_zone_right = Right
 
 # source: i18n
-webtoon_viewer = Long strip
+webtoon_viewer = Webtoon
 
 # source: i18n
-vertical_plus_viewer = Long strip with gaps
+vertical_plus_viewer = Continuous vertical
 
 # source: i18n
 pager_viewer = Paged
@@ -4284,13 +4284,13 @@ action_mark_previous_as_seen = Mark previous as watched
 label_extension_repos = Repositories
 
 # source: kurobayomi
-left_to_right_viewer = Paged, left to right
+left_to_right_viewer = Left to right
 
 # source: kurobayomi
-right_to_left_viewer = Paged, right to left
+right_to_left_viewer = Right to left
 
 # source: kurobayomi
-vertical_viewer = Paged, vertical
+vertical_viewer = Vertical
 
 # source: kurobayomi
 action_filter_unwatched = Unwatched
