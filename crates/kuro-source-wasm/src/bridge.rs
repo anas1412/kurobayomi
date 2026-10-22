@@ -179,7 +179,11 @@ impl HostState {
             std::thread::sleep(wait);
         }
         let handle = tokio::runtime::Handle::try_current().map_err(|e| format!("no async runtime: {e}"))?;
-        handle.block_on(send(self.client.clone(), request, &self.hosts))
+        // the request runs as a runtime task, not on this blocking thread: when the app quits mid-request the runtime
+        // cancels the task, where polling its timers from here would panic (and crash the app on its way out)
+        let (client, hosts) = (self.client.clone(), self.hosts.clone());
+        let task = handle.spawn(async move { send(client, request, &hosts).await });
+        handle.block_on(task).map_err(|e| format!("the request did not finish: {e}"))?
     }
 }
 
@@ -367,6 +371,36 @@ mod tests {
         let (mut host, _dir) = state(5, &[]);
         assert!(host.pref_set("k".into(), "not json".into()).is_err());
         assert_eq!(host.pref_get("k".into()), "", "a refused write stores nothing");
+    }
+
+    /// The app quitting while a source waits on a request: the runtime shuts down, and the call fails instead of
+    /// panicking on the blocking thread (which crashed the app on its way out).
+    #[test]
+    fn a_request_in_flight_when_the_runtime_shuts_down_fails_without_a_panic() {
+        // a server that takes the connection and never answers
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        let url = format!("http://{}/slow", listener.local_addr().expect("address"));
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                std::thread::sleep(Duration::from_secs(10));
+                drop(stream);
+            }
+        });
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("runtime");
+        let (sent, outcome) = std::sync::mpsc::channel();
+        {
+            let _entered = rt.enter();
+            let (mut host, dir) = state(1, &["127.0.0.1"]);
+            let request = json!({ "method": "GET", "url": url, "headers": [], "body": null }).to_string();
+            rt.spawn_blocking(move || {
+                let _dir = dir;
+                let _ = sent.send(host.http(request));
+            });
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        rt.shutdown_timeout(Duration::from_secs(2));
+        let result = outcome.recv_timeout(Duration::from_secs(5)).expect("the call returned, it did not panic");
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
