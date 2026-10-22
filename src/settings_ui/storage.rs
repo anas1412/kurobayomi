@@ -79,7 +79,10 @@ pub fn apply_choice(store: &PrefStore, path: &Path) -> Result<(), String> {
     manager.set_base(path).map_err(|err| {
         tracing::warn!(%err, "the storage location could not be saved");
         refused()
-    })
+    })?;
+    // the Local folders follow the new location at once
+    crate::local_flow::load_roots();
+    Ok(())
 }
 
 /// Opens the folder chooser; a folder that passes [`apply_choice`] is stored and `changed` runs, any other one is

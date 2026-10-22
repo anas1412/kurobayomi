@@ -274,6 +274,8 @@ fn build_window(app: &gtk::Application) {
             downloaded_only: downloaded_only.get(),
         });
     }
+    // the Local folders, which the local source and every local path read (from any thread)
+    local_flow::load_roots();
     // the sources the screens read (repository sources), then the source gate they wait on
     startup::start_sources(base.store());
     // the library update runner behind the refresh button and the automatic schedule

@@ -12,6 +12,7 @@ use kuro_data::entry::{EntryRepo, EntryUpdate};
 use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
 use kuro_local::media::FrameExtractor;
+use kuro_platform::kind::Kind;
 
 thread_local! {
     /// Entries already tried this run, so a card that binds again starts no second ffmpeg.
@@ -59,9 +60,10 @@ pub fn ensure(db: Arc<Db>, anime_id: i64, done: impl FnOnce() + 'static) {
 fn store_cover(db: &Arc<Db>, anime_id: i64) -> bool {
     let Ok(anime) = EntryRepo::new(db.clone()).by_id(anime_id) else { return false };
     let episodes = ItemRepo::new(db.clone()).by_entry_id(anime_id, false).unwrap_or_default();
-    let video = lowest(&episodes).map(|e| PathBuf::from(&e.url));
+    let video = lowest(&episodes).and_then(|e| crate::local_flow::path_of(Kind::Anime, &e.url));
+    let Some(folder) = crate::local_flow::path_of(Kind::Anime, &anime.url) else { return false };
     let frames = FrameExtractor::from_path(std::env::temp_dir());
-    let Some(url) = find_or_make(Path::new(&anime.url), video.as_deref(), &frames).and_then(|p| kuro_local::fs::file_url(&p)) else { return false };
+    let Some(url) = find_or_make(&folder, video.as_deref(), &frames).and_then(|p| kuro_local::fs::file_url(&p)) else { return false };
     let update = EntryUpdate { thumbnail_url: Some(url), cover_last_modified: Some(kuro_data::time::now_millis()), ..EntryUpdate::new(anime_id) };
     EntryRepo::new(db.clone()).update(&update).inspect_err(|e| tracing::warn!(error = %e, "the local anime cover was not stored")).is_ok()
 }

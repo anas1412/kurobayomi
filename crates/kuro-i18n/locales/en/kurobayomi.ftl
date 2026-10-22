@@ -4746,10 +4746,10 @@ ui_no_results = No results
 ui_couldn_t_open_this_link = Couldn't open this link
 
 # source: kurobayomi
-ui_add_local_manga_folder = Add local manga folder
+ui_add_local_manga_folder = Link a manga folder
 
 # source: kurobayomi
-ui_add_local_anime_folder = Add local anime folder
+ui_add_local_anime_folder = Link an anime folder
 
 # source: kurobayomi
 ui_quality_and_server = Quality and server
@@ -4970,12 +4970,6 @@ reader_page_label = Chapter { $chapter } page { $page }
 reader_page_label_split = Chapter { $chapter } page { $page } (split)
 
 # source: kurobayomi
-ui_rescan_local_manga_folders = Rescan local manga folders
-
-# source: kurobayomi
-ui_rescan_local_anime_folders = Rescan local anime folders
-
-# source: kurobayomi
 airing_in_countdown = Airing in { $days }d { $hours }h { $minutes }m { $seconds }s
 
 # source: kurobayomi
@@ -5007,15 +5001,6 @@ local_scan_failed = Could not scan the folder: { $error }
 
 # source: kurobayomi
 local_read_failed = Could not read the folder: { $error }
-
-# source: kurobayomi
-local_save_failed = Could not save { $title }: { $error }
-
-# source: kurobayomi
-local_manga_result = { $title }: { $added } new, { $renamed } renamed chapters
-
-# source: kurobayomi
-local_anime_result = Local anime: { $series } series, { $added } episodes added, { $removed } removed
 
 # source: kurobayomi
 interval_every_hours = Every { $hours } hours
@@ -5064,3 +5049,26 @@ pref_show_adult_titles = Show adult (18+) titles
 
 # source: kurobayomi
 pref_show_adult_titles_summary = While this is off, sources that know a title's rating leave adult titles out, and extensions marked 18+ are hidden.
+
+# source: kurobayomi
+local_linked =
+    { $count ->
+        [one] Linked 1 title
+       *[other] Linked { NUMBER($count, useGrouping: "false") } titles
+    }
+
+# source: kurobayomi
+local_link_nothing_new = Nothing new to add from that folder: its titles are already in the library, or it holds no supported files.
+
+# source: kurobayomi
+local_folders_skipped =
+    { $count ->
+        [one] 1 folder in Local could not be added
+       *[other] { NUMBER($count, useGrouping: "false") } folders in Local could not be added
+    }
+
+# source: kurobayomi
+local_folder_unavailable = The Local folder is not available: check the storage location in Settings.
+
+# source: kurobayomi
+ui_open_local_folder = Open the Local folder

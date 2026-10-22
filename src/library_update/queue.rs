@@ -180,6 +180,11 @@ fn skip_reason(entry: &LibraryEntry, input: &QueueInput) -> Option<SkipReason> {
     if entry.update_strategy != UpdateStrategy::AlwaysUpdate {
         return Some(SkipReason::NotAlwaysUpdate);
     }
+    // a local title is read from disk: no request to spare, and its status (a details.json may say "completed") must not
+    // keep new files out
+    if entry.source == kuro_local::LOCAL_SOURCE_ID {
+        return None;
+    }
     if r.skip_completed && entry.status == COMPLETED_STATUS {
         return Some(SkipReason::Completed);
     }

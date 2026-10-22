@@ -53,7 +53,8 @@ where
     }
 
     let slot = deps.registry.get_or_stub(kind, entry.source);
-    let fetched = slot.fetch(kind, &entry.url, &entry.title, cx.settings.auto_update_metadata).await?;
+    // a local title's details are its own files (details.json, ComicInfo.xml, cover), read on every pass so edits show up
+    let fetched = slot.fetch(kind, &entry.url, &entry.title, cx.settings.auto_update_metadata || slot.is_local()).await?;
     if fetched.items.is_empty() && !slot.is_local() {
         return Err(match kind {
             Kind::Manga => UpdateError::NoChapters,
@@ -69,7 +70,8 @@ where
 
     let mut new_items = deps.sync.sync(entry, &fetched, cx.window, cx.now_ms).await?;
     new_items.sort_by(|a, b| b.source_order.cmp(&a.source_order));
-    let downloads = queue_downloads(deps, cx, entry, &new_items).await?;
+    // a local title's files are on disk already: nothing to download
+    let downloads = if slot.is_local() { 0 } else { queue_downloads(deps, cx, entry, &new_items).await? };
     Ok(EntryOutcome { new_items, downloads })
 }
 

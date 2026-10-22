@@ -4,7 +4,6 @@
 //! local episode plays its file in the player at its saved position.
 
 use std::cell::Cell;
-use std::path::Path;
 use std::sync::Arc;
 
 use kuro_data::DataResult;
@@ -85,7 +84,10 @@ pub fn open_episode(title: &str, episode_name: &str) -> bool {
 fn play(found: DataResult<Option<Opening>>) -> bool {
     match found {
         Ok(Some(found)) => {
-            crate::player_view::open_episode(Path::new(&found.path), found.episode_id, found.start_ms);
+            match super::path_of(Kind::Anime, &found.path) {
+                Some(path) => crate::player_view::open_episode(&path, found.episode_id, found.start_ms),
+                None => tracing::warn!(url = %found.path, "a local episode url names no file"),
+            }
             true
         }
         Ok(None) => false,
@@ -101,18 +103,16 @@ mod tests {
     use kuro_data::entry::Entry;
     use kuro_data::item::ItemUpdate;
     use kuro_platform::kind::Kind;
-    use kuro_prefs::store::PrefStore;
 
     use super::*;
-    use crate::local_flow::sync::add;
-    use crate::local_flow::tests::{db_in, test_db, series, video};
+    use crate::local_flow::tests::{linked, series, test_db};
 
     #[test]
     fn only_a_local_library_title_resolves() {
+        let (_db_dir, db) = test_db();
         let root = tempfile::tempdir().expect("temp dir");
-        let db = db_in(root.path());
-        let done = add(&db, &PrefStore::in_memory(), Kind::Manga, &series(root.path()), 1_000).expect("add").remove(0).result.expect("sync");
-        assert_eq!(local_id_with_title(&db, Kind::Manga, "Series").expect("lookup"), Some(done.entry_id));
+        let id = linked(&db, Kind::Manga, &series(root.path()), &["Ch 1"]);
+        assert_eq!(local_id_with_title(&db, Kind::Manga, "Series").expect("lookup"), Some(id));
         assert_eq!(local_id_with_title(&db, Kind::Manga, "Title 1").expect("lookup"), None);
     }
 
@@ -120,9 +120,7 @@ mod tests {
     fn a_local_episode_opens_at_its_saved_position_and_other_titles_do_not() {
         let (_db_dir, db) = test_db();
         let root = tempfile::tempdir().expect("root");
-        video(root.path(), "Show", "Show - 1.mkv");
-        video(root.path(), "Show", "Show - 2.mkv");
-        add(&db, &PrefStore::in_memory(), Kind::Anime, root.path(), 1_000).expect("scan");
+        linked(&db, Kind::Anime, &root.path().join("Show"), &["Show - 1.mkv", "Show - 2.mkv"]);
 
         let anime_id = local_id_with_title(&db, Kind::Anime, "Show").expect("lookup").expect("local Show");
         let episodes = ItemRepo::new(Arc::clone(&db));
@@ -140,9 +138,7 @@ mod tests {
     fn an_episode_id_opens_only_a_local_episode() {
         let (_db_dir, db) = test_db();
         let root = tempfile::tempdir().expect("root");
-        video(root.path(), "Show", "Show - 1.mkv");
-        add(&db, &PrefStore::in_memory(), Kind::Anime, root.path(), 1_000).expect("scan");
-        let anime_id = local_id_with_title(&db, Kind::Anime, "Show").expect("lookup").expect("local Show");
+        let anime_id = linked(&db, Kind::Anime, &root.path().join("Show"), &["Show - 1.mkv"]);
         let episode = ItemRepo::new(Arc::clone(&db)).by_entry_id(anime_id, false).expect("rows").remove(0);
         assert_eq!(opening_by_id(&db, episode.id).expect("lookup").expect("local episode").path, episode.url);
 

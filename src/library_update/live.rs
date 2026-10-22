@@ -6,7 +6,6 @@
 //! The lists are read at each call, so a source that starts later is found without a restart. The registry is
 //! stateless: it holds nothing that could go stale.
 
-use kuro_i18n::{MsgKey, tr};
 use std::sync::Arc;
 
 use kuro_platform::kind::Kind;
@@ -23,10 +22,8 @@ use crate::library_update::source::{Fetched, RemoteFlags, Source, SourceDetails,
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LiveRegistry;
 
-/// A source found by [`LiveRegistry`].
+/// A source found by [`LiveRegistry`]. The local source is one of them (id `LOCAL_SOURCE_ID`, from the directory).
 pub enum LiveSource {
-    /// The local source: it is unmetered, and its refresh and fetch return nothing without an error.
-    Local,
     Manga(Arc<dyn MangaSource>),
     Anime(Arc<dyn AnimeSource>),
 }
@@ -35,9 +32,6 @@ impl SourceRegistry for LiveRegistry {
     type Source = LiveSource;
 
     fn get(&self, kind: Kind, source_id: i64) -> Option<LiveSource> {
-        if source_id == LOCAL_SOURCE_ID {
-            return Some(LiveSource::Local);
-        }
         let source = directory::current(kind).catalogue(source_id)?;
         match kind {
             Kind::Manga => source.manga().map(LiveSource::Manga),
@@ -67,7 +61,6 @@ impl LiveRegistry {
 impl LiveSource {
     fn name(&self) -> String {
         match self {
-            Self::Local => tr(MsgKey::action_display_local_badge).to_owned(),
             Self::Manga(source) => source.name().to_owned(),
             Self::Anime(source) => source.name().to_owned(),
         }
@@ -75,7 +68,6 @@ impl LiveSource {
 
     fn lang(&self) -> String {
         match self {
-            Self::Local => "other".to_owned(),
             Self::Manga(source) => source.lang().to_owned(),
             Self::Anime(source) => source.lang().to_owned(),
         }
@@ -89,12 +81,15 @@ impl LiveSource {
 
 impl Source for LiveSource {
     fn is_local(&self) -> bool {
-        matches!(self, Self::Local)
+        let id = match self {
+            Self::Manga(source) => source.id(),
+            Self::Anime(source) => source.id(),
+        };
+        id == LOCAL_SOURCE_ID
     }
 
     fn is_unmetered(&self) -> bool {
         match self {
-            Self::Local => true,
             Self::Manga(source) => source.is_unmetered(),
             Self::Anime(source) => source.is_unmetered(),
         }
@@ -102,7 +97,6 @@ impl Source for LiveSource {
 
     async fn fetch(&self, _kind: Kind, url: &str, title: &str, with_details: bool) -> Result<Fetched, UpdateError> {
         match self {
-            Self::Local => Ok(Fetched::default()),
             Self::Manga(source) => fetch_manga(&**source, url, title, with_details).await,
             Self::Anime(source) => fetch_anime(&**source, url, title, with_details).await,
         }
@@ -114,7 +108,6 @@ impl Source for LiveSource {
             return Ok(None);
         }
         match self {
-            Self::Local => Ok(None),
             Self::Manga(source) => manga_details(&**source, url, title).await.map(Some),
             Self::Anime(source) => anime_details(&**source, url, title).await,
         }

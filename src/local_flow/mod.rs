@@ -1,10 +1,11 @@
-//! Local folders of both kinds (plan areas 14, 43 and 45, wire-local-anime). A manga folder is one entry whose
-//! subfolders, archives and EPUB files are its chapters; an anime folder holds one folder per series whose video files
-//! are its episodes. `scan` reads a folder with kuro-local, `sync` stores it under the built-in local source id, `open`
-//! finds the local entry or episode a screen asks for, `reader` opens a local chapter, `cover` draws a local cover and
-//! `ui` holds the library menu's add and rescan. Scan and sync take no GTK types, so their tests run without a display.
+//! The app's side of local titles. Reading the files is the local source's (kuro-local, listed in the source directory
+//! like any source): its chapters, episodes, seasons, details and covers reach the library through the library update
+//! pass. Here: the Local folders and the one url-to-path rule (`path_of`), `titles` adds the Local folder's new titles and
+//! the linked folders to the library, `open` finds the local entry or episode a screen asks for, `reader` opens a local
+//! chapter, `cover` draws a local cover and `ui` holds the library menu's actions.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use kuro_data::DataResult;
 use kuro_data::entry::EntryRepo;
@@ -15,12 +16,40 @@ use kuro_local::LOCAL_SOURCE_ID;
 pub mod cover;
 pub mod open;
 pub mod reader;
-pub mod scan;
-pub mod sync;
+pub mod titles;
 pub mod ui;
 
 #[cfg(test)]
 mod tests;
+
+/// The Local folders, `[manga, anime]`, as [`load_roots`] last read them. Kept for every thread: the library update and the
+/// cover makers run off the GTK thread, where the app data cannot be read.
+static ROOTS: RwLock<[Option<PathBuf>; 2]> = RwLock::new([None, None]);
+
+/// Reads the Local folders (`Local/Manga`, `Local/Anime` under the storage folder, created on first use) and keeps them
+/// for [`local_root`]. Call on the GTK thread once the app data is open, and again when the storage folder changes. A
+/// folder that cannot be made is `None`: nothing local is read from it then.
+pub fn load_roots() {
+    let storage = crate::data::is_installed().then(|| crate::settings_ui::storage::manager(crate::data::app().base.store())).flatten();
+    let roots = match storage {
+        Some(storage) => [storage.local_manga_dir().ok(), storage.local_anime_dir().ok()],
+        None => [None, None],
+    };
+    *ROOTS.write().unwrap_or_else(PoisonError::into_inner) = roots;
+}
+
+/// The Local folder of `kind`, from any thread. `None` before [`load_roots`] or while the storage folder is missing.
+pub fn local_root(kind: Kind) -> Option<PathBuf> {
+    ROOTS.read().unwrap_or_else(PoisonError::into_inner)[usize::from(kind == Kind::Anime)].clone()
+}
+
+/// The file or folder a local url names: a title (or one of its files) inside the Local folder of `kind` for a relative
+/// url, a linked folder for an absolute one. The app's one way from a local url to a path (kuro-local's `resolve`, the
+/// same rule the local source follows). `None` for an unsafe url, or a relative one while there is no Local folder.
+pub fn path_of(kind: Kind, url: &str) -> Option<PathBuf> {
+    let root = if url.starts_with('/') { PathBuf::from("/") } else { local_root(kind)? };
+    kuro_local::fs::resolve(&root, url)
+}
 
 /// One library entry that came from a local folder.
 #[derive(Clone, Debug, PartialEq, Eq)]

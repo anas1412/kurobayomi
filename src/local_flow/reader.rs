@@ -2,7 +2,6 @@
 //! absolute path of its folder, archive or EPUB, so the loader reads the file it names. The reader's own launch
 //! path has no local source, so this module builds the same page with the local loader picked.
 
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -24,13 +23,11 @@ use crate::reader::model::{LoadError, ReaderChapter};
 use crate::reader::screen::{ReaderDeps, open};
 use crate::reader::writer::WriterHandle;
 
-/// The local format of a chapter url: an absolute path that exists as a folder, an EPUB or a manga archive.
+/// The local format of a chapter url (inside the Local folder or in a linked one, see `local_flow::path_of`): a folder, an
+/// EPUB or a manga archive that exists.
 pub fn local_format(url: &str) -> Option<LocalFormat> {
-    let path = Path::new(url);
-    if !path.is_absolute() {
-        return None;
-    }
-    match format_of(path, path.is_dir())? {
+    let path = super::path_of(Kind::Manga, url)?;
+    match format_of(&path, path.is_dir())? {
         Format::Directory(dir) => Some(LocalFormat::Directory(dir)),
         Format::Archive(file) => Some(LocalFormat::Archive(file)),
         Format::Epub(file) => Some(LocalFormat::Epub(file)),

@@ -372,8 +372,11 @@ pub fn start() {
 
     let (start_runner, start_inputs) = (runner.clone(), inputs.clone());
     let running_runner = runner.clone();
-    let start: std::rc::Rc<dyn Fn(Kind, Option<i64>) -> bool> =
-        std::rc::Rc::new(move |kind, category| start_runner.start_after(pass_settings(kind, category, &start_inputs), sources_loaded()));
+    let local = LocalTitles { db: app.db.clone(), prefs: app.base.store().clone() };
+    let start_local = local.clone();
+    let start: std::rc::Rc<dyn Fn(Kind, Option<i64>) -> bool> = std::rc::Rc::new(move |kind, category| {
+        start_runner.start_after(pass_settings(kind, category, &start_inputs), start_local.clone().before_pass(kind))
+    });
     let running: std::rc::Rc<dyn Fn(Kind) -> bool> =
         std::rc::Rc::new(move |kind| running_runner.locks().holder(kind).is_some());
     register_update_action(start.clone());
@@ -386,11 +389,11 @@ pub fn start() {
     for kind in [Kind::Manga, Kind::Anime] {
         let (tx, rx) = watch::channel(0_u32);
         senders.push(tx);
-        let (runner, inputs) = (runner.clone(), inputs.clone());
+        let (runner, inputs, local) = (runner.clone(), inputs.clone(), local.clone());
         handle.spawn(run_schedule(rx, move || {
-            let (runner, inputs) = (runner.clone(), inputs.clone());
+            let (runner, inputs, local) = (runner.clone(), inputs.clone(), local.clone());
             async move {
-                sources_loaded().await;
+                local.before_pass(kind).await;
                 if !device_allows(&inputs).await {
                     return PassStatus::Retry;
                 }
@@ -407,6 +410,22 @@ pub fn start() {
 async fn sources_loaded() {
     let mut ready = crate::recipe_sources::ready();
     let _ = ready.wait_for(|loaded| *loaded).await;
+}
+
+/// What the passes need to add the Local folder's new titles.
+#[derive(Clone)]
+struct LocalTitles {
+    db: Arc<Db>,
+    prefs: PrefStore,
+}
+
+impl LocalTitles {
+    /// Waits for the sources, then puts the Local folder's new titles of `kind` in the library (off the GTK thread), so the
+    /// pass that follows reads their chapters or episodes too: a launch, the refresh button and the schedule all sync it.
+    async fn before_pass(self, kind: Kind) {
+        sources_loaded().await;
+        let _ = tokio::task::spawn_blocking(move || crate::local_flow::titles::discover_local(&self.db, &self.prefs, kind)).await;
+    }
 }
 
 /// The application action a second process activates on the primary instance (T-26a-029).

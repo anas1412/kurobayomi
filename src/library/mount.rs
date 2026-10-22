@@ -400,31 +400,31 @@ pub fn build(kind: Kind) -> Option<Built> {
 }
 
 /// The header menu's sections: the category update (only with more than one category; the refresh button updates the whole
-/// library), the local folders, the categories. How the covers are filtered, sorted and shown is the view options button's.
+/// library, local titles included), the local folders (link one, open the Local folder), the categories. How the covers are filtered, sorted and shown is the view options button's.
 fn menu_sections(kind: Kind, view: &LibraryView) -> Vec<Vec<crate::ui::MenuEntry>> {
     use crate::ui::MenuEntry;
-    let (folder, rescan) = local_folder_actions(kind);
+    let (link, open) = local_folder_actions(kind);
     let (update, count) = (view.clone(), view.clone());
     vec![
         vec![MenuEntry::new(tr(MsgKey::action_update_category), move || update.update_category()).when(move || count.category_count() > 1)],
         vec![
             // the item opens a folder chooser, so it ends in "…"
-            MenuEntry::new(format!("{}…", tr(if kind == Kind::Anime { MsgKey::ui_add_local_anime_folder } else { MsgKey::ui_add_local_manga_folder })), folder),
-            MenuEntry::new(tr(if kind == Kind::Anime { MsgKey::ui_rescan_local_anime_folders } else { MsgKey::ui_rescan_local_manga_folders }), rescan),
+            MenuEntry::new(format!("{}…", tr(if kind == Kind::Anime { MsgKey::ui_add_local_anime_folder } else { MsgKey::ui_add_local_manga_folder })), link),
+            MenuEntry::new(tr(MsgKey::ui_open_local_folder), open),
         ],
         vec![MenuEntry::new(tr(MsgKey::categories), || crate::ui::open("categories"))],
     ]
 }
 
-/// Add-folder and rescan, from the local folder module, for `kind`.
+/// Link a folder and open the Local folder, from the local folder module, for `kind`.
 fn local_folder_actions(kind: Kind) -> (Box<dyn Fn()>, Box<dyn Fn()>) {
-    let (add, rescan) = match kind {
-        Kind::Manga => ("manga add", "manga rescan"),
-        Kind::Anime => ("anime add", "anime rescan"),
+    let (link, open) = match kind {
+        Kind::Manga => ("manga link", "manga open"),
+        Kind::Anime => ("anime link", "anime open"),
     };
     (
-        Box::new(move || run_local(add, || crate::local_flow::ui::add_folder(kind))),
-        Box::new(move || run_local(rescan, || crate::local_flow::ui::rescan(kind))),
+        Box::new(move || run_local(link, || crate::local_flow::ui::link_folder(kind))),
+        Box::new(move || run_local(open, || crate::local_flow::ui::open_local_folder(kind))),
     )
 }
 
@@ -565,13 +565,14 @@ mod tests {
             for (kind, word) in [(Kind::Manga, "manga"), (Kind::Anime, "anime")] {
                 let menu = crate::ui::menu_button(menu_sections(kind, &view)).expect("the library has a menu");
                 let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("a menu"));
-                assert_eq!(labels, [tr(MsgKey::action_update_category), format!("Add local {word} folder…"), format!("Rescan local {word} folders"), tr(MsgKey::categories)]);
+                let article = if kind == Kind::Anime { "an" } else { "a" };
+                assert_eq!(labels, [tr(MsgKey::action_update_category), format!("Link {article} {word} folder…"), "Open the Local folder".to_owned(), tr(MsgKey::categories)]);
                 assert!(!labels.iter().any(|l| l.contains("Update library")), "the refresh button is the only library update");
                 LOCAL_CALLS.with(|c| *c.borrow_mut() = Some(Vec::new()));
-                menu.activate_action("more.e1", None).expect("the add item");
-                menu.activate_action("more.e2", None).expect("the rescan item");
+                menu.activate_action("more.e1", None).expect("the link item");
+                menu.activate_action("more.e2", None).expect("the open item");
                 let calls = LOCAL_CALLS.with(|c| c.borrow_mut().take()).unwrap_or_default();
-                assert_eq!(calls, [format!("{word} add"), format!("{word} rescan")]);
+                assert_eq!(calls, [format!("{word} link"), format!("{word} open")]);
             }
         });
     }

@@ -153,11 +153,30 @@ fn remember_stubs(kind: Kind, catalogues: &Catalogues) {
     }
 }
 
-/// The directory the pages of `kind` read: the installed sources (none before the first load) and, for anime, the
-/// packages of the extension host. It is a snapshot taken when a page is built.
+/// The directory the pages of `kind` read: the installed sources (none before the first load), the local source, and for
+/// anime the packages of the extension host. It is a snapshot taken when a page is built.
 pub fn current(kind: Kind) -> Arc<dyn SourceDirectory> {
     let installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(of, _)| *of == kind).map(|(_, catalogues)| catalogues.clone());
-    Arc::new(installed.unwrap_or_else(|| Catalogues::new(kind, Vec::new())))
+    let mut catalogues = installed.unwrap_or_else(|| Catalogues::new(kind, Vec::new()));
+    if let Some(local) = local(kind) {
+        catalogues.runnable.push(local);
+    }
+    Arc::new(catalogues)
+}
+
+/// The local source of `kind` over its folder (`Local/Manga` or `Local/Anime` under the storage folder), with its row. It
+/// needs no repository, so it is always listed; it is made at each lookup, from any thread, so a new storage folder applies
+/// at once. `None` before the Local folders are known (`local_flow::load_roots`).
+fn local(kind: Kind) -> Option<(Catalogue, DirectorySource)> {
+    use kuro_source::local::{LOCAL_ANIME_NAME, LOCAL_MANGA_NAME};
+    let root = crate::local_flow::local_root(kind)?;
+    let (catalogue, name) = match kind {
+        Kind::Manga => (Catalogue::Manga(Arc::new(kuro_local::LocalMangaSource::new(Some(root)))), LOCAL_MANGA_NAME),
+        Kind::Anime => (Catalogue::Anime(Arc::new(kuro_local::LocalAnimeSource::new(Some(root)))), LOCAL_ANIME_NAME),
+    };
+    let mut source = Source::new(kuro_local::LOCAL_SOURCE_ID, name, "other");
+    source.supports_latest = catalogue.supports_latest();
+    Some((catalogue, DirectorySource { source, package: "local".to_owned(), home_url: None }))
 }
 
 /// A source as the migration picker shows it: the installed one, or a stub with no name or language when the directory
