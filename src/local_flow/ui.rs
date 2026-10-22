@@ -1,5 +1,5 @@
 //! GTK glue for local folders (area 43, wire-local-anime): the library menu's "Add local … folder" and "Rescan local …
-//! folders" for both kinds, and the add-manga shortcut. Scanning and storing run on a worker thread; the toast and the
+//! folders" for both kinds, and the add-folder shortcut. Scanning and storing run on a worker thread; the toast and the
 //! library refresh run back on the GTK thread.
 
 use kuro_i18n::{Arg, MsgKey, tr, trf};
@@ -14,13 +14,14 @@ use kuro_prefs::store::PrefStore;
 
 use super::sync::{self, Failure, Outcome};
 
-/// The window action that asks for a manga folder and adds it (`win.add-local-manga`, `Ctrl+Shift+O`).
-pub const ADD_ACTION: &str = "add-local-manga";
+/// The window action that asks for a local folder of the kind on screen, anime or manga, and adds it
+/// (`win.add-local-folder`, `Ctrl+Shift+O`).
+pub const ADD_ACTION: &str = "add-local-folder";
 
-/// Registers the add-manga window action and its shortcut.
+/// Registers the add-folder window action and its shortcut. It follows the app's one Anime | Manga choice.
 pub fn attach(window: &gtk::ApplicationWindow) {
     let add = gio::SimpleAction::new(ADD_ACTION, None);
-    add.connect_activate(|_, _| add_folder(Kind::Manga));
+    add.connect_activate(|_, _| add_folder(crate::shell::kind_choice::current()));
     window.add_action(&add);
     if let Some(app) = window.application() {
         app.set_accels_for_action(&format!("win.{ADD_ACTION}"), &["<Primary><Shift>o"]);
