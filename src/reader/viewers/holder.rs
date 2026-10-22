@@ -131,6 +131,23 @@ impl Row {
         })
     }
 
+    /// Whether the shown page has room to pan by `(dx, dy)` screen px.
+    pub fn can_pan_by(&self, dx: f64, dy: f64) -> bool {
+        self.image.as_ref().is_some_and(|i| i.view.can_pan_by(dx, dy))
+    }
+
+    /// Pans the shown page by `(dx, dy)` screen px at once. `false` when it is at its edge that way.
+    pub fn scroll_pan(&self, dx: f64, dy: f64) -> bool {
+        self.image.as_ref().is_some_and(|i| i.view.scroll_pan(dx, dy))
+    }
+
+    /// One notch of Ctrl+wheel zoom on the shown page.
+    pub fn zoom_wheel(&self, up: bool) {
+        if let Some(image) = &self.image {
+            image.view.zoom_wheel(up);
+        }
+    }
+
     /// Pans the shown page one view width toward `dir`.
     pub fn pan(&self, dir: Phys) {
         if let Some(image) = &self.image {

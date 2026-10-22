@@ -270,10 +270,16 @@ mod imp {
             let z = self.zoom.get();
             let bounds = graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
             snapshot.push_clip(&bounds);
-            match (self.page_fill.borrow().as_ref(), *self.background.borrow()) {
-                (Some(fill), _) => paint_fill(snapshot, fill, &bounds),
-                (None, Some(background)) => snapshot.append_color(&background, &bounds),
-                (None, None) => {}
+            // A webtoon page (it never zooms on its own) is stretched onto its row, which the strip sized from the
+            // page's own aspect: off by under a pixel, so nothing shows, and no background line is left at its ends
+            // (issue 4). The page covers the row, so no background is painted under it either.
+            let src = self.src.get();
+            let fill = (self.zoom_locked.get() && src.w > 0.0 && src.h > 0.0).then(|| (w / src.w, h / src.h));
+            match (fill, self.page_fill.borrow().as_ref(), *self.background.borrow()) {
+                (Some(_), _, _) => {}
+                (None, Some(fill), _) => paint_fill(snapshot, fill, &bounds),
+                (None, None, Some(background)) => snapshot.append_color(&background, &bounds),
+                (None, None, None) => {}
             }
             let (_, visible) = pyramid.visible_tiles(z.scale, z.center, (w, h));
             let mut uploaded = self.tiles.borrow_mut();
@@ -285,7 +291,10 @@ mod imp {
                     }
                 }
                 let Some(texture) = uploaded.get(&tile) else { continue };
-                let (x, y, tw, th) = Pyramid::screen_rect(tile, z.scale, z.center, (w, h));
+                let (x, y, tw, th) = match fill {
+                    Some((sx, sy)) => Pyramid::fill_rect(tile, sx, sy),
+                    None => Pyramid::screen_rect(tile, z.scale, z.center, (w, h)),
+                };
                 snapshot.append_texture(texture, &graphene::Rect::new(x as f32, y as f32, tw as f32, th as f32));
             }
             snapshot.pop();
@@ -493,6 +502,19 @@ mod imp {
             zoom::pan_remaining(z.center, self.view(), self.src.get(), z.scale)
         }
 
+        /// The centre after moving the view by `(dx, dy)` screen px, held inside the page. `None` when the page would
+        /// move by half a pixel or less, is not ready, or does not pan on its own (a webtoon page).
+        pub(super) fn pan_target(&self, dx: f64, dy: f64) -> Option<(f64, f64)> {
+            let z = self.zoom.get();
+            if self.state.get() != LoadState::Ready || self.fitted.get().is_none() || self.zoom_locked.get() || z.scale <= 0.0 {
+                return None;
+            }
+            let (cx, cy) = z.center;
+            let to = zoom::clamp_center((cx + dx / z.scale, cy + dy / z.scale), self.view(), self.src.get(), z.scale);
+            let moved = ((to.0 - cx) * z.scale).abs().max(((to.1 - cy) * z.scale).abs());
+            (moved > 0.5).then_some(to)
+        }
+
         /// Moves the page one view width toward `dir` over 250 ms, easing out (T-43b-019). Does nothing before the page is
         /// ready. Any zoom or drag that follows stops it.
         pub(super) fn pan(&self, dir: Phys) {
@@ -680,7 +702,7 @@ mod imp {
             self.animate_zoom(target, (x, y), zoom::animation_ms(self.double_tap_ms.get(), enabled));
         }
 
-        fn wheel(&self, up: bool) {
+        pub(super) fn wheel(&self, up: bool) {
             if self.state.get() != LoadState::Ready || self.zoom_locked.get() {
                 return;
             }
@@ -926,6 +948,28 @@ impl PageView {
     /// Whether the page has more than 1 px left to pan to the right (`canPanRight`).
     pub fn can_pan_right(&self) -> bool {
         zoom::can_pan(self.imp().pan_room().1)
+    }
+
+    /// Whether moving the view by `(dx, dy)` screen px would pan the page (it has room that way). A webtoon page never
+    /// pans on its own.
+    pub fn can_pan_by(&self, dx: f64, dy: f64) -> bool {
+        self.imp().pan_target(dx, dy).is_some()
+    }
+
+    /// Moves the view by `(dx, dy)` screen px at once, as a scroll does; positive shows more of the right and bottom.
+    /// Returns whether the page moved: `false` at its edge, so the viewer can turn the page instead.
+    pub fn scroll_pan(&self, dx: f64, dy: f64) -> bool {
+        let imp = self.imp();
+        let Some(center) = imp.pan_target(dx, dy) else { return false };
+        imp.stop_animation();
+        imp.zoom.set(ZoomState { center, ..imp.zoom.get() });
+        self.queue_draw();
+        true
+    }
+
+    /// One notch of Ctrl+wheel zoom about the pointer (T-43b-016).
+    pub fn zoom_wheel(&self, up: bool) {
+        self.imp().wheel(up);
     }
 
     /// Pans one view width to the left over 250 ms. Does nothing before the page is ready.
@@ -1371,6 +1415,26 @@ mod tests {
             page.pan_left();
             run_for(500);
             assert!((page.imp().zoom.get().center.0 - (edge - 1024.0).max(800.0 / before.scale / 2.0)).abs() < 1.0);
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn issue_4_a_scroll_pans_a_zoomed_page_until_its_edge_and_a_webtoon_page_never() {
+        crate::testing::with_display(|| {
+            let (page, window) = wide_page_in_window(false);
+            run_for(300);
+            assert!(!page.can_pan_by(50.0, 0.0) && !page.scroll_pan(50.0, 0.0), "a fitted page has nothing to pan");
+            for _ in 0..3 {
+                page.zoom_by_key(ZoomKey::In);
+            }
+            let before = page.imp().zoom.get().center;
+            assert!(page.can_pan_by(0.0, 50.0) && page.scroll_pan(0.0, 50.0), "zoomed, a scroll down pans down");
+            assert!(page.imp().zoom.get().center.1 > before.1);
+            while page.scroll_pan(0.0, 50.0) {}
+            assert!(!page.can_pan_by(0.0, 50.0) && page.can_pan_by(0.0, -50.0), "stopped at the bottom edge only");
+            page.set_zoomable(false);
+            assert!(!page.can_pan_by(0.0, -50.0) && !page.scroll_pan(0.0, -50.0), "a webtoon page leaves panning to the strip");
             window.destroy();
         });
     }

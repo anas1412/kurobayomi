@@ -254,11 +254,21 @@ trait Surface: 'static {
     fn alive(&self) -> bool;
     fn tap(&self, gesture: Gesture);
     fn key(&self, ev: KeyEvent) -> bool;
-    fn wheel(&self, dy: f64) -> bool;
+    fn wheel(&self, scroll: Scroll) -> bool;
     /// Whether the wheel handler runs before the scrolled window's own one, which it replaces.
     fn wheel_first(&self) -> bool {
         false
     }
+}
+
+/// One scroll event. A mouse wheel reports notches (1.0 each); a touchpad reports surface pixels.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Scroll {
+    dx: f64,
+    dy: f64,
+    notches: bool,
+    /// Ctrl was held: the scroll zooms (T-43b-016).
+    ctrl: bool,
 }
 
 /// Connects the click, motion, key, wheel and gesture-timer controllers of an engine. Handlers hold a weak
@@ -307,14 +317,22 @@ fn wire_surface<T: Surface>(this: &Rc<T>) {
     });
     root.add_controller(keys);
 
-    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
     if this.wheel_first() {
         wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
     }
     let weak = Rc::downgrade(this);
-    wheel.connect_scroll(move |_, _, dy| match weak.upgrade() {
-        Some(s) if s.wheel(dy) => Propagation::Stop,
-        _ => Propagation::Proceed,
+    wheel.connect_scroll(move |c, dx, dy| {
+        let scroll = Scroll {
+            dx,
+            dy,
+            notches: c.unit() == gtk::gdk::ScrollUnit::Wheel,
+            ctrl: c.current_event_state().contains(gtk::gdk::ModifierType::CONTROL_MASK),
+        };
+        match weak.upgrade() {
+            Some(s) if s.wheel(scroll) => Propagation::Stop,
+            _ => Propagation::Proceed,
+        }
     });
     root.add_controller(wheel);
 
@@ -389,7 +407,7 @@ impl ViewerEngine for PagerEngine {
     }
 
     fn handle_scroll(&self, dy: f64) -> bool {
-        self.0.wheel(dy)
+        self.0.wheel(Scroll { dx: 0.0, dy, notches: true, ctrl: false })
     }
 
     fn destroy(&self) {
@@ -403,6 +421,9 @@ struct PagerInner {
     /// last turn happened: one swipe or one wheel notch turns one page.
     wheel_sum: Cell<f64>,
     wheel_at: Cell<u64>,
+    /// When the scroll last panned the shown page, or was swallowed after it: a swipe that reaches the page's edge
+    /// stops there, and only a new one after a pause turns the page.
+    panned_at: Cell<u64>,
     kind: ViewerKind,
     root: gtk::ScrolledWindow,
     fixed: gtk::Fixed,
@@ -444,6 +465,7 @@ impl PagerInner {
             me: me.clone(),
             wheel_sum: Cell::new(0.0),
             wheel_at: Cell::new(0),
+            panned_at: Cell::new(0),
             kind,
             root,
             fixed,
@@ -702,33 +724,59 @@ impl PagerInner {
         }
     }
 
+    /// A drag moves the strip, unless the shown page takes it. Who owns a drag is decided once, past the drag
+    /// threshold, as Android's pager does: the page keeps the whole drag when it can still pan the way the drag goes
+    /// (zoomed, or bigger than the view) or when the drag runs across the strip's axis. A zoomed page therefore never
+    /// slides on to the next page mid-drag; a new drag started at its edge does.
     fn wire_drag(&self) {
         let drag = gtk::GestureDrag::new();
         let start = Rc::new(Cell::new(0.0));
         let track = Rc::new(RefCell::new(DragTracker::default()));
+        let owner = Rc::new(Cell::new(DragOwner::Undecided));
+        let slop = recognizer_slop();
         let weak = self.me.clone();
-        let (s, t) = (Rc::clone(&start), Rc::clone(&track));
+        let (s, t, o) = (Rc::clone(&start), Rc::clone(&track), Rc::clone(&owner));
         drag.connect_drag_begin(move |_, _, _| {
             if let Some(this) = weak.upgrade() {
                 t.borrow_mut().begin();
                 s.set(this.adjustment().value());
+                // a page that cannot pan at all leaves the whole drag to the strip, from its first pixel
+                let mut pans = false;
+                this.on_current_row(|row| pans = [(2.0, 0.0), (-2.0, 0.0), (0.0, 2.0), (0.0, -2.0)].iter().any(|&(x, y)| row.can_pan_by(x, y)));
+                o.set(if pans { DragOwner::Undecided } else { DragOwner::Strip(0.0) });
                 this.rebuild();
                 this.set_idle(false);
             }
         });
         let weak = self.me.clone();
-        let (s, t) = (Rc::clone(&start), Rc::clone(&track));
+        let (s, t, o) = (Rc::clone(&start), Rc::clone(&track), Rc::clone(&owner));
         drag.connect_drag_update(move |_, dx, dy| {
-            if let Some(this) = weak.upgrade() {
-                let offset = if this.horizontal() { dx } else { dy };
-                t.borrow_mut().push(now_ms(), offset);
-                this.adjustment().set_value(s.get() - offset);
+            let Some(this) = weak.upgrade() else { return };
+            let horizontal = this.horizontal();
+            let (offset, across) = if horizontal { (dx, dy) } else { (dy, dx) };
+            if o.get() == DragOwner::Undecided {
+                if offset.abs().max(across.abs()) < slop {
+                    return;
+                }
+                // the content follows the finger, so a drag toward -x shows more of the page's right side
+                let toward = -offset.signum() * 2.0;
+                let mut pans = across.abs() > offset.abs();
+                this.on_current_row(|row| pans = pans || row.can_pan_by(if horizontal { toward } else { 0.0 }, if horizontal { 0.0 } else { toward }));
+                o.set(if pans { DragOwner::Page } else { DragOwner::Strip(offset) });
             }
+            let DragOwner::Strip(from) = o.get() else { return };
+            t.borrow_mut().push(now_ms(), offset - from);
+            this.adjustment().set_value(s.get() - (offset - from));
         });
         let weak = self.me.clone();
         drag.connect_drag_end(move |_, dx, dy| {
             if let Some(this) = weak.upgrade() {
-                let offset = if this.horizontal() { dx } else { dy };
+                let DragOwner::Strip(from) = owner.replace(DragOwner::Undecided) else {
+                    // the page took the drag: the strip did not move, so it only settles
+                    this.finish_drag(0.0, 0.0);
+                    return;
+                };
+                let offset = if this.horizontal() { dx } else { dy } - from;
                 // The release is a sample too, so a drag that paused before letting go has no velocity.
                 let velocity = {
                     let mut track = track.borrow_mut();
@@ -821,9 +869,30 @@ impl PagerInner {
         out.claimed
     }
 
-    /// A pointer scroll: down is the next page, and up or no movement is the previous one (E-24).
-    fn wheel(&self, dy: f64) -> bool {
+    /// A pointer scroll. Ctrl zooms the shown page. A page that can still pan that way pans (a zoomed or a fit-width
+    /// page); a scroll that keeps coming after it reached the edge is swallowed until it pauses for `WHEEL_GAP_MS`.
+    /// Otherwise down is the next page, and up or no movement is the previous one (E-24).
+    fn wheel(&self, scroll: Scroll) -> bool {
+        let Scroll { dx, dy, notches, ctrl } = scroll;
+        if ctrl {
+            if dy != 0.0 {
+                self.on_current_row(|row| row.zoom_wheel(dy < 0.0));
+            }
+            return true;
+        }
+        let (px, py) = if notches { (wheel_delta(dx, self.root.width()), wheel_delta(dy, self.root.height())) } else { (dx, dy) };
         let now = now_ms();
+        let mut panned = false;
+        self.on_current_row(|row| panned = row.scroll_pan(px, py));
+        if panned || now.saturating_sub(self.panned_at.get()) < WHEEL_GAP_MS {
+            self.wheel_sum.set(0.0);
+            self.panned_at.set(now);
+            return true;
+        }
+        if dy == 0.0 && dx != 0.0 {
+            // a sideways scroll that pans nothing goes on to the scrolled window, as before
+            return false;
+        }
         match wheel_turn(self.wheel_sum.get() + dy, now.saturating_sub(self.wheel_at.get())) {
             WheelTurn::Gather(sum) => self.wheel_sum.set(sum),
             WheelTurn::Turn(next) => {
@@ -834,6 +903,15 @@ impl PagerInner {
         }
         true
     }
+}
+
+/// Who a pager drag moves: not known before the drag threshold, then the shown page or the strip (with the drag
+/// offset the strip starts from).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DragOwner {
+    Undecided,
+    Page,
+    Strip(f64),
 }
 
 /// What a scroll step does in a paged viewer.
@@ -902,8 +980,8 @@ impl Surface for PagerInner {
         PagerInner::key(self, ev)
     }
 
-    fn wheel(&self, dy: f64) -> bool {
-        PagerInner::wheel(self, dy)
+    fn wheel(&self, scroll: Scroll) -> bool {
+        PagerInner::wheel(self, scroll)
     }
 
     /// The pager turns pages itself; the scrolled window must not also scroll the strip with the same wheel event.
@@ -1724,8 +1802,20 @@ impl Surface for WebtoonInner {
     }
 
     /// The wheel moves the strip by `viewport^(2/3)` a notch, as the scrolled window does, but never by more than a
-    /// viewport, so one input cannot jump over pages that are still loading.
-    fn wheel(&self, dy: f64) -> bool {
+    /// viewport, so one input cannot jump over pages that are still loading. Ctrl zooms the whole strip, as a pinch.
+    fn wheel(&self, scroll: Scroll) -> bool {
+        let dy = scroll.dy;
+        if scroll.ctrl {
+            if dy != 0.0 {
+                self.stop_zoom_anim();
+                self.pinch(if dy < 0.0 { page_zoom::WHEEL_ZOOM_STEP } else { 1.0 / page_zoom::WHEEL_ZOOM_STEP });
+                self.pinch_end();
+            }
+            return true;
+        }
+        if dy == 0.0 && scroll.dx != 0.0 {
+            return false;
+        }
         let adj = self.root.vadjustment();
         // a running tap or key animation yields to the wheel
         self.anim.set(self.anim.get() + 1);

@@ -162,6 +162,14 @@ impl Pyramid {
         (x, y, f64::from(tile.w) * factor * scale, f64::from(tile.h) * factor * scale)
     }
 
+    /// The screen rectangle of a tile when the whole page is stretched onto `(0, 0, w, h)`: `(sx, sy)` is `w / src.w` and
+    /// `h / src.h`. A webtoon row is a whole number of pixels tall while the fitted page is not, so drawn with
+    /// [`Self::screen_rect`] it leaves a sliver of background at its top and bottom: a dark line between pages (issue 4).
+    pub fn fill_rect(tile: Tile, sx: f64, sy: f64) -> (f64, f64, f64, f64) {
+        let factor = f64::from(1u32 << tile.level.min(31));
+        (f64::from(tile.x) * factor * sx, f64::from(tile.y) * factor * sy, f64::from(tile.w) * factor * sx, f64::from(tile.h) * factor * sy)
+    }
+
     /// The RGBA bytes of a tile, rows of `tile.w * 4` bytes. Empty for a tile outside its level.
     pub fn tile_bytes(&self, tile: Tile) -> Vec<u8> {
         let Some(page) = self.level(tile.level) else { return Vec::new() };
@@ -295,6 +303,20 @@ mod tests {
         let (x, y, w, h) = Pyramid::screen_rect(tile, 0.5, (0.0, 0.0), (100.0, 100.0));
         assert_eq!((x, y), (50.0 + 10.0, 50.0 + 20.0));
         assert_eq!((w, h), (30.0, 40.0));
+    }
+
+    #[test]
+    fn issue_4_a_filled_page_reaches_the_row_edges_exactly() {
+        // an 800 x 1201 page in a 1000 px row: the row is round(1501.25) = 1501 px tall, the fitted page 1501.25
+        let (w, h) = (1000.0, 1501.0);
+        let (sx, sy) = (w / 800.0, h / 1201.0);
+        let top = Tile { level: 0, x: 0, y: 0, w: 800, h: 600 };
+        let bottom = Tile { level: 0, x: 0, y: 600, w: 800, h: 601 };
+        assert_eq!(Pyramid::fill_rect(top, sx, sy).1, 0.0);
+        let (_, y, tw, th) = Pyramid::fill_rect(bottom, sx, sy);
+        assert!((y + th - h).abs() < 1e-9 && (tw - w).abs() < 1e-9, "the last tile ends on the row's bottom and right edges");
+        let (_, top_y, _, top_h) = Pyramid::fill_rect(top, sx, sy);
+        assert!((top_y + top_h - y).abs() < 1e-9, "adjacent tiles meet with no gap");
     }
 
     #[test]
