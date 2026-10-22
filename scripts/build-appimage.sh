@@ -142,6 +142,35 @@ echo 'cd "$APPDIR/usr"' >> "$hook"
 # AppImage the helpers start directly. The pages only pass the browser check of sites the user installed sources for.
 echo 'export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1' >> "$hook"
 
+# libmpv links the client libraries of two sound servers, PipeWire and JACK. The AppImage exclude list keeps both out
+# (each must match the server installed on the host), so a system without them could not even start the app ("error while
+# loading shared libraries: libpipewire-0.3.so.0", the AppImage catalog's test). They travel as fallbacks, one folder
+# each, put on the library path only when the system has no copy: a host with the server keeps its own library, and on a
+# host without, the bundled one loads, finds no server, and mpv plays its sound through PulseAudio or ALSA instead.
+fallbacks=(libpipewire-0.3.so.0 libjack.so.0)
+for soname in "${fallbacks[@]}"; do
+    found="$(ldconfig -p | awk -v n="$soname" '$1 == n && /x86-64/ {print $NF; exit}')"
+    [ -n "$found" ] || { echo "missing $soname: install the package that has it, so it can travel as a fallback" >&2; exit 1; }
+    mkdir -p "$appdir/usr/lib/fallback/$soname"
+    cp -L "$found" "$appdir/usr/lib/fallback/$soname/$soname"
+    "$tools/linuxdeploy" --appdir "$appdir" --deploy-deps-only "$appdir/usr/lib/fallback/$soname"
+done
+# the launcher's check: the system's library when the linker or one of the usual folders has it, else the bundled one
+cat >> "$hook" <<'EOF'
+kb_system_has() {
+    if { /sbin/ldconfig -p 2>/dev/null || ldconfig -p 2>/dev/null; } | grep -q "^[[:space:]]*$1 "; then return 0; fi
+    for kb_dir in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib64 /usr/lib; do
+        if [ -e "$kb_dir/$1" ]; then return 0; fi
+    done
+    return 1
+}
+EOF
+echo "for kb_lib in ${fallbacks[*]}; do" >> "$hook"
+cat >> "$hook" <<'EOF'
+    kb_system_has "$kb_lib" || export LD_LIBRARY_PATH="$APPDIR/usr/lib/fallback/$kb_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+done
+EOF
+
 # GTK's gstreamer media module links the host's gstreamer, which fails against the bundled glib on newer distros (an
 # "undefined symbol" warning at start); the app plays video through libmpv, so the module is not needed
 rm -rf "$appdir"/usr/lib/gtk-4.0/*/media
@@ -157,7 +186,7 @@ cp "$data/SOURCE-OFFER.txt" "$lic/SOURCE-OFFER.txt"
 if command -v dpkg >/dev/null; then
     : > "$lic/libraries/PACKAGES.txt"
     {
-        for lib in "$appdir"/usr/lib/*.so*; do
+        for lib in "$appdir"/usr/lib/*.so* "$appdir"/usr/lib/fallback/*/*.so*; do
             found="$(ldconfig -p | awk -v n="$(basename "$lib")" '$1 == n {print $NF; exit}')"
             if [ -n "$found" ]; then
                 dpkg -S "$(readlink -f "$found")" 2>/dev/null | head -1 | cut -d: -f1 || true

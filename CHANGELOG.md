@@ -6,6 +6,24 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-22
+
+### Added
+
+- A **Show adult (18+) titles** switch (Settings, Sources and tracking), off by default. While it is off, sources that know
+  a title's rating leave adult titles out of their lists (Kagane, Weeb Central, AnimeParadise; MangaDex already does), and
+  extensions marked 18+ are hidden.
+- The first-run welcome screen of an AppImage says that the app updates itself, and where to turn that off.
+
+### Changed
+
+- The AppImage no longer downloads an update at start on a metered connection; About's Check for updates still does.
+
+### Fixed
+
+- The AppImage did not start on a system without PipeWire or JACK ("error while loading shared libraries:
+  libpipewire-0.3.so.0"). Their libraries now travel as fallbacks, used only when the system has none.
+
 ## [0.1.1] - 2026-10-19
 
 ### Added
