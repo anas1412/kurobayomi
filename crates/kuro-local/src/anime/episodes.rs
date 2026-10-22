@@ -39,7 +39,7 @@ where
     F: Fn(&Path) -> io::Result<Option<Vec<u8>>>,
 {
     let Some(dir) = find_child(root, &anime.url).filter(|p| p.is_dir()) else {
-        return Ok(Vec::new());
+        return Err(LocalSourceError::folder_missing());
     };
     let entries = list_dir(&dir)?;
     let overrides = side_file(&entries, "episodes").and_then(|file| read_episodes_json(&file.path));
@@ -223,17 +223,13 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_folder_is_an_empty_list() -> io::Result<()> {
+    fn a_missing_folder_is_an_error_not_an_empty_list() -> io::Result<()> {
         let (root, _) = show_with(&[])?;
         let gone = SAnime {
             url: "Gone".into(),
             ..SAnime::default()
         };
-        assert!(
-            episode_list(root.path(), &gone)
-                .map_err(io::Error::other)?
-                .is_empty()
-        );
+        assert!(episode_list(root.path(), &gone).is_err());
         Ok(())
     }
 

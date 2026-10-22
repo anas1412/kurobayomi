@@ -257,10 +257,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_local_source_lists_nothing_without_an_error() {
+    async fn the_local_source_without_a_local_folder_fails_and_empties_nothing() {
         let slot = LiveRegistry.get_or_stub(Kind::Anime, LOCAL_SOURCE_ID);
         assert!(slot.is_local() && slot.is_unmetered());
-        assert_eq!(slot.fetch(Kind::Anime, "Show", "Show", true).await, Ok(Fetched::default()));
+        assert!(slot.fetch(Kind::Anime, "Show", "Show", true).await.is_err());
     }
 
     #[test]

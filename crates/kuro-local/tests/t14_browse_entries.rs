@@ -213,20 +213,17 @@ fn t_14_help_urls_exact() {
 }
 
 #[tokio::test]
-async fn t_14_chapters_from_a_missing_folder_are_empty() -> io::Result<()> {
+async fn t_14_chapters_from_a_missing_folder_are_an_error() -> io::Result<()> {
     let root = tempfile::tempdir()?;
-    let got = chapters(root.path(), &mut SManga::new("Gone", "Gone")).map_err(io::Error::other)?;
-    assert!(got.is_empty());
+    assert!(chapters(root.path(), &mut SManga::new("Gone", "Gone")).is_err(), "a missing folder never empties a title");
     Ok(())
 }
 
 #[tokio::test]
-async fn t_14_anime_episode_list_for_unknown_root_is_empty() -> io::Result<()> {
+async fn t_14_anime_episode_list_for_unknown_root_is_an_error() -> io::Result<()> {
     let source = LocalAnimeSource::new(None);
-    let got = AnimeSource::episode_list(&source, &SAnime { url: "x".into(), ..SAnime::default() })
-        .await
-        .map_err(io::Error::other)?;
-    assert!(got.is_empty());
+    let got = AnimeSource::episode_list(&source, &SAnime { url: "x".into(), ..SAnime::default() }).await;
+    assert!(got.is_err(), "no Local folder never empties a title");
     Ok(())
 }
 

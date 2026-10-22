@@ -268,7 +268,7 @@ impl MangaSource for LocalMangaSource {
                 cover::cover_from_lowest_chapter(&root, &manga, &list);
                 Ok(list)
             }
-            None => Ok(Vec::new()),
+            None => Err(LocalSourceError::folder_missing()),
         })
         .await?;
         Ok(list)

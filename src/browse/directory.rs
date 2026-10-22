@@ -158,25 +158,24 @@ fn remember_stubs(kind: Kind, catalogues: &Catalogues) {
 pub fn current(kind: Kind) -> Arc<dyn SourceDirectory> {
     let installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(of, _)| *of == kind).map(|(_, catalogues)| catalogues.clone());
     let mut catalogues = installed.unwrap_or_else(|| Catalogues::new(kind, Vec::new()));
-    if let Some(local) = local(kind) {
-        catalogues.runnable.push(local);
-    }
+    catalogues.runnable.push(local(kind));
     Arc::new(catalogues)
 }
 
 /// The local source of `kind` over its folder (`Local/Manga` or `Local/Anime` under the storage folder), with its row. It
 /// needs no repository, so it is always listed; it is made at each lookup, from any thread, so a new storage folder applies
 /// at once. `None` before the Local folders are known (`local_flow::load_roots`).
-fn local(kind: Kind) -> Option<(Catalogue, DirectorySource)> {
+fn local(kind: Kind) -> (Catalogue, DirectorySource) {
     use kuro_source::local::{LOCAL_ANIME_NAME, LOCAL_MANGA_NAME};
-    let root = crate::local_flow::local_root(kind)?;
+    // listed even without a Local folder, so backups know source 0; it then reads nothing and empties no title
+    let root = crate::local_flow::local_root(kind);
     let (catalogue, name) = match kind {
-        Kind::Manga => (Catalogue::Manga(Arc::new(kuro_local::LocalMangaSource::new(Some(root)))), LOCAL_MANGA_NAME),
-        Kind::Anime => (Catalogue::Anime(Arc::new(kuro_local::LocalAnimeSource::new(Some(root)))), LOCAL_ANIME_NAME),
+        Kind::Manga => (Catalogue::Manga(Arc::new(kuro_local::LocalMangaSource::new(root))), LOCAL_MANGA_NAME),
+        Kind::Anime => (Catalogue::Anime(Arc::new(kuro_local::LocalAnimeSource::new(root))), LOCAL_ANIME_NAME),
     };
     let mut source = Source::new(kuro_local::LOCAL_SOURCE_ID, name, "other");
     source.supports_latest = catalogue.supports_latest();
-    Some((catalogue, DirectorySource { source, package: "local".to_owned(), home_url: None }))
+    (catalogue, DirectorySource { source, package: "local".to_owned(), home_url: None })
 }
 
 /// A source as the migration picker shows it: the installed one, or a stub with no name or language when the directory

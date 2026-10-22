@@ -173,7 +173,7 @@ impl AnimeSource for LocalAnimeSource {
         let frames = self.frames.clone();
         let list = crate::blocking(move || match root {
             Some(root) => episodes::episode_list_with(&root, &anime, |video| frames.frame_io(video)),
-            None => Ok(Vec::new()),
+            None => Err(LocalSourceError::folder_missing()),
         })
         .await?;
         Ok(list)
@@ -185,7 +185,7 @@ impl AnimeSource for LocalAnimeSource {
         let url = anime.url.clone();
         let seasons = crate::blocking(move || {
             let Some(dir) = root.and_then(|root| find_child(&root, &url)) else {
-                return Ok(Vec::new());
+                return Err(LocalSourceError::folder_missing());
             };
             let mut seasons = Vec::new();
             for entry in list_dir(&dir)?.into_iter().filter(|e| e.is_dir && !e.name.starts_with('.')) {

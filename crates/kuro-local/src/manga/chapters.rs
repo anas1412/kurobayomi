@@ -22,7 +22,7 @@ use crate::recognition::chapter_number;
 /// (E-MANGA-3).
 pub fn chapters(root: &Path, manga: &mut SManga) -> Result<Vec<SChapter>, LocalSourceError> {
     let Some(dir) = find_child(root, &manga.url).filter(|p| p.is_dir()) else {
-        return Ok(Vec::new());
+        return Err(LocalSourceError::folder_missing());
     };
     let entries = list_dir(&dir)?;
     let overrides = chapter_overrides(&entries);
@@ -156,14 +156,10 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_manga_folder_is_an_empty_list() -> io::Result<()> {
+    fn a_missing_manga_folder_is_an_error_not_an_empty_list() -> io::Result<()> {
         let (root, _) = manga_with(&[])?;
         let mut gone = SManga::new("Gone", "Gone");
-        assert!(
-            chapters(root.path(), &mut gone)
-                .map_err(io::Error::other)?
-                .is_empty()
-        );
+        assert!(chapters(root.path(), &mut gone).is_err());
         Ok(())
     }
 

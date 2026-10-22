@@ -23,6 +23,14 @@ pub enum LocalSourceError {
     Io(#[from] io::Error),
 }
 
+impl LocalSourceError {
+    /// A title folder that is not there (a drive that is not mounted, a folder moved away). It is an error, not an empty
+    /// list, so a library update keeps the title's chapters or episodes and their progress until the folder is back.
+    pub(crate) fn folder_missing() -> Self {
+        Self::Io(io::Error::new(io::ErrorKind::NotFound, "the title folder is missing"))
+    }
+}
+
 /// The source traits return `SourceError`. A failed read is a transport-class failure there, since
 /// `SourceError` has no local-file variant. Format errors never reach the traits (they belong to the
 /// reader's inherent API), so they take the parse class.
