@@ -6,6 +6,26 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-22
+
+### Changed
+
+- The reading modes have Aniyomi's names: Left to right, Right to left, Vertical, Webtoon and Continuous vertical.
+- Ctrl+Shift+O follows the Anime | Manga choice: on the Anime tab it adds a local anime folder.
+- The reader's tap-zone overlay fades out on its own two seconds after it is shown.
+
+### Fixed
+
+- A zoomed page in Left to right, Right to left or Vertical no longer slides on to the next page while you pan it. A
+  drag, a touchpad swipe or the wheel moves the image; a new drag or swipe started at its edge turns the page.
+- Ctrl+scroll zooms: the page in the paged modes, the whole strip in Webtoon.
+- Webtoon: no dark line where each page starts (issue 4).
+- Switching to Webtoon no longer steps back a page.
+- A local title whose folder is missing (a drive not mounted, a folder moved) keeps its chapters, episodes and progress
+  until the folder is back, instead of losing them in the next library update.
+- Quitting while a source was still loading (a library update, a search) showed the crash window.
+- A lone global-search result no longer stretches its cover to its title's width.
+
 ## [0.1.3] - 2026-10-22
 
 ### Fixed
