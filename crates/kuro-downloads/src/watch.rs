@@ -38,8 +38,11 @@ pub fn watch_roots(index: &DownloadIndex) -> Option<RootWatch> {
 /// cannot start. Dropping the returned watcher ends the debouncer thread.
 fn watch_dir(root: &Path, quiet: Duration, fire: impl FnMut() + Send + 'static) -> Option<RecommendedWatcher> {
     let (tx, rx) = mpsc::channel::<()>();
-    let mut watcher = notify::recommended_watcher(move |_event: notify::Result<notify::Event>| {
-        let _ = tx.send(());
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        // opening or listing the root is no change: the index's own rescan reads it, and reacting would rescan forever
+        if event.is_ok_and(|event| !event.kind.is_access()) {
+            let _ = tx.send(());
+        }
     })
     .ok()?;
     watcher.watch(root, RecursiveMode::NonRecursive).ok()?;
@@ -110,6 +113,35 @@ mod tests {
         let both = IndexRoots { manga: base.path().join("manga"), anime: base.path().join("anime") };
         std::fs::create_dir_all(&both.anime).unwrap();
         assert!(DownloadIndex::open(both, base.path()).watch().is_some());
+    }
+
+    // Reading a root (the index's own rescan lists it) is no change: before, its access events invalidated the index,
+    // whose next check rescanned the root, every 10 s for as long as the app ran (kurobayomi#2).
+    #[test]
+    fn listing_a_root_does_not_fire_and_a_new_folder_does() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("anime");
+        std::fs::create_dir_all(root.join("Source (EN)")).unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let _watch = watch_dir(&root, Duration::from_millis(50), move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })
+        .expect("root watched");
+        for _ in 0..3 {
+            let _ = std::fs::read_dir(&root).unwrap().count();
+            let _ = std::fs::metadata(root.join("Source (EN)")).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "listing the root is not a change");
+        std::fs::create_dir(root.join("Other (EN)")).unwrap();
+        for _ in 0..100 {
+            if hits.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "a new folder is");
     }
 
     // Test 4.2 item 11: the watcher reacts only to the root that changed.

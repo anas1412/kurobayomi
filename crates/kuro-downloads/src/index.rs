@@ -557,9 +557,14 @@ fn write_snapshot(shared: &Shared) -> io::Result<()> {
     if let Some(parent) = shared.snapshot_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = shared.snapshot_path.with_extension("bin.tmp");
+    // a name of its own per write: an invalidation and a debounced write may run at once, and with one shared name the
+    // second rename found the file already moved ("No such file or directory")
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let tmp = shared.snapshot_path.with_extension(format!("bin.{}.{}.tmp", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     fs::write(&tmp, bytes)?;
-    fs::rename(&tmp, &shared.snapshot_path)
+    fs::rename(&tmp, &shared.snapshot_path).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
 }
 
 #[cfg(test)]

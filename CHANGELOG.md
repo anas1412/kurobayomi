@@ -6,6 +6,15 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-22
+
+### Fixed
+
+- Adding a link that is not a Kurobayomi repository (a Mihon, Tachiyomi or Aniyomi one, including their newer `index.pb`)
+  now says so plainly, instead of "The repo index is not valid".
+- The downloads index rescanned its folders every 10 seconds and logged "could not write the index snapshot": listing
+  the folders counted as a change. Only real changes (files added, removed, renamed or written) count now.
+
 ## [0.1.2] - 2026-10-22
 
 ### Added

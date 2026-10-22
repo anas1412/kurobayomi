@@ -215,7 +215,8 @@ mod tests {
         assert_eq!(repo_error_text(&RepoError::Network("refused".into())), "The repo could not be reached");
         assert_eq!(repo_error_text(&RepoError::Status(404)), "The repo could not be reached");
         assert_eq!(repo_error_text(&RepoError::TooMany { kind: Kind::Manga, count: 11, limit: 10 }), "The repo lists more than 10 sources of one kind");
-        assert_eq!(repo_error_text(&RepoError::Parse("x".into())), "The repo index is not valid");
+        assert!(repo_error_text(&RepoError::Parse("x".into())).starts_with("This is not a valid Kurobayomi repository"));
+        assert_eq!(repo_error_text(&RepoError::TooLarge), repo_error_text(&RepoError::Parse("x".into())), "a Mihon index.json is too large: same message");
         assert_eq!(repo_error_text(&RepoError::Mismatch), "A source does not match its checksum in the repo index");
         assert_eq!(repo_error_text(&RepoError::Write("disk".into())), could_not_add_repo());
         let (_saved, ops) = repo_ops(&[]);
