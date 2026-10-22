@@ -27,11 +27,14 @@ pub struct WebtoonController {
     chapter: Option<CurrentChapter>,
     current: Option<ItemKey>,
     laid_out: bool,
+    /// The item a jump went to, reported by the next scroll when no item ends inside the view (a page taller than
+    /// the view fills it), as upstream's `moveToPage` does when `findLastEndVisibleItemPosition` finds none.
+    jumped: Option<usize>,
 }
 
 impl WebtoonController {
     pub fn new(opts: WebtoonOptions) -> Self {
-        Self { opts, items: Vec::new(), chapter: None, current: None, laid_out: false }
+        Self { opts, items: Vec::new(), chapter: None, current: None, laid_out: false, jumped: None }
     }
 
     pub fn set_options(&mut self, opts: WebtoonOptions) {
@@ -68,7 +71,10 @@ impl WebtoonController {
     /// `moveToPage` (B§7.5). The view scrolls without animation and then reports a scroll with `dy == 0`.
     pub fn move_to_page(&mut self, key: &ItemKey) -> Vec<Effect> {
         match self.items.iter().position(|i| i == key) {
-            Some(index) => vec![Effect::ScrollTo { index, smooth: false }],
+            Some(index) => {
+                self.jumped = Some(index);
+                vec![Effect::ScrollTo { index, smooth: false }]
+            }
             None => Vec::new(),
         }
     }
@@ -77,7 +83,7 @@ impl WebtoonController {
     /// `menu_visible` gates the hide rule; `dy` is the scroll delta in pixels (positive is down).
     pub fn on_scroll(&mut self, dy: i32, menu_visible: bool, last_visible: Option<usize>, first_visible: Option<usize>) -> Vec<Effect> {
         let mut fx = Vec::new();
-        if let Some(pos) = last_visible {
+        if let Some(pos) = last_visible.or(self.jumped.take()) {
             fx.extend(self.report_current(pos));
         }
         if (dy > self.opts.hide_threshold || dy < -self.opts.hide_threshold) && menu_visible {
@@ -251,6 +257,15 @@ mod tests {
         let first = index_of_page(&c, 2, 0);
         assert!(c.on_scroll(0, false, Some(first), None).contains(&Effect::PageSelected(loaded(2, 2.0, 20).page(0))));
         assert!(!c.on_scroll(0, false, Some(first), None).iter().any(|e| matches!(e, Effect::PageSelected(_))));
+    }
+
+    #[test]
+    fn a_jump_to_a_page_taller_than_the_view_reports_that_page() {
+        let mut c = strip();
+        let target = index_of_page(&c, 2, 3);
+        assert!(!c.move_to_page(&c.items()[target].clone()).is_empty());
+        assert!(c.on_scroll(0, false, None, Some(target)).contains(&Effect::PageSelected(loaded(2, 2.0, 20).page(3))));
+        assert!(!c.on_scroll(0, false, None, Some(target)).iter().any(|e| matches!(e, Effect::PageSelected(_))), "only once");
     }
 
     #[test]

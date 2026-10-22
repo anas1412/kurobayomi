@@ -1967,6 +1967,69 @@ mod tests {
         });
     }
 
+    struct SixPngPages;
+
+    impl HttpPageSource for SixPngPages {
+        fn page_list(&self, _chapter_url: &str) -> Result<Vec<PageEntry>, String> {
+            Ok((0..6).map(|i| PageEntry { url: format!("p{i}"), image_url: None }).collect())
+        }
+        fn image_url(&self, page_url: &str) -> Result<String, String> {
+            PngPages.image_url(page_url)
+        }
+        fn image(&self, image_url: &str) -> Result<Vec<u8>, String> {
+            PngPages.image(image_url)
+        }
+    }
+
+    /// A mode switch keeps the page on screen: the new viewer opens where the old one was, not at the chapter's start.
+    #[test]
+    fn a_mode_switch_keeps_the_page_on_screen() {
+        crate::testing::with_display(|| {
+            let f = fixture(2);
+            let build: BuildLoader = Rc::new(|chapter| {
+                let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/reader-screen-tests/mode-keeps-page");
+                let cache = Arc::new(DiskCache::open(root, CACHE_LIMIT_BYTES).unwrap());
+                Ok(Loader::Http(HttpLoader::new(Arc::new(SixPngPages), 1, chapter.chapter.url.clone(), cache)))
+            });
+            let deps = ReaderDeps {
+                db: Arc::clone(&f.db),
+                manga_id: f.manga_id,
+                chapter_id: f.chapter_ids[0],
+                prefs: ReaderPrefs::new(PrefStore::in_memory()),
+                store: Rc::new(NoStore),
+                build,
+                is_downloaded: Rc::new(|_| false),
+                downloaded_only: false,
+                incognito: false,
+                prefs_store: PrefStore::in_memory(),
+            };
+            let (toaster, _feed) = kuro_platform::toast::toast_channel();
+            let screen = open(deps, &crate::reader::launch::open_gate(), toaster, || {});
+            let window = gtk::Window::new();
+            window.set_default_size(500, 600);
+            window.set_child(Some(&screen.root));
+            window.present();
+            assert!(pump_until(|| screen.core.page_counts() == (1, 6)), "{:?}", screen.core.page_counts());
+            let inner = screen.chrome.screen.upgrade().unwrap();
+            move_viewer(&inner, 3);
+            assert!(pump_until(|| screen.core.page_counts().0 == 4), "the slider moved to page 4: {:?}", screen.core.page_counts());
+            let settle = || {
+                let (ctx, end) = (glib::MainContext::default(), std::time::Instant::now() + std::time::Duration::from_millis(600));
+                while std::time::Instant::now() < end {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            };
+            for mode in [ReadingMode::Vertical, ReadingMode::RightToLeft, ReadingMode::LeftToRight, ReadingMode::Webtoon, ReadingMode::ContinuousVertical, ReadingMode::Vertical] {
+                screen.core.apply_mode(mode);
+                drain_events(&inner);
+                settle();
+                assert_eq!(screen.core.page_counts().0, 4, "still on page 4 after switching to {mode:?}");
+            }
+            window.destroy();
+        });
+    }
+
     #[test]
     fn the_reader_attaches_its_viewer_shows_network_pages_and_swaps_the_viewer_on_a_mode_switch() {
         crate::testing::with_display(|| {

@@ -92,7 +92,9 @@ impl StripLayout {
     }
 
     /// The bottom-most realised item whose bottom edge is inside the viewport, or whose top is above it (B§7.3).
-    /// `None` when no realised item qualifies, including before the first layout (`viewport == 0`).
+    /// `None` when no realised item qualifies, including before the first layout (`viewport == 0`). Only items that
+    /// reach into the viewport count, as only those are children of upstream's list: a page that ends exactly at the
+    /// top of the view is off screen, or a jump to the top of a tall page would report the page before it.
     pub fn last_end_visible(&self, scroll: i64, viewport: i32, realised: Range<usize>) -> Option<usize> {
         if viewport <= 0 {
             return None;
@@ -100,7 +102,7 @@ impl StripLayout {
         let (parent_start, parent_end) = (scroll, scroll + i64::from(viewport));
         realised.rev().find(|&i| {
             let (start, end) = (self.offset(i), self.offset(i) + i64::from(self.height(i)));
-            end <= parent_end || start < parent_start
+            end > parent_start && (end <= parent_end || start < parent_start)
         })
     }
 
@@ -262,6 +264,14 @@ mod tests {
         // At the bottom of a 5000 px strip the last item's end is at the viewport end.
         let bottom = s.realised(4600, 400);
         assert_eq!(s.last_end_visible(4600, 400, bottom), Some(49));
+    }
+
+    #[test]
+    fn a_page_that_ends_at_the_top_of_the_view_is_not_visible() {
+        // 1000 px pages in a 600 px view, scrolled to the top of page 3: page 2 ends exactly at the top
+        let s = StripLayout::new(vec![1000; 6]);
+        assert_eq!(s.last_end_visible(3000, 600, s.realised(3000, 600)), None, "page 3 fills the view and ends below it");
+        assert_eq!(s.last_end_visible(3500, 600, s.realised(3500, 600)), Some(3), "page 3's end is on screen");
     }
 
     #[test]
