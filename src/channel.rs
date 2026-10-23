@@ -4,7 +4,7 @@
 pub const NIGHTLY: bool = kuro_platform::channel::NIGHTLY;
 
 /// The GitHub repository the releases (stable and nightly) and the commits come from.
-pub const REPOSITORY: &str = "anas1412/kurobayomi";
+pub const REPOSITORY: &str = "kurobayomi/kurobayomi";
 
 /// The application id: the nightly build is a separate app (own window class, own single instance, own data folders).
 pub const APP_ID: &str = if NIGHTLY { "io.github.anas1412.Kurobayomi.Nightly" } else { "io.github.anas1412.Kurobayomi" };

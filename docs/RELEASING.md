@@ -31,8 +31,8 @@ branch you pick and attaches it to the run as a download (kept 7 days); nothing 
 
 ## Download addresses
 
-- Stable, always the newest: `https://github.com/anas1412/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage`
-- Nightly: `https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage`
+- Stable, always the newest: `https://github.com/kurobayomi/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage`
+- Nightly: `https://github.com/kurobayomi/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage`
 
 ## Licences inside the AppImage
 

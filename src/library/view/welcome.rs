@@ -10,7 +10,7 @@ use crate::pref_model::router::Destination;
 use crate::theme::icons::Icon;
 
 /// The getting-started guide in the repository, opened by the last link.
-const GUIDE_URL: &str = "https://github.com/anas1412/kurobayomi/blob/main/docs/GETTING-STARTED.md";
+const GUIDE_URL: &str = "https://github.com/kurobayomi/kurobayomi/blob/main/docs/GETTING-STARTED.md";
 
 /// The welcome view.
 #[derive(Clone)]

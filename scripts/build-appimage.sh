@@ -18,11 +18,11 @@ data="$root/src/shell/data"
 id=io.github.anas1412.Kurobayomi
 icons="$data/icons"
 # what an AppImage updater (Gear Lever, AppImageUpdate, ...) follows: the nightly release, or the newest stable one
-update_info="gh-releases-zsync|anas1412|kurobayomi|latest|Kurobayomi-x86_64.AppImage.zsync"
+update_info="gh-releases-zsync|kurobayomi|kurobayomi|latest|Kurobayomi-x86_64.AppImage.zsync"
 if [ "${CHANNEL:-stable}" = nightly ]; then
     id=$id.Nightly
     icons="$data/icons-nightly"
-    update_info="gh-releases-zsync|anas1412|kurobayomi|nightly|Kurobayomi-nightly-x86_64.AppImage.zsync"
+    update_info="gh-releases-zsync|kurobayomi|kurobayomi|nightly|Kurobayomi-nightly-x86_64.AppImage.zsync"
 fi
 tools="${TOOLS_DIR:-$root/target/appimage-tools}"
 work="$(mktemp -d)"

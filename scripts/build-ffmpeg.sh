@@ -31,6 +31,6 @@ mkdir -p "$prefix/share/licenses/ffmpeg"
 cp COPYING.LGPLv2.1 "$prefix/share/licenses/ffmpeg/"
 {
     echo "FFmpeg $version, unmodified, from https://ffmpeg.org/releases/ffmpeg-$version.tar.xz (sha256 $sha256),"
-    echo "built by scripts/build-ffmpeg.sh in https://github.com/anas1412/kurobayomi with:"
+    echo "built by scripts/build-ffmpeg.sh in https://github.com/kurobayomi/kurobayomi with:"
     sed -n 's/^#define FFMPEG_CONFIGURATION "\(.*\)"$/\1/p' config.h
 } > "$prefix/share/licenses/ffmpeg/SOURCE.txt"

@@ -7,11 +7,11 @@
 <p align="center">Watch anime and read manga on the Linux desktop.</p>
 
 <p align="center">
-  <a href="https://github.com/anas1412/kurobayomi/releases"><img src="https://img.shields.io/github/downloads/anas1412/kurobayomi/total?label=downloads" alt="Downloads"></a>
-  <a href="https://github.com/anas1412/kurobayomi/releases/latest"><img src="https://img.shields.io/github/v/release/anas1412/kurobayomi?label=stable" alt="Stable release"></a>
-  <a href="https://github.com/anas1412/kurobayomi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/anas1412/kurobayomi/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <a href="https://github.com/anas1412/kurobayomi/releases/tag/nightly"><img src="https://img.shields.io/github/actions/workflow/status/anas1412/kurobayomi/appimage.yml?branch=main&label=nightly" alt="Nightly build"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/anas1412/kurobayomi" alt="Licence"></a>
+  <a href="https://github.com/kurobayomi/kurobayomi/releases"><img src="https://img.shields.io/github/downloads/kurobayomi/kurobayomi/total?label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/kurobayomi/kurobayomi/releases/latest"><img src="https://img.shields.io/github/v/release/kurobayomi/kurobayomi?label=stable" alt="Stable release"></a>
+  <a href="https://github.com/kurobayomi/kurobayomi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kurobayomi/kurobayomi/ci.yml?branch=main&label=CI" alt="CI"></a>
+  <a href="https://github.com/kurobayomi/kurobayomi/releases/tag/nightly"><img src="https://img.shields.io/github/actions/workflow/status/kurobayomi/kurobayomi/appimage.yml?branch=main&label=nightly" alt="Nightly build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/kurobayomi/kurobayomi" alt="Licence"></a>
 </p>
 
 Kurobayomi is a native desktop app, written in Rust with GTK4, that follows the model of
@@ -81,9 +81,9 @@ documented here: [text recipes](docs/source-recipes.md) and [WASM plug-ins](docs
 Download the AppImage, make it executable and run it. It carries its own libraries and needs glibc 2.39 or newer
 (Ubuntu 24.04, Fedora 40, Debian 13, Arch and newer).
 
-- **Stable** (recommended): [Kurobayomi-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage)
+- **Stable** (recommended): [Kurobayomi-x86_64.AppImage](https://github.com/kurobayomi/kurobayomi/releases/latest/download/Kurobayomi-x86_64.AppImage)
 - **Nightly** (built from every change, may be unstable, keeps its data apart from the stable app):
-  [Kurobayomi-nightly-x86_64.AppImage](https://github.com/anas1412/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage)
+  [Kurobayomi-nightly-x86_64.AppImage](https://github.com/kurobayomi/kurobayomi/releases/download/nightly/Kurobayomi-nightly-x86_64.AppImage)
 
 ```bash
 chmod +x Kurobayomi-x86_64.AppImage
@@ -103,7 +103,7 @@ You need a recent stable Rust, GTK 4.14 or newer, and libmpv (on Arch: `pacman -
 `dnf install gtk4-devel mpv-libs-devel`; on Ubuntu 24.04: `apt install libgtk-4-dev libmpv-dev`).
 
 ```bash
-git clone https://github.com/anas1412/kurobayomi.git
+git clone https://github.com/kurobayomi/kurobayomi.git
 cd kurobayomi
 cargo build --release
 ./target/release/kurobayomi

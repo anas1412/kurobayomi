@@ -35,7 +35,7 @@ pub const SLIDER_ROW_PADDING: i32 = 12;
 pub const TRACKER_CHECK_SIZE: i32 = 32;
 
 /// Where Help in the app menu leads: the project page of this app (Aniyomi's help site is about the Android app).
-pub const HELP_URL: &str = "https://github.com/anas1412/kurobayomi#readme";
+pub const HELP_URL: &str = "https://github.com/kurobayomi/kurobayomi#readme";
 
 #[cfg(test)]
 mod tests {
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn help_url_and_restore_title_are_the_exact_strings() {
-        assert_eq!(HELP_URL, "https://github.com/anas1412/kurobayomi#readme");
+        assert_eq!(HELP_URL, "https://github.com/kurobayomi/kurobayomi#readme");
         assert_eq!(super::super::strings::label_backup(), "Backup and restore");
     }
 }

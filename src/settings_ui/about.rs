@@ -379,9 +379,9 @@ pub fn check_row() -> PreferenceItem {
 }
 
 /// This app's project page. Aniyomi's website, Discord and privacy page describe the Android app, so none is linked.
-pub const PROJECT_URL: &str = "https://github.com/anas1412/kurobayomi";
+pub const PROJECT_URL: &str = "https://github.com/kurobayomi/kurobayomi";
 /// Where bugs are reported.
-pub const ISSUES_URL: &str = "https://github.com/anas1412/kurobayomi/issues";
+pub const ISSUES_URL: &str = "https://github.com/kurobayomi/kurobayomi/issues";
 /// What's new: the waiting update when there is one (its subtitle says which), else the notes of this build
 /// (`whats_new`). Off in a local build, which has no release to show.
 fn whats_new_row() -> PreferenceItem {
@@ -439,7 +439,7 @@ mod link_tests {
     fn the_links_lead_to_this_apps_project_and_never_to_aniyomi() {
         let urls = [PROJECT_URL, ISSUES_URL];
         for url in urls {
-            assert!(url.starts_with("https://github.com/anas1412/kurobayomi"), "{url}");
+            assert!(url.starts_with("https://github.com/kurobayomi/kurobayomi"), "{url}");
         }
         assert!(!urls.iter().any(|u| u.contains("aniyomi")));
     }
