@@ -15,11 +15,26 @@ concurrency:
 permissions:
   contents: write
   actions: read
+  # to pull the build image
+  packages: read
+
+# bash, as on the plain runners: in a container a step's default shell is sh (the publish step uses bash arrays)
+defaults:
+  run:
+    shell: bash
 
 jobs:
   release:
-    # Same runner as the nightly: the AppImage bundles its libraries, so it runs on glibc 2.39 and newer (Ubuntu 24.04+).
+    # Same machine as the nightly: the AppImage bundles its libraries, so it runs on glibc 2.39 and newer (Ubuntu 24.04+).
+    # The build image (ci/Dockerfile, built by build-image.yml) is that Ubuntu with every system package already in it:
+    # nothing is installed from Ubuntu's mirror, which once held a release run for 73 minutes.
+    # Way back if the image ever breaks a release: delete this `container:` block and uncomment the two apt steps below.
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/kurobayomi-build:noble
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -42,21 +57,20 @@ jobs:
           [ "$passed" -ge 1 ] || { echo "no successful CI run for $GITHUB_SHA: run the CI workflow on it first (it can be started by hand)" >&2; exit 1; }
           scripts/release-notes.sh "$VERSION" > release-notes.md
 
-      # Downloading the packages from the runner's mirror took about 4 minutes: the .deb files are kept between runs, and
-      # apt only fetches what changed since. Editing this file starts a fresh cache.
-      - name: Cache the downloaded packages
-        uses: actions/cache@v4
-        with:
-          path: ~/apt-archives/*.deb
-          key: apt-release-${{ hashFiles('.github/workflows/release.yml') }}
-          restore-keys: apt-release-
-
-      - name: Install system packages
-        run: |
-          mkdir -p ~/apt-archives/partial
-          sudo apt-get update
-          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf glib-networking dconf-gsettings-backend desktop-file-utils file zsync \
-            nasm libgnutls28-dev libxml2-dev libva-dev libvdpau-dev libdrm-dev zlib1g-dev libbz2-dev
+      # The way back (see `container:` above): the packages installed on the plain runner, as before the build image.
+      # - name: Cache the downloaded packages
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/apt-archives/*.deb
+      #     key: apt-release-${{ hashFiles('.github/workflows/release.yml') }}
+      #     restore-keys: apt-release-
+      #
+      # - name: Install system packages
+      #   run: |
+      #     mkdir -p ~/apt-archives/partial
+      #     sudo apt-get update
+      #     sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf glib-networking dconf-gsettings-backend desktop-file-utils file zsync \
+      #       nasm libgnutls28-dev libxml2-dev libva-dev libvdpau-dev libdrm-dev zlib1g-dev libbz2-dev
 
       - name: Update Rust
         run: rustup update stable
@@ -78,7 +92,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+          # the nightly's key: same build image, same FFmpeg (on the plain runner it was ffmpeg-${{ runner.os }}-<hash>)
+          key: ffmpeg-image-${{ hashFiles('scripts/build-ffmpeg.sh', 'ci/Dockerfile') }}
 
       - name: Build FFmpeg
         if: steps.ffmpeg.outputs.cache-hit != 'true'
