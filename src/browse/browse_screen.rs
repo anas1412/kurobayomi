@@ -102,7 +102,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
             source_id,
             source_name: source.name.clone(),
             source_lang: source.lang.clone(),
-            load_cover: file_cover_loader(),
+            load_cover: file_cover_loader(env.kind),
             open_entry: {
                 let open = Rc::clone(&env.open_entry);
                 Rc::new(move |item| open(item.id))

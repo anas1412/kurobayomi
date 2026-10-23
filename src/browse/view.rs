@@ -194,13 +194,16 @@ pub fn always() -> CoverGuard {
 /// The loader of the listing covers. A file on disk, such as the local source's, is read off the GTK thread; an http(s)
 /// url goes through the app's image service (network, disk cache and decode off the GTK thread). Without the service a
 /// remote cover keeps its placeholder.
-pub fn file_cover_loader() -> CoverLoader {
-    Rc::new(|ask, done| {
+///
+/// `kind` is the kind of the listed entries: the picture is cached under the same key the entry page and the library
+/// use for it, so a cover seen in Browse is not downloaded again when the entry opens.
+pub fn file_cover_loader(kind: kuro_platform::kind::Kind) -> CoverLoader {
+    Rc::new(move |ask, done| {
         // a source's poster-on-demand marker resolves to a remote picture inside the image service
         // a local title's `file://` cover goes through the service too, for its decoded-image cache
         if ask.url.starts_with("https://") || ask.url.starts_with("http://") || ask.url.starts_with("file://") || ask.url.starts_with(kuro_images::fetch::COVER_MARKER) {
             if let (Some(service), Ok(runtime)) = (crate::entry_core::cover_view::service(), tokio::runtime::Handle::try_current()) {
-                remote_cover(service, &runtime, remote_art(ask.url, ask.source_id), ask.picture, done);
+                remote_cover(service, &runtime, remote_art(ask.url, ask.source_id, kind), ask.picture, done);
             }
             return;
         }
@@ -217,11 +220,11 @@ pub fn file_cover_loader() -> CoverLoader {
 }
 
 /// A listed entry's remote cover. The entry is not a library entry yet (entry id 0, not a favourite), so the image goes to
-/// the shared image cache only and no cover file is written; the source id picks the source's image headers.
-pub(super) fn remote_art(url: &str, source_id: i64) -> kuro_images::art::ArtRef {
+/// the shared image cache only and no cover file is written; the source id picks the source's image headers. The key is
+/// `<kind>;<url>;0`, the key of a stored entry whose cover was never refreshed, so the entry page finds the same file.
+pub(super) fn remote_art(url: &str, source_id: i64, kind: kuro_platform::kind::Kind) -> kuro_images::art::ArtRef {
     use kuro_images::art::{ArtKind, ArtRef};
-    use kuro_platform::kind::Kind;
-    ArtRef { owner: Kind::Manga, entry_id: 0, source_id, kind: ArtKind::Cover, url: Some(url.to_owned()), favorite: false, last_modified: 0 }
+    ArtRef { owner: kind, entry_id: 0, source_id, kind: ArtKind::Cover, url: Some(url.to_owned()), favorite: false, last_modified: 0 }
 }
 
 /// Loads `art` through the image service. The load is cancelled when `picture` is destroyed (its cell was rebound or its
@@ -485,7 +488,7 @@ pub(crate) mod tests {
         holder.append(&picture);
         let drawn = Rc::new(Cell::new(false));
         let flag = Rc::clone(&drawn);
-        remote_cover(Arc::new(service), rt.handle(), remote_art(&url, 41), &picture, Box::new(move |_| flag.set(true)));
+        remote_cover(Arc::new(service), rt.handle(), remote_art(&url, 41, kuro_platform::kind::Kind::Anime), &picture, Box::new(move |_| flag.set(true)));
         let (mut request, _) = server.accept().expect("the cover request reaches the service's client");
         holder.remove(&picture);
         drop(picture);

@@ -98,6 +98,18 @@ impl MemoryCache {
         inner.bytes = 0;
     }
 
+    /// Drops the images decoded from `url` (a key is `<owner>;<url>;<stamp>`), for a cover the site replaced.
+    pub fn forget_url(&self, url: &str) {
+        let needle = format!(";{url};");
+        let mut inner = self.lock();
+        let gone: Vec<String> = inner.entries.keys().filter(|key| key.contains(&needle)).cloned().collect();
+        for key in gone {
+            if let Some(entry) = inner.entries.remove(&key) {
+                inner.bytes -= weight(&entry.image);
+            }
+        }
+    }
+
     /// Bytes held by the cached images.
     pub fn size(&self) -> u64 {
         self.lock().bytes
@@ -137,6 +149,17 @@ mod tests {
         let got = cache.get("a", ON).unwrap();
         assert!(Arc::ptr_eq(&got, &img));
         assert!(cache.get("b", ON).is_none());
+        assert_eq!(cache.size(), 100);
+    }
+
+    #[test]
+    fn forgetting_a_url_drops_every_image_decoded_from_it_only() {
+        let cache = MemoryCache::new(1000);
+        cache.insert("anime;https://c/a.jpg;0".into(), image(100), ON);
+        cache.insert("manga;https://c/a.jpg;5".into(), image(100), ON);
+        cache.insert("anime;https://c/a.jpg.th;0".into(), image(100), ON);
+        cache.forget_url("https://c/a.jpg");
+        assert_eq!(cache.len(), 1);
         assert_eq!(cache.size(), 100);
     }
 

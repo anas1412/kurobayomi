@@ -617,7 +617,11 @@ impl SourceHttp for RecipeImageHeaders {
             let poster = source.cover_url(&anime).await.ok().flatten()?;
             if let Some(db) = crate::data::shared_db() {
                 let (url, found) = (anime_url.to_owned(), poster.clone());
-                tokio::task::spawn_blocking(move || remember_poster(&db, source_id, &url, &found));
+                // a database write: off this runtime thread when there is a runtime, else here (a small write)
+                match tokio::runtime::Handle::try_current() {
+                    Ok(runtime) => drop(runtime.spawn_blocking(move || remember_poster(&db, source_id, &url, &found))),
+                    Err(_) => remember_poster(&db, source_id, &url, &found),
+                }
             }
             Some(poster)
         })

@@ -96,7 +96,7 @@ pub struct ImageService {
     disk: DiskImageCache,
     fetch_permits: Semaphore,
     decode_permits: Semaphore,
-    memory: MemoryCache,
+    memory: Arc<MemoryCache>,
     /// The display ICC profile every decode applies, `None` for no colour management (T-34a-031).
     display_profile: RwLock<Option<Arc<DisplayProfile>>>,
 }
@@ -132,7 +132,7 @@ impl ImageService {
             disk,
             fetch_permits: Semaphore::new(FETCH_CONCURRENCY),
             decode_permits: Semaphore::new(DECODE_CONCURRENCY),
-            memory: MemoryCache::new(DEFAULT_BUDGET_BYTES),
+            memory: Arc::new(MemoryCache::new(DEFAULT_BUDGET_BYTES)),
             display_profile: RwLock::new(None),
         })
     }
@@ -140,7 +140,7 @@ impl ImageService {
     /// Replaces the decoded-image cache with one of `bytes` (the default is 64 MiB). Call it before sharing the
     /// service.
     pub fn with_memory_budget(mut self, bytes: u64) -> Self {
-        self.memory = MemoryCache::new(bytes);
+        self.memory = Arc::new(MemoryCache::new(bytes));
         self
     }
 
@@ -396,7 +396,7 @@ impl ImageService {
         // marked first, so the covers on screen do not each start a check of the same address
         recheck::write(&root, url, &recheck::Check { checked_ms: now, ..check.clone() });
         let (client, headers) = self.client_of(art);
-        let (url, file, driver) = (url.to_owned(), file.to_path_buf(), runtime.clone());
+        let (url, file, driver, memory) = (url.to_owned(), file.to_path_buf(), runtime.clone(), Arc::clone(&self.memory));
         // the client's future is not `Send`, so it runs to the end on a blocking-pool thread
         runtime.spawn_blocking(move || {
             driver.block_on(async move {
@@ -409,6 +409,8 @@ impl ImageService {
                 let body = response.bytes().await?;
                 cover_file::write_atomic(&file, &body).await?;
                 recheck::write(&root, &url, &changed);
+                // the next look decodes the new picture
+                memory.forget_url(&url);
                 tracing::debug!(url, "a cover changed behind its address and was downloaded again");
                 Ok::<(), ImageError>(())
             })

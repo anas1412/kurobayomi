@@ -39,6 +39,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 - A title saved while a source listed the wrong picture (AnimePahe once gave an episode screenshot) no longer opens with
   that picture: the next listing corrects the stored cover, and a poster the source finds later is stored and cached
   under its real address.
+- A cover seen in Browse is no longer downloaded a second time when its title opens, and a cover the site changed shows
+  its new picture without a restart.
 
 ### Removed
 

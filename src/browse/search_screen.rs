@@ -166,7 +166,7 @@ pub fn search_page(env: &SearchEnv, start: &Start, migrating: bool) -> (gtk::Wid
         open_source: Rc::new(move |id, typed| open_route(source_route(kind, id, typed, migrating))),
         open_entry: Rc::new(move |_, item| open_entry(item.id)),
         menu: Rc::new(menu),
-        load_cover: file_cover_loader(),
+        load_cover: file_cover_loader(kind),
         chips: SearchChips {
             filter: SourceFilter::All,
             only_has_results,

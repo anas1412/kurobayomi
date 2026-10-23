@@ -51,6 +51,8 @@ pub fn page_title(source: &Source) -> String {
 /// What the screen needs of the app.
 pub struct MigrateEnv {
     pub source: Source,
+    /// The kind of the entries, for their covers' cache key.
+    pub kind: Kind,
     /// A row: the migrate search for that entry, with its title.
     pub open_search: Rc<dyn Fn(i64, &str)>,
     /// A cover: the entry itself.
@@ -118,7 +120,7 @@ impl MigrateEntriesView {
                         }
                     }),
                     open_entry: other,
-                    load_cover: file_cover_loader(),
+                    load_cover: file_cover_loader(self.env.kind),
                 };
                 self.list.append(&migrate_entries(&entries, None, nav));
                 self.root.set_visible_child_name("list");
@@ -165,6 +167,7 @@ pub fn page() -> Option<gtk::Box> {
     let title = page_title(&source);
     let env = MigrateEnv {
         source,
+        kind,
         open_search: Rc::new(move |entry_id, title| {
             crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id, kind, title: title.to_owned() });
         }),
@@ -227,6 +230,7 @@ pub(crate) mod tests {
         let (search, entry) = (Rc::clone(&log), Rc::clone(&log));
         let env = MigrateEnv {
             source: Source::new(1, "Alpha", "en"),
+            kind: Kind::Manga,
             open_search: Rc::new(move |id, title| search.borrow_mut().push(format!("search {id} {title}"))),
             open_entry: Rc::new(move |id| entry.borrow_mut().push(format!("entry {id}"))),
         };
