@@ -75,6 +75,10 @@ pub struct Index {
     /// The repository's web page (its source code), opened by the card's globe button. Optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub website: Option<String>,
+    /// The address this index lives at now. A repository that moves keeps an index at its old address naming the new
+    /// one, and a saved link follows it ([`moved_to`]). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub sources: Vec<Entry>,
 }
 
@@ -241,6 +245,26 @@ async fn ensure_icon(client: &reqwest::Client, root: &Path, entry: &Entry) -> Re
         return Err(RepoError::Mismatch);
     }
     write_atomic(&path, &bytes).map_err(|e| RepoError::Write(e.to_string()))
+}
+
+/// The address a repository moved to: its index's `url`, when that is another https link to a `.json` file. The index
+/// already decides which files the app runs, so following its own address adds no trust; the caller still checks that
+/// the new address answers before it switches.
+pub fn moved_to<'a>(link: &str, index: &'a Index) -> Option<&'a str> {
+    index.url.as_deref().map(str::trim).filter(|url| url.starts_with("https://") && url.ends_with(".json") && *url != link.trim())
+}
+
+/// Moves the saved copies of link `old` to the folder of link `new`, so a repository that moved fetches nothing again.
+/// When `new` has copies already (both links were added), the old ones are dropped. No copies of `old` is no error.
+pub fn move_link_dir(root: &Path, old: &str, new: &str) -> std::io::Result<()> {
+    let (from, to) = (link_dir(root, old), link_dir(root, new));
+    if !from.exists() {
+        return Ok(());
+    }
+    if to.exists() {
+        return std::fs::remove_dir_all(&from);
+    }
+    std::fs::rename(&from, &to)
 }
 
 /// The folder a link's copies live in: the SHA-256 of the link, so two links never share one.
@@ -518,6 +542,39 @@ mod tests {
         std::fs::write(&first, b"changed").expect("overwrite the copy");
         ensure_cached(&client, &root, &source).await.expect("fetched again");
         assert_eq!(std::fs::read(&first).expect("the copy"), b"abc");
+    }
+
+    #[test]
+    fn an_index_naming_another_https_address_has_moved_there() {
+        let at = |url: &str| parse_index(&format!(r#"{{"version":1,"url":"{url}","sources":[]}}"#)).expect("valid");
+        let old = "https://old.example/index.min.json";
+        let new = "https://new.example/index.min.json";
+        assert_eq!(moved_to(old, &at(new)), Some(new));
+        assert_eq!(moved_to(old, &at(old)), None, "an index at its own address has not moved");
+        assert_eq!(moved_to(old, &at(&format!(" {old} "))), None, "spaces do not make another address");
+        assert_eq!(moved_to(old, &at("http://new.example/index.min.json")), None, "never to plain http");
+        assert_eq!(moved_to(old, &at("https://new.example/page.html")), None, "only to an index file");
+        assert_eq!(moved_to(old, &parse_index(&index_of(&[])).expect("valid")), None, "no url, no move");
+        let saved = serde_json::to_string(&at(new)).expect("json");
+        assert_eq!(parse_index(&saved).expect("saved copy").url.as_deref(), Some(new), "the saved copy keeps the address");
+    }
+
+    #[test]
+    fn a_moved_link_takes_its_saved_copies_with_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let (old, new) = ("https://old.example/index.min.json", "https://new.example/index.min.json");
+        std::fs::create_dir_all(link_dir(root, old)).expect("old folder");
+        std::fs::write(link_dir(root, old).join("x.wasm"), b"abc").expect("a copy");
+        move_link_dir(root, old, new).expect("moved");
+        assert!(!link_dir(root, old).exists());
+        assert_eq!(std::fs::read(link_dir(root, new).join("x.wasm")).expect("the copy moved"), b"abc");
+        move_link_dir(root, old, new).expect("no copies of the old link is no error");
+
+        std::fs::create_dir_all(link_dir(root, old)).expect("old folder again");
+        move_link_dir(root, old, new).expect("both links had copies");
+        assert!(!link_dir(root, old).exists(), "the old copies are dropped");
+        assert!(link_dir(root, new).join("x.wasm").exists(), "the new link's copies stay");
     }
 
     /// An entry JSON with an icon link and its checksum added, as a published index writes them.

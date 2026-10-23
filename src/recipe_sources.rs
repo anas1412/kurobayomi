@@ -100,18 +100,57 @@ fn source_prefs() -> Option<SourcePrefs> {
     PREFS.get().map(|store| SourcePrefs::new(store.clone()))
 }
 
-/// Fetches a repo link's index and the files of its sources that are on into the link's folder, and returns how many
-/// sources it lists. Blocks, so call it off the GTK thread.
-pub fn sync_link(link: &str) -> Result<usize, RepoError> {
+/// What a sync of a repo link gave: how many sources it lists, and the link to keep, which is another one when the
+/// repository moved.
+#[derive(Debug)]
+pub struct Synced {
+    pub count: usize,
+    pub link: String,
+}
+
+/// Fetches a repo link's index and the files of its sources that are on into the link's folder. A repository whose
+/// index names a new address moves there (see [`follow_move`]). Blocks, so call it off the GTK thread.
+pub fn sync_link(link: &str) -> Result<Synced, RepoError> {
     let root = repo_root().ok_or_else(|| RepoError::Write("the app folders are not set".to_owned()))?;
     let dir = repo::link_dir(&root, link);
     let http = repo_http();
     let on = source_prefs().map(|prefs| prefs.enabled_sources.get()).unwrap_or_default();
     let wanted = move |entry: &repo::Entry| on.contains(&entry.id);
-    match block(repo::sync_link(&http, &dir, link, &wanted)) {
-        Some(result) => result.map(|index| index.sources.len()),
-        None => Err(RepoError::Network("the app runtime is not running".to_owned())),
+    let index = match block(repo::sync_link(&http, &dir, link, &wanted)) {
+        Some(result) => result?,
+        None => return Err(RepoError::Network("the app runtime is not running".to_owned())),
+    };
+    Ok(Synced { count: index.sources.len(), link: follow_move(&root, link, &index) })
+}
+
+/// The link to keep for `link` after a sync: the address its index names when the repository moved and that address
+/// answers with an index, else `link`. A move takes the saved copies along and swaps a saved link for the new one, so
+/// users of the old address follow without doing anything; sources and their settings do not depend on the link.
+fn follow_move(root: &std::path::Path, link: &str, index: &repo::Index) -> String {
+    let Some(new) = repo::moved_to(link, index) else { return link.to_owned() };
+    // the new address must work first: a move never leaves a repository without an index
+    match block(repo::fetch_index(&repo_http(), new)) {
+        Some(Ok(_)) => {}
+        Some(Err(error)) => {
+            tracing::warn!(link, new, %error, "the repository says it moved, but its new address does not answer; the old one is kept");
+            return link.to_owned();
+        }
+        None => return link.to_owned(),
     }
+    if let Err(error) = repo::move_link_dir(root, link, new) {
+        tracing::warn!(link, new, %error, "the saved copies of a moved repository could not be moved; they are fetched again");
+    }
+    if let Some(prefs) = source_prefs() {
+        let mut links = prefs.manga_extension_repos.get();
+        if links.remove(link) {
+            links.insert(new.to_owned());
+            if let Err(error) = prefs.manga_extension_repos.set(links) {
+                tracing::error!(link, new, %error, "the moved repository's new address could not be saved");
+            }
+        }
+    }
+    tracing::info!(link, new, "a repository moved; its saved link follows");
+    new.to_owned()
 }
 
 /// The saved icon of a source of a repo link, when it has one.
@@ -531,7 +570,9 @@ fn check_on_start(links: Vec<String>) {
         for link in &links {
             let before = listed_ids(link);
             match sync_link(link) {
-                Ok(_) => {
+                Ok(synced) => {
+                    // a repository that moved is read under its new link
+                    let link = &synced.link;
                     let Some(index) = saved_index(link) else { continue };
                     let new = index.sources.iter().filter(|entry| !before.contains(&entry.id)).count();
                     // a link whose saved index was missing has nothing to compare with

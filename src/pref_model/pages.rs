@@ -59,8 +59,9 @@ fn with_storage_rows(built: Built) -> Built {
     built
 }
 
-/// The one repository list of both kinds of source. An `aniyomi://add-repo` or `tachiyomi://add-repo` link parks its
-/// address for this page (T-47b-017) and opens the add dialog with it.
+/// The one repository list of both kinds of source. A `kurobayomi://add-repo`, `aniyomi://add-repo` or
+/// `tachiyomi://add-repo` link parks its address for this page (T-47b-017) and opens the add dialog with it; the user
+/// still confirms the add.
 fn extension_repos() -> Option<Built> {
     let links = SourcePrefs::new(crate::data::app().base.store().clone()).manga_extension_repos;
     let ops = Arc::new(RepoOps::new(links.clone()));

@@ -349,6 +349,9 @@ mod tests {
             manga.actions,
             vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { url: "https://a.test/i.json".into() })]
         );
+        // the app's own link, which a repository's website offers as its "Add to Kurobayomi" button
+        let own = launch_of(LaunchRequest::OpenUri("kurobayomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json".into()));
+        assert_eq!(own.actions, manga.actions);
         let anime = launch_of(LaunchRequest::OpenUri("aniyomi://extension-store?url=u".into()));
         assert!(matches!(&anime.actions[1], NavAction::Push(Screen::ExtensionStores { url }) if url == "u"));
         let missing = launch_of(LaunchRequest::OpenUri("aniyomi://add-repo".into()));

@@ -128,13 +128,18 @@ impl Ops<RepoLink> for RepoOps {
         if links.iter().any(|known| known.as_str() == link) {
             return AddOutcome::Notice(tr(MsgKey::error_repo_exists));
         }
-        let count = match crate::recipe_sources::sync_link(link) {
-            Ok(count) => count,
+        let synced = match crate::recipe_sources::sync_link(link) {
+            Ok(synced) => synced,
             Err(error) => {
                 tracing::warn!(%error, link, "adding the repo failed");
                 return AddOutcome::Notice(repo_error_text(&error));
             }
         };
+        // an old address of a repository that moved is saved as its new one
+        let (count, link) = (synced.count, synced.link.as_str());
+        if links.iter().any(|known| known.as_str() == link) {
+            return AddOutcome::Notice(tr(MsgKey::error_repo_exists));
+        }
         if let Err(error) = add_link(&mut links, link) {
             return AddOutcome::Notice(repo_error_text(&error));
         }
