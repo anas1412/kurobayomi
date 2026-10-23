@@ -32,6 +32,10 @@ RUN apt-get update \
       nasm libgnutls28-dev libxml2-dev libva-dev libvdpau-dev libdrm-dev zlib1g-dev libbz2-dev \
  && rm -rf /var/lib/apt/lists/*
 
+# The jobs run as root on a checkout owned by the runner's user, which git refuses ("dubious ownership") once the checkout
+# step is over: the nightly's tag push failed on it
+RUN git config --system --add safe.directory '*'
+
 # Rust stable, as rust-toolchain.toml asks; the jobs still run `rustup update stable` for a newer one
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
  && chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"

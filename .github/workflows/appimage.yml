@@ -27,6 +27,11 @@ env:
   # the commit that passed CI, or the current one for a manual run
   SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+# bash, as on the plain runners: in a container a step's default shell is sh
+defaults:
+  run:
+    shell: bash
+
 jobs:
   appimage:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')

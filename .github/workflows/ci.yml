@@ -36,6 +36,11 @@ permissions:
   # to pull the build image
   packages: read
 
+# bash, as on the plain runners: in a container a step's default shell is sh
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     runs-on: ubuntu-latest
