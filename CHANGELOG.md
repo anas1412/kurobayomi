@@ -6,6 +6,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-10-24
+
 ### Added
 
 - A repository can give each source a short description; it shows under the source's name in Browse and in the list
