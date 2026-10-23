@@ -44,15 +44,27 @@ Names (free on 2026-10-23, confirm when creating):
 - Run `scripts/set-identity.py --owner kurobayomi`, CI green, release the next stable (0.1.6; 0.1.5 is out). New
   installs then use the new address directly.
 
-## Step 5: the extensions split like Keiyoushi (me)
+## Step 5: the extensions split like Keiyoushi (prepared locally, 2026-10-23)
 
-- New `tsuikabako/extensions-source`: `sources/`, `tools/`, `template/`, the WIT files, the health check.
-- Its CI, on each push to `main`: build every source to WASM, run the checks, write the index with the new base URL,
-  and push only `dist/`, `index.min.json` and `repo.json` to `tsuikabako/extensions`.
-- `tsuikabako/extensions` keeps its history and the index at the same path, so the URL people already added still
-  works through the redirect.
-- The repo-signing key becomes a CI secret; the public key stays the same, so apps that trust the repo keep trusting it.
-- Check: the first CI-built index matches today's apart from the URLs.
+- `~/tsuikabako-extensions-source` (local, not pushed): a clone of `kurobayomi-extensions` with its history, without
+  `dist/` and `index.min.json` (ignored now). It becomes `tsuikabako/extensions-source`.
+- Its workflow `publish.yml`, on each push to `main` and every six hours: the health check (state committed in the
+  source repo), every plug-in built with `tools/build.sh`, the index written by `make-index.py` (base URL, name and
+  website now `tsuikabako`'s), then everything published to `tsuikabako/extensions`, whose contents CI replaces whole:
+  `dist/`, `index.min.json`, LICENSE, NOTICE and the README from `output/README.md`.
+- `tsuikabako/extensions` is today's `kurobayomi-extensions`, transferred and renamed, so the URL people already added
+  redirects to it, and its index keeps the same path.
+- There is no repo signing key to move: the index has per-file checksums only.
+- The first CI build changes each plug-in's checksum (another machine, other paths), so every user downloads each
+  source they use once more. Nothing else changes for them.
+
+**You, on GitHub** (after step 3's transfers):
+1. Create the empty repository `tsuikabako/extensions-source` (public, no README).
+2. Make a deploy key: `ssh-keygen -t ed25519 -N "" -C extensions-publish -f extensions-publish`
+   - `tsuikabako/extensions` → Settings → Deploy keys → Add: paste `extensions-publish.pub`, tick **Allow write access**.
+   - `tsuikabako/extensions-source` → Settings → Secrets and variables → Actions → New secret
+     `EXTENSIONS_DEPLOY_KEY`: paste the private file `extensions-publish`. Then delete both files.
+3. Tell me; I push `extensions-source`, run its workflow once and compare the published index with today's.
 
 ## Moving the extension link of existing users
 
