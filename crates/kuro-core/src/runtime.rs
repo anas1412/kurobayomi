@@ -26,8 +26,10 @@ pub fn build() -> std::io::Result<Runtime> {
     Builder::new_multi_thread().worker_threads(worker_threads()).thread_name(THREAD_NAME).enable_all().build()
 }
 
-/// Stops the runtime, waiting at most `SHUTDOWN_TIMEOUT` for blocking tasks.
+/// Stops the runtime, waiting at most `SHUTDOWN_TIMEOUT` for blocking tasks. Panics from here on are the app
+/// quitting (see [`crate::crash::mark_shutting_down`]).
 pub fn shutdown(rt: Runtime) {
+    crate::crash::mark_shutting_down();
     rt.shutdown_timeout(SHUTDOWN_TIMEOUT);
 }
 

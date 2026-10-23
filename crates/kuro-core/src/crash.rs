@@ -78,6 +78,14 @@ pub async fn crash_test_worker() {
 /// Reports older than this are deleted at startup.
 const MAX_REPORT_AGE_MS: u128 = 14 * 24 * 60 * 60 * 1000;
 static CRASHING: AtomicBool = AtomicBool::new(false);
+/// Set once the app's runtime starts shutting down. From then on a blocking thread still waiting on a request
+/// (a slow source, a cover) panics inside tokio ("context is being shutdown"); that is the app quitting, not a crash.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Marks the app as quitting: later panics are logged at WARN, with no report, no crash window and no exit 101.
+pub fn mark_shutting_down() {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+}
 
 thread_local! {
     /// Nesting depth of [`contain`] on this thread. While it is above zero the hook stays quiet.
@@ -241,6 +249,10 @@ pub fn install(crash_dir: PathBuf) {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if SUPPRESS.with(Cell::get) > 0 {
+            return;
+        }
+        if SHUTTING_DOWN.load(Ordering::SeqCst) {
+            tracing::warn!(target: "crash", "panic while quitting, not reported: {}", payload_text(info.payload()));
             return;
         }
         // a second panic while reporting exits without a second file
@@ -524,6 +536,14 @@ mod tests {
                     let _ = tokio::task::spawn_blocking(|| panic!("boom on blocking thread")).await;
                 });
             }
+            "shutdown" => {
+                // a blocking thread waits on a slow request while the app quits (the 2026-10-22 nightly crash)
+                let rt = crate::runtime::build().unwrap();
+                let handle = rt.handle().clone();
+                rt.spawn_blocking(move || handle.block_on(tokio::time::sleep(std::time::Duration::from_secs(1))));
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                crate::runtime::shutdown(rt);
+            }
             "nested" => panic!("first panic"),
             "contain" => assert!(contain(|| panic!("contained")).is_err()),
             other => panic!("unknown mode {other}"),
@@ -543,6 +563,11 @@ mod tests {
     #[test]
     fn panic_on_a_spawn_blocking_thread_writes_one_report_and_exits_101() {
         assert_eq!(run_child("blocking"), (Some(101), 1));
+    }
+
+    #[test]
+    fn a_panic_while_the_runtime_shuts_down_writes_no_report_and_does_not_exit() {
+        assert_eq!(run_child("shutdown"), (Some(0), 0));
     }
 
     #[test]

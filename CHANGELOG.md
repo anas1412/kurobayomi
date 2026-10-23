@@ -26,6 +26,12 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 - Pinning sources.
 
+### Fixed
+
+- Quitting while a slow request was still running (a cover, a source such as AnimePahe behind its browser check)
+  no longer shows the crash window. This covers every source and image load, not only the plug-in requests fixed in
+  0.1.4.
+
 ## [0.1.4] - 2026-10-22
 
 ### Changed
