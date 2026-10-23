@@ -116,6 +116,8 @@ fn clear_db(id: &str) -> Option<Built> {
                 });
                 match written {
                     Ok(removed) => {
+                        // saved browse results name the rows that just went
+                        crate::browse::results_cache::clear();
                         after_clear(kind, removed);
                         for (source, check, r) in entries.iter() {
                             if selected.contains(source) {

@@ -64,6 +64,13 @@ pub fn write(source_id: i64, query: &BrowseQuery, filters: &FilterList, items: &
     }
 }
 
+/// Forgets every saved result: they name database rows, and Clear database removes the rows outside the library.
+pub fn clear() {
+    if let Some(dir) = app_dir() {
+        let _ = crate::cache_limit::clear(&[dir]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
