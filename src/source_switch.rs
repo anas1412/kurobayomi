@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gtk::prelude::*;
 use kuro_extensions::repo::{Entry, Index, Status};
@@ -93,9 +94,56 @@ pub fn import_aniyomi_disabled(prefs: &SourcePrefs, indexes: &[Index]) -> bool {
 /// Both steps that turn stored state into the switches, before any source file is fetched or deleted, then the
 /// languages of the sources that are on.
 pub fn settle(prefs: &SourcePrefs, indexes: &[Index]) {
-    migrate_once(prefs, indexes);
+    if migrate_once(prefs, indexes) {
+        NARROW_AFTER_LOAD.store(true, Ordering::SeqCst);
+    }
     import_aniyomi_disabled(prefs, indexes);
     show_languages_of_on(prefs, indexes);
+}
+
+/// Set when the one-time migration ran at this start: it turned on every listed source, since before the switches each
+/// one was active, so the first load knows every source's id; after it the switches keep only the sources in use
+/// ([`after_load`]). ponytail: in memory only, so a start that quits before its first load ends keeps them all on.
+static NARROW_AFTER_LOAD: AtomicBool = AtomicBool::new(false);
+
+/// Called when a load has installed its sources (any thread). After the migration's first load, the sources nobody
+/// used are turned off, on the GTK thread, where the library and the history are.
+pub fn after_load() {
+    if NARROW_AFTER_LOAD.swap(false, Ordering::SeqCst) {
+        gtk::glib::MainContext::default().invoke(narrow_to_used);
+    }
+}
+
+/// Keeps on only the sources with titles in the library or the history, of either kind: a source listed by a
+/// repository is not one the user had (three Russian sources an English reader never opened came on).
+fn narrow_to_used() {
+    let Some(prefs) = live() else { return };
+    let db = crate::data::app().db.clone();
+    let entries = kuro_data::entry::EntryRepo::new(db.clone());
+    let history = kuro_data::history::HistoryRepo::new(db);
+    let mut used: HashSet<i64> = HashSet::new();
+    for kind in [Kind::Manga, Kind::Anime] {
+        used.extend(entries.favorite_counts_by_source(kind).unwrap_or_default().into_iter().map(|(source, _)| source));
+        used.extend(history.list(kind, "").unwrap_or_default().into_iter().map(|item| item.source));
+    }
+    let on = prefs.enabled_sources.get();
+    let kept = in_use(&on, &keys(&prefs), &used);
+    if kept != on {
+        tracing::info!(off = on.len() - kept.len(), "the sources not in the library or the history start off");
+        if let Err(error) = prefs.enabled_sources.set(kept) {
+            tracing::warn!(%error, "the sources in use could not be saved");
+            return;
+        }
+        crate::recipe_sources::reload();
+    }
+}
+
+/// The sources of `on` to keep: every one whose id is in `used`, and every one whose id is not known (it did not load),
+/// since a source that cannot be told unused is not turned off.
+fn in_use(on: &BTreeSet<String>, keys: &BTreeMap<i64, String>, used: &HashSet<i64>) -> BTreeSet<String> {
+    let loaded_unused: HashSet<&String> = keys.iter().filter(|(id, _)| !used.contains(id)).map(|(_, key)| key).collect();
+    let loaded_used: HashSet<&String> = keys.iter().filter(|(id, _)| used.contains(id)).map(|(_, key)| key).collect();
+    on.iter().filter(|key| loaded_used.contains(key) || !loaded_unused.contains(key)).cloned().collect()
 }
 
 /// Turns on the language of every source that is on. Browse lists only the enabled languages, so without this a source
@@ -387,6 +435,17 @@ mod tests {
         set_on(&prefs, "senkuro", false);
         show_languages_of_on(&prefs, &[repo]);
         assert!(prefs.enabled_languages.get().contains("ru"), "turning a source off leaves the languages as the user has them");
+    }
+
+    /// The first start after the switches came: a listed source is not one the user had. Only the sources with titles
+    /// in the library or the history stay on; one that did not load (id unknown) is not turned off.
+    #[test]
+    fn the_migration_keeps_on_only_the_sources_in_use() {
+        let on = set(&["mangadex", "kagane", "senkuro", "usagi", "broken"]);
+        let keys: BTreeMap<i64, String> = [(1, "mangadex"), (2, "kagane"), (3, "senkuro"), (4, "usagi")].into_iter().map(|(id, key)| (id, key.to_owned())).collect();
+        let used: HashSet<i64> = [1, 2].into_iter().collect();
+        assert_eq!(in_use(&on, &keys, &used), set(&["mangadex", "kagane", "broken"]));
+        assert_eq!(in_use(&on, &keys, &HashSet::new()), set(&["broken"]), "nothing in use keeps only what cannot be told");
     }
 
     #[test]

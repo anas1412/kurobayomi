@@ -13,6 +13,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 - A source you turn on shows in Browse even when its language was not on: turning it on turns its language on too
   (a Russian source on an English system was on but never listed). Sources already on get their language at the next
   start.
+- Updating from 0.1.4 or older turns on only the sources you used (titles in your library or history), not every
+  source your repositories list; the others start off and are in each repository's Sources list.
 
 ## [0.1.7] - 2026-10-23
 

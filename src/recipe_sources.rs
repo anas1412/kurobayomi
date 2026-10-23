@@ -541,6 +541,7 @@ fn load_sources() -> Vec<String> {
     let runnable = anime.anime.iter().map(|(source, row)| (Catalogue::Anime(Arc::clone(source)), row.clone())).collect();
     install(Kind::Anime, Catalogues::new(Kind::Anime, runnable));
     *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(anime));
+    crate::source_switch::after_load();
     failed
 }
 
