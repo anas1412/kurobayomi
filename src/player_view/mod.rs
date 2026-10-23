@@ -692,6 +692,17 @@ fn downloaded_media(episode_id: i64) -> Option<Media> {
     Some(Media { target: path.to_string_lossy().into_owned(), title: title_or_file(episode_id, &path), headers: None, tracks: Vec::new() })
 }
 
+/// Plays episode row `episode_id` from its download, for an episode whose source is not loaded (turned off). False when
+/// it has no download or a player is already open.
+pub fn open_downloaded(episode_id: i64) -> bool {
+    if is_open() {
+        return false;
+    }
+    let Some(media) = downloaded_media(episode_id) else { return false };
+    open_media(media, episode_id, 0);
+    true
+}
+
 /// Starts episode row `episode_id` in this window: a local file at once, a source's stream once it resolves.
 fn play_episode(shared: &Shared, episode_id: i64) {
     let db = crate::data::app().db.clone();

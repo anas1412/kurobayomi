@@ -9,7 +9,6 @@ use std::sync::{Arc, OnceLock};
 
 use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
-use kuro_domain::source::pin::Pin;
 
 use super::listing::ListItem;
 use super::pages::{GlobalSearchSnapshot, SearchRow, SearchState, SourceFilter};
@@ -151,9 +150,7 @@ impl GlobalSearch {
             .iter()
             .filter(|c| self.enabled_languages.contains(&c.source.lang) && !self.hidden.contains(&c.source.id))
             .collect();
-        enabled.sort_by(|a, b| {
-            (!a.source.pin.contains(Pin::Pinned), name_key(&a.source)).cmp(&(!b.source.pin.contains(Pin::Pinned), name_key(&b.source)))
-        });
+        enabled.sort_by(|a, b| name_key(&a.source).cmp(&name_key(&b.source)));
         enabled
             .into_iter()
             .filter(|c| match (&self.extension, self.filter) {
@@ -188,7 +185,7 @@ impl GlobalSearch {
         generation == self.generation
     }
 
-    /// The order of the result map (B§9.5, D-GS-01): the origin first, then non-empty results, then pinned sources, then
+    /// The order of the result map (B§9.5, D-GS-01): the origin first, then non-empty results, then
     /// `"name (lang)"` in UTF-16 order. The sort is stable, so two sources with equal keys are both kept (GS-EC-04).
     fn sort_rows(&mut self) {
         self.rows.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
@@ -226,10 +223,10 @@ fn name_key(source: &Source) -> Vec<u16> {
     format!("{} ({})", source.name.to_lowercase(), source.lang).encode_utf16().collect()
 }
 
-/// The sort key of one row: origin, then a non-empty success, then pinned, then the name key. `false` sorts first.
-fn sort_key(row: &SearchRow) -> (bool, bool, bool, Vec<u16>) {
+/// The sort key of one row: origin, then a non-empty success, then the name key. `false` sorts first.
+fn sort_key(row: &SearchRow) -> (bool, bool, Vec<u16>) {
     let non_empty = matches!(&row.state, SearchState::Results(items) if !items.is_empty());
-    (!row.origin, !non_empty, !row.source.pin.contains(Pin::Pinned), name_key(&row.source))
+    (!row.origin, !non_empty, name_key(&row.source))
 }
 
 /// The page-level rule of the single-result auto-open (T-40b-064, GS-EC-13, GS-EC-14).
@@ -296,13 +293,9 @@ pub fn take_starts(queue: &mut VecDeque<Source>, running: usize) -> Vec<Source> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_domain::source::pin::Pins;
 
-    fn cand(id: i64, name: &str, lang: &str, pinned: bool, package: &str) -> Candidate {
-        let mut source = Source::new(id, name, lang);
-        if pinned {
-            source.pin = Pins::PINNED;
-        }
+    fn cand(id: i64, name: &str, lang: &str, package: &str) -> Candidate {
+        let source = Source::new(id, name, lang);
         Candidate { source, package: package.to_owned() }
     }
 
@@ -314,10 +307,10 @@ mod tests {
         ListItem { id, title: format!("M{id}"), ..ListItem::default() }
     }
 
-    /// Sources A (pinned, en), B (en), C (ja, pinned) with the extension "ext.a" owning A and B.
+    /// Sources A (en), B (en), C (ja) with the extension "ext.a" owning A and B.
     fn engine() -> GlobalSearch {
         GlobalSearch::new(
-            vec![cand(1, "A", "en", true, "ext.a"), cand(2, "B", "en", false, "ext.a"), cand(3, "C", "ja", true, "ext.c")],
+            vec![cand(1, "A", "en", "ext.a"), cand(2, "B", "en", "ext.a"), cand(3, "C", "ja", "ext.c")],
             langs(&["en", "ja"]),
             BTreeSet::new(),
             None,
@@ -332,7 +325,7 @@ mod tests {
     #[test]
     fn a_new_search_defaults_to_all_and_selects_every_enabled_source() {
         let mut search = GlobalSearch::new(
-            vec![cand(1, "A", "en", false, "ext.a"), cand(2, "B", "en", false, "ext.a"), cand(3, "C", "ja", false, "ext.c")],
+            vec![cand(1, "A", "en", "ext.a"), cand(2, "B", "en", "ext.a"), cand(3, "C", "ja", "ext.c")],
             langs(&["en", "ja"]),
             BTreeSet::new(),
             None,
@@ -340,14 +333,14 @@ mod tests {
         );
         search.set_query(Some("one"));
         let plan = search.search().expect("a search starts");
-        assert_eq!(search.filter(), SourceFilter::All, "the pinned-only filter is cut: every source is searched");
+        assert_eq!(search.filter(), SourceFilter::All, "every source is searched");
         assert_eq!(ids(&plan.sources), [1, 2, 3], "every enabled source, by name");
         assert_eq!(plan.generation, 1);
     }
 
     #[test]
     fn a_search_with_no_enabled_language_selects_nothing_and_has_no_rows() {
-        let mut search = GlobalSearch::new(vec![cand(2, "B", "en", false, "")], langs(&["fr"]), BTreeSet::new(), None, false);
+        let mut search = GlobalSearch::new(vec![cand(2, "B", "en", "")], langs(&["fr"]), BTreeSet::new(), None, false);
         search.set_query(Some("one"));
         let plan = search.search().expect("the search runs with nothing to fetch");
         assert!(plan.sources.is_empty(), "the language filter decides: a language that is off is not searched");
@@ -370,7 +363,7 @@ mod tests {
         search.set_query(Some("one"));
         let plan = search.search().expect("first search");
         assert!(search.apply(plan.generation, 1, Ok(vec![item(10), item(11)])));
-        assert_eq!(search.set_filter(SourceFilter::All), None, "the Pinned chip is cut: every source was already searched");
+        assert_eq!(search.set_filter(SourceFilter::All), None, "every source was already searched");
         let kept = search.rows().iter().find(|r| r.source.id == 1).expect("A stays");
         assert_eq!(kept.state, SearchState::Results(vec![item(10), item(11)]), "the finished result of A is kept");
     }
@@ -383,7 +376,7 @@ mod tests {
         search.apply(first.generation, 1, Ok(vec![item(10)]));
         search.set_query(Some("two"));
         let second = search.search().expect("new query");
-        assert_eq!(ids(&second.sources), [1, 3, 2], "every source, pinned first");
+        assert_eq!(ids(&second.sources), [1, 2, 3], "every source, by name");
         assert!(search.rows().iter().all(|r| r.state == SearchState::Loading));
     }
 
@@ -412,15 +405,15 @@ mod tests {
     }
 
     #[test]
-    fn rows_sort_by_origin_then_non_empty_then_pinned_then_name() {
-        // V6 from the spec: Zed (empty), Alpha (ja, 2), Beta (pinned, loading), Gamma (pinned, 1), Delta (error).
+    fn rows_sort_by_origin_then_non_empty_then_name() {
+        // V6 from the spec: Zed (empty), Alpha (ja, 2), Beta (loading), Gamma (1), Delta (error).
         let mut search = GlobalSearch::new(
             vec![
-                cand(1, "Zed", "en", false, ""),
-                cand(2, "Alpha", "ja", false, ""),
-                cand(3, "Beta", "en", true, ""),
-                cand(4, "Gamma", "en", true, ""),
-                cand(5, "Delta", "en", false, ""),
+                cand(1, "Zed", "en", ""),
+                cand(2, "Alpha", "ja", ""),
+                cand(3, "Beta", "en", ""),
+                cand(4, "Gamma", "en", ""),
+                cand(5, "Delta", "en", ""),
             ],
             langs(&["en", "ja"]),
             BTreeSet::new(),
@@ -435,13 +428,13 @@ mod tests {
         search.apply(plan.generation, 4, Ok(vec![item(40)]));
         search.apply(plan.generation, 5, Err("boom".into()));
         let names: Vec<&str> = search.rows().iter().map(|r| r.source.name.as_str()).collect();
-        assert_eq!(names, ["Gamma", "Alpha", "Beta", "Delta", "Zed"]);
+        assert_eq!(names, ["Alpha", "Gamma", "Beta", "Delta", "Zed"]);
     }
 
     #[test]
     fn two_sources_with_equal_keys_are_both_kept_in_insertion_order() {
         let mut search = GlobalSearch::new(
-            vec![cand(1, "MangaX", "en", false, "p1"), cand(2, "MangaX", "en", false, "p2")],
+            vec![cand(1, "MangaX", "en", "p1"), cand(2, "MangaX", "en", "p2")],
             langs(&["en"]),
             BTreeSet::new(),
             None,
@@ -456,7 +449,7 @@ mod tests {
     #[test]
     fn only_has_results_filters_to_non_empty_successes_and_runs_no_search() {
         let mut search = GlobalSearch::new(
-            vec![cand(1, "L", "en", true, ""), cand(2, "E", "en", true, ""), cand(3, "Err", "en", true, ""), cand(4, "One", "en", true, "")],
+            vec![cand(1, "L", "en", ""), cand(2, "E", "en", ""), cand(3, "Err", "en", ""), cand(4, "One", "en", "")],
             langs(&["en"]),
             BTreeSet::new(),
             None,
@@ -477,7 +470,7 @@ mod tests {
     #[test]
     fn progress_counts_answered_rows_of_all_rows() {
         let mut search = GlobalSearch::new(
-            (1..=4).map(|i| cand(i, &format!("S{i}"), "en", true, "")).collect(),
+            (1..=4).map(|i| cand(i, &format!("S{i}"), "en", "")).collect(),
             langs(&["en"]),
             BTreeSet::new(),
             None,
@@ -498,7 +491,7 @@ mod tests {
         let mut search = engine();
         let plan = search.request("one", Some("ext.a")).expect("the intent searches");
         assert_eq!(search.filter(), SourceFilter::All, "GS-EC-11: the extension filter forces All");
-        assert_eq!(ids(&plan.sources), [1, 2], "the package's sources, pinned first");
+        assert_eq!(ids(&plan.sources), [1, 2], "the package's sources, by name");
     }
 
     #[test]
@@ -506,7 +499,7 @@ mod tests {
         let mut search = engine();
         let plan = search.request("one", Some("")).expect("search");
         assert_eq!(search.filter(), SourceFilter::All);
-        assert_eq!(ids(&plan.sources), [1, 3, 2], "pinned first, then by name");
+        assert_eq!(ids(&plan.sources), [1, 2, 3], "by name");
     }
 
     #[test]
@@ -519,7 +512,7 @@ mod tests {
     #[test]
     fn hidden_and_disabled_languages_are_never_selected() {
         let mut search = GlobalSearch::new(
-            vec![cand(1, "A", "en", false, ""), cand(2, "B", "ja", false, ""), cand(3, "C", "en", false, "")],
+            vec![cand(1, "A", "en", ""), cand(2, "B", "ja", ""), cand(3, "C", "en", "")],
             langs(&["en"]),
             BTreeSet::from([3]),
             None,
@@ -532,7 +525,7 @@ mod tests {
     #[test]
     fn the_origin_source_sorts_first_for_a_migrate_search() {
         let mut search = GlobalSearch::new(
-            vec![cand(1, "Alpha", "en", false, ""), cand(2, "Zulu", "en", false, "")],
+            vec![cand(1, "Alpha", "en", ""), cand(2, "Zulu", "en", "")],
             langs(&["en"]),
             BTreeSet::new(),
             Some(2),
@@ -597,7 +590,6 @@ mod tests {
 #[cfg(test)]
 mod props {
     use super::*;
-    use kuro_domain::source::pin::Pins;
     use proptest::prelude::*;
 
     fn item(id: i64) -> ListItem {
@@ -616,11 +608,8 @@ mod props {
             let candidates: Vec<Candidate> = specs
                 .iter()
                 .enumerate()
-                .map(|(at, (name, pinned))| {
-                    let mut source = Source::new(at as i64 + 1, names[*name], "en");
-                    if *pinned {
-                        source.pin = Pins::PINNED;
-                    }
+                .map(|(at, (name, _))| {
+                    let source = Source::new(at as i64 + 1, names[*name], "en");
                     Candidate { source, package: String::new() }
                 })
                 .collect();

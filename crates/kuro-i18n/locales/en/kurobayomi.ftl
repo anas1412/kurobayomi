@@ -5069,3 +5069,59 @@ local_folder_unavailable = The Local folder is not available: check the storage 
 
 # source: kurobayomi
 ui_open_local_folder = Open the Local folder
+
+# source: kurobayomi
+source_switch_off = This source is off
+
+# source: kurobayomi
+source_switch_turn_on = Turn on
+
+# source: kurobayomi
+source_switch_turn_off = Turn off
+
+# source: kurobayomi
+source_switch_off_title = Turn off { $source }?
+
+# source: kurobayomi
+source_switch_off_body =
+    { $count ->
+        [one] 1 title in your library uses this source. It won't update while the source is off.
+       *[other] { NUMBER($count, useGrouping: "false") } titles in your library use this source. They won't update while the source is off.
+    }
+
+# source: kurobayomi
+source_switch_picker_title = Sources in { $repo }
+
+# source: kurobayomi
+source_switch_picker_intro = Turn on the sources you want. A source that is off is not downloaded or updated, and does not show in Browse or search.
+
+# source: kurobayomi
+source_switch_new_sources =
+    { $count ->
+        [one] 1 new source in { $repo }
+       *[other] { NUMBER($count, useGrouping: "false") } new sources in { $repo }
+    }
+
+# source: kurobayomi
+source_switch_choose = Choose
+
+# source: kurobayomi
+source_switch_sources = Sources
+
+# source: kurobayomi
+source_switch_check_now = Check now
+
+# source: kurobayomi
+source_switch_checking = Checking { $source }…
+
+# source: kurobayomi
+source_switch_check_works = { $source } works from your connection
+
+# source: kurobayomi
+source_switch_check_blocked = { $source } is blocked from your connection
+
+# source: kurobayomi
+source_switch_check_broken = { $source } does not work right now
+
+# source: kurobayomi
+source_switch_failed = The source could not be downloaded. Check your connection and try again.

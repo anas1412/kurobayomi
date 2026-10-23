@@ -1,5 +1,5 @@
 //! Source lists of the app layer (`GetEnabledMangaSources`, `GetEnabledAnimeSources`, `ToggleMangaSource`,
-//! `ToggleMangaSourcePin`, `ToggleLanguage`; T-10a-018, T-10a-020). The two kinds share one algorithm, parameterised by
+//! `ToggleLanguage`; T-10a-018, T-10a-020). The two kinds share one algorithm, parameterised by
 //! the preference handles of each kind.
 
 use kuro_platform::kind::Kind;
@@ -10,10 +10,9 @@ use std::sync::Mutex;
 use kuro_prefs::pref::Pref;
 use tokio::sync::watch;
 
-use super::rx::{combine2, combine3, pref_stream};
-use crate::source::toggles::{flip_disabled, set_disabled, toggle_language, toggle_pin};
+use super::rx::{combine2, pref_stream};
+use crate::source::toggles::{flip_disabled, set_disabled, toggle_language};
 use crate::source::model::{Id, Source};
-use crate::source::pin::{Pin, Pins};
 use kuro_prefs::source::SourcePrefs;
 
 /// The id of the local source, which is listed whatever the language filter says (`LocalMangaSource.ID`).
@@ -22,8 +21,6 @@ pub const LOCAL_SOURCE_ID: Id = 0;
 /// The preference handles of one kind of source list.
 #[derive(Clone)]
 pub struct KindPrefs {
-    /// Decimal ids of the pinned sources.
-    pub pinned: Pref<BTreeSet<String>>,
     /// Decimal ids of the hidden sources.
     pub disabled: Pref<BTreeSet<String>>,
 }
@@ -32,11 +29,9 @@ impl KindPrefs {
     pub fn of(prefs: &SourcePrefs, kind: Kind) -> Self {
         match kind {
             Kind::Manga => Self {
-                pinned: prefs.pinned_manga_sources.clone(),
                 disabled: prefs.disabled_manga_sources.clone(),
             },
             Kind::Anime => Self {
-                pinned: prefs.pinned_anime_sources.clone(),
                 disabled: prefs.disabled_anime_sources.clone(),
             },
         }
@@ -44,15 +39,13 @@ impl KindPrefs {
 }
 
 /// The list the screens show (`GetEnabledMangaSources` and its anime twin, without the stream): sources in an enabled
-/// language (the local source always), not hidden, sorted by name without regard to case; pinned sources carry
-/// `Pins::PINNED`. The source used last is listed a second time, right after its first row, with `is_used_last` set and
-/// the pin without `Actual` (EC-31; `without`, not Kotlin's XOR, so an unpinned duplicate is `0b00`, accepted difference 3).
+/// language (the local source always), not hidden, sorted by name without regard to case. The source used last
+/// is listed a second time, right after its first row, with `is_used_last` set (EC-31).
 /// A last-used id that is hidden or unknown adds nothing (EC-32).
 pub fn compute_enabled_sources(
     sources: &[Source],
     languages: &BTreeSet<String>,
     disabled: &BTreeSet<String>,
-    pinned: &BTreeSet<String>,
     last_used: i64,
 ) -> Vec<Source> {
     let mut listed: Vec<&Source> = sources
@@ -65,18 +58,16 @@ pub fn compute_enabled_sources(
 
     let mut out = Vec::with_capacity(listed.len());
     for source in listed {
-        let pin = if pinned.contains(&source.id.to_string()) { Pins::PINNED } else { Pins::UNPINNED };
-        let row = Source { pin, ..source.clone() };
-        out.push(row.clone());
+        out.push(source.clone());
         if source.id == last_used {
-            out.push(Source { is_used_last: true, pin: pin.without(Pin::Actual), ..row });
+            out.push(Source { is_used_last: true, ..source.clone() });
         }
     }
     out
 }
 
 /// The enabled list as a stream: the current list first, then a new list after each change of the languages, the
-/// hidden or pinned ids or the source list. A list equal to the last one is not published
+/// hidden ids or the source list. A list equal to the last one is not published
 /// (`distinctUntilChanged`).
 pub fn subscribe_enabled(
     prefs: &SourcePrefs,
@@ -85,11 +76,7 @@ pub fn subscribe_enabled(
 ) -> watch::Receiver<Vec<Source>> {
     let kind_prefs = KindPrefs::of(prefs, kind);
     let inputs = combine2(
-        combine3(
-            pref_stream(&kind_prefs.pinned),
-            pref_stream(&prefs.enabled_languages),
-            pref_stream(&kind_prefs.disabled),
-        ),
+        combine2(pref_stream(&prefs.enabled_languages), pref_stream(&kind_prefs.disabled)),
         sources,
     );
     let (tx, rx) = watch::channel(enabled_from(&inputs.borrow()));
@@ -117,16 +104,16 @@ pub fn subscribe_enabled(
 /// no row is ever listed a second time.
 const NO_LAST_USED: Id = -1;
 
-/// The enabled list from the combined inputs of [`subscribe_enabled`]: the pinned, language and hidden sets, then the
+/// The enabled list from the combined inputs of [`subscribe_enabled`]: the language and hidden sets, then the
 /// source list.
-type EnabledInputs = ((BTreeSet<String>, BTreeSet<String>, BTreeSet<String>), Vec<Source>);
+type EnabledInputs = ((BTreeSet<String>, BTreeSet<String>), Vec<Source>);
 
 fn enabled_from(inputs: &EnabledInputs) -> Vec<Source> {
     enabled_with(inputs, NO_LAST_USED)
 }
 
-fn enabled_with(((pinned, languages, disabled), sources): &EnabledInputs, last_used: Id) -> Vec<Source> {
-    compute_enabled_sources(sources, languages, disabled, pinned, last_used)
+fn enabled_with(((languages, disabled), sources): &EnabledInputs, last_used: Id) -> Vec<Source> {
+    compute_enabled_sources(sources, languages, disabled, last_used)
 }
 
 /// The Java `String.CASE_INSENSITIVE_ORDER` (JDK 16 and later, which compare code points): each character is compared
@@ -193,11 +180,6 @@ impl SourceToggles {
         self.edit(hidden, |set| set_disabled(set, ids, disable))
     }
 
-    /// Pins or unpins source `id`. Returns `true` when pinned after the call.
-    pub fn toggle_pin(&self, pinned: &Pref<BTreeSet<String>>, id: Id) -> bool {
-        self.edit(pinned, |set| toggle_pin(set, id))
-    }
-
     /// Adds or removes a language. Returns `true` when enabled after the call.
     pub fn toggle_language(&self, languages: &Pref<BTreeSet<String>>, language: &str) -> bool {
         self.edit(languages, |set| toggle_language(set, language))
@@ -239,38 +221,36 @@ mod tests {
     #[test]
     fn empty_languages_leave_only_the_local_source() {
         let sources = [src(0, "Local", ""), src(1, "Alpha", "en"), src(2, "Beta", "ja")];
-        let list = compute_enabled_sources(&sources, &set(&[]), &set(&[]), &set(&[]), -1);
+        let list = compute_enabled_sources(&sources, &set(&[]), &set(&[]), -1);
         assert_eq!(keys(&list), ["0"], "EC-30");
     }
 
     #[test]
-    fn pinned_and_last_used_source_gives_two_rows_with_the_second_flagged() {
+    fn the_last_used_source_gives_two_rows_with_the_second_flagged() {
         let sources = [src(1, "Alpha", "en"), src(2, "Beta", "en")];
-        let list = compute_enabled_sources(&sources, &set(&["en"]), &set(&[]), &set(&["1"]), 1);
+        let list = compute_enabled_sources(&sources, &set(&["en"]), &set(&[]), 1);
         assert_eq!(keys(&list), ["1", "1-lastused", "2"], "EC-31: the second row has the used-last key");
-        assert_eq!(list[0].pin, Pins::PINNED);
-        assert_eq!(list[1].pin.bits(), 0b01, "pin minus Actual");
         assert!(list[1].is_used_last && !list[0].is_used_last);
     }
 
     #[test]
     fn a_last_used_id_that_is_hidden_or_unknown_adds_no_row() {
         let sources = [src(1, "Alpha", "en")];
-        let hidden = compute_enabled_sources(&sources, &set(&["en"]), &set(&["1"]), &set(&[]), 1);
+        let hidden = compute_enabled_sources(&sources, &set(&["en"]), &set(&["1"]), 1);
         assert!(hidden.is_empty(), "EC-32: hidden, so no duplicate");
-        let unknown = compute_enabled_sources(&sources, &set(&["en"]), &set(&[]), &set(&[]), 99);
+        let unknown = compute_enabled_sources(&sources, &set(&["en"]), &set(&[]), 99);
         assert_eq!(keys(&unknown), ["1"]);
     }
 
     #[test]
     fn names_sort_without_regard_to_case_and_equal_names_keep_repository_order() {
         let sources = [src(7, "beta", "en"), src(3, "Alpha", "en"), src(9, "Beta", "ja"), src(4, "ALPHA", "en")];
-        let list = compute_enabled_sources(&sources, &set(&["en", "ja"]), &set(&[]), &set(&[]), -1);
+        let list = compute_enabled_sources(&sources, &set(&["en", "ja"]), &set(&[]), -1);
         assert_eq!(keys(&list), ["3", "4", "7", "9"], "EC-33: stable among equal names");
     }
 
     #[test]
-    fn toggles_flip_show_hide_and_pin_and_languages() {
+    fn toggles_flip_show_hide_and_languages() {
         let prefs = test_prefs();
         let toggles = SourceToggles::default();
         assert!(toggles.flip_disabled(&prefs.disabled_manga_sources, 5), "flip hides and reports hidden");
@@ -283,11 +263,6 @@ mod tests {
         assert!(!toggles.set_disabled(&prefs.disabled_manga_sources, &[5, 6], false));
         assert!(prefs.disabled_manga_sources.get().is_empty());
 
-        assert!(toggles.toggle_pin(&prefs.pinned_manga_sources, 8));
-        assert!(prefs.pinned_manga_sources.get().contains("8"));
-        assert!(!toggles.toggle_pin(&prefs.pinned_manga_sources, 8));
-        assert!(prefs.pinned_manga_sources.get().is_empty());
-
         assert!(toggles.toggle_language(&prefs.enabled_languages, "fr"));
         assert!(prefs.enabled_languages.get().contains("fr"));
         assert!(!toggles.toggle_language(&prefs.enabled_languages, "fr"));
@@ -299,67 +274,62 @@ mod tests {
     fn a_toggle_with_one_write_leaves_the_other_sets_as_they_were() {
         let prefs = test_prefs();
         let toggles = SourceToggles::default();
-        toggles.toggle_pin(&prefs.pinned_manga_sources, 3);
         toggles.toggle_language(&prefs.enabled_languages, "ja");
         toggles.flip_disabled(&prefs.disabled_manga_sources, 4);
-        assert_eq!(prefs.pinned_manga_sources.get(), set(&["3"]), "a language or hide does not touch pins");
         assert_eq!(prefs.disabled_manga_sources.get(), set(&["4"]));
         assert!(prefs.enabled_languages.get().contains("ja"));
     }
 
     /// The section 2 input of `p1-edge-cases-and-tests.md`, as rows, with the settings the vector names.
-    fn section2() -> (Vec<Source>, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
+    fn section2() -> (Vec<Source>, BTreeSet<String>, BTreeSet<String>) {
         let rows = crate::source::fakes::enabled_rows();
-        (rows, set(&["en", "ja"]), set(&["4"]), set(&["3"]))
+        (rows, set(&["en", "ja"]), set(&["4"]))
     }
 
     #[test]
     fn the_main_vector_of_section_two_gives_the_five_rows_in_order() {
-        let (rows, languages, disabled, pinned) = section2();
-        let list = compute_enabled_sources(&rows, &languages, &disabled, &pinned, 2);
+        let (rows, languages, disabled) = section2();
+        let list = compute_enabled_sources(&rows, &languages, &disabled, 2);
         assert_eq!(keys(&list), ["2", "2-lastused", "3", "0", "1"]);
-        assert_eq!(list[1].pin.bits(), 0b00, "the Rust duplicate of an unpinned source is 0b00");
-        assert_eq!(list[2].pin, Pins::PINNED);
-        assert!(list[1].is_used_last && !list[1].pin.contains(Pin::Actual));
+        assert!(list[1].is_used_last);
     }
 
     #[test]
     fn e_n1_no_languages_leaves_only_the_local_row() {
-        let (rows, _, disabled, pinned) = section2();
-        let list = compute_enabled_sources(&rows, &set(&[]), &disabled, &pinned, 2);
+        let (rows, _, disabled) = section2();
+        let list = compute_enabled_sources(&rows, &set(&[]), &disabled, 2);
         assert_eq!(keys(&list), ["0"]);
     }
 
     #[test]
-    fn e_n2_hidden_pinned_and_last_used_leave_rows_four_and_five_only() {
+    fn e_n2_hidden_and_last_used_leave_rows_four_and_five_only() {
         // The vector's disabled set {2, 3} is read with source 4 still hidden (the main setting), so the output is the
         // local row and Zeta: rows 4 and 5 of the main vector.
-        let (rows, languages, _, _) = section2();
-        let list = compute_enabled_sources(&rows, &languages, &set(&["2", "3", "4"]), &set(&[]), 2);
+        let (rows, languages, _) = section2();
+        let list = compute_enabled_sources(&rows, &languages, &set(&["2", "3", "4"]), 2);
         assert_eq!(keys(&list), ["0", "1"]);
     }
 
     #[test]
     fn e_n3_an_unknown_last_used_id_adds_no_duplicate() {
-        let (rows, languages, disabled, pinned) = section2();
-        let list = compute_enabled_sources(&rows, &languages, &disabled, &pinned, 99);
+        let (rows, languages, disabled) = section2();
+        let list = compute_enabled_sources(&rows, &languages, &disabled, 99);
         assert!(list.iter().all(|s| !s.is_used_last));
     }
 
     #[test]
-    fn e_n4_a_pinned_source_outside_the_languages_is_absent_but_stays_pinned() {
-        let (rows, _, _, pinned) = section2();
+    fn e_n4_a_source_outside_the_languages_is_absent() {
+        let (rows, _, _) = section2();
         let languages = set(&["fr"]);
-        let list = compute_enabled_sources(&rows, &languages, &set(&["4"]), &pinned, -1);
+        let list = compute_enabled_sources(&rows, &languages, &set(&["4"]), -1);
         assert_eq!(keys(&list), ["0", "5"], "source 3 is absent");
-        assert!(pinned.contains("3"), "the set is storage and is not changed by the list");
     }
 
     #[test]
     fn e_n5_a_last_used_source_in_a_third_language_appears_twice() {
-        let (rows, _, disabled, pinned) = section2();
+        let (rows, _, disabled) = section2();
         let languages = set(&["en", "ja", "fr"]);
-        let list = compute_enabled_sources(&rows, &languages, &disabled, &pinned, 5);
+        let list = compute_enabled_sources(&rows, &languages, &disabled, 5);
         let omega = list.iter().filter(|s| s.id == 5).count();
         assert_eq!(omega, 2);
     }
@@ -367,9 +337,9 @@ mod tests {
     /// The section 2 vectors through `enabled_from`, the one path both kinds take (T-17a-042).
     #[test]
     fn section_two_vectors_hold() {
-        let (rows, languages, disabled, pinned) = section2();
+        let (rows, languages, disabled) = section2();
         let run = |languages: &BTreeSet<String>, hidden: &BTreeSet<String>, last_used: i64| {
-            let inputs = ((pinned.clone(), languages.clone(), hidden.clone()), rows.clone());
+            let inputs = ((languages.clone(), hidden.clone()), rows.clone());
             keys(&enabled_with(&inputs, last_used))
         };
         assert_eq!(run(&languages, &disabled, 2), ["2", "2-lastused", "3", "0", "1"], "main vector");
@@ -382,21 +352,10 @@ mod tests {
     }
 
     #[test]
-    fn a_pinned_last_used_duplicate_keeps_the_pinned_bit_so_its_menu_reads_unpin() {
-        let sources = [src(1, "Alpha", "en")];
-        let list = compute_enabled_sources(&sources, &set(&["en"]), &set(&[]), &set(&["1"]), 1);
-        assert_eq!(list.len(), 2);
-        assert!(list[1].is_used_last);
-        assert!(list[1].pin.contains(Pin::Pinned), "the duplicate reads Unpin, as its source does");
-        assert!(!list[1].pin.contains(Pin::Actual));
-    }
-
-    #[test]
     fn unparsable_stored_ids_are_ignored_by_the_readers() {
         let sources = [src(1, "Alpha", "en")];
-        let list = compute_enabled_sources(&sources, &set(&["en"]), &set(&["x", "1.5"]), &set(&["y"]), -1);
+        let list = compute_enabled_sources(&sources, &set(&["en"]), &set(&["x", "1.5"]), -1);
         assert_eq!(keys(&list), ["1"]);
-        assert_eq!(list[0].pin, Pins::UNPINNED);
     }
 
     #[tokio::test]

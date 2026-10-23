@@ -71,7 +71,6 @@ fn t38_source_ids_are_decimal_strings_and_nothing_parses_them() {
         sources: &sources,
         enabled_languages: &enabled(&["en"]),
         disabled: &hidden,
-        pinned: &BTreeSet::new(),
         last_used: -1,
     });
     assert_eq!(list.len(), 2, "a stored id that is not a number is skipped, the source still lists: {list:?}");
@@ -80,7 +79,6 @@ fn t38_source_ids_are_decimal_strings_and_nothing_parses_them() {
         sources: &sources,
         enabled_languages: &enabled(&["en"]),
         disabled: &hidden,
-        pinned: &BTreeSet::new(),
         last_used: -1,
     });
     assert!(list.is_empty(), "\"12\" is the id of the source");

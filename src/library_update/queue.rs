@@ -85,6 +85,8 @@ pub enum SkipReason {
     NotCaughtUp,
     NotStarted,
     NotInReleasePeriod,
+    /// The user turned the title's source off.
+    SourceOff,
 }
 
 impl SkipReason {
@@ -95,6 +97,7 @@ impl SkipReason {
             Self::NotCaughtUp => tr(MsgKey::skipped_reason_not_caught_up),
             Self::NotStarted => tr(MsgKey::skipped_reason_not_started),
             Self::NotInReleasePeriod => tr(MsgKey::skipped_reason_not_in_release_period),
+            Self::SourceOff => tr(MsgKey::source_switch_off),
         }
     }
 }
@@ -111,6 +114,8 @@ pub struct QueueInput<'a> {
     pub release_window_upper_ms: i64,
     /// Season children per `Seasons`-type parent id. A missing key means no children.
     pub season_children: &'a HashMap<i64, Vec<LibraryEntry>>,
+    /// The sources the user turned off: their titles are not updated.
+    pub off_sources: &'a HashSet<i64>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -177,6 +182,9 @@ fn expand_seasons(selected: Vec<LibraryEntry>, input: &QueueInput) -> Vec<Librar
 
 fn skip_reason(entry: &LibraryEntry, input: &QueueInput) -> Option<SkipReason> {
     let r = input.restrictions;
+    if input.off_sources.contains(&entry.source) {
+        return Some(SkipReason::SourceOff);
+    }
     if entry.update_strategy != UpdateStrategy::AlwaysUpdate {
         return Some(SkipReason::NotAlwaysUpdate);
     }
@@ -236,6 +244,7 @@ mod tests {
             include_season_children: false,
             release_window_upper_ms: i64::MAX,
             season_children: &none,
+            off_sources: &HashSet::new(),
         })
     }
 
@@ -291,6 +300,28 @@ mod tests {
         let only_ongoing = QueueRestrictions::from_tokens(&["manga_ongoing"]);
         assert!(only_ongoing.skip_completed && !only_ongoing.skip_unread);
         assert_eq!(QueueRestrictions::from_pref(Some(&[] as &[&str])), QueueRestrictions::default());
+    }
+
+    #[test]
+    fn a_title_whose_source_is_off_is_skipped() {
+        let none = HashMap::new();
+        let off = HashSet::from([1001]);
+        let mut other = entry(2, "B", 0);
+        other.source = 2002;
+        let library = [entry(1, "A", 0), other];
+        let q = build_queue(&QueueInput {
+            library: &library,
+            explicit_category: None,
+            include_categories: &[],
+            exclude_categories: &[],
+            restrictions: QueueRestrictions::default(),
+            include_season_children: false,
+            release_window_upper_ms: i64::MAX,
+            season_children: &none,
+            off_sources: &off,
+        });
+        assert_eq!(q.skipped, vec![(1, SkipReason::SourceOff)]);
+        assert_eq!(q.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [2]);
     }
 
     #[test]
@@ -357,6 +388,7 @@ mod tests {
             include_season_children: false,
             release_window_upper_ms: upper,
             season_children: &none,
+            off_sources: &HashSet::new(),
         });
         assert_eq!(ids(&q), vec![1]);
         assert_eq!(q.skipped, vec![(2, SkipReason::NotInReleasePeriod)]);
@@ -407,6 +439,7 @@ mod tests {
             include_season_children: true,
             release_window_upper_ms: i64::MAX,
             season_children: &seasons,
+            off_sources: &HashSet::new(),
         });
         assert_eq!(ids(&with), vec![11]);
         assert_eq!(with.entries[0].category, -1);
@@ -421,6 +454,7 @@ mod tests {
             include_season_children: false,
             release_window_upper_ms: i64::MAX,
             season_children: &seasons,
+            off_sources: &HashSet::new(),
         });
         assert!(without.entries.is_empty());
         // Q-16: a parent with no entry in the map contributes nothing.
@@ -434,6 +468,7 @@ mod tests {
             include_season_children: true,
             release_window_upper_ms: i64::MAX,
             season_children: &empty_map,
+            off_sources: &HashSet::new(),
         });
         assert!(missing.entries.is_empty());
     }

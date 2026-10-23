@@ -1,4 +1,4 @@
-//! The pure toggles of the source lists (`ToggleMangaSource`, `ToggleMangaSourcePin`, `ToggleLanguage`;
+//! The pure toggles of the source lists (`ToggleMangaSource`, `ToggleLanguage`;
 //! T-17a-019, T-17a-020, T-17a-022). Each function changes one set and returns the new
 //! membership, so the UI can update without reading the set again. A set holds decimal source ids (`p1-data-and-config.md`
 //! section 7). The naming trap is gone: a "disabled" set is never read through a helper called `is_enabled`.
@@ -24,11 +24,6 @@ pub fn set_disabled(disabled: &mut BTreeSet<String>, ids: &[Id], disable: bool) 
         }
     }
     disable
-}
-
-/// Pins a source that is not pinned, unpins one that is (`ToggleMangaSourcePin`). Returns `true` when pinned after the call.
-pub fn toggle_pin(pinned: &mut BTreeSet<String>, id: Id) -> bool {
-    toggle_member(pinned, id)
 }
 
 /// Adds a language code that is absent, removes one that is present (`ToggleLanguage`). Codes are compared exactly.
@@ -84,14 +79,6 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_toggle_reports_pinned_after_the_call() {
-        let mut pinned = set(&[]);
-        assert!(toggle_pin(&mut pinned, 8));
-        assert!(!toggle_pin(&mut pinned, 8));
-        assert!(pinned.is_empty());
-    }
-
-    #[test]
     fn a_language_toggle_adds_and_removes_and_codes_are_exact() {
         let mut languages = set(&["en"]);
         assert!(toggle_language(&mut languages, "fr"));
@@ -111,14 +98,12 @@ mod tests {
     }
 
     #[test]
-    fn a_language_toggle_leaves_the_disabled_and_pinned_sets_alone() {
+    fn a_language_toggle_leaves_the_disabled_set_alone() {
         let disabled = set(&["3"]);
-        let pinned = set(&["4"]);
         let mut languages = set(&["en"]);
         toggle_language(&mut languages, "ja");
         toggle_language(&mut languages, "en");
         assert_eq!(disabled, set(&["3"]));
-        assert_eq!(pinned, set(&["4"]));
     }
 
     proptest! {

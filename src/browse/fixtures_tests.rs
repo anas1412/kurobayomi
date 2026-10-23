@@ -59,9 +59,6 @@ fn sources_fixture() -> Vec<Source> {
             let mut source = Source::new(s["id"].as_i64().expect("id"), &text(s, "name"), &text(s, "lang"));
             source.supports_latest = s["supports_latest"].as_bool().unwrap_or(false);
             source.is_stub = s["is_stub"].as_bool().unwrap_or(false);
-            if s["pinned"].as_bool().unwrap_or(false) {
-                source.pin = kuro_domain::source::pin::Pins::PINNED;
-            }
             source
         })
         .collect()
@@ -150,8 +147,8 @@ fn a_chip_change_with_the_query_searches_nothing_new() {
         .map(|source| Candidate { source, package: String::new() })
         .collect();
     let mut search = GlobalSearch::new(candidates, set(&["en", "ja", "all", "other", "de"]), BTreeSet::new(), None, false);
-    let first = search.request("title", None).expect("the first search runs the pinned source");
-    assert!(first.sources.iter().any(|s| s.id == 1001) && first.sources.iter().any(|s| s.id == 5001), "the Pinned chip is cut: every source is searched");
+    let first = search.request("title", None).expect("the first search runs every source");
+    assert!(first.sources.iter().any(|s| s.id == 1001) && first.sources.iter().any(|s| s.id == 5001), "every source is searched");
     search.apply(first.generation, 1001, Ok(Vec::new()));
     assert_eq!(search.set_filter(SourceFilter::All), None, "a chip change adds no source: nothing is searched again");
 }
@@ -285,16 +282,14 @@ fn tc_40_120_aniyomi_style_settings_in_a_toml_file_read_as_the_same_modes_and_se
     // the exporter writes each Aniyomi key under [sources] by its field name, with the Aniyomi spelling of the value
     std::fs::write(
         config_file(&config),
-        "[sources]\ndisabled_manga_sources = [\"11\", \"12\"]\npinned_manga_sources = [\"5\"]\nenabled_languages = [\"en\", \"ja\"]\n",
+        "[sources]\ndisabled_manga_sources = [\"11\", \"12\"]\nenabled_languages = [\"en\", \"ja\"]\n",
     )
     .expect("seed");
     let backend = TomlBackend::open(&config, &state).expect("open");
     let store = PrefStore::new(Box::new(backend)).expect("store");
     let prefs = SourcePrefs::new(store);
     assert_eq!(prefs.disabled_manga_sources.key(), "hidden_catalogues");
-    assert_eq!(prefs.pinned_manga_sources.key(), "pinned_catalogues");
     assert_eq!(prefs.disabled_manga_sources.get(), set(&["11", "12"]), "the hidden sources, as decimal ids");
-    assert_eq!(prefs.pinned_manga_sources.get(), set(&["5"]), "the pinned sources");
     assert_eq!(prefs.enabled_languages.get(), set(&["en", "ja"]), "the enabled languages");
 }
 
@@ -317,7 +312,7 @@ fn section_18_keys() -> Vec<(&'static str, kuro_i18n::MsgKey)> {
         // the browse toolbar
         action_display_mode, action_display_comfortable_grid, action_display_grid, action_display_list, action_settings, browse,
         // the sources list
-        latest, action_pin, action_unpin, action_disable, not_installed, label_sources, pinned_sources, all, has_results,
+        latest, action_disable, not_installed, label_sources, all, has_results,
         // the extension list
         label_manga_extensions, label_extensions, label_extension_repos, action_filter, ext_updates_pending, ext_installed,
         ext_update_all, ext_update, ext_install, ext_pending, ext_downloading, ext_installing, ext_untrusted, ext_obsolete,

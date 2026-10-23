@@ -686,7 +686,21 @@ impl View {
             }
             EntryEvent::RefreshEnded(result) => {
                 // a failed refresh says why in a notification (behaviour 19)
-                if let Some(message) = result.as_ref().err().and_then(refresh_snack) {
+                // a source the user turned off is not an error: the notice offers to turn it on, then refreshes
+                let missing = matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled));
+                let entry = self.model.borrow().as_ref().map(|m| (m.entry.id, m.entry.source));
+                let off = match entry.filter(|_| missing) {
+                    Some((entry_id, source)) => {
+                        let runner = Rc::downgrade(&self.runner);
+                        crate::source_switch::offer_turn_on(source, move || {
+                            if let Some(runner) = runner.upgrade() {
+                                runner.send(EntryCmd::Refresh { entry_id });
+                            }
+                        })
+                    }
+                    None => false,
+                };
+                if let Some(message) = result.as_ref().err().filter(|_| !off).and_then(refresh_snack) {
                     // Retry runs the refresh again; an uninstalled source has nothing to retry
                     let entry_id = self.model.borrow().as_ref().map(|m| m.entry.id);
                     match entry_id.filter(|_| !matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled))) {

@@ -6,6 +6,26 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+### Added
+
+- Every source has its own on/off switch. Right after you add a repository, a list of its sources opens so you can turn
+  on the ones you want; the repository's card has a Sources button that opens the same list. When a repository adds new
+  sources, a notice says so and opens the list.
+- Check now (a source's right-click menu in Browse) downloads the source again and loads its first page from your own
+  connection, then shows its status dot from that result: green works, orange blocked, red broken.
+
+### Changed
+
+- A source that is off is not on your computer: it is not downloaded or updated, and Browse, global search and the library
+  update leave it out. Its titles stay in the library and their downloads still open; anything that needs the site says
+  "This source is off" with a Turn on button. Turning off a source with library titles asks first.
+- New sources start off. After updating, every source you already had stays on.
+- Restoring an Aniyomi backup turns on every source except the ones Aniyomi had disabled.
+
+### Removed
+
+- Pinning sources.
+
 ## [0.1.4] - 2026-10-22
 
 ### Changed

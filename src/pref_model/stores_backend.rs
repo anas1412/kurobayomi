@@ -47,6 +47,13 @@ pub trait Ops<T>: Send + Sync + 'static {
     fn busy_text(&self) -> Option<String> {
         None
     }
+    /// Whether an item lists sources the user turns on one by one (a repository): its card then has a Sources button
+    /// that runs [`Ops::open_sources`], which also opens right after the item is added.
+    fn has_sources(&self) -> bool {
+        false
+    }
+    /// Opens the source switches of item `key`. Runs on the GTK thread.
+    fn open_sources(&self, _key: &str) {}
 }
 
 /// The busy card text while a repo link's index and sources download.
@@ -98,11 +105,20 @@ impl Ops<RepoLink> for RepoOps {
         Some(adding_repo())
     }
 
+    fn has_sources(&self) -> bool {
+        true
+    }
+
+    /// A repository's sources start off: the user picks the ones to turn on.
+    fn open_sources(&self, key: &str) {
+        crate::source_switch::open_picker(key);
+    }
+
     fn card(&self, repo: &RepoLink) -> Card {
         repo_card(&repo.0, crate::recipe_sources::saved_index(&repo.0).as_ref())
     }
 
-    /// Fetches the index and every source it lists, then saves the link. Nothing is saved when any of it fails.
+    /// Fetches the index (and the files of sources already on, normally none), then saves the link. Nothing is saved when any of it fails.
     fn add(&self, url: &str) -> AddOutcome {
         let link = url.trim();
         if !(link.starts_with("https://") && link.ends_with(".json")) {

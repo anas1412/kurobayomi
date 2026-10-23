@@ -95,16 +95,77 @@ pub fn repo_http() -> reqwest::Client {
     .clone()
 }
 
-/// Fetches a repo link's index and its sources into the link's folder and returns how many sources it lists. Blocks, so
-/// call it off the GTK thread.
+/// The source preferences, once [`start`] has run.
+fn source_prefs() -> Option<SourcePrefs> {
+    PREFS.get().map(|store| SourcePrefs::new(store.clone()))
+}
+
+/// Fetches a repo link's index and the files of its sources that are on into the link's folder, and returns how many
+/// sources it lists. Blocks, so call it off the GTK thread.
 pub fn sync_link(link: &str) -> Result<usize, RepoError> {
     let root = repo_root().ok_or_else(|| RepoError::Write("the app folders are not set".to_owned()))?;
     let dir = repo::link_dir(&root, link);
     let http = repo_http();
-    match block(repo::sync_link(&http, &dir, link)) {
+    let on = source_prefs().map(|prefs| prefs.enabled_sources.get()).unwrap_or_default();
+    let wanted = move |entry: &repo::Entry| on.contains(&entry.id);
+    match block(repo::sync_link(&http, &dir, link, &wanted)) {
         Some(result) => result.map(|index| index.sources.len()),
         None => Err(RepoError::Network("the app runtime is not running".to_owned())),
     }
+}
+
+/// The saved icon of a source of a repo link, when it has one.
+pub fn saved_icon(link: &str, entry: &repo::Entry) -> Option<PathBuf> {
+    repo::read_icon(&repo::link_dir(&repo_root()?, link), entry)
+}
+
+/// The repo link and the index entry of the source with entry id `key`, in the saved indexes.
+fn find_entry(key: &str) -> Option<(PathBuf, repo::Entry)> {
+    let root = repo_root()?;
+    source_prefs()?.manga_extension_repos.get().into_iter().find_map(|link| {
+        let dir = repo::link_dir(&root, &link);
+        let entry = repo::read_index(&dir)?.sources.into_iter().find(|entry| entry.id == key)?;
+        Some((dir, entry))
+    })
+}
+
+/// Fetches the file of the source with entry id `key` (again when its copy does not match). Blocks.
+pub fn fetch_source(key: &str) -> Result<(), RepoError> {
+    let (dir, entry) = find_entry(key).ok_or_else(|| RepoError::Write(format!("no saved repository lists {key}")))?;
+    let http = repo_http();
+    match block(repo::ensure_cached(&http, &dir, &entry)) {
+        Some(result) => result.map(|_| ()),
+        None => Err(RepoError::Network("the app runtime is not running".to_owned())),
+    }
+}
+
+/// Check now of a loaded repository source: fetches its file again, loads it, and asks for its first page from this
+/// connection. The status that gives replaces the repository's for this run. `None` when the source is not a repository
+/// source or the device is offline. Blocks.
+pub fn check(kind: Kind, source_id: i64) -> Option<repo::Status> {
+    let key = crate::source_switch::key_of(source_id)?;
+    let (dir, entry) = find_entry(&key)?;
+    // a fresh copy: the one on disk may be the version that broke
+    let _ = std::fs::remove_file(repo::cached_path(&dir, &entry));
+    if let Err(error) = fetch_source(&key) {
+        tracing::warn!(%error, key, "Check now could not fetch the source");
+        return Some(repo::Status::Broken);
+    }
+    reload_now();
+    let catalogue = crate::browse::directory::current(kind).catalogue(source_id)?;
+    let filters = catalogue.filter_list();
+    let result = block(async move { crate::browse::errors::limited(catalogue.list(kuro_domain::source::browse::BrowseQuery::Popular, &filters, 1)).await.map(|(found, _)| found.len()) })?;
+    if let Err(error) = &result {
+        if crate::browse::errors::classify(error, gtk::gio::prelude::NetworkMonitorExt::is_network_available(&gtk::gio::NetworkMonitor::default())) == crate::browse::errors::Trouble::Offline {
+            crate::toast::notify(crate::browse::errors::offline());
+            return None;
+        }
+        tracing::info!(%error, key, "Check now: the first page failed");
+    }
+    let status = crate::source_switch::checked_status(&result);
+    CHECKED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(source_id, status);
+    notify_changed();
+    Some(status)
 }
 
 /// Deletes a removed link's saved copies. A folder that is already gone is not an error.
@@ -208,7 +269,25 @@ pub fn folder_names(kind: Kind) -> Vec<(i64, String)> {
         Kind::Manga => crate::browse::directory::current(Kind::Manga).sources(),
         Kind::Anime => anime_rows(),
     };
-    names_of(rows)
+    let mut names = names_of(rows);
+    names.extend(off_folder_names(kind));
+    names
+}
+
+/// The download folder names of the sources that are off, from the names they were recorded under: their downloads stay
+/// known, so they still open.
+fn off_folder_names(kind: Kind) -> Vec<(i64, String)> {
+    if !crate::data::is_installed() {
+        return Vec::new();
+    }
+    let stubs = kuro_data::source::StubSourceRepo::new(crate::data::app().db.clone(), kind);
+    crate::source_switch::off_ids()
+        .into_iter()
+        .filter_map(|id| {
+            let stub = stubs.get(id).ok().flatten().filter(|stub| !stub.is_invalid())?;
+            Some((id, kuro_source::display_name(&stub.name, &stub.lang)))
+        })
+        .collect()
 }
 
 fn names_of(rows: Vec<DirectorySource>) -> Vec<(i64, String)> {
@@ -270,17 +349,27 @@ static RELOAD_LOCK: Mutex<()> = Mutex::new(());
 /// [`ready`] and [`changes`]. A plug-in that does not load is named in a toast.
 pub fn reload() {
     LOAD_STATE.begin();
-    let spawned = std::thread::Builder::new().name("kuro-sources".to_owned()).spawn(|| {
-        let _end = EndOnDrop;
-        let _one_at_a_time = RELOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let failed = load_sources();
-        if !failed.is_empty() {
-            crate::toast::notify(failed_text(&failed));
-        }
-    });
+    let spawned = std::thread::Builder::new().name("kuro-sources".to_owned()).spawn(run_load);
     if let Err(error) = spawned {
         tracing::warn!(%error, "the sources could not be loaded: no thread");
         LOAD_STATE.end();
+    }
+}
+
+/// [`reload`] that returns once the load is installed, for a source that must be usable right after (one just turned
+/// on). Blocks: call it off the GTK thread.
+pub fn reload_now() {
+    LOAD_STATE.begin();
+    run_load();
+}
+
+/// One load, after [`LoadState::begin`].
+fn run_load() {
+    let _end = EndOnDrop;
+    let _one_at_a_time = RELOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let failed = load_sources();
+    if !failed.is_empty() {
+        crate::toast::notify(failed_text(&failed));
     }
 }
 
@@ -301,7 +390,13 @@ fn load_sources() -> Vec<String> {
         tracing::warn!(file, "recipe skipped: {reason}");
     }
     let root = paths.repo_sources_dir();
-    let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
+    let prefs = SourcePrefs::new(store.clone());
+    let links: Vec<String> = prefs.manga_extension_repos.get().into_iter().collect();
+    let saved: Vec<repo::Index> = links.iter().filter_map(|link| repo::read_index(&repo::link_dir(&root, link))).collect();
+    crate::source_switch::settle(&prefs, &saved);
+    let on = prefs.enabled_sources.get();
+    // the entry id of each repo recipe, by the recipe's own id (its package is named after that one)
+    let mut recipe_keys: HashMap<String, String> = HashMap::new();
     // (id, kind, allowed hosts, bytes) for each plug-in of a link
     let mut plugins = Vec::new();
     // the saved icon of each repo package ("scraper.<id>" or "repo.<id>"), as the rows name their packages
@@ -315,7 +410,9 @@ fn load_sources() -> Vec<String> {
             failed.push(link.clone());
             continue;
         };
-        for entry in &index.sources {
+        // a source that is off is not on this computer: its file goes, and it is not loaded
+        repo::prune(&dir, &index, &|entry| on.contains(&entry.id));
+        for entry in index.sources.iter().filter(|entry| on.contains(&entry.id)) {
             let Some(bytes) = repo::read_source(&dir, entry) else {
                 tracing::warn!(id = entry.id.as_str(), "a repo source is missing or changed; it is skipped until the next check");
                 failed.push(entry.id.clone());
@@ -339,6 +436,7 @@ fn load_sources() -> Vec<String> {
                         icons.insert(package_of(&recipe), path);
                     }
                     statuses.insert(package_of(&recipe), entry.status);
+                    recipe_keys.insert(recipe.id.clone(), entry.id.clone());
                     recipes.push(recipe);
                 }
                 Err(reason) => {
@@ -398,6 +496,7 @@ fn load_sources() -> Vec<String> {
     *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
     *ICON_PATHS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(icon_paths);
     let statuses: HashMap<i64, repo::Status> = rows.iter().filter_map(|row| Some((row.source.id, *statuses.get(&row.package)?))).collect();
+    crate::source_switch::record(&prefs, rows.iter().filter_map(|row| Some((row.source.id, entry_key(&row.package, &recipe_keys)?))));
     *STATUSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(statuses);
     install(Kind::Manga, manga);
     let runnable = anime.anime.iter().map(|(source, row)| (Catalogue::Anime(Arc::clone(source)), row.clone())).collect();
@@ -406,17 +505,42 @@ fn load_sources() -> Vec<String> {
     failed
 }
 
+/// The entry id a loaded row came from: `repo.<entry id>` for a plug-in, and for a repo recipe the entry its recipe id
+/// was read from. A recipe of the scrapers folder has none: it is always on.
+fn entry_key(package: &str, recipe_keys: &HashMap<String, String>) -> Option<String> {
+    if let Some(key) = package.strip_prefix("repo.") {
+        return Some(key.to_owned());
+    }
+    recipe_keys.get(package.strip_prefix("scraper.")?).cloned()
+}
+
+/// The entry ids a repo link's saved index lists.
+fn listed_ids(link: &str) -> std::collections::HashSet<String> {
+    saved_index(link).map(|index| index.sources.into_iter().map(|entry| entry.id).collect()).unwrap_or_default()
+}
+
 /// The start check: every link is fetched again on a thread of its own, so the window does not wait for the network and a
-/// source's new version is in use from the next start (user, 2026-10-15). A source file is fetched only when it changed.
-/// The Browse pages are reloaded when it ends.
+/// source's new version is in use from the next start (user, 2026-10-15). A source file is fetched only when it changed,
+/// and only for the sources that are on. Sources a repository added since its last check are announced, so the user
+/// can turn them on. The Browse pages are reloaded when it ends.
 fn check_on_start(links: Vec<String>) {
     if links.is_empty() {
         return;
     }
     std::thread::spawn(move || {
         for link in &links {
-            if let Err(error) = sync_link(link) {
-                tracing::warn!(link = link.as_str(), %error, "the start repo check failed; the saved copy is kept");
+            let before = listed_ids(link);
+            match sync_link(link) {
+                Ok(_) => {
+                    let Some(index) = saved_index(link) else { continue };
+                    let new = index.sources.iter().filter(|entry| !before.contains(&entry.id)).count();
+                    // a link whose saved index was missing has nothing to compare with
+                    if new > 0 && !before.is_empty() {
+                        let repo = index.name.clone().filter(|name| !name.trim().is_empty()).unwrap_or_else(|| link.clone());
+                        crate::source_switch::announce_new(link.clone(), repo, new);
+                    }
+                }
+                Err(error) => tracing::warn!(link = link.as_str(), %error, "the start repo check failed; the saved copy is kept"),
             }
         }
         reload();
@@ -439,8 +563,16 @@ static ICON_PATHS: Mutex<Option<HashMap<i64, PathBuf>>> = Mutex::new(None);
 
 static STATUSES: Mutex<Option<HashMap<i64, repo::Status>>> = Mutex::new(None);
 
-/// The status a repo source's index gives it; `None` for a source outside any repo.
+/// The status a Check now found for a source from the user's own connection, by source id. It wins over the index's
+/// until the app ends.
+static CHECKED: LazyLock<Mutex<HashMap<i64, repo::Status>>> = LazyLock::new(Mutex::default);
+
+/// The status of a repo source: what the last Check now found, else what its index gives it; `None` for a source
+/// outside any repo.
 pub fn status(source_id: i64) -> Option<repo::Status> {
+    if let Some(checked) = CHECKED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&source_id) {
+        return Some(*checked);
+    }
     STATUSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref()?.get(&source_id).copied()
 }
 
@@ -515,8 +647,13 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
     // the NSFW switch of Settings: while it is off, the plug-ins leave adult titles out of their lists
     let show_adult = SourcePrefs::new(store.clone()).show_nsfw_source;
     kuro_extensions::instantiate::set_show_adult(move || show_adult.get());
+    // the switch migration and an Aniyomi restore's disabled list are read before any file is fetched or deleted
+    let prefs = SourcePrefs::new(store.clone());
+    let root = paths.repo_sources_dir();
+    let saved: Vec<repo::Index> = prefs.manga_extension_repos.get().iter().filter_map(|link| repo::read_index(&repo::link_dir(&root, link))).collect();
+    crate::source_switch::settle(&prefs, &saved);
     reload();
-    let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
+    let links: Vec<String> = prefs.manga_extension_repos.get().into_iter().collect();
     check_on_start(links);
 }
 
@@ -638,6 +775,14 @@ mod tests {
         settle().await;
         assert!(rescans.try_recv().is_ok());
         task.abort();
+    }
+
+    #[test]
+    fn a_loaded_row_names_the_repository_entry_it_came_from() {
+        let recipes: HashMap<String, String> = [("example-manga".to_owned(), "example".to_owned())].into();
+        assert_eq!(entry_key("repo.senkuro", &recipes).as_deref(), Some("senkuro"));
+        assert_eq!(entry_key("scraper.example-manga", &recipes).as_deref(), Some("example"), "a repo recipe");
+        assert_eq!(entry_key("scraper.from-the-folder", &recipes), None, "a recipe of the scrapers folder is always on");
     }
 
     #[test]

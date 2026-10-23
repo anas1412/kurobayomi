@@ -12,7 +12,6 @@ pub mod migration;
 pub mod model;
 pub mod non_library;
 pub mod paging;
-pub mod pin;
 pub mod registry;
 pub mod remote_update;
 pub mod repo;

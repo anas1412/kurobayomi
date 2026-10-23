@@ -386,12 +386,12 @@ Not a registry key but you asked for it: **player quality and server choice**. A
 | `extension_repos` | Browse > Sources > Manga extension repos | The manga extension repository addresses. | **KEEP** |  | Always keep: source repository management. | - |
 | `__APP_STATE_trusted_extensions` | Nowhere (state; Advanced > Revoke trusted unknown extensions moves to Browse) | Extensions the user trusted once. | **KEEP** |  | Security state of extension loading. | STATE |
 | `__APP_STATE_has_filters_toggle_state` | Browse > global search (Pinned only toggle) | Remembers the pinned-only toggle of global search. | **CUT** | false | Micro state. | import: app state, not in normal backups; skip it if present |
-| `hidden_anime_catalogues` | Browse > Sources > disable a source (anime) | Anime sources the user switched off. | **KEEP** |  | Source management state. | - |
-| `hidden_catalogues` | Browse > Sources > disable a source (manga) | Manga sources the user switched off. | **KEEP** |  | Source management state. | - |
+| `hidden_anime_catalogues` | Aniyomi backups only | Aniyomi's disabled anime sources. | **KEEP** |  | Read once after a restore: every known source minus these is turned on, then the key is cleared (2026-10-23). Kurobayomi stores the sources that are on in `enabled_sources`. | import: restored, then converted |
+| `hidden_catalogues` | Aniyomi backups only | Aniyomi's disabled manga sources. | **KEEP** |  | As above. | import: restored, then converted |
 | `incognito_anime_extensions` | Browse > extension details > Incognito | Anime extensions that never write history. | **CUT** | {} | Per-extension micro option; global incognito covers it. | import: keep accepting on import |
 | `incognito_manga_extensions` | Browse > extension details > Incognito | Manga extensions that never write history (the extension details page writes the unregistered key incognito_extensions instead). | **CUT** | {} | Same as above. | import: keep accepting on import |
-| `pinned_anime_catalogues` | Browse > Sources > pin a source (anime) | Anime sources pinned to the top. | **KEEP** |  | Source management state. | - |
-| `pinned_catalogues` | Browse > Sources > pin a source (manga) | Manga sources pinned to the top. | **KEEP** |  | Source management state. | - |
+| `pinned_anime_catalogues` | Browse > Sources > pin a source (anime) | Anime sources pinned to the top. | **CUT** | {} | 2026-10-23: one on/off switch per source, no pinning. | import: in `DROPPED_KEYS`, skipped |
+| `pinned_catalogues` | Browse > Sources > pin a source (manga) | Manga sources pinned to the top. | **CUT** | {} | As above. | import: in `DROPPED_KEYS`, skipped |
 | `__APP_STATE_last_anime_catalogue_source` | Browse > Sources > Last used group (anime) | Id of the last anime source opened. | **CUT** | -1 | Micro convenience; pinned sources do the job. | import: app state, not in normal backups; skip it if present |
 | `__APP_STATE_last_catalogue_source` | Browse > Sources > Last used group (manga) | Id of the last manga source opened. | **CUT** | -1 | Same as above. | import: app state, not in normal backups; skip it if present |
 | `ext_updates_count` | Browse tab badge | Cached number of manga extension updates. | **CUT** | 0 | Derive in memory like the anime count (registry note T-19a-064). | import: keep accepting on import |

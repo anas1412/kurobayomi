@@ -129,7 +129,7 @@ fn every_key_renders_with_its_declared_arguments() {
 #[test]
 fn key_table_matches_english_file() {
     assert_eq!(MsgKey::ALL.len(), MSG_COUNT);
-    assert_eq!(MSG_COUNT, 1638, "1343 from the Aniyomi base (1434 minus the 91 dropped names) and the 295 in kurobayomi-extra.ftl");
+    assert_eq!(MSG_COUNT, 1654, "1343 from the Aniyomi base (1434 minus the 91 dropped names) and the 311 in kurobayomi-extra.ftl");
     let ids: HashSet<&str> = MsgKey::ALL.iter().map(|k| k.id()).collect();
     assert_eq!(ids.len(), MSG_COUNT, "ids are unique");
     assert_eq!(MsgKey::r#type.id(), "type");
@@ -162,8 +162,8 @@ fn english_file_has_no_android_escapes_or_entities() {
 fn every_plural_has_an_other_variant() {
     let selects = ENGLISH_FTL.matches("{ $count ->").count();
     let others = ENGLISH_FTL.matches("*[other]").count();
-    assert_eq!(selects, 39, "34 from the Aniyomi base plus ext_store_not_runnable_hidden, repos_added, whats_new_more_changes, local_linked and local_folders_skipped");
-    assert_eq!(others, 39);
+    assert_eq!(selects, 41, "34 from the Aniyomi base plus ext_store_not_runnable_hidden, repos_added, whats_new_more_changes, local_linked, local_folders_skipped, source_switch_off_body and source_switch_new_sources");
+    assert_eq!(others, 41);
 }
 
 #[test]

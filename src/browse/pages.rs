@@ -1229,15 +1229,10 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod pure_tests {
-    use kuro_domain::source::pin::Pins;
-
     use super::*;
 
-    fn row(id: i64, pinned: bool, origin: bool, state: SearchState) -> SearchRow {
-        let mut source = Source::new(id, &format!("S{id}"), "en");
-        if pinned {
-            source.pin = Pins::PINNED;
-        }
+    fn row(id: i64, origin: bool, state: SearchState) -> SearchRow {
+        let source = Source::new(id, &format!("S{id}"), "en");
         SearchRow { source, state, origin }
     }
 
@@ -1278,10 +1273,10 @@ mod pure_tests {
     #[test]
     fn the_chips_filter_the_rows_they_are_given() {
         let rows = vec![
-            row(1, true, false, found()),
-            row(2, false, false, found()),
-            row(3, false, true, SearchState::Results(vec![])),
-            row(4, true, false, SearchState::Loading),
+            row(1, false, found()),
+            row(2, false, found()),
+            row(3, true, SearchState::Results(vec![])),
+            row(4, false, SearchState::Loading),
         ];
         let all = SearchChips { filter: SourceFilter::All, only_has_results: false };
         assert_eq!(ids(&visible_rows(&rows, all)), [1, 2, 3, 4]);
@@ -1292,8 +1287,8 @@ mod pure_tests {
 
     #[test]
     fn the_origin_source_carries_the_arrow_prefix_and_a_card_is_96_px() {
-        assert_eq!(row_title(&row(1, false, true, found())), "\u{25B6} S1");
-        assert_eq!(row_title(&row(2, false, false, found())), "S2");
+        assert_eq!(row_title(&row(1, true, found())), "\u{25B6} S1");
+        assert_eq!(row_title(&row(2, false, found())), "S2");
         assert_eq!(SEARCH_CARD_WIDTH_PX, 96);
     }
 }

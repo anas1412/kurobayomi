@@ -312,6 +312,10 @@ pub fn run_restore(
             RepoOps::new(legacy.links).refresh();
         }
     }
+    // an Aniyomi backup's disabled sources become the source switches on the next load (`source_switch::settle`)
+    if matches!(end, RestoreEnd::Completed(_)) {
+        crate::recipe_sources::reload();
+    }
     Ok(end)
 }
 

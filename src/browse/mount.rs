@@ -77,7 +77,6 @@ fn sources_snapshot(kind: Kind, prefs: &SourcePrefs) -> SourcesSnapshot {
         sources: listed.into_iter().map(|entry| entry.source).collect(),
         enabled_languages: prefs.enabled_languages.get(),
         disabled: BTreeSet::new(),
-        pinned: BTreeSet::new(),
         last_used: crate::misc::diet_defaults::BROWSE_LAST_USED_SOURCE,
         icon_files: BTreeMap::new(),
         home_urls,
@@ -115,6 +114,7 @@ fn sources_page(kind: Kind, prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool
     let nav = SourcesNav {
         open_listing: Rc::new(move |source_id, query| open_route(&BrowseRoute::BrowseSource { kind, source_id, query, migrating: false })),
         open_url: Rc::new(|url: &str| crate::ui::open_link(url, None)),
+        kind,
     };
     let page = super::pages::sources(nav, ready);
     let show = {

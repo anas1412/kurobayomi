@@ -377,6 +377,7 @@ where
             }
         }
 
+        let off_sources = crate::source_switch::off_ids();
         let queue = build_queue(&QueueInput {
             library: &library,
             explicit_category: settings.category,
@@ -386,6 +387,7 @@ where
             include_season_children: settings.include_season_children,
             release_window_upper_ms: window.upper_ms,
             season_children: &season_children,
+            off_sources: &off_sources,
         });
         for (entry_id, reason) in &queue.skipped {
             tracing::debug!(entry_id, reason = reason.message(), "library update skipped entry");

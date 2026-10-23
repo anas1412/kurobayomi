@@ -294,7 +294,6 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use gtk::glib;
-    use kuro_domain::source::pin::Pins;
 
     use super::*;
     use crate::browse::global_search::MAX_IN_FLIGHT;
@@ -350,8 +349,7 @@ mod tests {
     fn candidates(count: i64) -> Vec<crate::browse::global_search::Candidate> {
         (1..=count)
             .map(|id| {
-                let mut source = Source::new(id, &format!("S{id}"), "en");
-                source.pin = Pins::PINNED;
+                let source = Source::new(id, &format!("S{id}"), "en");
                 crate::browse::global_search::Candidate { source, package: format!("ext.{id}") }
             })
             .collect()
@@ -614,7 +612,7 @@ mod tests {
             assert!(pump(context, || rig.runner.snapshot().answered == 2));
             rig.runner.set_filter(SourceFilter::All);
             let _ = pump(context, || false);
-            assert_eq!(rig.started.load(Ordering::SeqCst), 2, "both were pinned and answered: All fetches nothing new");
+            assert_eq!(rig.started.load(Ordering::SeqCst), 2, "both answered: All fetches nothing new");
             let before = rig.snapshots.borrow().len();
             rig.runner.set_only_has_results(true);
             assert_eq!(rig.snapshots.borrow().len(), before + 1, "the toggle redraws and fetches nothing");

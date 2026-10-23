@@ -8,7 +8,6 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use kuro_domain::source::model::Source;
-use kuro_domain::source::pin::Pins;
 
 fn source(id: i64, name: &str, lang: &str) -> Source {
     Source::new(id, name, lang)
@@ -28,7 +27,6 @@ mod source_list {
         rows.iter()
             .map(|row| match row {
                 SourceRow::Header(Section::LastUsed) => "last".to_owned(),
-                SourceRow::Header(Section::Pinned) => "pinned".to_owned(),
                 SourceRow::Header(Section::Language(lang)) => format!("lang:{lang}"),
                 SourceRow::Item(source) if source.is_used_last => format!("{}*", source.name),
                 SourceRow::Item(source) => source.name.clone(),
@@ -36,9 +34,9 @@ mod source_list {
             .collect()
     }
 
-    fn build(sources: &[Source], pinned: &[&str], last_used: i64) -> Vec<SourceRow> {
-        let (enabled, disabled, pinned) = (set(&["en", "ja", "de", ""]), set(&[]), set(pinned));
-        source_list(&ListInput { sources, enabled_languages: &enabled, disabled: &disabled, pinned: &pinned, last_used })
+    fn build(sources: &[Source], last_used: i64) -> Vec<SourceRow> {
+        let (enabled, disabled) = (set(&["en", "ja", "de", ""]), set(&[]));
+        source_list(&ListInput { sources, enabled_languages: &enabled, disabled: &disabled, last_used })
     }
 
     #[test]
@@ -51,18 +49,18 @@ mod source_list {
             source(5, "echo", "de"),
             source(6, "foxtrot", "en"),
         ];
-        let rows = build(&sources, &["5"], 6);
+        let rows = build(&sources, 6);
         assert_eq!(
             shape(&rows),
-            ["last", "foxtrot*", "pinned", "echo", "lang:en", "alpha", "delta", "foxtrot", "lang:ja", "beta", "lang:", "gamma"],
-            "last used, pinned, languages in code order, the empty language last; the header keys are exact"
+            ["last", "foxtrot*", "lang:de", "echo", "lang:en", "alpha", "delta", "foxtrot", "lang:ja", "beta", "lang:", "gamma"],
+            "last used, languages in code order, the empty language last; the header keys are exact"
         );
     }
 
     #[test]
-    fn build_source_list_pinned_and_last_used_duplicate() {
-        let rows = build(&[source(1, "x", "en")], &["1"], 1);
-        assert_eq!(shape(&rows), ["last", "x*", "pinned", "x"], "E-SL-04: a pinned last-used source is listed under both");
+    fn build_source_list_last_used_duplicate() {
+        let rows = build(&[source(1, "x", "en")], 1);
+        assert_eq!(shape(&rows), ["last", "x*", "lang:en", "x"], "E-SL-04: a last-used source is listed under both");
     }
 }
 
@@ -404,11 +402,8 @@ mod global_search {
     use crate::browse::listing::ListItem;
     use crate::browse::pages::{SearchState, SourceFilter};
 
-    fn cand(id: i64, name: &str, pinned: bool) -> Candidate {
-        let mut source = source(id, name, "en");
-        if pinned {
-            source.pin = Pins::PINNED;
-        }
+    fn cand(id: i64, name: &str) -> Candidate {
+        let source = source(id, name, "en");
         Candidate { source, package: String::new() }
     }
 
@@ -426,17 +421,17 @@ mod global_search {
 
     #[test]
     fn global_sort_items_nonempty_first() {
-        let mut search = search_of(vec![cand(1, "Alpha", false), cand(2, "Beta", true), cand(3, "Gamma", false)], None);
+        let mut search = search_of(vec![cand(1, "Alpha"), cand(2, "Beta"), cand(3, "Gamma")], None);
         search.set_query(Some("q"));
         let plan = search.set_filter(SourceFilter::All).expect("a search");
         search.apply(plan.generation, 3, Ok(vec![item(30)]));
         search.apply(plan.generation, 2, Ok(Vec::new()));
-        assert_eq!(row_ids(&search), [3, 2, 1], "non-empty first, then pinned, then by name; the loading row last");
+        assert_eq!(row_ids(&search), [3, 1, 2], "non-empty first, then by name");
     }
 
     #[test]
     fn global_sort_keeps_collisions() {
-        let mut search = search_of(vec![cand(1, "Same", false), cand(2, "Same", false)], None);
+        let mut search = search_of(vec![cand(1, "Same"), cand(2, "Same")], None);
         search.set_query(Some("q"));
         search.set_filter(SourceFilter::All).expect("a search");
         assert_eq!(row_ids(&search), [1, 2], "GS-EC-04: two sources with one key are both kept");
@@ -444,7 +439,7 @@ mod global_search {
 
     #[test]
     fn global_begin_search_noop_rules() {
-        let mut search = search_of(vec![cand(1, "A", true)], None);
+        let mut search = search_of(vec![cand(1, "A")], None);
         search.set_query(Some("   "));
         assert_eq!(search.search(), None, "GS-EC-01: a blank query is a no-op");
         search.set_query(Some("one"));
@@ -454,7 +449,7 @@ mod global_search {
 
     #[test]
     fn global_begin_search_same_query_keeps_results() {
-        let mut search = search_of(vec![cand(1, "A", true), cand(2, "B", false)], None);
+        let mut search = search_of(vec![cand(1, "A"), cand(2, "B")], None);
         search.set_query(Some("one"));
         let plan = search.search().expect("first search");
         search.apply(plan.generation, 1, Ok(vec![item(10)]));
@@ -464,7 +459,7 @@ mod global_search {
 
     #[test]
     fn global_apply_stale_generation_dropped() {
-        let mut search = search_of(vec![cand(1, "A", true)], None);
+        let mut search = search_of(vec![cand(1, "A")], None);
         search.set_query(Some("one"));
         let old = search.search().expect("generation 1");
         search.set_query(Some("two"));
@@ -476,7 +471,7 @@ mod global_search {
 
     #[test]
     fn global_visible_has_results() {
-        let mut search = search_of(vec![cand(1, "A", true), cand(2, "B", true), cand(3, "C", true)], None);
+        let mut search = search_of(vec![cand(1, "A"), cand(2, "B"), cand(3, "C")], None);
         search.set_query(Some("q"));
         let plan = search.search().expect("a search");
         search.apply(plan.generation, 1, Ok(vec![item(1)]));
@@ -488,7 +483,7 @@ mod global_search {
 
     #[test]
     fn global_progress_total() {
-        let mut search = search_of(vec![cand(1, "A", true), cand(2, "B", true), cand(3, "C", true)], None);
+        let mut search = search_of(vec![cand(1, "A"), cand(2, "B"), cand(3, "C")], None);
         search.set_query(Some("q"));
         let plan = search.search().expect("a search");
         assert_eq!(search.progress(), (0, 3));
@@ -499,10 +494,10 @@ mod global_search {
 
     #[test]
     fn migrate_search_origin_first() {
-        let mut search = search_of(vec![cand(1, "Alpha", true), cand(2, "Zulu", false), cand(3, "Mid", true)], Some(2));
+        let mut search = search_of(vec![cand(1, "Alpha"), cand(2, "Zulu"), cand(3, "Mid")], Some(2));
         search.set_query(Some("title"));
         search.set_filter(SourceFilter::All).expect("a search over every source");
-        assert_eq!(row_ids(&search)[0], 2, "E-MG-01: the origin source's row is first, though it is unpinned and sorts last by name");
+        assert_eq!(row_ids(&search)[0], 2, "E-MG-01: the origin source's row is first, though it sorts last by name");
         assert!(search.rows()[0].origin);
     }
 }
@@ -517,7 +512,6 @@ mod props {
     fn section() -> impl Strategy<Value = Section> {
         prop_oneof![
             Just(Section::LastUsed),
-            Just(Section::Pinned),
             proptest::sample::select(vec!["", "en", "ja", "de", "pt-BR", "zh-CN", "all", "\u{1F600}", "\u{FF21}"]).prop_map(|lang| Section::Language(lang.to_owned())),
             proptest::collection::vec(any::<char>(), 0..4).prop_map(|chars| Section::Language(chars.into_iter().collect())),
         ]

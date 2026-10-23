@@ -322,6 +322,8 @@ Source: `docs/design/settings-diet.md`, section 6 tables ("If CUT: hard-code"). 
 | `pref_library_columns_landscape_key` | 0 (auto) | Library view menu (round 5: its control was gone) |
 | `display_download_badge` | false | Library view menu (round 5: its control was gone) |
 | `display_unread_badge` | true | Library view menu (round 5: its control was gone) |
+| `pinned_anime_catalogues` | {} | Source pinning (2026-10-23: one on/off switch per source, no pinning) |
+| `pinned_catalogues` | {} | Source pinning (2026-10-23: one on/off switch per source, no pinning) |
 | `pref_library_columns_portrait_key` | 0 (auto) | Library page (settings_library) and the library window sheets |
 | `pref_filter_animelib_started_v2` | DISABLED | Library page (settings_library) and the library window sheets |
 | `pref_filter_library_started_v2` | DISABLED | Library page (settings_library) and the library window sheets |

@@ -2,7 +2,6 @@
 //! Manga and anime share this shape.
 
 use kuro_platform::kind::Kind;
-use super::pin::Pins;
 
 pub type Id = i64;
 
@@ -31,12 +30,11 @@ pub struct Source {
     pub name: String,
     pub supports_latest: bool,
     pub is_stub: bool,
-    pub pin: Pins,
     pub is_used_last: bool,
 }
 
 impl Source {
-    /// A source with the defaults of both constructors: unpinned, not used last.
+    /// A source with the defaults of both constructors: not used last.
     pub fn new(id: Id, name: &str, lang: &str) -> Self {
         Self {
             id,
@@ -44,7 +42,6 @@ impl Source {
             name: name.to_owned(),
             supports_latest: false,
             is_stub: false,
-            pin: Pins::UNPINNED,
             is_used_last: false,
         }
     }
@@ -90,7 +87,6 @@ mod tests {
     #[test]
     fn constructor_defaults_match_the_upstream_constructors() {
         let s = Source::new(7, "n", "");
-        assert_eq!(s.pin, Pins::UNPINNED);
         assert!(!s.is_used_last);
         assert!(!s.is_stub && !s.supports_latest);
     }

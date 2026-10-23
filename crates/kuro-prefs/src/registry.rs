@@ -227,8 +227,6 @@ define_prefs! {
     "__APP_STATE_trusted_extensions", AppState, Set, &[], "sources", "trusted_extensions";
     "hidden_anime_catalogues", Normal, Set, &[], "sources", "disabled_anime_sources";
     "hidden_catalogues", Normal, Set, &[], "sources", "disabled_manga_sources";
-    "pinned_anime_catalogues", Normal, Set, &[], "sources", "pinned_anime_sources";
-    "pinned_catalogues", Normal, Set, &[], "sources", "pinned_manga_sources";
     "__PRIVATE_pref_mangasync_username_{id}", Private, Str, "", "secrets", "track_username";
     "__PRIVATE_pref_mangasync_password_{id}", Private, Str, "", "secrets", "track_password";
     "__PRIVATE_pref_tracker_auth_expired_{id}", Private, Bool, false, "tracking.auth_expired", "";
@@ -284,13 +282,15 @@ define_prefs! {
     "__APP_STATE_appimage_menu_removed", AppState, Bool, false, "base", "appimage_menu_removed";
     "auto_hide_bars", Normal, Bool, true, "base", "auto_hide_bars";
     "pref_player_default_quality", Normal, Int, 1080, "player", "default_quality";
+    "enabled_sources", Normal, Set, &[], "sources", "enabled_sources";
+    "__APP_STATE_source_keys", AppState, Set, &[], "sources", "source_keys";
 }
 
 /// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
 /// The registry holds no row for them, a restore skips them ([`is_dropped`]) and nothing reads them, so an old
 /// `config.toml` or an Aniyomi backup that still carries one loads and restores without it. Each key and its reason
 /// is recorded in `docs/drop-decisions.md`.
-pub const DROPPED_KEYS: [&str; 276] = [
+pub const DROPPED_KEYS: [&str; 278] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -568,6 +568,9 @@ pub const DROPPED_KEYS: [&str; 276] = [
     "display_unread_badge",
     "pref_animelib_columns_landscape_key",
     "pref_library_columns_landscape_key",
+    // source pinning, cut for one on/off switch per source (2026-10-23)
+    "pinned_anime_catalogues",
+    "pinned_catalogues",
 ];
 
 /// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
@@ -672,15 +675,16 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_61_plan_rows_in_order() {
+    fn registry_has_the_59_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 61, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
+        assert_eq!(rows.len(), 59, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
         // four Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064), `muted_notification_channels`
         // (T-req-platform-004), `check_app_updates` (the update toggle, back from the settings diet, on by default) and
         // `last_kind` (the Anime | Manga choice every page shares), `appimage_menu_removed` (the user took the AppImage
         // out of the applications menu), `auto_hide_bars` (the reader's and the player's bars hide by themselves) and
-        // `pref_player_default_quality` (the height an episode starts at)
-        assert_eq!(REGISTRY.len(), rows.len() + 7);
+        // `pref_player_default_quality` (the height an episode starts at), `enabled_sources` (the sources that are on) and
+        // `source_keys` (which repository entry each source id came from)
+        assert_eq!(REGISTRY.len(), rows.len() + 9);
         assert_eq!(REGISTRY[rows.len()].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 1].key, "muted_notification_channels");
         assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
@@ -688,6 +692,8 @@ mod tests {
         assert_eq!(REGISTRY[rows.len() + 4].key, "__APP_STATE_appimage_menu_removed");
         assert_eq!(REGISTRY[rows.len() + 5].key, "auto_hide_bars");
         assert_eq!(REGISTRY[rows.len() + 6].key, "pref_player_default_quality");
+        assert_eq!(REGISTRY[rows.len() + 7].key, "enabled_sources");
+        assert_eq!(REGISTRY[rows.len() + 8].key, "__APP_STATE_source_keys");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

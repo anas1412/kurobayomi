@@ -262,12 +262,16 @@ pub fn read_source(dir: &Path, entry: &Entry) -> Option<Vec<u8>> {
     (sha256_hex(&bytes) == entry.sha256.to_ascii_lowercase()).then_some(bytes)
 }
 
-/// Fetches a repository's index and each source it lists, and saves them under `dir`. A source is fetched again only when
-/// its copy is missing or does not match the index. Any failure is returned and the saved index stays as it was.
-pub async fn sync_link(client: &reqwest::Client, dir: &Path, link: &str) -> Result<Index, RepoError> {
+/// Fetches a repository's index and the file of each source `wanted` accepts (the sources the user turned on), and saves
+/// them under `dir`. Every listed source's icon is saved, so a list of the sources that are off still shows them. A source
+/// is fetched again only when its copy is missing or does not match the index; the copy of a source that is not wanted is
+/// deleted. Any failure is returned and the saved index stays as it was.
+pub async fn sync_link(client: &reqwest::Client, dir: &Path, link: &str, wanted: &(dyn Fn(&Entry) -> bool + Sync)) -> Result<Index, RepoError> {
     let index = fetch_index(client, link).await?;
     for entry in &index.sources {
-        ensure_cached(client, dir, entry).await?;
+        if wanted(entry) {
+            ensure_cached(client, dir, entry).await?;
+        }
         // an icon is only a picture: one that fails is logged and the repository is still added
         if let Err(error) = ensure_icon(client, dir, entry).await {
             tracing::warn!(id = entry.id.as_str(), %error, "a source icon could not be saved; the source shows its letter tile");
@@ -275,15 +279,18 @@ pub async fn sync_link(client: &reqwest::Client, dir: &Path, link: &str) -> Resu
     }
     let text = serde_json::to_string(&index).map_err(|e| RepoError::Parse(e.to_string()))?;
     write_atomic(&dir.join(INDEX_FILE), text.as_bytes()).map_err(|e| RepoError::Write(e.to_string()))?;
-    prune(dir, &index);
+    prune(dir, &index, wanted);
     Ok(index)
 }
 
-/// Deletes the copies in `dir` that `index` no longer lists: a source dropped from the repo, or a file it replaced (a
-/// recipe that became a plug-in). Files still being written (`.part`) are left alone.
-fn prune(dir: &Path, index: &Index) {
+/// Deletes the copies in `dir` that `index` no longer lists or that are not `wanted`: a source dropped from the repo or
+/// turned off, or a file it replaced (a recipe that became a plug-in). Icons stay for every listed source. Files still
+/// being written (`.part`) are left alone.
+pub fn prune(dir: &Path, index: &Index, wanted: &dyn Fn(&Entry) -> bool) {
     let Ok(files) = std::fs::read_dir(dir) else { return };
-    let keep: std::collections::HashSet<PathBuf> = index.sources.iter().flat_map(|e| [cached_path(dir, e), cached_icon_path(dir, e)]).chain([dir.join(INDEX_FILE)]).collect();
+    let files_kept = index.sources.iter().filter(|e| wanted(e)).map(|e| cached_path(dir, e));
+    let icons = index.sources.iter().map(|e| cached_icon_path(dir, e));
+    let keep: std::collections::HashSet<PathBuf> = files_kept.chain(icons).chain([dir.join(INDEX_FILE)]).collect();
     for path in files.flatten().map(|f| f.path()) {
         if !keep.contains(&path) && path.extension().is_none_or(|ext| ext != "part") {
             if let Err(error) = std::fs::remove_file(&path) {
@@ -428,10 +435,24 @@ mod tests {
         for name in [INDEX_FILE, "kept.toml", "kept.png", "gone.toml", "gone.png", "kept.wasm", "x.1.part"] {
             std::fs::write(dir.path().join(name), b"x").expect("write");
         }
-        prune(dir.path(), &index);
+        prune(dir.path(), &index, &|_| true);
         let mut left: Vec<String> = std::fs::read_dir(dir.path()).expect("read").flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect();
         left.sort();
         assert_eq!(left, [INDEX_FILE, "kept.png", "kept.toml", "x.1.part"]);
+    }
+
+    /// A source the user turned off is not on this computer: its file goes, its icon stays for the source list.
+    #[test]
+    fn the_file_of_a_source_that_is_not_wanted_is_deleted_and_its_icon_kept() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let index = parse_index(&index_of(&[entry("on", "manga", "en"), entry("off", "manga", "en")])).expect("valid");
+        for name in [INDEX_FILE, "on.toml", "off.toml", "off.png"] {
+            std::fs::write(dir.path().join(name), b"x").expect("write");
+        }
+        prune(dir.path(), &index, &|e| e.id == "on");
+        let mut left: Vec<String> = std::fs::read_dir(dir.path()).expect("read").flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, [INDEX_FILE, "off.png", "on.toml"]);
     }
 
     #[test]

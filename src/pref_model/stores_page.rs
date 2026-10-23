@@ -350,7 +350,8 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                 // a spinner card over the window while the fetch runs, as the repo link has no dialog left to show it
                 let busy = ops.busy_text().map(|text| crate::toast::busy(&text));
                 glib::spawn_future_local(async move {
-                    let outcome = gio::spawn_blocking(move || ops.add(&url)).await;
+                    let (adding, added) = (ops.clone(), url.clone());
+                    let outcome = gio::spawn_blocking(move || adding.add(&url)).await;
                     drop(busy);
                     let Some(page) = weak.upgrade() else { return };
                     match outcome {
@@ -363,6 +364,10 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                                 crate::library::mount::refresh(kind);
                             }
                             crate::ui::open("browse");
+                            // the sources of a new repository are off: offer them right away
+                            if ops.has_sources() {
+                                ops.open_sources(added.trim());
+                            }
                         }
                         Ok(AddOutcome::Failed(text)) if close => crate::toast::notify(text),
                         Ok(AddOutcome::Failed(text)) => page.dispatch(Event::AddFailed(text)),
@@ -451,6 +456,13 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             let discord = crate::ui::icon_button("user-available-symbolic", "Discord");
             discord.connect_clicked(move |_| crate::ui::open_link(&link, None));
             h.append(&discord);
+        }
+        if self.ops.has_sources() {
+            let sources = gtk::Button::with_label(&tr(MsgKey::source_switch_sources));
+            sources.set_valign(gtk::Align::Center);
+            let (ops, key) = (self.ops.clone(), card.key.clone());
+            sources.connect_clicked(move |_| ops.open_sources(&key));
+            h.append(&sources);
         }
         let copy = crate::ui::icon_button("edit-copy-symbolic", &self.texts.copy);
         let text = card.copy.clone();

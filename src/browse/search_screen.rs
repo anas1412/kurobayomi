@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use gtk::prelude::*;
 use kuro_domain::source::browse::BrowseQuery;
-use kuro_domain::source::pin::Pins;
 use kuro_i18n::{MsgKey, tr};
 use tokio::sync::watch;
 
@@ -65,17 +64,9 @@ pub fn start_for(migrating: bool, migrate_manga: Option<(i64, String)>, intent: 
     Start::Search { query, extension: None, origin: None }
 }
 
-/// The sources a search can ask, with the pinned ones marked from `pinned_catalogues` (decimal ids).
-pub fn candidates(directory: &dyn SourceDirectory, pinned: &BTreeSet<String>) -> Vec<Candidate> {
-    directory
-        .sources()
-        .into_iter()
-        .map(|entry| {
-            let mut source = entry.source;
-            source.pin = if pinned.contains(&source.id.to_string()) { Pins::PINNED } else { Pins::UNPINNED };
-            Candidate { source, package: entry.package }
-        })
-        .collect()
+/// The sources a search can ask.
+pub fn candidates(directory: &dyn SourceDirectory) -> Vec<Candidate> {
+    directory.sources().into_iter().map(|entry| Candidate { source: entry.source, package: entry.package }).collect()
 }
 
 /// `hidden_catalogues` as source ids; text that is not an id is skipped.
@@ -134,9 +125,9 @@ pub fn search_page(env: &SearchEnv, start: &Start, migrating: bool) -> (gtk::Wid
     // the has-results toggle is cut from the settings: it starts off on every open
     let only_has_results = false;
     let directory = Arc::clone(&env.directory);
-    // the pin and hide sets are cut: every source of an enabled language is searched
-    let (pinned, hidden): (BTreeSet<String>, BTreeSet<String>) = (BTreeSet::new(), BTreeSet::new());
-    let engine = GlobalSearch::new(candidates(&*directory, &pinned), sources.enabled_languages.get(), hidden_ids(&hidden), *origin, only_has_results);
+    // the hide set is cut: every source of an enabled language is searched
+    let hidden: BTreeSet<String> = BTreeSet::new();
+    let engine = GlobalSearch::new(candidates(&*directory), sources.enabled_languages.get(), hidden_ids(&hidden), *origin, only_has_results);
     // the page and the runner reach each other: the page calls the runner through a weak slot
     let slot: Rc<RefCell<Weak<SearchRunner>>> = Rc::default();
     let with_runner = |action: fn(&Rc<SearchRunner>, &str)| {
@@ -402,10 +393,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn candidates_carry_the_pinned_flag_and_the_hidden_ids_skip_text_that_is_no_id() {
+    fn candidates_carry_their_package_and_the_hidden_ids_skip_text_that_is_no_id() {
         let directory = FakeDirectory { entries: vec![entry(1, "A", "en", "ext.a"), entry(2, "B", "ja", "")], answers: Arc::new(|_, _| Ok(Vec::new())) };
-        let found = candidates(&directory, &BTreeSet::from(["2".to_owned()]));
-        assert_eq!(found.iter().map(|c| (c.source.id, c.source.pin.contains(kuro_domain::source::pin::Pin::Pinned))).collect::<Vec<_>>(), [(1, false), (2, true)]);
+        let found = candidates(&directory);
+        assert_eq!(found.iter().map(|c| c.source.id).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(found[0].package, "ext.a");
         assert_eq!(hidden_ids(&BTreeSet::from(["3".to_owned(), "x".to_owned()])), BTreeSet::from([3]));
     }

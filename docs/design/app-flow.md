@@ -4,14 +4,15 @@ This is how a normal user uses Kurobayomi. Every screen, setting and feature mus
 is cut (see `CLAUDE.md`, design principles).
 
 No limit on how many sources a repository lists (user, 2026-10-23: the old cap of 10 per kind is gone). There is no source Install step: adding a repository
-link makes its sources available at once; each source's small file is fetched and checked on first use and refreshed by the
-daily update check.
+link makes its sources available at once; each source that is on has its small file fetched and checked
+when it is turned on and refreshed by the daily update check. A source that is off is not on the computer (2026-10-23).
 
 ## First run, once
 
 1. Open the app and see an empty state with one clear button: "Add a source repository".
-2. Paste a link. The repository's sources appear in Browse at once (grouped by language, with a language filter); there is no
-   Install button.
+2. Paste a link. A list of the repository's sources opens, each with a switch; the ones turned on appear in Browse at once
+   (grouped by language, with a language filter); there is no Install button. Sources start off (user, 2026-10-23), so a
+   repository with many sources does not fill Browse; when the daily check finds new sources, a notice opens the same list.
 3. Optional and skippable: log in to AniList.
 
 ## Finding something to watch or read

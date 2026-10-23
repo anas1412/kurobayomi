@@ -29,9 +29,6 @@ pub struct SourcesSnapshot {
     /// Decimal ids of sources the list leaves out. The page never writes it (the hide toggle is cut); the caller passes
     /// none.
     pub disabled: BTreeSet<String>,
-    /// Decimal ids of sources the list shows under Pinned. The page never writes it (the pin toggle is cut); the caller
-    /// passes none.
-    pub pinned: BTreeSet<String>,
     /// `last_catalogue_source`, -1 for none.
     pub last_used: i64,
     /// Icon files of the extensions that ship one, by source id.
@@ -46,6 +43,8 @@ pub struct SourcesNav {
     pub open_listing: Rc<dyn Fn(i64, BrowseQuery)>,
     /// A row menu's Open website: the source's site in the browser.
     pub open_url: Rc<dyn Fn(&str)>,
+    /// The kind of the page's sources, for a row's Check now.
+    pub kind: kuro_platform::kind::Kind,
 }
 
 struct Inner {
@@ -141,7 +140,6 @@ impl Inner {
                 sources: &snapshot.sources,
                 enabled_languages: &snapshot.enabled_languages,
                 disabled: &snapshot.disabled,
-                pinned: &snapshot.pinned,
                 last_used: snapshot.last_used,
             })
         };
@@ -189,7 +187,7 @@ impl Inner {
         let language = language_line(section, &source);
         let picture = crate::recipe_sources::icon_path(source.id);
         let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), picture.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
-        let (open, menu, id) = (Rc::downgrade(self), Rc::downgrade(self), source.id);
+        let (open, menu, id, name) = (Rc::downgrade(self), Rc::downgrade(self), source.id, source.name.clone());
         list_row(
             &row,
             move || {
@@ -197,7 +195,12 @@ impl Inner {
                     (inner.nav.open_listing)(id, BrowseQuery::Popular);
                 }
             },
-            move || menu.upgrade().map_or_else(Vec::new, |inner| row_menu(&inner.nav, id, home.clone())),
+            move || {
+                let Some(inner) = menu.upgrade() else { return Vec::new() };
+                // a repository source has a switch; a recipe of the scrapers folder and the local source do not
+                let switch = crate::source_switch::key_of(id).map(|key| (key, name.clone()));
+                row_menu(&inner.nav, id, home.clone(), switch)
+            },
         )
     }
 }
@@ -215,7 +218,6 @@ fn status_dot(status: kuro_extensions::repo::Status) -> gtk::Box {
     dot
 }
 
-/// The right-click menu of a source row: Open (its Popular listing), and Open website when the source has a site.
 /// The loading state of a Sources tab: the page spinner with its "Loading sources…" line under it.
 fn loading_sources() -> gtk::Box {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -228,12 +230,19 @@ fn loading_sources() -> gtk::Box {
     page
 }
 
-fn row_menu(nav: &SourcesNav, id: i64, home: Option<String>) -> Vec<Item> {
+/// The right-click menu of a source row: Open (its Popular listing), Open website when the source has a site, and for a
+/// repository source (`switch`: its entry id and name) Check now and Turn off.
+fn row_menu(nav: &SourcesNav, id: i64, home: Option<String>, switch: Option<(String, String)>) -> Vec<Item> {
     let open = Rc::clone(&nav.open_listing);
     let mut items = vec![Item::new(super::texts::OPEN, 0, move || open(id, BrowseQuery::Popular))];
     if let Some(url) = home {
         let open_url = Rc::clone(&nav.open_url);
         items.push(Item::new(super::texts::open_website(), 0, move || open_url(&url)));
+    }
+    if let Some((key, name)) = switch {
+        let (kind, check_name) = (nav.kind, name.clone());
+        items.push(Item::new(tr(MsgKey::source_switch_check_now), 0, move || crate::source_switch::check_now(kind, id, check_name.clone())));
+        items.push(Item::new(tr(MsgKey::source_switch_turn_off), 1, move || crate::source_switch::confirm_off(key.clone(), &name, |_| {})));
     }
     items
 }
@@ -289,6 +298,7 @@ pub(crate) mod tests {
         SourcesNav {
             open_listing: Rc::new(move |id, q| open.borrow_mut().push(format!("open {id} {q:?}"))),
             open_url: Rc::new(move |url: &str| site.borrow_mut().push(format!("site {url}"))),
+            kind: kuro_platform::kind::Kind::Manga,
         }
     }
 
@@ -296,14 +306,23 @@ pub(crate) mod tests {
     fn a_source_row_menu_opens_the_listing_and_the_site_only_when_there_is_one() {
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let nav = nav(&log);
-        let plain = row_menu(&nav, 1, None);
+        let plain = row_menu(&nav, 1, None, None);
         assert_eq!(plain.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN]);
-        let both = row_menu(&nav, 2, Some("https://two.test".into()));
+        let both = row_menu(&nav, 2, Some("https://two.test".into()), None);
         assert_eq!(both.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN, &crate::browse::texts::open_website()]);
         for item in &both {
             (item.run)();
         }
         assert_eq!(*log.borrow(), ["open 2 Popular", "site https://two.test"]);
+    }
+
+    #[test]
+    fn a_repository_source_row_offers_check_now_and_turn_off() {
+        let log: Rc<RefCell<Vec<String>>> = Rc::default();
+        let menu = row_menu(&nav(&log), 3, None, Some(("alpha".into(), "Alpha".into())));
+        let check = tr(MsgKey::source_switch_check_now);
+        let off = tr(MsgKey::source_switch_turn_off);
+        assert_eq!(menu.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN, check.as_str(), off.as_str()]);
     }
 
     fn labels(column: &gtk::Box) -> Vec<String> {

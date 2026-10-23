@@ -109,12 +109,20 @@ pub fn open_unit(kind: Kind, entry_id: i64, unit_id: i64) {
     if crate::local_flow::open::open_local_episode(unit_id) || crate::player_view::open_source_episode(&anime_sources(), unit_id) {
         return;
     }
+    // a source the user turned off keeps its downloads playable
+    if crate::player_view::open_downloaded(unit_id) {
+        return;
+    }
     let source = kuro_data::item::ItemRepo::new(crate::data::app().db.clone())
         .by_id(unit_id)
         .ok()
         .flatten()
         .and_then(|i| kuro_data::entry::EntryRepo::new(crate::data::app().db.clone()).by_id(i.entry_id).ok())
-        .map_or_else(|| unit_id.to_string(), |e| e.source.to_string());
+        .map(|e| e.source);
+    if source.is_some_and(|source| crate::source_switch::offer_turn_on(source, move || open_unit(kind, entry_id, unit_id))) {
+        return;
+    }
+    let source = source.map_or_else(|| unit_id.to_string(), |source| source.to_string());
     crate::toast::notify(crate::reader::strings::source_not_installed(&source));
 }
 

@@ -38,6 +38,7 @@ mod settings;
 mod settings_ui;
 mod source_bridge;
 mod source_gate;
+mod source_switch;
 mod toast;
 mod tri_check;
 mod spec;

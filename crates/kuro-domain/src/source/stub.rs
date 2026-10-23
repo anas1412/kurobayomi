@@ -94,7 +94,6 @@ mod tests {
     #[test]
     fn from_source_copies_only_id_language_and_name() {
         let mut source = Source::new(7, "Name", "fr");
-        source.pin = crate::source::pin::Pins::PINNED;
         source.is_used_last = true;
         assert_eq!(StubSource::from(&source), StubSource { id: 7, lang: "fr".into(), name: "Name".into() });
     }

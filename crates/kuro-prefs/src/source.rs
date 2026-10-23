@@ -37,10 +37,15 @@ define_prefs! {
         anime_extension_repos: BTreeSet<String> = "anime_extension_repos" => BTreeSet::new();
         manga_extension_repos: BTreeSet<String> = "extension_repos" => BTreeSet::new();
         trusted_extensions: BTreeSet<String> = "__APP_STATE_trusted_extensions" => BTreeSet::new();
+        // Aniyomi's disabled sources (decimal ids), as a restore writes them: the app reads them once, turns on every
+        // known source but these, and clears them
         disabled_anime_sources: BTreeSet<String> = "hidden_anime_catalogues" => BTreeSet::new();
         disabled_manga_sources: BTreeSet<String> = "hidden_catalogues" => BTreeSet::new();
-        pinned_anime_sources: BTreeSet<String> = "pinned_anime_catalogues" => BTreeSet::new();
-        pinned_manga_sources: BTreeSet<String> = "pinned_catalogues" => BTreeSet::new();
+        // the repository sources that are on, by their entry id in the repository index; a source not in it is off
+        enabled_sources: BTreeSet<String> = "enabled_sources" => BTreeSet::new();
+        // "<source id>=<entry id>": the repository entry each loaded source came from, so a source that is off now is
+        // still known by its id
+        source_keys: BTreeSet<String> = "__APP_STATE_source_keys" => BTreeSet::new();
     }
 }
 
@@ -99,7 +104,7 @@ mod tests {
     fn every_default_of_the_kept_keys_holds_on_an_empty_store() {
         let prefs = SourcePrefs::new(PrefStore::in_memory());
         assert!(prefs.trusted_extensions.get().is_empty());
-        assert!(prefs.pinned_manga_sources.get().is_empty() && prefs.pinned_anime_sources.get().is_empty());
+        assert!(prefs.enabled_sources.get().is_empty() && prefs.source_keys.get().is_empty());
         assert!(prefs.disabled_anime_sources.get().is_empty());
         assert!(prefs.manga_extension_repos.get().is_empty() && prefs.anime_extension_repos.get().is_empty());
     }
