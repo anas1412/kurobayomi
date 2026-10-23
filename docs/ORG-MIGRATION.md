@@ -10,6 +10,14 @@ Names (free on 2026-10-23, confirm when creating):
 | The app | `kurobayomi` (if refused: `kurobayomi-app`) | `kurobayomi/kurobayomi` |
 | The extensions | `tsuikabako` (追加箱, "add-on box") | `tsuikabako/extensions` (what users add), `tsuikabako/extensions-source` (code and CI) |
 
+## Status (2026-10-23)
+
+Done: both organizations; the transfers; `kurobayomi/kurobayomi` on the new owner (CI green); `tsuikabako/extensions-source`
+public, publishing to `tsuikabako/extensions` (index checked: 12 sources, every checksum matches, the old link serves it);
+the website live. Deploy keys were allowed on the `tsuikabako` organization for the publish key. Open: release 0.1.6
+(it carries the automatic link move); step 6 (app ID) undecided. History was not rewritten: earlier commits in the
+`tsuikabako` repositories still name anas1412; new ones in the local clones use the author "Tsuikabako".
+
 ## Step 1: one place for the app's identity (done, 2026-10-23)
 
 - `identity.toml` at the app repo root holds `owner`, `repo` and `app_id`. It names the app only, never the extensions.
@@ -28,7 +36,7 @@ Names (free on 2026-10-23, confirm when creating):
 - Remove the link to `kurobayomi-extensions`; say only "add a repository URL in Browse".
 - No screenshots or text that name manga or anime sites. Put the local library first.
 
-## Step 3: create the organizations (you, about 5 minutes)
+## Step 3: create the organizations (done, 2026-10-23)
 
 1. github.com/organizations/new, Free plan: create `kurobayomi`.
 2. Same again: create `tsuikabako`.
@@ -37,14 +45,14 @@ Names (free on 2026-10-23, confirm when creating):
 5. Never create a repository named `kurobayomi` or `kurobayomi-extensions` on `anas1412` again: GitHub redirects the old
    addresses only while those names stay free.
 
-## Step 4: the app follows (me)
+## Step 4: the app follows (done, 2026-10-23, except the 0.1.6 release)
 
 - Check the redirects first: an installed AppImage still finds and downloads updates, and the old extension URL still
   gives the index.
 - Run `scripts/set-identity.py --owner kurobayomi`, CI green, release the next stable (0.1.6; 0.1.5 is out). New
   installs then use the new address directly.
 
-## Step 5: the extensions split like Keiyoushi (prepared locally, 2026-10-23)
+## Step 5: the extensions split like Keiyoushi (done, 2026-10-23)
 
 - `~/tsuikabako-extensions-source` (local, not pushed): a clone of `kurobayomi-extensions` with its history, without
   `dist/` and `index.min.json` (ignored now). It becomes `tsuikabako/extensions-source`.
@@ -104,7 +112,7 @@ Every link comes from `identity.toml` through `scripts/set-identity.py` (step 1)
 - Links to the app's format docs on `kurobayomi/kurobayomi` and to the output repository.
 - `tools/make-index.py`'s default base URL and the index `website` become `tsuikabako`'s.
 
-## Website: `tsuikabako.github.io` (VitePress, like keiyoushi.github.io)
+## Website: `tsuikabako.github.io` (VitePress, like keiyoushi.github.io; live 2026-10-23)
 
 A repository `tsuikabako/tsuikabako.github.io`, built with VitePress and published by GitHub Pages from its own CI, at
 `https://tsuikabako.github.io`.
