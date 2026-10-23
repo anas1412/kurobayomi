@@ -87,7 +87,7 @@ pub trait SourceHttp: Send + Sync {
 /// The start of a thumbnail URL that is no picture but a request for the source's poster: a listing gives
 /// `kb-cover:<anime url>` for an anime whose poster it does not know yet, and the image service asks the source when the
 /// card needs it (so the list itself never waits on lookups).
-pub const COVER_MARKER: &str = "kb-cover:";
+pub const COVER_MARKER: &str = "kb-cover:"; // the same text as `kuro_source::anime::COVER_MARKER`
 
 pub struct ImageService {
     shared: NetworkClient,
@@ -275,9 +275,14 @@ impl ImageService {
         }
         let mut url = art.url.as_deref().ok_or(ImageError::NoCoverSpecified)?;
         let found;
+        let resolved;
+        let mut art = art;
         if let Some(anime_url) = url.strip_prefix(COVER_MARKER) {
             found = self.sources.cover_url(art.source_id, anime_url).await.ok_or(ImageError::NoCoverSpecified)?;
             url = &found;
+            // the poster is cached under its own address, so a row that stores the real address later finds it
+            resolved = ArtRef { url: Some(found.clone()), ..art.clone() };
+            art = &resolved;
         }
         match resource::classify(Some(url)) {
             Some(Resource::Http) => self.fetch_http(art, opts, cancel, url).await,

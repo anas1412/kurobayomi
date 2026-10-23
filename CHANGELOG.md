@@ -34,6 +34,12 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 - New sources start off. After updating, every source you already had stays on.
 - Restoring an Aniyomi backup turns on every source except the ones Aniyomi had disabled.
 
+### Fixed
+
+- A title saved while a source listed the wrong picture (AnimePahe once gave an episode screenshot) no longer opens with
+  that picture: the next listing corrects the stored cover, and a poster the source finds later is stored and cached
+  under its real address.
+
 ### Removed
 
 - Pinning sources.

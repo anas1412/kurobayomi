@@ -121,6 +121,13 @@ pub fn flush_on_shutdown(store: &PrefStore) -> bool {
     }
 }
 
+/// The database for work off the GTK thread (the app data itself lives on that thread). Set by [`install`].
+static SHARED_DB: std::sync::OnceLock<Arc<Db>> = std::sync::OnceLock::new();
+
+pub fn shared_db() -> Option<Arc<Db>> {
+    SHARED_DB.get().cloned()
+}
+
 /// Builds the shared state on the GTK thread: the startup cleanup, then the texture limit probe (a short-lived GL
 /// context; the limit is not stored, T-13a-030).
 /// Does nothing when the state is already installed.
@@ -129,6 +136,7 @@ pub fn install(opened: Opened) -> Result<(), String> {
         return Ok(());
     }
     let Opened { prefs_store, db } = opened;
+    let _ = SHARED_DB.set(Arc::clone(&db));
     watch_save_failures(&prefs_store);
     let prefs = Arc::new(LibraryPrefs::new(prefs_store.clone()));
     let known_manga = known_ids(&CategoryRepo::new(Arc::clone(&db), Kind::Manga))?;
