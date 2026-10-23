@@ -6,6 +6,22 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-23
+
+### Changed
+
+- Kurobayomi has moved to its own organization: https://github.com/kurobayomi/kurobayomi. Updates, the Help and
+  Getting started links and bug reports use the new address. The old one redirects, so nothing needs doing.
+- A source repository that moves takes you along: when its index names a new address and that address works, the app
+  switches the saved link by itself on the next start, keeps the sources you turned on and downloads nothing again.
+  Adding an old address saves the new one.
+- The README no longer names any source repository; the app ships with none.
+
+### Fixed
+
+- Links that start with `kurobayomi://add-repo?url=` (a repository website's "Add to Kurobayomi" button) open the add
+  dialog with the address filled in, like the `aniyomi://` and `tachiyomi://` links; you still confirm.
+
 ## [0.1.5] - 2026-10-23
 
 ### Added

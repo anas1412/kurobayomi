@@ -27,6 +27,10 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
 
 ## What it does
 
+- **Your own manga and anime.** Put folders in `~/Kurobayomi/Local/Manga` or `~/Kurobayomi/Local/Anime`, or link a
+  folder where it already is (Ctrl+Shift+O): they join the library and are read and played like anything else. Manga as
+  image folders, CBZ, ZIP, CBR, RAR, CB7, CBT or EPUB; anime as MKV, MP4, WebM, AVI, MOV, FLV or WMV, with season
+  folders. New files are picked up at every start and on Refresh.
 - **Sources you add.** The app ships with no sources. Paste a repository link someone gave you and its sources appear
   at once; there is nothing to install. Sources are small files (text recipes or sandboxed WASM plug-ins) that are
   checked and updated every day.
