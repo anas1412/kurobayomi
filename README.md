@@ -70,9 +70,9 @@ Downloads and backups go to `~/Kurobayomi` unless you pick another folder in Set
 
 ## Sources and repositories
 
-Kurobayomi does not host, list or recommend any content or website. A repository is a link to an `index.min.json` file
-that lists sources; anyone can publish one. The format, the plug-in interface and an example repository are in
-[kurobayomi-extensions](https://github.com/anas1412/kurobayomi-extensions).
+Kurobayomi does not host, list or recommend any content, website or repository, and ships with none. A repository is a
+link to an `index.min.json` file that lists sources; anyone can publish one, and you add it in Browse. The formats are
+documented here: [text recipes](docs/source-recipes.md) and [WASM plug-ins](docs/source-abi.md).
 
 ## Install
 

@@ -1,0 +1,6 @@
+# Where the app lives on GitHub and its desktop app ID. Change them only through `scripts/set-identity.py`, which rewrites
+# every file that names them (code, packaging, docs, workflows and the icon file names). CI runs `--check`, which fails
+# when a file names another owner or app ID.
+owner = "anas1412"
+repo = "kurobayomi"
+app_id = "io.github.anas1412.Kurobayomi"

@@ -1,0 +1,15 @@
+name: Identity
+
+# Every file names the GitHub owner and the app ID that identity.toml gives (scripts/set-identity.py). Text-only, so it
+# runs on every push, docs included, and takes seconds.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Files agree with identity.toml
+        run: python3 scripts/set-identity.py --check
