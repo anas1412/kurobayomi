@@ -90,10 +90,26 @@ pub fn import_aniyomi_disabled(prefs: &SourcePrefs, indexes: &[Index]) -> bool {
     true
 }
 
-/// Both steps that turn stored state into the switches, before any source file is fetched or deleted.
+/// Both steps that turn stored state into the switches, before any source file is fetched or deleted, then the
+/// languages of the sources that are on.
 pub fn settle(prefs: &SourcePrefs, indexes: &[Index]) {
     migrate_once(prefs, indexes);
     import_aniyomi_disabled(prefs, indexes);
+    show_languages_of_on(prefs, indexes);
+}
+
+/// Turns on the language of every source that is on. Browse lists only the enabled languages, so without this a source
+/// the user turned on (a Russian one on an English system) is on and never shown. To hide a source, turn it off.
+pub fn show_languages_of_on(prefs: &SourcePrefs, indexes: &[Index]) {
+    let on = prefs.enabled_sources.get();
+    let mut languages = prefs.enabled_languages.get();
+    let before = languages.len();
+    languages.extend(indexes.iter().flat_map(|index| &index.sources).filter(|entry| on.contains(&entry.id)).map(|entry| entry.lang.clone()));
+    if languages.len() != before {
+        if let Err(error) = prefs.enabled_languages.set(languages) {
+            tracing::warn!(%error, "the languages of the sources that are on could not be saved");
+        }
+    }
 }
 
 /// Source id to entry id, as the loads recorded them.
@@ -159,16 +175,18 @@ pub fn checked_status(result: &Result<usize, SourceError>) -> Status {
     }
 }
 
-/// Fetches the file of entry `key`, turns it on and loads it, so it is usable when this returns. Blocks: call it off the
-/// GTK thread. The switch stays off when the file cannot be fetched.
-pub fn turn_on(key: &str) -> Result<(), String> {
-    let prefs = live().ok_or_else(|| "the app data is not open".to_owned())?;
-    set_on(&prefs, key, true);
+/// Fetches the file of entry `key`, turns it on and its language with it, and loads it, so it is usable when this
+/// returns. Blocks: call it off the GTK thread, with `prefs` read on it (the app data is the GTK thread's). The switch
+/// stays off when the file cannot be fetched.
+pub fn turn_on(prefs: &SourcePrefs, key: &str) -> Result<(), String> {
+    set_on(prefs, key, true);
     if let Err(error) = crate::recipe_sources::fetch_source(key) {
         tracing::warn!(%error, key, "a source could not be turned on");
-        set_on(&prefs, key, false);
+        set_on(prefs, key, false);
         return Err(error.to_string());
     }
+    let indexes: Vec<Index> = prefs.manga_extension_repos.get().iter().filter_map(|link| crate::recipe_sources::saved_index(link)).collect();
+    show_languages_of_on(prefs, &indexes);
     crate::recipe_sources::reload_now();
     Ok(())
 }
@@ -196,8 +214,13 @@ fn library_titles(key: &str) -> i64 {
 
 /// Turns a source on off the GTK thread, then runs `done` on it with whether it worked. A failure is a toast.
 pub fn turn_on_then(key: String, done: impl Fn(bool) + 'static) {
+    // read here, on the GTK thread: the worker below cannot see the app data
+    let prefs = live();
     gtk::glib::spawn_future_local(async move {
-        let worked = matches!(gtk::gio::spawn_blocking(move || turn_on(&key)).await, Ok(Ok(())));
+        let worked = match prefs {
+            Some(prefs) => matches!(gtk::gio::spawn_blocking(move || turn_on(&prefs, &key)).await, Ok(Ok(()))),
+            None => false,
+        };
         if !worked {
             crate::toast::notify(tr(MsgKey::source_switch_failed));
         }
@@ -349,6 +372,21 @@ mod tests {
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// Browse lists only the enabled languages: a source that is on must bring its language, or it is on and invisible.
+    #[test]
+    fn a_source_that_is_on_turns_its_language_on_and_one_that_is_off_does_not() {
+        let entry = |id: &str, lang: &str| format!(r#"{{"id":"{id}","name":"{id}","lang":"{lang}","kind":"manga","version":1,"file":"https://raw.example/{id}.wasm","sha256":"{}"}}"#, "0".repeat(64));
+        let repo = kuro_extensions::repo::parse_index(&format!(r#"{{"version":1,"sources":[{},{},{}]}}"#, entry("senkuro", "ru"), entry("usagi", "ru"), entry("raw", "ja"))).expect("valid index");
+        let prefs = SourcePrefs::new(PrefStore::in_memory());
+        prefs.enabled_languages.set(set(&["all", "en"])).expect("languages");
+        set_on(&prefs, "senkuro", true);
+        show_languages_of_on(&prefs, std::slice::from_ref(&repo));
+        assert_eq!(prefs.enabled_languages.get(), set(&["all", "en", "ru"]), "ru for Senkuro; ja stays off, its source is off");
+        set_on(&prefs, "senkuro", false);
+        show_languages_of_on(&prefs, &[repo]);
+        assert!(prefs.enabled_languages.get().contains("ru"), "turning a source off leaves the languages as the user has them");
     }
 
     #[test]

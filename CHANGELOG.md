@@ -6,6 +6,14 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+### Fixed
+
+- Turning a source on works again: every switch from off to on (the Sources list, Browse's Turn on, the reader's and
+  the title page's offer) failed with "The source could not be downloaded" without trying, since 0.1.5.
+- A source you turn on shows in Browse even when its language was not on: turning it on turns its language on too
+  (a Russian source on an English system was on but never listed). Sources already on get their language at the next
+  start.
+
 ## [0.1.7] - 2026-10-23
 
 ### Fixed
