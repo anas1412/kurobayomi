@@ -6,6 +6,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-23
+
 ### Fixed
 
 - Turning a source on works again: every switch from off to on (the Sources list, Browse's Turn on, the reader's and
