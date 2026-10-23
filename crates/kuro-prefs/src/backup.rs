@@ -30,10 +30,11 @@ impl BackupPrefs {
 }
 
 define_prefs! {
-    /// `[storage]` section: the app-state base storage folder, empty until the user picks one. The default folder
-    /// comes from `kuro_platform::paths::Paths`.
+    /// `[storage]` section: the app-state base storage folder, empty until the user picks one (the default folder
+    /// comes from `kuro_platform::paths::Paths`), and the one size limit of every cache in megabytes.
     pub struct StoragePrefs in "storage" {
         base_storage_directory: String = "__APP_STATE_storage_dir" => String::new();
+        cache_size_mb: i32 = "cache_size_mb" => 500;
     }
 }
 
@@ -49,6 +50,7 @@ mod tests {
         assert_eq!(backup.backup_interval.get(), 12);
         assert_eq!(backup.last_auto_backup_timestamp.get(), 0);
         assert!(StoragePrefs::new(PrefStore::in_memory()).base_storage_directory.get().is_empty());
+        assert_eq!(StoragePrefs::new(PrefStore::in_memory()).cache_size_mb.get(), 500);
     }
 
     #[test]

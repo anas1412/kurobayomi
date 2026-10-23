@@ -130,7 +130,7 @@ impl GlobalSearch {
             .into_iter()
             .map(|source| {
                 let state = match previous.iter().find(|row| row.source.id == source.id) {
-                    Some(row) if same_query && !matches!(row.state, SearchState::Loading) => row.state.clone(),
+                    Some(row) if same_query && !row.state.waiting() => row.state.clone(),
                     _ => SearchState::Loading,
                 };
                 let origin = Some(source.id) == self.origin;
@@ -138,7 +138,7 @@ impl GlobalSearch {
             })
             .collect();
         self.sort_rows();
-        let sources = self.rows.iter().filter(|row| matches!(row.state, SearchState::Loading)).map(|row| row.source.clone()).collect();
+        let sources = self.rows.iter().filter(|row| row.state.waiting()).map(|row| row.source.clone()).collect();
         Some(SearchPlan { generation: self.generation, sources })
     }
 
@@ -168,13 +168,27 @@ impl GlobalSearch {
             return false;
         }
         let Some(row) = self.rows.iter_mut().find(|row| row.source.id == source_id) else { return false };
-        if !matches!(row.state, SearchState::Loading) {
+        if !row.state.waiting() {
             return false;
         }
-        row.state = match result {
-            Ok(items) => SearchState::Results(items),
-            Err(message) => SearchState::Error(message),
+        // a source that fails keeps the saved results it showed
+        row.state = match (result, std::mem::replace(&mut row.state, SearchState::Loading)) {
+            (Ok(items), _) => SearchState::Results(items),
+            (Err(_), SearchState::Refreshing(saved)) => SearchState::Results(saved),
+            (Err(message), _) => SearchState::Error(message),
         };
+        self.sort_rows();
+        true
+    }
+
+    /// Shows the saved results of the last same search on a row that is still loading (`results_cache`). False when the
+    /// plan is old, the row is gone or answered, or nothing was saved.
+    pub fn prefill(&mut self, generation: u64, source_id: i64, items: Vec<ListItem>) -> bool {
+        if generation != self.generation || items.is_empty() {
+            return false;
+        }
+        let Some(row) = self.rows.iter_mut().find(|row| row.source.id == source_id && matches!(row.state, SearchState::Loading)) else { return false };
+        row.state = SearchState::Refreshing(items);
         self.sort_rows();
         true
     }
@@ -193,7 +207,7 @@ impl GlobalSearch {
 
     /// `(answered, total)`: a row answers once it is no longer Loading, an error included.
     pub fn progress(&self) -> (usize, usize) {
-        (self.rows.iter().filter(|row| !matches!(row.state, SearchState::Loading)).count(), self.rows.len())
+        (self.rows.iter().filter(|row| !row.state.waiting()).count(), self.rows.len())
     }
 
     #[cfg(test)]
@@ -225,7 +239,7 @@ fn name_key(source: &Source) -> Vec<u16> {
 
 /// The sort key of one row: origin, then a non-empty success, then the name key. `false` sorts first.
 fn sort_key(row: &SearchRow) -> (bool, bool, Vec<u16>) {
-    let non_empty = matches!(&row.state, SearchState::Results(items) if !items.is_empty());
+    let non_empty = row.state.items().is_some_and(|items| !items.is_empty());
     (!row.origin, !non_empty, name_key(&row.source))
 }
 
@@ -249,7 +263,7 @@ pub fn auto_open(query: &str, extension: &str, total_sources: usize, rows: &[Sea
     match rows {
         [] => AutoOpen::Wait,
         [row] => match &row.state {
-            SearchState::Loading => AutoOpen::Wait,
+            SearchState::Loading | SearchState::Refreshing(_) => AutoOpen::Wait,
             SearchState::Results(items) if items.len() == 1 => AutoOpen::Open(items[0].id),
             _ => AutoOpen::Show,
         },
@@ -320,6 +334,23 @@ mod tests {
 
     fn ids(sources: &[Source]) -> Vec<i64> {
         sources.iter().map(|s| s.id).collect()
+    }
+
+    #[test]
+    fn saved_results_show_while_loading_and_the_answer_or_a_failure_settles_the_row() {
+        let mut search = engine();
+        search.set_query(Some("one"));
+        let plan = search.search().unwrap();
+        assert!(search.prefill(plan.generation, 1, vec![item(7)]));
+        assert!(search.prefill(plan.generation, 2, vec![item(8)]));
+        assert!(!search.prefill(plan.generation, 3, Vec::new()), "nothing saved: the row keeps loading");
+        assert_eq!(search.progress(), (0, 3), "a saved row still waits for its source");
+        assert!(search.apply(plan.generation, 1, Ok(vec![item(9)])));
+        assert!(search.apply(plan.generation, 2, Err("offline".into())));
+        let state = |id: i64| search.rows().iter().find(|row| row.source.id == id).unwrap().state.clone();
+        assert_eq!(state(1), SearchState::Results(vec![item(9)]), "the answer replaces the saved results");
+        assert_eq!(state(2), SearchState::Results(vec![item(8)]), "a failure keeps them");
+        assert!(!search.prefill(plan.generation, 1, vec![item(7)]), "an answered row is not overwritten");
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub fn quality_label(height: i32) -> String {
     sheets::quality::height_label(height)
 }
 mod source;
+pub mod sub_cache;
 mod store;
 #[cfg(test)]
 mod tests;
@@ -67,6 +68,8 @@ struct Media {
     title: page_header::MediaTitle,
     /// The `http-header-fields` value; `None` for a file.
     headers: Option<String>,
+    /// The stream's request headers, which a side subtitle file is fetched with into the subtitle cache.
+    track_headers: Vec<(String, String)>,
     /// `audio-add` and `sub-add` commands, sent once mpv has loaded the stream.
     tracks: Vec<Vec<String>>,
 }
@@ -81,7 +84,7 @@ pub fn open_episode(path: &Path, episode_id: i64, start_ms: i64) {
         return tracing::error!(path = %path.display(), "player: the path is not UTF-8; not opened");
     };
     let title = title_or_file(episode_id, path);
-    open_media(Media { target: target.to_owned(), title, headers: None, tracks: Vec::new() }, episode_id, start_ms);
+    open_media(Media { target: target.to_owned(), title, headers: None, track_headers: Vec::new(), tracks: Vec::new() }, episode_id, start_ms);
 }
 
 thread_local! {
@@ -689,7 +692,7 @@ fn downloaded_media(episode_id: i64) -> Option<Media> {
     let (entry, source) = crate::downloads::directory::AppDirectory::new(db).entry_context(kuro_platform::kind::Kind::Anime, episode.entry_id)?;
     let service = crate::shell::host::Shell::get()?.download_service()?;
     let path = service.locate(&entry, &source, &kuro_downloads::unit::UnitRef::from(&episode))?;
-    Some(Media { target: path.to_string_lossy().into_owned(), title: title_or_file(episode_id, &path), headers: None, tracks: Vec::new() })
+    Some(Media { target: path.to_string_lossy().into_owned(), title: title_or_file(episode_id, &path), headers: None, track_headers: Vec::new(), tracks: Vec::new() })
 }
 
 /// Plays episode row `episode_id` from its download, for an episode whose source is not loaded (turned off). False when
@@ -709,7 +712,7 @@ fn play_episode(shared: &Shared, episode_id: i64) {
     match crate::local_flow::open::opening_by_id(&db, episode_id) {
         Ok(Some(found)) => {
             let title = title_or_file(episode_id, Path::new(&found.path));
-            let media = Media { target: found.path, title, headers: None, tracks: Vec::new() };
+            let media = Media { target: found.path, title, headers: None, track_headers: Vec::new(), tracks: Vec::new() };
             shared.borrow_mut().play(media, episode_id);
         }
         Ok(None) => play_source_episode(shared, episode_id),
@@ -797,7 +800,8 @@ fn start_ticks(page: &gtk::Box, title: &page_header::TwoLineTitle, hiding: &Rc<a
                     }
                     MpvEvent::FileLoaded => {
                         let tracks = std::mem::take(&mut player.media.tracks);
-                        player.playback.add_tracks(&tracks);
+                        let prepare = sub_cache::preparer(player.episode_id, &player.media.track_headers);
+                        player.playback.add_tracks(&tracks, prepare);
                         player.skip.file_loaded();
                     }
                     _ => {}

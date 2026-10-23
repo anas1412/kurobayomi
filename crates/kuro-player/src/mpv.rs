@@ -195,12 +195,19 @@ impl MpvHandle {
     /// thread that asks, which is the GTK thread. Failures are logged. The handle is only destroyed, not terminated,
     /// so a close of the player in the meantime just makes the remaining commands fail.
     pub fn run_commands_in_background(&self, commands: Vec<Vec<String>>) {
+        self.run_commands_in_background_with(commands, |command| command);
+    }
+
+    /// Like [`Self::run_commands_in_background`], with each command passed through `prepare` on the worker thread first
+    /// (the app swaps a side subtitle's address for its cached copy there, fetching it if needed).
+    pub fn run_commands_in_background_with(&self, commands: Vec<Vec<String>>, prepare: impl Fn(Vec<String>) -> Vec<String> + Send + 'static) {
         let client = match self.inner.create_client(None) {
             Ok(client) => client,
             Err(e) => return tracing::warn!(error = %e, "mpv: no client handle for the background commands"),
         };
         std::thread::spawn(move || {
             for command in commands {
+                let command = prepare(command);
                 let Some((name, rest)) = command.split_first() else { continue };
                 let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
                 if let Err(e) = client.command(name, &rest) {

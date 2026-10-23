@@ -225,6 +225,13 @@ impl SearchRunner {
         *self.queue.borrow_mut() = plan.sources.iter().cloned().collect();
         self.running.set(0);
         self.plan.set(plan.generation);
+        // the saved results of the same search show while each source is asked again
+        let query = BrowseQuery::Search(self.query.borrow().clone());
+        for source in &plan.sources {
+            if let Some(saved) = super::results_cache::read(source.id, &query, &FilterList::default()) {
+                self.engine.borrow_mut().prefill(plan.generation, source.id, saved.items);
+            }
+        }
         self.pump();
         self.changed();
     }
@@ -264,6 +271,9 @@ impl SearchRunner {
     /// The one writer: a result of the live plan is applied on the GTK thread, then the next queued fetch starts.
     fn arrived(self: &Rc<Self>, fetched: Fetched) {
         self.running.set(self.running.get().saturating_sub(1));
+        if let (Ok(items), true) = (&fetched.result, fetched.plan == self.plan.get()) {
+            super::results_cache::write(fetched.source_id, &BrowseQuery::Search(self.query.borrow().clone()), &FilterList::default(), items);
+        }
         let applied = self.engine.borrow_mut().apply(fetched.plan, fetched.source_id, fetched.result);
         self.pump();
         if applied {

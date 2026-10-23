@@ -333,7 +333,7 @@ impl Shared {
         match loaded {
             Ok(Some(model)) => {
                 let plan = model.plan;
-                if plan.episodes {
+                if plan.episodes && model.episodes.is_empty() {
                     record_empty_open_fetch(self.store.kind(), entry_id, ctx.now_ms);
                 }
                 let seasons = model.entry.fetch_type() == FetchType::Seasons;

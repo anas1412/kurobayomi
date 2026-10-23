@@ -197,7 +197,8 @@ pub fn always() -> CoverGuard {
 pub fn file_cover_loader() -> CoverLoader {
     Rc::new(|ask, done| {
         // a source's poster-on-demand marker resolves to a remote picture inside the image service
-        if ask.url.starts_with("https://") || ask.url.starts_with("http://") || ask.url.starts_with(kuro_images::fetch::COVER_MARKER) {
+        // a local title's `file://` cover goes through the service too, for its decoded-image cache
+        if ask.url.starts_with("https://") || ask.url.starts_with("http://") || ask.url.starts_with("file://") || ask.url.starts_with(kuro_images::fetch::COVER_MARKER) {
             if let (Some(service), Ok(runtime)) = (crate::entry_core::cover_view::service(), tokio::runtime::Handle::try_current()) {
                 remote_cover(service, &runtime, remote_art(ask.url, ask.source_id), ask.picture, done);
             }

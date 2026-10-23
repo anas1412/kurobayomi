@@ -113,7 +113,7 @@ impl EntryModel {
         }
         let plan = refresh_on_open(entry.initialized, episodes.is_empty(), episode_list, seasons.is_empty(), season_list);
         // An entry with no episodes refreshes on open at most once per 10 minutes (fix 23.24).
-        let plan = if plan.episodes && !open_refresh_due(true, ctx.last_empty_open_fetch_ms, ctx.now_ms) {
+        let plan = if plan.episodes && !open_refresh_due(episodes.is_empty(), ctx.last_empty_open_fetch_ms, ctx.now_ms) {
             RefreshPlan { episodes: false, ..plan }
         } else {
             plan
@@ -356,13 +356,13 @@ mod tests {
     }
 
     #[test]
-    fn a_fixture_entry_opens_in_success_with_its_episodes_and_no_refresh() {
+    fn a_fixture_entry_opens_in_success_with_its_saved_episodes_and_asks_the_source_again() {
         let (_dir, store, id) = with_episodes(true, true, 4, 1);
         let model = load(&store, id);
         assert_eq!(model.flow.load, LoadState::Success);
         assert!(model.accepts_dispatch());
-        assert!(!model.flow.refreshing);
-        assert_eq!(model.plan, RefreshPlan { info: false, episodes: false, seasons: false });
+        assert!(model.flow.refreshing, "the saved list shows while the source is asked again");
+        assert_eq!(model.plan, RefreshPlan { info: false, episodes: true, seasons: false });
         assert_eq!(model.entry.title, "Frieren");
         assert_eq!(model.source.name, "Fake");
         assert_eq!(model.episodes.len(), 4);
@@ -388,13 +388,16 @@ mod tests {
         assert!(load_at(None, 0).plan.episodes, "never fetched: fetch");
         assert!(!load_at(Some(1_000), 1_001).plan.episodes, "a second open within ten minutes waits");
         assert!(load_at(Some(1_000), 1_000 + EMPTY_OPEN_REFRESH_GAP_MS).plan.episodes, "ten minutes later: fetch again");
+        let (_dir, store, id) = with_episodes(true, true, 2, 0);
+        let ctx = EntryLoadContext { last_empty_open_fetch_ms: Some(1_000), now_ms: 1_001, ..Default::default() };
+        assert!(EntryModel::load(&store, &PrefStore::in_memory(), id, ctx, source).unwrap().unwrap().plan.episodes, "the guard is for empty lists only");
     }
 
     #[test]
     fn the_first_state_is_refreshing_until_the_refresh_ends_on_success_or_error() {
         let (_dir, store, id) = with_episodes(true, false, 2, 0);
         let mut model = load(&store, id);
-        assert_eq!(model.plan, RefreshPlan { info: true, episodes: false, seasons: false });
+        assert_eq!(model.plan, RefreshPlan { info: true, episodes: true, seasons: false });
         assert!(model.flow.refreshing);
         model.finish_refresh(Err(DetailError::SourceNotInstalled));
         assert!(!model.flow.refreshing);

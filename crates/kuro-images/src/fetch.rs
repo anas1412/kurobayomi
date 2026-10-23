@@ -28,6 +28,7 @@ use crate::keys;
 use crate::memory_cache::{DEFAULT_BUDGET_BYTES, MemoryCache};
 use crate::options::LoadOptions;
 use crate::platform::image_cache_dir;
+use crate::recheck;
 use crate::resource::{self, Resource};
 
 /// At most this many fetches run at once (behavior section 2.3).
@@ -141,6 +142,12 @@ impl ImageService {
     pub fn with_memory_budget(mut self, bytes: u64) -> Self {
         self.memory = MemoryCache::new(bytes);
         self
+    }
+
+    /// Replaces the disk cache budget (the default follows the free space) with the app's one cache size limit.
+    pub async fn with_disk_budget(mut self, bytes: u64) -> io::Result<Self> {
+        self.disk = DiskImageCache::open_with_budget(self.disk.root().to_path_buf(), bytes).await?;
+        Ok(self)
     }
 
     /// The settings-change handler of `pref_display_profile_key`: loads the profile file once and applies it to every
@@ -274,10 +281,7 @@ impl ImageService {
         }
         match resource::classify(Some(url)) {
             Some(Resource::Http) => self.fetch_http(art, opts, cancel, url).await,
-            Some(Resource::File) => Ok(Fetched::file(
-                DataSource::Disk,
-                PathBuf::from(url.strip_prefix("file://").unwrap_or(url)),
-            )),
+            Some(Resource::File) => Ok(Fetched::file(DataSource::Disk, file_path(url))),
             // Content URIs are an Android picker format, not supported on Linux (E-IMG-11).
             Some(Resource::Uri) | None => Err(ImageError::InvalidImage),
         }
@@ -306,6 +310,7 @@ impl ImageService {
         if let Some(cover) = &library_cover {
             if opts.disk_cache.read_enabled() && tokio::fs::try_exists(cover).await.unwrap_or(false)
             {
+                self.recheck_if_due(art, url, cover);
                 return Ok(Fetched::file(DataSource::Disk, cover.clone()));
             }
         }
@@ -314,7 +319,10 @@ impl ImageService {
             if let Some(snapshot) = self.disk.get(&key).await {
                 if let Some(cover) = &library_cover {
                     match cover_file::promote_snapshot(&self.disk, &key, &snapshot, cover).await {
-                        Ok(()) => return Ok(Fetched::file(DataSource::Disk, cover.clone())),
+                        Ok(()) => {
+                            self.recheck_if_due(art, url, cover);
+                            return Ok(Fetched::file(DataSource::Disk, cover.clone()));
+                        }
                         Err(e) => tracing::error!(
                             error = %e,
                             "Failed to write snapshot data to cover cache {}",
@@ -322,16 +330,18 @@ impl ImageService {
                         ),
                     }
                 }
+                self.recheck_if_due(art, url, &snapshot);
                 return Ok(Fetched::file(DataSource::Disk, snapshot));
             }
         }
 
-        let (client, headers) = match self.sources.http_source(art.source_id) {
-            Some(source) => (source.client, source.headers),
-            None => (self.shared.clone(), HeaderMap::new()),
-        };
+        let (client, headers) = self.client_of(art);
         let request = http::image_request(url, &headers, opts.network_cache, cancel)?;
-        let body = http::fetch_bytes(&client, request).await?;
+        let response = client.execute(request).await?;
+        http::check_status(response.status)?;
+        let check = recheck::Check::from_headers(&response.headers, recheck::now_ms());
+        let body = response.bytes().await?;
+        recheck::write(self.disk.root(), url, &check);
 
         if let Some(cover) = &library_cover {
             if opts.disk_cache.write_enabled() {
@@ -356,6 +366,71 @@ impl ImageService {
             payload: Payload::Bytes(body),
         })
     }
+}
+
+impl ImageService {
+    fn client_of(&self, art: &ArtRef) -> (NetworkClient, HeaderMap) {
+        match self.sources.http_source(art.source_id) {
+            Some(source) => (source.client, source.headers),
+            None => (self.shared.clone(), HeaderMap::new()),
+        }
+    }
+
+    /// A cached cover is shown at once; when its last check is [`recheck::RECHECK_AFTER_MS`] old, the site is asked in
+    /// the background whether it changed (a conditional request), and a changed picture replaces `file` for the next
+    /// look. A cover cached before checks existed starts its clock now.
+    fn recheck_if_due(&self, art: &ArtRef, url: &str, file: &Path) {
+        let (root, now) = (self.disk.root().to_path_buf(), recheck::now_ms());
+        let Some(check) = recheck::read(&root, url) else {
+            return recheck::write(&root, url, &recheck::Check { checked_ms: now, ..recheck::Check::default() });
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        if !check.due(now) {
+            return;
+        }
+        // marked first, so the covers on screen do not each start a check of the same address
+        recheck::write(&root, url, &recheck::Check { checked_ms: now, ..check.clone() });
+        let (client, headers) = self.client_of(art);
+        let (url, file, driver) = (url.to_owned(), file.to_path_buf(), runtime.clone());
+        // the client's future is not `Send`, so it runs to the end on a blocking-pool thread
+        runtime.spawn_blocking(move || {
+            driver.block_on(async move {
+                let request = http::image_request(&url, &check.conditional(&headers), crate::options::CachePolicy::Enabled, &CancellationToken::new());
+                let Ok(response) = client.execute(request?).await else { return Ok(()) };
+                if response.status == ::http::StatusCode::NOT_MODIFIED || !response.status.is_success() {
+                    return Ok(());
+                }
+                let changed = recheck::Check::from_headers(&response.headers, now);
+                let body = response.bytes().await?;
+                cover_file::write_atomic(&file, &body).await?;
+                recheck::write(&root, &url, &changed);
+                tracing::debug!(url, "a cover changed behind its address and was downloaded again");
+                Ok::<(), ImageError>(())
+            })
+        });
+    }
+}
+
+/// The path of a `file://` link with its percent escapes decoded (a local cover's link escapes spaces), or the path
+/// itself.
+fn file_path(url: &str) -> PathBuf {
+    let Some(rest) = url.strip_prefix("file://") else { return PathBuf::from(url) };
+    let (bytes, mut out) = (rest.as_bytes(), Vec::with_capacity(rest.len()));
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (bytes[i], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    PathBuf::from(String::from_utf8_lossy(&out).into_owned())
 }
 
 fn file_name(path: &Path) -> String {
@@ -427,6 +502,56 @@ mod tests {
         let none = Arc::new(CoverSource(String::new(), Default::default()));
         let svc = service(&tmp.path().join("other"), none).await;
         assert!(svc.fetch(&art, &LoadOptions::default(), &CancellationToken::new()).await.is_err(), "no poster: no picture");
+    }
+
+    #[tokio::test]
+    async fn a_cached_cover_is_asked_again_after_three_days_and_replaced_only_when_it_changed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path_matcher("/c.jpg")).respond_with(ResponseTemplate::new(200).set_body_bytes(JPEG).insert_header("etag", "\"v1\"")).mount(&server).await;
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path(), Arc::new(NoSources)).await;
+        let url = format!("{}/c.jpg", server.uri());
+        let art = cover(Some(&url), false, 1);
+        let opts = LoadOptions::default();
+        let Payload::File(file) = svc.fetch(&art, &opts, &CancellationToken::new()).await.unwrap().payload else { panic!("a file") };
+        let root = svc.disk.root().to_path_buf();
+        assert_eq!(recheck::read(&root, &url).unwrap().etag.as_deref(), Some("\"v1\""));
+        svc.fetch(&art, &opts, &CancellationToken::new()).await.unwrap();
+        assert_eq!(server.received_requests().await.unwrap().len(), 1, "a fresh check: the cache answers");
+
+        server.reset().await;
+        Mock::given(method("GET")).and(header("if-none-match", "\"v1\"")).respond_with(ResponseTemplate::new(304)).mount(&server).await;
+        recheck::write(&root, &url, &recheck::Check { checked_ms: 0, etag: Some("\"v1\"".into()), last_modified: None });
+        assert_eq!(svc.fetch(&art, &opts, &CancellationToken::new()).await.unwrap().source, DataSource::Disk);
+        for _ in 0..100 {
+            if !server.received_requests().await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(server.received_requests().await.unwrap().len(), 1, "a due check asks the site");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(std::fs::read(&file).unwrap(), JPEG, "not modified: the cached cover stays");
+
+        server.reset().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(b"NEW".to_vec()).insert_header("etag", "\"v2\"")).mount(&server).await;
+        recheck::write(&root, &url, &recheck::Check { checked_ms: 0, etag: Some("\"v1\"".into()), last_modified: None });
+        svc.fetch(&art, &opts, &CancellationToken::new()).await.unwrap();
+        for _ in 0..100 {
+            if std::fs::read(&file).unwrap() == b"NEW" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(std::fs::read(&file).unwrap(), b"NEW", "changed: downloaded again");
+        assert_eq!(recheck::read(&root, &url).unwrap().etag.as_deref(), Some("\"v2\""));
+    }
+
+    #[test]
+    fn a_file_link_is_decoded_to_its_path() {
+        assert_eq!(file_path("file:///home/a/Ch%201/001.png"), PathBuf::from("/home/a/Ch 1/001.png"));
+        assert_eq!(file_path("file:///x/100%"), PathBuf::from("/x/100%"));
+        assert_eq!(file_path("/plain/p.jpg"), PathBuf::from("/plain/p.jpg"));
     }
 
     #[tokio::test]

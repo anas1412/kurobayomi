@@ -145,7 +145,7 @@ fn a_stream_load_sets_its_headers_and_adds_its_subtitle_after_the_file_loads() {
 
     assert!(wait_for(|| playback.mpv_mut().drain_events().contains(&kuro_player::observer::MpvEvent::FileLoaded)), "the file loads");
     let before = playback.mpv().get_i64("track-list/count").unwrap_or(0);
-    playback.add_tracks(&[vec!["sub-add".into(), subtitle.display().to_string(), "auto".into(), "English".into()]]);
+    playback.add_tracks(&[vec!["sub-add".into(), subtitle.display().to_string(), "auto".into(), "English".into()]], None);
     // the side track is added on a worker thread
     assert!(wait_for(|| playback.mpv().get_i64("track-list/count") == Some(before + 1)), "sub-add adds the subtitle track");
     let lists = kuro_player::tracks::load_track_lists(&super::menu::MpvTracks(playback.mpv()));
@@ -176,7 +176,7 @@ fn popping_the_embedded_player_stops_playback_at_once() {
         let was_visible = window.is_visible();
         window.present();
         crate::ui::push(&gtk::Label::new(Some("below")));
-        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, tracks: Vec::new() };
+        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, track_headers: Vec::new(), tracks: Vec::new() };
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         pump_for(500);
         assert!(!shared.borrow().closed, "playing");
@@ -204,7 +204,7 @@ fn a_closed_player_is_freed_and_leaves_no_leak() {
         let was_visible = window.is_visible();
         window.present();
         crate::ui::push(&gtk::Label::new(Some("below")));
-        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, tracks: Vec::new() };
+        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, track_headers: Vec::new(), tracks: Vec::new() };
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         pump_for(400);
         let weak = std::rc::Rc::downgrade(&shared);
@@ -234,7 +234,7 @@ fn fullscreen_and_escape_act_on_the_window_that_holds_the_player() {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         stack.add_child(&root);
         stack.set_visible_child(&root);
-        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, tracks: Vec::new() };
+        let media = super::Media { target: clip.display().to_string(), title: crate::widgets::page_header::MediaTitle::new("clip", ""), headers: None, track_headers: Vec::new(), tracks: Vec::new() };
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         let page = stack.visible_child().and_downcast::<gtk::Box>().expect("the page is the visible child");
 

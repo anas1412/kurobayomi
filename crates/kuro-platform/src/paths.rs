@@ -55,6 +55,14 @@ pub trait Paths {
     fn chapter_cache_dir(&self) -> PathBuf {
         self.cache_dir().join("chapter_disk_cache")
     }
+    /// The last results of each source listing and search, shown at once while the site is asked again.
+    fn browse_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("browse_results")
+    }
+    /// Side subtitle files (`.vtt`, `.srt`, `.ass`) of streamed episodes, kept by their address.
+    fn subtitle_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("subtitles")
+    }
     /// Where a shared image is staged before it is handed to another app.
     fn share_staging_dir(&self) -> PathBuf {
         self.cache_dir().join("shared_image")
@@ -232,6 +240,8 @@ mod role_tests {
         assert_eq!(p.image_cache_dir(), PathBuf::from("/k/image_cache"));
         assert_eq!(p.chapter_cache_dir(), PathBuf::from("/k/chapter_disk_cache"));
         assert_eq!(p.share_staging_dir(), PathBuf::from("/k/shared_image"));
+        assert_eq!(p.browse_cache_dir(), PathBuf::from("/k/browse_results"));
+        assert_eq!(p.subtitle_cache_dir(), PathBuf::from("/k/subtitles"));
         assert_eq!(p.extensions_dir(), PathBuf::from("/d/extensions"));
         assert_eq!(p.anime_extensions_dir(), PathBuf::from("/d/extensions/anime"));
         assert_eq!(p.scrapers_dir(), PathBuf::from("/d/scrapers"));

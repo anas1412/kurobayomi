@@ -955,3 +955,12 @@ source_switch_check_broken = { $source } does not work right now
 
 # source: kurobayomi
 source_switch_failed = The source could not be downloaded. Check your connection and try again.
+
+# source: kurobayomi
+pref_clear_cache = Clear cache
+
+# source: kurobayomi
+pref_cache_size = Cache size limit
+
+# source: kurobayomi
+action_reload = Reload

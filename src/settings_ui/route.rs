@@ -216,7 +216,7 @@ fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let mut tree: Vec<Preference> = storage::rows(prefs, Rc::clone(&changed)).into_iter().map(rows::item).collect();
     let interval = rows::ranged_choice(&tr(MsgKey::pref_backup_interval), &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
     tree.push(rows::group(&tr(MsgKey::label_backup), vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
-    tree.push(rows::group(&tr(MsgKey::pref_storage_usage), vec![cache::clear_row(Rc::clone(&changed))]));
+    tree.push(rows::group(&tr(MsgKey::pref_storage_usage), vec![cache::size_row(prefs), cache::clear_row(Rc::clone(&changed))]));
     tree.push(rows::group(&tr(MsgKey::ui_maintenance), maintenance::data_rows()));
     tree.push(library_export::group_row());
     tree

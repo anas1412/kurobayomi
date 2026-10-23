@@ -110,9 +110,10 @@ pub fn download_badge(count: i64) -> Option<String> {
 /// What a card draws as its cover.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoverKind {
-    /// A `file://` image, drawn at once.
+    /// A `file://` image GTK draws itself: only before the app has an image service.
     File(String),
-    /// An image the image service loads (only offered when the app installed one).
+    /// An image the image service loads (only offered when the app installed one): a web cover, or a local title's
+    /// `file://` cover, which then gets the service's decoded-image cache and its sized decode.
     Remote(String),
     /// The initials tile.
     Initials,
@@ -121,7 +122,8 @@ pub enum CoverKind {
 /// The cover of an entry with stored thumbnail `thumbnail`. `remote_loader` says whether remote images can load.
 pub fn cover_kind(thumbnail: Option<&str>, remote_loader: bool) -> CoverKind {
     match thumbnail {
-        Some(url) if url.starts_with("file://") => CoverKind::File(url.to_owned()),
+        Some(url) if url.starts_with("file://") && !remote_loader => CoverKind::File(url.to_owned()),
+        Some(url) if url.starts_with("file://") => CoverKind::Remote(url.to_owned()),
         Some(url) if remote_loader && (url.starts_with("https://") || url.starts_with("http://") || url.starts_with(kuro_images::fetch::COVER_MARKER)) => CoverKind::Remote(url.to_owned()),
         _ => CoverKind::Initials,
     }
@@ -237,6 +239,7 @@ mod tests {
     #[test]
     fn file_covers_draw_remote_ones_need_the_loader_and_the_rest_is_initials() {
         assert_eq!(cover_kind(Some("file:///a/cover.jpg"), false), CoverKind::File("file:///a/cover.jpg".into()));
+        assert_eq!(cover_kind(Some("file:///a/cover.jpg"), true), CoverKind::Remote("file:///a/cover.jpg".into()), "a local cover uses the image cache");
         assert_eq!(cover_kind(Some("https://x/c.jpg"), true), CoverKind::Remote("https://x/c.jpg".into()));
         assert_eq!(cover_kind(Some("kb-cover:/a/1"), true), CoverKind::Remote("kb-cover:/a/1".into()), "a poster asked of the source");
         assert_eq!(cover_kind(Some("https://x/c.jpg"), false), CoverKind::Initials);

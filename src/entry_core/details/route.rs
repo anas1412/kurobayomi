@@ -329,6 +329,10 @@ fn assemble(runner: Rc<EntryRunner>, show_airing: bool, env: Env) -> GBox {
                 let view = weak.borrow().upgrade();
                 match (view, action) {
                     (Some(view), RowAction::Select) => view.row_pressed(id, true, false, crate::entry_core::selection::Mods::default()),
+                    (Some(view), RowAction::Reload) => {
+                        crate::cache_limit::forget_item(kind, id);
+                        view.row_pressed(id, false, false, crate::entry_core::selection::Mods::default());
+                    }
                     (Some(view), action) => view.menu_pressed(id, action),
                     (None, _) => {}
                 }

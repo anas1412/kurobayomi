@@ -7,6 +7,7 @@ mod backup_host;
 mod backup_run;
 mod backup_schedule;
 mod bind;
+mod cache_limit;
 mod category_picker;
 mod duplicate_dialog;
 mod clamp;
@@ -336,6 +337,7 @@ fn build_window(app: &gtk::Application) {
     // background work that waits for the window: the chapter cache clear and the opt-in release check
     if let Ok(paths) = kuro_platform::linux::LinuxPaths::system() {
         startup::clear_chapter_cache_on_launch(crate::misc::diet_defaults::LIBRARY_AUTO_CLEAR_CHAPTER_CACHE, kuro_images::platform::chapter_cache_dir(&paths));
+        cache_limit::start(&kuro_prefs::backup::StoragePrefs::new(data::app().base.store().clone()), cache_limit::dirs(&paths));
     }
     app_update::startup();
     appimage_update::startup();

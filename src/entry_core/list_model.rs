@@ -122,6 +122,9 @@ pub enum RowAction {
     Download,
     /// Selects the row: the menu's Select item, and what a long press on a row reports.
     Select,
+    /// Forgets the row's cached files (chapter pages, subtitle files) and opens it, so they are fetched again from the
+    /// site (for a site that replaced them behind the same address).
+    Reload,
 }
 
 /// The right-click menu of `row` as `(label, section, action)`, in section order. Each label says what a press does
@@ -152,6 +155,9 @@ pub fn row_menu(row: &RowItem, kind: Kind) -> Vec<(MsgKey, u8, RowAction)> {
             DownloadState::NotDownloaded | DownloadState::Error => MsgKey::action_download,
         };
         items.push((download, 1, RowAction::Download));
+    }
+    if !matches!(row.download, DownloadState::Downloaded) {
+        items.push((MsgKey::action_reload, 2, RowAction::Reload));
     }
     items.push((MsgKey::action_select, 2, RowAction::Select));
     items
@@ -209,7 +215,7 @@ mod tests {
     #[test]
     fn the_row_menu_is_one_menu_for_both_kinds_with_labels_of_what_a_press_does() {
         let actions = |items: Vec<(MsgKey, u8, RowAction)>| items.into_iter().map(|(_, _, a)| a).collect::<Vec<_>>();
-        let all = [RowAction::ToggleRead, RowAction::MarkPrevious, RowAction::ToggleBookmark, RowAction::Download, RowAction::Select];
+        let all = [RowAction::ToggleRead, RowAction::MarkPrevious, RowAction::ToggleBookmark, RowAction::Download, RowAction::Reload, RowAction::Select];
         assert_eq!(actions(row_menu(&item(1), Kind::Manga)), all);
         assert_eq!(actions(row_menu(&item(1), Kind::Anime)), all, "an episode has the same items");
         let sections: Vec<u8> = row_menu(&item(1), Kind::Manga).iter().map(|(_, s, _)| *s).collect();
@@ -220,6 +226,7 @@ mod tests {
         let done = RowItem { read: true, bookmark: true, download: DownloadState::Downloaded, ..item(1) };
         let episode = row_menu(&done, Kind::Anime);
         assert_eq!((episode[0].0, episode[1].0, episode[2].0, episode[3].0), (MsgKey::action_mark_as_unseen, MsgKey::action_mark_previous_as_seen, MsgKey::action_remove_bookmark_episode, MsgKey::action_delete_download));
+        assert!(!actions(episode).contains(&RowAction::Reload), "a downloaded row has no cached files to reload");
         let queued = RowItem { download: DownloadState::Queue, ..item(1) };
         assert_eq!(row_menu(&queued, Kind::Manga)[3].0, MsgKey::action_cancel);
 

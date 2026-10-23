@@ -15,7 +15,7 @@ use super::grid::{PageAsk, Pager, prefetch_due};
 
 /// One cover of a listing. `id` is the library row of the entry, found or inserted by `network_to_local` when the
 /// page was loaded (0 when a caller has none, as in global search).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ListItem {
     pub id: i64,
     pub source_id: i64,
@@ -58,6 +58,9 @@ pub struct Listing {
     append_error: Option<String>,
     /// `browse_hide_in_library_items`, read when the page was made (B§1.1, T-40b-034): favourites are not kept.
     hide_in_library: bool,
+    /// The items are the saved results of the last visit (`results_cache`): the first page the site answers replaces
+    /// them, and no later page is asked before it.
+    provisional: bool,
 }
 
 impl Listing {
@@ -71,6 +74,7 @@ impl Listing {
             refresh_error: None,
             append_error: None,
             hide_in_library: false,
+            provisional: false,
         }
     }
 
@@ -106,6 +110,23 @@ impl Listing {
         self.loading = false;
         self.refresh_error = None;
         self.append_error = None;
+        self.provisional = false;
+    }
+
+    /// Shows the saved results of the last visit while the first page loads. Only a listing with nothing loaded takes
+    /// them.
+    pub fn prefill(&mut self, page: ListedPage) {
+        if !self.items.is_empty() || page.items.is_empty() {
+            return;
+        }
+        let hide = self.hide_in_library;
+        self.items = page.items.into_iter().filter(|item| !(hide && item.favorite)).map(Some).collect();
+        self.provisional = !self.items.is_empty();
+    }
+
+    /// The items on screen are the saved results, not yet replaced by the site's answer.
+    pub fn is_provisional(&self) -> bool {
+        self.provisional
     }
 
     /// The next page to load, or `None` while one is in flight or the listing has ended.
@@ -125,6 +146,9 @@ impl Listing {
         }
         if !self.pager.deliver(generation, page.has_next) {
             return None;
+        }
+        if std::mem::take(&mut self.provisional) {
+            self.items.clear();
         }
         self.loading = false;
         self.append_error = None;
@@ -171,6 +195,7 @@ impl Listing {
     /// `last_visible` is the index of the last cell on screen. True when the next page should be asked for.
     pub fn wants_more(&self, last_visible: usize) -> bool {
         !self.pager.is_done()
+            && !self.provisional
             && !self.loading
             && self.append_error.is_none()
             && self.refresh_error.is_none()
@@ -221,6 +246,35 @@ mod tests {
 
     fn plan(listing: &Listing) -> ContentPlan {
         listing.plan(true, false, false, LibraryDisplayMode::CompactGrid)
+    }
+
+    #[test]
+    fn saved_results_show_at_once_and_the_first_answer_replaces_them_in_place() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        listing.prefill(page(&["old a", "old b"], false));
+        assert!(listing.is_provisional());
+        assert_eq!(listing.loaded(), 2);
+        let ask = listing.ask().expect("the site is still asked");
+        assert!(!listing.wants_more(10), "no second page before the first answer");
+        assert_eq!(listing.deliver(ask.generation, page(&["new"], true)), Some(1));
+        assert!(!listing.is_provisional());
+        let titles: Vec<&str> = listing.slots().iter().flatten().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["new"]);
+        listing.prefill(page(&["late"], false));
+        assert_eq!(listing.loaded(), 1, "a listing with items keeps them");
+    }
+
+    #[test]
+    fn a_failed_refresh_keeps_the_saved_results_and_the_retry_still_replaces_them() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        listing.prefill(page(&["old"], false));
+        let ask = listing.ask().unwrap();
+        assert!(listing.fail(ask.generation, "offline".into()));
+        assert_eq!(listing.loaded(), 1);
+        listing.clear_errors();
+        let ask = listing.ask().expect("the same page again");
+        listing.deliver(ask.generation, page(&["new"], false));
+        assert_eq!(listing.slots().iter().flatten().map(|item| item.title.as_str()).collect::<Vec<_>>(), ["new"]);
     }
 
     #[test]

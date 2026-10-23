@@ -25,19 +25,20 @@ impl RefreshPlan {
     }
 }
 
-/// `needRefreshInfo = !initialized`, `needRefreshEpisode = episodes.isEmpty() && Episodes`,
-/// `needRefreshSeason = seasons.isEmpty() && Seasons`. `episode_list` and `season_list` say whether the entry's fetch
-/// type is `Episodes` or `Seasons`.
+/// `needRefreshInfo = !initialized`, `needRefreshSeason = seasons.isEmpty() && Seasons`. The episode or chapter list
+/// is never shown from the saved copy alone: an `Episodes` entry always asks the source again on open, and new items
+/// appear when it answers (owner rule, 2026-10-23; upstream only asked when the list was empty). `episode_list` and
+/// `season_list` say whether the entry's fetch type is `Episodes` or `Seasons`.
 pub fn refresh_on_open(
     initialized: bool,
-    episodes_empty: bool,
+    _episodes_empty: bool,
     episode_list: bool,
     seasons_empty: bool,
     season_list: bool,
 ) -> RefreshPlan {
     RefreshPlan {
         info: !initialized,
-        episodes: episodes_empty && episode_list,
+        episodes: episode_list,
         seasons: seasons_empty && season_list,
     }
 }
@@ -91,19 +92,20 @@ mod tests {
     }
 
     #[test]
-    fn lists_refresh_only_when_empty_and_of_their_fetch_type() {
+    fn the_episode_list_always_refreshes_and_seasons_only_when_empty() {
         let plan = refresh_on_open(true, true, true, true, false);
         assert!(plan.episodes);
         assert!(!plan.seasons);
-        let plan = refresh_on_open(true, false, true, true, true);
+        assert!(refresh_on_open(true, false, true, false, false).episodes, "a saved list is shown and asked again");
+        let plan = refresh_on_open(true, false, false, true, true);
         assert!(!plan.episodes);
         assert!(plan.seasons);
     }
 
     #[test]
     fn a_plan_is_active_when_any_part_refreshes() {
-        assert!(!refresh_on_open(true, false, true, false, false).any());
-        assert!(refresh_on_open(false, false, true, false, false).any());
+        assert!(!refresh_on_open(true, false, false, false, false).any());
+        assert!(refresh_on_open(false, false, false, false, false).any());
         assert!(refresh_on_open(true, true, true, false, false).any());
         assert!(refresh_on_open(true, false, false, true, true).any());
     }

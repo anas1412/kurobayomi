@@ -167,6 +167,7 @@ pub(super) fn media_of(video: Video, title: crate::widgets::page_header::MediaTi
         video.video_url
     };
     Media {
+        track_headers: video.headers.as_ref().map(|h| h.0.clone()).unwrap_or_default(),
         tracks: select_defaults(external_track_commands(&tracks(&video.audio_tracks), &tracks(&video.subtitle_tracks)).commands, preferred, preferred_audio),
         target,
         title,
