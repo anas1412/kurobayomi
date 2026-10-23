@@ -20,6 +20,8 @@ concurrency:
 
 permissions:
   contents: write
+  # to pull the build image
+  packages: read
 
 env:
   # the commit that passed CI, or the current one for a manual run
@@ -28,29 +30,19 @@ env:
 jobs:
   appimage:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
-    # The AppImage bundles this machine's libraries, so it runs on distros with glibc 2.39 or newer. Ubuntu 24.04 is also
-    # the first with GTK 4.14, which the gtk4 v4_14 feature needs.
+    # The AppImage bundles the build machine's libraries, so it runs on distros with glibc 2.39 or newer. The machine is
+    # Ubuntu 24.04 (also the first with GTK 4.14, which the gtk4 v4_14 feature needs) with every system package already
+    # in it (ci/Dockerfile, built by build-image.yml): nothing is installed from Ubuntu's mirror here.
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/kurobayomi-build:noble
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.SHA }}
-
-      # Downloading the packages from the runner's mirror took about 4 minutes: the .deb files are kept between runs, and
-      # apt only fetches what changed since. Editing this file starts a fresh cache.
-      - name: Cache the downloaded packages
-        uses: actions/cache@v4
-        with:
-          path: ~/apt-archives/*.deb
-          key: apt-appimage-${{ hashFiles('.github/workflows/appimage.yml') }}
-          restore-keys: apt-appimage-
-
-      - name: Install system packages
-        run: |
-          mkdir -p ~/apt-archives/partial
-          sudo apt-get update
-          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libdav1d-dev libmpv-dev patchelf glib-networking dconf-gsettings-backend desktop-file-utils file zsync \
-            nasm libgnutls28-dev libxml2-dev libva-dev libvdpau-dev libdrm-dev zlib1g-dev libbz2-dev
 
       - name: Update Rust
         run: rustup update stable
@@ -80,7 +72,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+          # "image": the build runs in the build image now, whose home folder differs, and FFmpeg's files name their prefix
+          key: ffmpeg-image-${{ hashFiles('scripts/build-ffmpeg.sh', 'ci/Dockerfile') }}
 
       - name: Build FFmpeg
         if: steps.ffmpeg.outputs.cache-hit != 'true'
