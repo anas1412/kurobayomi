@@ -47,13 +47,17 @@ pub trait Ops<T>: Send + Sync + 'static {
     fn busy_text(&self) -> Option<String> {
         None
     }
-    /// Whether an item lists sources the user turns on one by one (a repository): its card then has a Sources button
-    /// that runs [`Ops::open_sources`], which also opens right after the item is added.
+    /// Whether an item lists sources the user turns on one by one (a repository): its card then shows them
+    /// ([`Ops::sources_list`]), and [`Ops::open_sources`] opens right after the item is added.
     fn has_sources(&self) -> bool {
         false
     }
-    /// Opens the source switches of item `key`. Runs on the GTK thread.
+    /// Opens the source switches of item `key` as a dialog. Runs on the GTK thread.
     fn open_sources(&self, _key: &str) {}
+    /// The source switches of item `key` as a list, filtered by `query`, shown under its card. Runs on the GTK thread.
+    fn sources_list(&self, _key: &str, _query: std::rc::Rc<std::cell::RefCell<String>>) -> Option<gtk::ListBox> {
+        None
+    }
 }
 
 /// The busy card text while a repo link's index and sources download.
@@ -112,6 +116,10 @@ impl Ops<RepoLink> for RepoOps {
     /// A repository's sources start off: the user picks the ones to turn on.
     fn open_sources(&self, key: &str) {
         crate::source_switch::open_picker(key);
+    }
+
+    fn sources_list(&self, key: &str, query: std::rc::Rc<std::cell::RefCell<String>>) -> Option<gtk::ListBox> {
+        crate::source_switch::sources_list(key, query)
     }
 
     fn card(&self, repo: &RepoLink) -> Card {

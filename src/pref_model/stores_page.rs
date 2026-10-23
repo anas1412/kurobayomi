@@ -164,6 +164,10 @@ struct Inner<T: Keyed + Send + 'static> {
     fab_label: gtk::Label,
     refresh: gtk::Button,
     dialog: RefCell<Option<DialogUi>>,
+    /// The text of the page's search, which filters the sources under every card.
+    query: Rc<RefCell<String>>,
+    /// The source lists under the cards, filtered again each time the search changes.
+    sections: RefCell<Vec<gtk::ListBox>>,
 }
 
 /// A built page. Dropping it does not close the page; the widget owns the state.
@@ -207,6 +211,8 @@ pub fn build<T: Keyed + Send + 'static>(
 
     let refresh = crate::ui::refresh_button(&texts.refresh);
     refresh.set_sensitive(false);
+    // a page of repositories searches their sources (the shared page search: the toggle leads the header actions)
+    let search = ops.has_sources().then(|| gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search_hint)).build());
 
     let inner = Rc::new(Inner {
         ops,
@@ -220,7 +226,18 @@ pub fn build<T: Keyed + Send + 'static>(
         fab_label,
         refresh: refresh.clone(),
         dialog: RefCell::new(None),
+        query: Rc::default(),
+        sections: RefCell::default(),
     });
+    if let Some(search) = &search {
+        let weak = Rc::downgrade(&inner);
+        search.connect_search_changed(move |entry| {
+            if let Some(page) = weak.upgrade() {
+                *page.query.borrow_mut() = entry.text().to_string();
+                page.sections.borrow().iter().for_each(|list| list.invalidate_filter());
+            }
+        });
+    }
 
     let weak = Rc::downgrade(&inner);
     fab.connect_clicked({
@@ -286,7 +303,8 @@ pub fn build<T: Keyed + Send + 'static>(
     let keep = Rc::clone(&inner);
     let root: gtk::Widget = overlay.clone().upcast();
     root.connect_destroy(move |_| drop(Rc::clone(&keep)));
-    let built = Built { content: overlay.upcast(), end: vec![refresh.upcast()] };
+    let end = search.into_iter().map(|entry| entry.upcast()).chain([refresh.upcast()]).collect();
+    let built = Built { content: overlay.upcast(), end };
     (built, StoresPage { inner })
 }
 
@@ -420,13 +438,25 @@ impl<T: Keyed + Send + 'static> Inner<T> {
         while let Some(row) = self.list.first_child() {
             self.list.remove(&row);
         }
+        self.sections.borrow_mut().clear();
         for card in &cards {
-            self.list.append(&self.card_row(card));
+            // a repository's sources sit under its card, in the same frame, shown until its chevron folds them
+            // ponytail: a rebuild opens every card again; keep the folded keys if a page ever rebuilds while folded
+            let section = if self.ops.has_sources() { self.ops.sources_list(&card.key, Rc::clone(&self.query)) } else { None };
+            let revealer = section.as_ref().map(|list| gtk::Revealer::builder().reveal_child(true).child(list).build());
+            self.list.append(&self.card_row(card, revealer.as_ref()));
+            if let Some(revealer) = revealer {
+                self.list.append(&gtk::ListBoxRow::builder().child(&revealer).activatable(false).selectable(false).build());
+            }
+            if let Some(list) = section {
+                list.remove_css_class("boxed-list");
+                self.sections.borrow_mut().push(list);
+            }
         }
         self.sync_dialog();
     }
 
-    fn card_row(self: &Rc<Self>, card: &Card) -> gtk::ListBoxRow {
+    fn card_row(self: &Rc<Self>, card: &Card, sources: Option<&gtk::Revealer>) -> gtk::ListBoxRow {
         let actions = stores::card_actions(&card.website, card.discord.as_deref());
         let h = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         h.set_margin_start(crate::ui::ROW_PAD_H);
@@ -457,13 +487,6 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             discord.connect_clicked(move |_| crate::ui::open_link(&link, None));
             h.append(&discord);
         }
-        if self.ops.has_sources() {
-            let sources = gtk::Button::with_label(&tr(MsgKey::source_switch_sources));
-            sources.set_valign(gtk::Align::Center);
-            let (ops, key) = (self.ops.clone(), card.key.clone());
-            sources.connect_clicked(move |_| ops.open_sources(&key));
-            h.append(&sources);
-        }
         let copy = crate::ui::icon_button("edit-copy-symbolic", &self.texts.copy);
         let text = card.copy.clone();
         copy.connect_clicked(move |_| copy_to_clipboard(&text));
@@ -476,6 +499,18 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             }
         });
         h.append(&delete);
+        if let Some(revealer) = sources {
+            // the chevron of a GNOME expander row: down while the sources show, right when they are folded
+            let tip = tr(MsgKey::source_switch_sources);
+            let fold = gtk::ToggleButton::builder().icon_name("pan-down-symbolic").active(true).valign(gtk::Align::Center).tooltip_text(&tip).css_classes(["flat"]).build();
+            fold.update_property(&[gtk::accessible::Property::Label(&tip)]);
+            let revealer = revealer.clone();
+            fold.connect_toggled(move |fold| {
+                revealer.set_reveal_child(fold.is_active());
+                fold.set_icon_name(if fold.is_active() { "pan-down-symbolic" } else { "pan-end-symbolic" });
+            });
+            h.append(&fold);
+        }
         let row = gtk::ListBoxRow::builder().child(&h).activatable(false).build();
         let (weak, card) = (Rc::downgrade(self), card.clone());
         crate::widgets::context_menu::attach(&row, move |_, _| weak.upgrade().map_or_else(Vec::new, |page| page.card_menu(&card)));
@@ -727,6 +762,59 @@ mod tests {
         fn closes_on_submit(&self) -> bool {
             self.closes
         }
+    }
+
+    /// A list whose items each list two sources, "Alpha" and "Beta".
+    struct WithSources;
+
+    impl Ops<Item> for WithSources {
+        fn card(&self, item: &Item) -> Card {
+            Card { key: item.0.clone(), name: item.0.clone(), website: String::new(), discord: None, copy: item.0.clone(), note: None }
+        }
+        fn add(&self, _url: &str) -> AddOutcome {
+            AddOutcome::Added
+        }
+        fn refresh(&self) {}
+        fn remove(&self, _key: &str) {}
+        fn has_sources(&self) -> bool {
+            true
+        }
+        fn sources_list(&self, _key: &str, query: Rc<RefCell<String>>) -> Option<gtk::ListBox> {
+            let list = crate::ui::boxed_list();
+            for name in ["Alpha", "Beta"] {
+                list.append(&crate::ui::row(name, None, None));
+            }
+            list.set_filter_func(move |row| crate::ui::title_matches(["Alpha", "Beta"][row.index() as usize], &query.borrow()));
+            Some(list)
+        }
+    }
+
+    /// A repository's sources show under its card, open at first; its chevron folds them, and the page's search, the
+    /// first header widget, filters every card's sources.
+    #[test]
+    fn a_cards_sources_show_under_it_fold_with_its_chevron_and_are_searched() {
+        crate::testing::with_display(|| {
+            let _nav = crate::testing::nav();
+            let feed: Rc<RefCell<Option<Box<dyn Fn(Vec<Item>)>>>> = Rc::new(RefCell::new(None));
+            let sink = feed.clone();
+            let (built, page) = build(Arc::new(WithSources), Texts::repos(), move |push| *sink.borrow_mut() = Some(push));
+            (feed.borrow().as_ref().expect("subscribed"))(vec![Item("https://a/index.json".into())]);
+            let inner = page.inner.clone();
+            let section = inner.list.row_at_index(1).expect("the sources row follows the card");
+            let revealer = section.child().and_downcast::<gtk::Revealer>().expect("a revealer holds the sources");
+            assert!(revealer.reveals_child(), "open at first");
+            let card = inner.list.row_at_index(0).unwrap().child().and_downcast::<gtk::Box>().unwrap();
+            let fold = card.last_child().and_downcast::<gtk::ToggleButton>().expect("the chevron ends the card");
+            fold.set_active(false);
+            assert!(!revealer.reveals_child(), "the chevron folds them");
+            assert_eq!(fold.icon_name().as_deref(), Some("pan-end-symbolic"));
+            let search = built.end.first().and_then(|w| w.downcast_ref::<gtk::SearchEntry>()).expect("the page's search leads its header widgets").clone();
+            search.set_text("bet");
+            pump_until(|| inner.query.borrow().as_str() == "bet");
+            let list = inner.sections.borrow()[0].clone();
+            let shown: Vec<bool> = (0..2).map(|i| list.row_at_index(i).unwrap().is_child_visible()).collect();
+            assert_eq!(shown, [false, true], "only Beta matches");
+        });
     }
 
     fn pump_until(done: impl Fn() -> bool) {

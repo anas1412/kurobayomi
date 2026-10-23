@@ -315,23 +315,55 @@ pub fn offer_turn_on(source_id: i64, after: impl Fn() + 'static) -> bool {
     true
 }
 
-/// The list of a repository's sources with a switch each: shown right after the repository is added, from the "new
-/// sources" notice and from the repository's card.
-pub fn open_picker(link: &str) {
-    let Some(index) = crate::recipe_sources::saved_index(link) else { return };
-    let Some(prefs) = live() else { return };
-    let repo = index.name.clone().filter(|name| !name.trim().is_empty()).unwrap_or_else(|| link.to_owned());
-    let col = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    col.append(&crate::ui::message(&tr(MsgKey::source_switch_picker_intro)));
+/// A repository's sources, a row with a switch each, filtered by `query` (empty shows every row): the Repositories page
+/// shows it under the repository's card, and the picker dialog on its own. `None` when the repository has no saved index.
+pub fn sources_list(link: &str, query: Rc<std::cell::RefCell<String>>) -> Option<gtk::ListBox> {
+    let index = crate::recipe_sources::saved_index(link)?;
+    let prefs = live()?;
     let list = crate::ui::boxed_list();
     let mut entries: Vec<&Entry> = index.sources.iter().collect();
     entries.sort_by(|a, b| (a.kind != Kind::Anime, &a.lang, a.name.to_lowercase()).cmp(&(b.kind != Kind::Anime, &b.lang, b.name.to_lowercase())));
+    // what each row is found by, in row order: rows are never removed, so a row's index names its text
+    let texts: Vec<String> = entries.iter().map(|entry| search_text(entry)).collect();
     for entry in entries {
         list.append(&picker_row(&prefs, link, entry));
     }
+    list.set_filter_func(move |row| usize::try_from(row.index()).ok().and_then(|i| texts.get(i)).is_none_or(|text| crate::ui::title_matches(text, &query.borrow())));
+    Some(list)
+}
+
+/// The list of a repository's sources with a switch each, as a dialog: shown right after the repository is added and
+/// from the "new sources" notice.
+pub fn open_picker(link: &str) {
+    let Some(index) = crate::recipe_sources::saved_index(link) else { return };
+    let query = Rc::new(std::cell::RefCell::new(String::new()));
+    let Some(list) = sources_list(link, Rc::clone(&query)) else { return };
+    let repo = index.name.clone().filter(|name| !name.trim().is_empty()).unwrap_or_else(|| link.to_owned());
+    let col = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    col.append(&crate::ui::message(&tr(MsgKey::source_switch_picker_intro)));
+    let search = gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search_hint)).hexpand(true).build();
+    col.append(&search);
+    let weak = list.downgrade();
+    search.connect_search_changed(move |entry| {
+        *query.borrow_mut() = entry.text().to_string();
+        if let Some(list) = weak.upgrade() {
+            list.invalidate_filter();
+        }
+    });
     col.append(&list);
     let title = trf(MsgKey::source_switch_picker_title, &[("repo", Arg::Str(&repo))]);
-    crate::ui::dialog(&title, &col, 480, vec![crate::ui::DialogButton::new(tr(MsgKey::action_ok), crate::ui::Role::Suggested, || {})]).present();
+    let window = crate::ui::dialog(&title, &col, 480, vec![crate::ui::DialogButton::new(tr(MsgKey::action_ok), crate::ui::Role::Suggested, || {})]);
+    // type to search, as GNOME lists do: typing anywhere in the dialog goes to the search field
+    search.set_key_capture_widget(Some(&window));
+    window.present();
+}
+
+/// What a picker row is found by: the source's name, language, kind and description.
+fn search_text(entry: &Entry) -> String {
+    let kind = tr(if entry.kind == Kind::Anime { MsgKey::label_anime } else { MsgKey::label_manga });
+    let language = crate::browse::names::localized_display_name(&entry.lang);
+    let about = crate::recipe_sources::described(entry).unwrap_or_default();
+    format!("{} {language} {kind} {about}", entry.name)
 }
 
 /// One row of the picker: icon, name, language and kind, and the switch.
@@ -515,6 +547,20 @@ mod tests {
         assert_eq!(keys(&prefs).len(), 3, "a did not load this time and stays known");
         set_on(&prefs, "b", true);
         assert_eq!(off_ids_of(&prefs), HashSet::from([11, 12]));
+    }
+
+    #[test]
+    fn a_picker_row_is_found_by_its_name_language_kind_or_description() {
+        let mut entry = index(&["a"]).sources.remove(0);
+        entry.name = "Senkuro".into();
+        entry.lang = "ru".into();
+        entry.description = Some("Chapters with teams".into());
+        let text = search_text(&entry);
+        let language = crate::browse::names::localized_display_name("ru");
+        for query in ["senk", language.as_str(), "manga", "teams", ""] {
+            assert!(crate::ui::title_matches(&text, query), "{query}");
+        }
+        assert!(!crate::ui::title_matches(&text, "anime"));
     }
 
     /// The picker draws one row per source with a switch that shows whether it is on.

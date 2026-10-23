@@ -6,6 +6,12 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+### Changed
+
+- The Repositories page lists each repository's sources under its card, with their switches; the card's chevron folds
+  them away. The page's search finds a source by name, language, kind or description. The Sources button is gone.
+- The list of a repository's sources that opens after adding it has a search field; typing anywhere in it searches.
+
 ## [0.1.9] - 2026-10-24
 
 ### Added
