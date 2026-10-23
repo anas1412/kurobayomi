@@ -4563,9 +4563,6 @@ ui_added_1_source = Added 1 source
 ui_the_repo_could_not_be_reached = The repo could not be reached
 
 # source: kurobayomi
-ui_the_repo_lists_more_than_10_sources_of_one_k = The repo lists more than 10 sources of one kind
-
-# source: kurobayomi
 ui_a_source_does_not_match_its_checksum_in_the = A source does not match its checksum in the repo index
 
 # source: kurobayomi

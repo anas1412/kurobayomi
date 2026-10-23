@@ -14,8 +14,6 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 
-/// The most sources one repository may list for one kind. A user has at most this many of each.
-pub const MAX_SOURCES_PER_KIND: usize = 10;
 /// The largest index or source file accepted. Both are small text files.
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 /// The largest source icon accepted: a square PNG of about 192 px.
@@ -84,8 +82,6 @@ pub struct Index {
 pub enum RepoError {
     #[error("the index could not be read: {0}")]
     Parse(String),
-    #[error("the index lists {count} {kind:?} sources, the limit is {limit}")]
-    TooMany { kind: Kind, count: usize, limit: usize },
     #[error("the source id {0:?} is listed twice or is not a plain name")]
     BadId(String),
     #[error("the source {0:?} has a sha256 that is not 64 hex digits")]
@@ -106,8 +102,8 @@ pub enum RepoError {
     Write(String),
 }
 
-/// Reads an index and checks it: each kind has at most [`MAX_SOURCES_PER_KIND`] sources, ids are unique and plain, the
-/// checksums are 64 hex digits, and the file links are https `.toml` files.
+/// Reads an index and checks it: ids are unique and plain, the checksums are 64 hex digits, and the file links are https
+/// `.toml` or `.wasm` files. A repository may list any number of sources.
 pub fn parse_index(text: &str) -> Result<Index, RepoError> {
     let index: Index = serde_json::from_str(text).map_err(|e| RepoError::Parse(e.to_string()))?;
     check(&index)?;
@@ -116,7 +112,6 @@ pub fn parse_index(text: &str) -> Result<Index, RepoError> {
 
 fn check(index: &Index) -> Result<(), RepoError> {
     let mut ids = HashSet::new();
-    let mut per_kind: BTreeMap<Kind, usize> = BTreeMap::new();
     for entry in &index.sources {
         if !is_plain_id(&entry.id) || !ids.insert(entry.id.as_str()) {
             return Err(RepoError::BadId(entry.id.clone()));
@@ -133,12 +128,8 @@ fn check(index: &Index) -> Result<(), RepoError> {
         if entry.icon_sha256.as_ref().is_some_and(|sha| !is_sha256_hex(sha)) {
             return Err(RepoError::BadChecksum(entry.id.clone()));
         }
-        *per_kind.entry(entry.kind).or_default() += 1;
     }
-    match per_kind.into_iter().find(|(_, count)| *count > MAX_SOURCES_PER_KIND) {
-        Some((kind, count)) => Err(RepoError::TooMany { kind, count, limit: MAX_SOURCES_PER_KIND }),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
 fn is_plain_id(id: &str) -> bool {
@@ -368,18 +359,9 @@ mod tests {
     }
 
     #[test]
-    fn ten_sources_of_one_kind_are_the_limit_and_eleven_are_refused() {
-        let ten: Vec<String> = (0..10).map(|i| entry(&format!("m{i}"), "manga", "en")).collect();
-        let anime: Vec<String> = (0..10).map(|i| entry(&format!("a{i}"), "anime", "en")).collect();
-        let mut both = ten.clone();
-        both.extend(anime);
-        assert!(parse_index(&index_of(&both)).is_ok(), "ten of each kind is fine");
-        let mut eleven = ten;
-        eleven.push(entry("m10", "manga", "en"));
-        assert_eq!(
-            parse_index(&index_of(&eleven)),
-            Err(RepoError::TooMany { kind: Kind::Manga, count: 11, limit: 10 })
-        );
+    fn a_repository_may_list_any_number_of_sources() {
+        let many: Vec<String> = (0..40).map(|i| entry(&format!("m{i}"), if i % 2 == 0 { "manga" } else { "anime" }, "en")).collect();
+        assert_eq!(parse_index(&index_of(&many)).unwrap().sources.len(), 40);
     }
 
     #[test]

@@ -81,7 +81,6 @@ pub fn repo_error_text(error: &RepoError) -> String {
     match error {
         RepoError::BadRepoLink => tr(MsgKey::invalid_repo_name),
         RepoError::Network(_) | RepoError::Status(_) => tr(MsgKey::ui_the_repo_could_not_be_reached).to_owned(),
-        RepoError::TooMany { .. } => tr(MsgKey::ui_the_repo_lists_more_than_10_sources_of_one_k).to_owned(),
         RepoError::Mismatch => tr(MsgKey::ui_a_source_does_not_match_its_checksum_in_the).to_owned(),
         RepoError::Write(_) => could_not_add_repo().to_owned(),
         RepoError::Parse(_) | RepoError::BadId(_) | RepoError::BadChecksum(_) | RepoError::BadLink(_) | RepoError::TooLarge => {
@@ -171,7 +170,6 @@ pub fn repo_remove_body(_name: &str, base_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use kuro_platform::kind::Kind;
     use kuro_prefs::source::SourcePrefs;
     use kuro_prefs::store::PrefStore;
 
@@ -214,7 +212,6 @@ mod tests {
     fn t_47b_020_each_failure_has_its_toast_text_and_the_dialog_closes_on_submit() {
         assert_eq!(repo_error_text(&RepoError::Network("refused".into())), "The repo could not be reached");
         assert_eq!(repo_error_text(&RepoError::Status(404)), "The repo could not be reached");
-        assert_eq!(repo_error_text(&RepoError::TooMany { kind: Kind::Manga, count: 11, limit: 10 }), "The repo lists more than 10 sources of one kind");
         assert!(repo_error_text(&RepoError::Parse("x".into())).starts_with("This is not a valid Kurobayomi repository"));
         assert_eq!(repo_error_text(&RepoError::TooLarge), repo_error_text(&RepoError::Parse("x".into())), "a Mihon index.json is too large: same message");
         assert_eq!(repo_error_text(&RepoError::Mismatch), "A source does not match its checksum in the repo index");

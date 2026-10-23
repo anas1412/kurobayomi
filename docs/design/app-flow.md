@@ -3,7 +3,7 @@
 This is how a normal user uses Kurobayomi. Every screen, setting and feature must serve this flow; what does not serve it
 is cut (see `CLAUDE.md`, design principles).
 
-Scale: a user has at most 10 sources for anime and at most 10 for manga. There is no source Install step: adding a repository
+No limit on how many sources a repository lists (user, 2026-10-23: the old cap of 10 per kind is gone). There is no source Install step: adding a repository
 link makes its sources available at once; each source's small file is fetched and checked on first use and refreshed by the
 daily update check.
 
