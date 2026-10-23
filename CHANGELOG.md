@@ -6,6 +6,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-23
+
 ### Added
 
 - Every source has its own on/off switch. Right after you add a repository, a list of its sources opens so you can turn
@@ -22,20 +24,23 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ### Changed
 
+- A source that is off is not on your computer: it is not downloaded or updated, and Browse, global search and the
+  library update leave it out. Its titles stay in the library and their downloads still open; anything that needs the
+  site says "This source is off" with a Turn on button. Turning off a source with library titles asks first.
+- New sources start off. After updating, every source you already had stays on.
+- Restoring an Aniyomi backup turns on every source except the ones Aniyomi had disabled.
+- A repository may list any number of sources (the limit of 10 of each kind is gone).
+- The player lists every audio and subtitle language again, not only English, Arabic, French, Spanish and Japanese.
 - Opening a title shows its saved episode or chapter list at once and always asks the site again in the background;
   new episodes and chapters appear when it answers.
 - Covers are checked again every few days with a conditional request and downloaded again only when they changed.
 - Local titles' covers load through the app's image cache instead of being decoded by the toolkit each time.
 - Clear cache (Data and storage) empties every cache, not only chapter pages.
 
-- A source that is off is not on your computer: it is not downloaded or updated, and Browse, global search and the library
-  update leave it out. Its titles stay in the library and their downloads still open; anything that needs the site says
-  "This source is off" with a Turn on button. Turning off a source with library titles asks first.
-- New sources start off. After updating, every source you already had stays on.
-- Restoring an Aniyomi backup turns on every source except the ones Aniyomi had disabled.
-
 ### Fixed
 
+- Quitting while a slow request was still running (a cover, a source such as AnimePahe behind its browser check) no
+  longer shows the crash window. This covers every source and image load, not only the plug-in requests fixed in 0.1.4.
 - A title saved while a source listed the wrong picture (AnimePahe once gave an episode screenshot) no longer opens with
   that picture: the next listing corrects the stored cover, and a poster the source finds later is stored and cached
   under its real address.
@@ -45,12 +50,6 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 ### Removed
 
 - Pinning sources.
-
-### Fixed
-
-- Quitting while a slow request was still running (a cover, a source such as AnimePahe behind its browser check)
-  no longer shows the crash window. This covers every source and image load, not only the plug-in requests fixed in
-  0.1.4.
 
 ## [0.1.4] - 2026-10-22
 
