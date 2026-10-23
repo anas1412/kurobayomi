@@ -143,6 +143,11 @@ fn off_key(source_id: i64) -> Option<String> {
     (!is_on(&prefs, &key)).then_some(key)
 }
 
+/// Whether source `source_id` is a repository source the user turned off.
+pub fn is_off(source_id: i64) -> bool {
+    off_key(source_id).is_some()
+}
+
 /// The status a Check now gives a source from its first page: it works when it lists something, it is blocked when the
 /// site refuses or cannot be reached from this connection, and it is broken otherwise.
 pub fn checked_status(result: &Result<usize, SourceError>) -> Status {

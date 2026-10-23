@@ -126,12 +126,32 @@ impl ListingView {
         let scroller = gtk::ScrolledWindow::builder().child(&grid).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
 
         let error_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let stub = super::look::empty_state(
-            "dialog-warning-symbolic",
-            &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&stub_source_label(&deps.source_name, &deps.source_lang, deps.source_id)))]),
-            &[],
-        )
-        .0;
+        // a source the user turned off is not missing: it says so and offers to turn it on, then opens its listing again
+        let stub = if crate::source_switch::is_off(deps.source_id) {
+            let turn_on = gtk::Button::with_label(&tr(MsgKey::source_switch_turn_on));
+            turn_on.add_css_class("suggested-action");
+            let source_id = deps.source_id;
+            turn_on.connect_clicked(move |button| {
+                button.set_sensitive(false);
+                let button = button.downgrade();
+                crate::source_switch::turn_on_then(crate::source_switch::key_of(source_id).unwrap_or_default(), move |worked| {
+                    if let Some(button) = button.upgrade() {
+                        button.set_sensitive(!worked);
+                    }
+                    if worked {
+                        reopen_listing(source_id);
+                    }
+                });
+            });
+            super::look::empty_state("dialog-information-symbolic", &tr(MsgKey::source_switch_off), std::slice::from_ref(&turn_on)).0
+        } else {
+            super::look::empty_state(
+                "dialog-warning-symbolic",
+                &trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&stub_source_label(&deps.source_name, &deps.source_lang, deps.source_id)))]),
+                &[],
+            )
+            .0
+        };
         let empty = super::look::empty_state("view-list-symbolic", &tr(MsgKey::empty_screen), &[]).0;
         let stack = gtk::Stack::new();
         stack.add_named(&crate::ui::loading(crate::ui::LoadSize::Page), Some("spinner"));
@@ -540,6 +560,13 @@ impl Inner {
             slot.remove(&child);
         }
     }
+}
+
+/// Closes the listing of a source that was just turned on and opens it again, now that the source is loaded.
+fn reopen_listing(source_id: i64) {
+    let Some(kind) = [kuro_platform::kind::Kind::Manga, kuro_platform::kind::Kind::Anime].into_iter().find(|kind| super::directory::current(*kind).catalogue(source_id).is_some()) else { return };
+    crate::ui::pop();
+    super::pending::open(super::route::BrowseRoute::BrowseSource { kind, source_id, query: kuro_domain::source::browse::BrowseQuery::Popular, migrating: false });
 }
 
 #[cfg(test)]

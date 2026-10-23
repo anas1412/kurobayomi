@@ -178,6 +178,13 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     // the opened chapter's page list is fetched before the reader asks for it, unless the chapter is on disk; Retry on
     // the failure card fetches it again and waits
     let opened = ItemRepo::new(Arc::clone(&db)).by_id(chapter_id).ok().flatten().filter(|c| !lookup(c));
+    // an online chapter of a source the user turned off: say so and offer to turn it on, then open the chapter again
+    if let (Some(manga), None, true) = (manga.as_ref().filter(|_| !manga_is_local), &online, opened.is_some()) {
+        crate::source_switch::offer_turn_on(manga.source, move || {
+            crate::ui::pop();
+            crate::screens::open_unit(kuro_platform::kind::Kind::Manga, manga_id, chapter_id);
+        });
+    }
     let retry_gate: Option<Rc<dyn Fn() -> SourceGate>> = match (&online, opened) {
         (Some(prefetch), Some(chapter)) => {
             let prefetch = Arc::clone(prefetch);
