@@ -75,8 +75,27 @@ Downloads and backups go to `~/Kurobayomi` unless you pick another folder in Set
 ## Sources and repositories
 
 Kurobayomi does not host, list or recommend any content, website or repository, and ships with none. A repository is a
-link to an `index.min.json` file that lists sources; anyone can publish one, and you add it in Browse. The formats are
-documented here: [text recipes](docs/source-recipes.md) and [WASM plug-ins](docs/source-abi.md).
+link to an `index.min.json` file that lists sources; anyone can publish one.
+
+**Using one**
+
+- Add its link with **Add a source repository** on the welcome screen, or later in **Settings → Sources and tracking →
+  Repositories → Add**. A `kurobayomi://add-repo?url=…` link (an "Add to Kurobayomi" button on a repository's site)
+  opens the same dialog with the link filled in, and so do `aniyomi://` and `tachiyomi://` add-repo links. You always
+  confirm.
+- Its sources start off: pick the ones you want in the list that opens, or later from the repository's **Sources**
+  button. A source that is off is not downloaded at all.
+- The app checks every repository at each start: fixes and new sources arrive by themselves, and a notice names new
+  ones. Each source in Browse has a dot: green works, orange the site blocks the app for now, red broken.
+- Removing a repository's link removes its sources; titles already in your library stay.
+
+**Publishing one**
+
+- The formats: [text recipes](docs/source-recipes.md) for simple HTML sites and [WASM plug-ins](docs/source-abi.md)
+  for everything else. Each file in the index carries its SHA-256, and a plug-in can reach only the hosts it names.
+- Give the index a `"url"` with its own address. If the repository ever moves, keep an index at the old address that
+  names the new one: apps switch their saved link by themselves.
+- For a button on your site, link to `kurobayomi://add-repo?url=` followed by your index's address, URL-encoded.
 
 ## Install
 
