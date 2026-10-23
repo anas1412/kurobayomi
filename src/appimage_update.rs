@@ -791,6 +791,14 @@ mod tests {
             std::thread::spawn(move || {
                 for mut stream in listener.incoming().flatten() {
                     std::thread::spawn(move || {
+                        // read the whole request first: closing a socket with unread data resets the connection, and the
+                        // reset could reach the probe before the answer did (the fast server then lost, or nobody won)
+                        use std::io::{BufRead, BufReader};
+                        let mut reader = BufReader::new(&stream);
+                        let mut line = String::new();
+                        while reader.read_line(&mut line).is_ok_and(|n| n > 0) && line != "\r\n" {
+                            line.clear();
+                        }
                         std::thread::sleep(Duration::from_millis(delay));
                         let _ = write!(stream, "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd");
                     });
