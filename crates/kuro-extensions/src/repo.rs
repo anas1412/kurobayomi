@@ -44,6 +44,10 @@ pub struct Entry {
     /// Whether the source works, as the repository last checked it. Missing or unknown means active.
     #[serde(default, skip_serializing_if = "Status::is_active")]
     pub status: Status,
+    /// One short line on what the source offers ("Manga and webtoons, chapters with dates"), shown under its name.
+    /// Optional: an older index has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// A source's state as its repository reports it: the Browse row shows it as a coloured dot.
@@ -377,6 +381,15 @@ mod tests {
 
     fn index_of(entries: &[String]) -> String {
         format!(r#"{{"version":1,"sources":[{}]}}"#, entries.join(","))
+    }
+
+    #[test]
+    fn a_description_is_read_when_given_and_optional_otherwise() {
+        let described = entry("a", "manga", "en").replace(r#""version":1"#, r#""version":1,"description":"Webtoons with dates""#);
+        let index = parse_index(&index_of(&[described, entry("b", "manga", "en")])).unwrap();
+        assert_eq!(index.sources[0].description.as_deref(), Some("Webtoons with dates"));
+        assert_eq!(index.sources[1].description, None, "an older index has none");
+        assert!(!serde_json::to_string(&index.sources[1]).unwrap().contains("description"), "none is not written out");
     }
 
     #[test]

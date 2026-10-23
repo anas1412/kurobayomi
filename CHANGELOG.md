@@ -6,6 +6,11 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+### Added
+
+- A repository can give each source a short description; it shows under the source's name in Browse and in the list
+  of a repository's sources.
+
 ### Fixed
 
 - Senkuro (and any source that sends its own Content-Type) failed with "isn't working right now": the request went out

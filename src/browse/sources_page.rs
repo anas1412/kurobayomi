@@ -184,7 +184,11 @@ impl Inner {
             actions.append(&status_dot(status));
         }
 
-        let language = language_line(section, &source);
+        // the language (Last used only), then the repository's description of the source
+        let language = match (language_line(section, &source), crate::recipe_sources::description(source.id)) {
+            (Some(language), Some(about)) => Some(format!("{language} · {about}")),
+            (language, about) => language.or(about),
+        };
         let picture = crate::recipe_sources::icon_path(source.id);
         let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), picture.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
         let (open, menu, id, name) = (Rc::downgrade(self), Rc::downgrade(self), source.id, source.name.clone());

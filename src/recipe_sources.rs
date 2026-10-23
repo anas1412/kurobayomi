@@ -442,6 +442,8 @@ fn load_sources() -> Vec<String> {
     let mut icons: HashMap<String, PathBuf> = HashMap::new();
     // the status each repo package's index gives it, keyed like `icons`
     let mut statuses: HashMap<String, repo::Status> = HashMap::new();
+    // the description line each repo package's index gives it, keyed like `icons`
+    let mut descriptions: HashMap<String, String> = HashMap::new();
     for link in &links {
         let dir = repo::link_dir(&root, link);
         let Some(index) = repo::read_index(&dir) else {
@@ -463,6 +465,9 @@ fn load_sources() -> Vec<String> {
                     icons.insert(format!("repo.{}", entry.id), path);
                 }
                 statuses.insert(format!("repo.{}", entry.id), entry.status);
+                if let Some(text) = described(entry) {
+                    descriptions.insert(format!("repo.{}", entry.id), text);
+                }
                 plugins.push((entry.id.clone(), entry.kind, entry.hosts.clone(), bytes));
                 continue;
             }
@@ -475,6 +480,9 @@ fn load_sources() -> Vec<String> {
                         icons.insert(package_of(&recipe), path);
                     }
                     statuses.insert(package_of(&recipe), entry.status);
+                    if let Some(text) = described(entry) {
+                        descriptions.insert(package_of(&recipe), text);
+                    }
                     recipe_keys.insert(recipe.id.clone(), entry.id.clone());
                     recipes.push(recipe);
                 }
@@ -537,6 +545,8 @@ fn load_sources() -> Vec<String> {
     let statuses: HashMap<i64, repo::Status> = rows.iter().filter_map(|row| Some((row.source.id, *statuses.get(&row.package)?))).collect();
     crate::source_switch::record(&prefs, rows.iter().filter_map(|row| Some((row.source.id, entry_key(&row.package, &recipe_keys)?))));
     *STATUSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(statuses);
+    let descriptions: HashMap<i64, String> = rows.iter().filter_map(|row| Some((row.source.id, descriptions.get(&row.package)?.clone()))).collect();
+    *DESCRIPTIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(descriptions);
     install(Kind::Manga, manga);
     let runnable = anime.anime.iter().map(|(source, row)| (Catalogue::Anime(Arc::clone(source)), row.clone())).collect();
     install(Kind::Anime, Catalogues::new(Kind::Anime, runnable));
@@ -604,6 +614,20 @@ static IMAGE_HEADERS: Mutex<Option<HashMap<i64, HeaderMap>>> = Mutex::new(None);
 static ICON_PATHS: Mutex<Option<HashMap<i64, PathBuf>>> = Mutex::new(None);
 
 static STATUSES: Mutex<Option<HashMap<i64, repo::Status>>> = Mutex::new(None);
+
+/// The description line of each repo source whose index gives one, by source id. Set by each load.
+static DESCRIPTIONS: Mutex<Option<HashMap<i64, String>>> = Mutex::new(None);
+
+/// The description line of a repo source, `None` when its index gives none.
+pub fn description(source_id: i64) -> Option<String> {
+    DESCRIPTIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref()?.get(&source_id).cloned()
+}
+
+/// An entry's description as one line: trimmed, never empty. A repository writes it, so it is cut at 120 characters.
+pub fn described(entry: &repo::Entry) -> Option<String> {
+    let line = entry.description.as_deref()?.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!line.is_empty()).then(|| line.chars().take(120).collect())
+}
 
 /// The status a Check now found for a source from the user's own connection, by source id. It wins over the index's
 /// until the app ends.
@@ -739,6 +763,28 @@ mod tests {
     use super::*;
 
     const MANGA: &str = include_str!("../crates/kuro-source-scrape/tests/fixtures/manga/recipe.toml");
+
+    #[test]
+    fn a_description_is_one_trimmed_line_and_an_empty_one_is_none() {
+        let entry = |text: Option<&str>| repo::Entry {
+            id: "a".into(),
+            name: "A".into(),
+            lang: "en".into(),
+            kind: Kind::Manga,
+            version: 1,
+            file: "https://x.test/a.wasm".into(),
+            sha256: "0".repeat(64),
+            hosts: Vec::new(),
+            icon: None,
+            icon_sha256: None,
+            status: repo::Status::Active,
+            description: text.map(str::to_owned),
+        };
+        assert_eq!(described(&entry(Some("  Manga and\n webtoons  "))).as_deref(), Some("Manga and webtoons"));
+        assert_eq!(described(&entry(Some("   "))), None);
+        assert_eq!(described(&entry(None)), None);
+        assert_eq!(described(&entry(Some(&"x".repeat(300)))).map(|d| d.chars().count()), Some(120));
+    }
     const ANIME: &str = include_str!("../crates/kuro-source-scrape/tests/fixtures/anime/recipe.toml");
 
     /// The folder's recipes become sources of their kind. `build` is used rather than `start`, which installs into the

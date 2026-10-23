@@ -337,7 +337,10 @@ pub fn open_picker(link: &str) {
 /// One row of the picker: icon, name, language and kind, and the switch.
 fn picker_row(prefs: &SourcePrefs, link: &str, entry: &Entry) -> gtk::ListBoxRow {
     let kind = tr(if entry.kind == Kind::Anime { MsgKey::label_anime } else { MsgKey::label_manga });
-    let subtitle = format!("{} · {kind}", crate::browse::names::localized_display_name(&entry.lang));
+    let mut subtitle = format!("{} · {kind}", crate::browse::names::localized_display_name(&entry.lang));
+    if let Some(about) = crate::recipe_sources::described(entry) {
+        subtitle = format!("{subtitle}\n{about}");
+    }
     let switch = gtk::Switch::builder().active(is_on(prefs, &entry.id)).valign(gtk::Align::Center).build();
     switch.update_property(&[gtk::accessible::Property::Label(&entry.name)]);
     let (key, name) = (entry.id.clone(), entry.name.clone());
