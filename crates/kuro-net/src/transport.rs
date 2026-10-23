@@ -14,6 +14,7 @@ use crate::doh::DohResolver;
 use crate::error::NetError;
 use crate::logging;
 use crate::progress;
+use crate::public_only::{self, PublicResolver};
 use crate::request::{Body, Method, Request};
 use crate::response::{BodyStream, Response};
 
@@ -73,6 +74,8 @@ pub struct Transport {
     per_host: Mutex<HashMap<String, Arc<Semaphore>>>,
     /// Logs every request and response at `kuro_net::http` (T-12a-026). Set once, at construction.
     verbose: bool,
+    /// Only internet addresses are reached ([`Transport::public_only`]).
+    public_only: bool,
 }
 
 impl Transport {
@@ -102,6 +105,30 @@ impl Transport {
             limits,
             per_host: Mutex::new(HashMap::new()),
             verbose: false,
+            public_only: false,
+        })
+    }
+
+    /// Like [`Transport::with_doh`], reaching only the internet: an address that is this computer or the local network
+    /// is refused, whether it is written in the URL, a name resolves to it or a redirect leads to it
+    /// ([`public_only`](crate::public_only)). The app's client is built this way, since sources are written by anyone.
+    pub fn public_only<C: reqwest::cookie::CookieStore + 'static>(
+        limits: TransportLimits,
+        cookies: Arc<C>,
+        doh: Option<DohResolver>,
+    ) -> Result<Self, NetError> {
+        let client = client_builder(&limits, cookies)
+            .dns_resolver(Arc::new(PublicResolver { doh }))
+            .redirect(public_only::redirect_policy(limits.max_redirects))
+            .build()
+            .map_err(|e| NetError::Other(format!("cannot build HTTP client: {e}")))?;
+        Ok(Self {
+            client,
+            all: Arc::new(Semaphore::new(limits.max_requests)),
+            limits,
+            per_host: Mutex::new(HashMap::new()),
+            verbose: false,
+            public_only: true,
         })
     }
 
@@ -120,6 +147,9 @@ impl Transport {
 
     /// Runs one request through reqwest. The per-host slot is taken before the global one.
     pub async fn send(&self, req: Request) -> Result<Response, NetError> {
+        if self.public_only && !public_only::url_allowed(&req.url) {
+            return Err(NetError::Other(public_only::REFUSED.to_owned()));
+        }
         if self.verbose {
             logging::log_request(&req);
         }
@@ -216,6 +246,28 @@ mod tests {
         let other = transport.host_semaphore("b.test");
         assert!(Arc::ptr_eq(&a, &again));
         assert!(!Arc::ptr_eq(&a, &other));
+    }
+
+    /// The app's transport reaches only the internet; the plain one (tests' local servers) still reaches this computer.
+    #[tokio::test]
+    async fn the_public_only_transport_refuses_this_computer_by_address_and_by_name() {
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = server.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = server.accept().await {
+                use tokio::io::AsyncWriteExt;
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await;
+            }
+        });
+        let store = || Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store::CookieStore::new()));
+        let guarded = Transport::public_only(TransportLimits::default(), store(), None).unwrap();
+        for url in [format!("http://127.0.0.1:{port}/"), format!("http://localhost:{port}/")] {
+            let err = guarded.send(crate::request::get(&url).unwrap()).await.err().unwrap_or_else(|| panic!("{url} was reached"));
+            assert!(format!("{err:?}").contains("address not allowed"), "{url}: {err:?}");
+        }
+        let plain = Transport::new(TransportLimits::default(), store()).unwrap();
+        let ok = plain.send(crate::request::get(&format!("http://127.0.0.1:{port}/")).unwrap()).await.expect("the plain transport reaches it");
+        assert_eq!(ok.status.as_u16(), 200);
     }
 
     /// A name the resolver rejects (a label over 63 bytes, so no lookup is sent) is an unknown host, online or not.

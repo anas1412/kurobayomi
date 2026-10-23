@@ -31,7 +31,13 @@ fn relay() -> Option<&'static Arc<Relay>> {
     RELAY
         .get_or_init(|| {
             let listener = TcpListener::bind("127.0.0.1:0").inspect_err(|e| tracing::warn!(%e, "the HLS relay could not start")).ok()?;
-            let client = reqwest::blocking::Client::builder().build().inspect_err(|e| tracing::warn!(%e, "the HLS relay has no client")).ok()?;
+            // a playlist comes from a source and may name any address: the relay fetches from the internet only
+            let client = reqwest::blocking::Client::builder()
+                .dns_resolver(Arc::new(kuro_net::public_only::PublicResolver { doh: None }))
+                .redirect(kuro_net::public_only::redirect_policy(10))
+                .build()
+                .inspect_err(|e| tracing::warn!(%e, "the HLS relay has no client"))
+                .ok()?;
             let relay = Arc::new(Relay { port: listener.local_addr().ok()?.port(), headers: Mutex::default(), next: Mutex::new(0), client });
             let serving = Arc::clone(&relay);
             std::thread::Builder::new()
@@ -170,6 +176,9 @@ impl Relay {
     fn answer(&self, writer: &mut TcpStream, path: &str, range: Option<&str>) -> Result<(), String> {
         let (token, upstream) = parse_path(path).ok_or("not a relay path")?;
         let headers = self.headers.lock().unwrap_or_else(PoisonError::into_inner).get(&token).cloned().ok_or("unknown video")?;
+        if !url::Url::parse(&upstream).is_ok_and(|url| matches!(url.scheme(), "http" | "https") && kuro_net::public_only::url_allowed(&url)) {
+            return Err(format!("{upstream}: {}", kuro_net::public_only::REFUSED));
+        }
         let mut request = self.client.get(&upstream);
         if !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("user-agent")) {
             request = request.header("User-Agent", BROWSER_UA);

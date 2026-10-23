@@ -5134,3 +5134,6 @@ pref_cache_size = Cache size limit
 
 # source: kurobayomi
 action_reload = Reload
+
+# source: kurobayomi
+player_link_refused = This source gave a video address that is not allowed: sources may only play from the internet

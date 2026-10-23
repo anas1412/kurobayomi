@@ -12,6 +12,7 @@ pub mod interceptors;
 pub mod js;
 mod logging;
 pub mod progress;
+pub mod public_only;
 pub mod request;
 pub mod response;
 pub mod settings;

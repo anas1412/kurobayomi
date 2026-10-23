@@ -478,7 +478,10 @@ pub(crate) mod tests {
         }
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("runtime");
         let paths = kuro_testkit::TempPaths::new().expect("paths");
-        let client = crate::net_client::build(&kuro_prefs::network::NetworkPrefs::new(kuro_prefs::store::PrefStore::in_memory()), &paths).expect("client");
+        // a client that may reach this computer: the app's own refuses local addresses, and the test's server is local
+        let prefs = kuro_prefs::network::NetworkPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        let toaster = kuro_platform::toast::toast_channel().0;
+        let client = kuro_net::NetworkClient::new(&prefs, kuro_platform::paths::Paths::cookie_jar_file(&paths), Arc::new(kuro_platform::webview::NoWebView), toaster).expect("client");
         let service = rt.block_on(kuro_images::fetch::ImageService::new(client, Arc::new(NoHeaders), Arc::new(paths))).expect("service");
         let server = std::net::TcpListener::bind("127.0.0.1:0").expect("a local socket");
         let url = format!("http://{}/cover.jpg", server.local_addr().expect("address"));

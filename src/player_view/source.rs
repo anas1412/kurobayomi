@@ -100,6 +100,10 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
     handle.spawn(async move {
         // the "Loading…" card never stays: after 30 seconds the toast says the source is not answering
         let answer = crate::browse::errors::settle(crate::browse::errors::LOAD_TIMEOUT, source.name(), best_stream(source.as_ref(), &s_episode, quality)).await;
+        let answer = match answer {
+            Ok(video) => allowed(source.id(), video).await,
+            Err(text) => Err(text),
+        };
         let _ = tx.send(answer).await;
     });
     let busy = crate::toast::busy(&tr(MsgKey::loading));
@@ -155,6 +159,28 @@ fn select_defaults(mut commands: Vec<Vec<String>>, preferred: &str, preferred_au
         commands[i][2] = "select".to_owned();
     }
     commands
+}
+
+/// `video` when the player may be given its links: the video, audio and subtitle links of an online source must be http
+/// or https on the internet (`kuro_net::public_only::link_allowed`), since anyone may write a source and the player
+/// opens what it is handed. The local source plays the files of your own folders and is not checked.
+pub(super) async fn allowed(source_id: i64, video: Video) -> Result<Video, String> {
+    if source_id == kuro_local::LOCAL_SOURCE_ID {
+        return Ok(video);
+    }
+    let tracks = video.audio_tracks.iter().chain(&video.subtitle_tracks).map(|track| track.url.as_str());
+    let links: Vec<&str> = std::iter::once(video.video_url.as_str()).chain(tracks).filter(|link| !link.is_empty()).collect();
+    for link in links {
+        let ok = match url::Url::parse(link) {
+            Ok(url) => kuro_net::public_only::link_allowed(&url).await,
+            Err(_) => false,
+        };
+        if !ok {
+            tracing::warn!(link, "a source's video link was refused: it is not an internet address");
+            return Err(tr(MsgKey::player_link_refused));
+        }
+    }
+    Ok(video)
 }
 
 pub(super) fn media_of(video: Video, title: crate::widgets::page_header::MediaTitle, preferred: &str, preferred_audio: &str) -> Media {
@@ -235,6 +261,22 @@ mod tests {
             audio_tracks: vec![Track { url: "https://cdn.test/ja.m3u8".into(), lang: "Japanese".into() }],
             ..Video::new(url, format!("{resolution}p"))
         }
+    }
+
+    /// Anyone may write a source, and the player opens what it is handed: an online source's links must be web links
+    /// on the internet, its subtitles and audio included; the local source plays your own files.
+    #[test]
+    fn the_player_gets_only_internet_links_from_an_online_source() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
+        let check = |source_id: i64, video: Video| rt.block_on(allowed(source_id, video));
+        let plain = |url: &str| Video { subtitle_tracks: Vec::new(), audio_tracks: Vec::new(), ..video(url, 720) };
+        assert!(check(42, plain("https://1.1.1.1/ep.mp4")).is_ok());
+        for refused in ["file:///home/me/.ssh/id_ed25519", "http://192.168.1.1/ep.mp4", "av://lavfi/testsrc"] {
+            assert_eq!(check(42, plain(refused)).err(), Some(tr(MsgKey::player_link_refused)), "{refused}");
+        }
+        let local_subtitle = Video { subtitle_tracks: vec![Track { url: "http://127.0.0.1:9/x.vtt".into(), lang: "English".into() }], ..plain("https://1.1.1.1/ep.mp4") };
+        assert!(check(42, local_subtitle).is_err(), "a subtitle link is checked too");
+        assert!(check(kuro_local::LOCAL_SOURCE_ID, plain("file:///home/me/Kurobayomi/Local/Anime/Show/01.mkv")).is_ok(), "the local source plays files");
     }
 
     fn resolve(fake: &Fake) -> Result<Video, String> {

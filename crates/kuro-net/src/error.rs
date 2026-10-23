@@ -59,6 +59,10 @@ impl From<reqwest::Error> for NetError {
         if err.is_builder() {
             return NetError::InvalidUrl(err.to_string());
         }
+        // an address the app refuses for sources (`public_only`) says so, rather than looking like a missing host
+        if chain_mentions(&err, crate::public_only::REFUSED) {
+            return NetError::Other(crate::public_only::REFUSED.to_owned());
+        }
         if let Some(kind) = find_source::<std::io::Error>(&err).map(std::io::Error::kind) {
             // The reqwest error stays inside the io error, so the original io error is still in the source chain.
             return NetError::Io(std::io::Error::new(kind, err));
@@ -75,6 +79,18 @@ impl From<reqwest::Error> for NetError {
         }
         NetError::Other(err.to_string())
     }
+}
+
+/// Whether any error in the source chain of `err` has `text` in its message.
+fn chain_mentions(err: &(dyn std::error::Error + 'static), text: &str) -> bool {
+    let mut next = Some(err);
+    while let Some(e) = next {
+        if e.to_string().contains(text) {
+            return true;
+        }
+        next = e.source();
+    }
+    false
 }
 
 /// The first error of type `T` in the source chain of `err`.

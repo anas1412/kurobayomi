@@ -90,14 +90,29 @@ impl NetworkClient {
         toaster: Toaster,
         pages: Option<Arc<dyn kuro_platform::hidden_pages::HiddenPages>>,
     ) -> Result<Self, NetError> {
+        Self::built(prefs, cookies, webview, toaster, pages, false)
+    }
+
+    /// The client of [`NetworkClient::with_cookies_and_pages`]; `public_only` keeps its requests on the internet
+    /// ([`Transport::public_only`]).
+    fn built(
+        prefs: &NetworkPrefs,
+        cookies: CookieJar,
+        webview: Arc<dyn WebViewHost>,
+        toaster: Toaster,
+        pages: Option<Arc<dyn kuro_platform::hidden_pages::HiddenPages>>,
+        public_only: bool,
+    ) -> Result<Self, NetError> {
         let settings = NetworkSettings::from_prefs(prefs);
         let doh = DohProvider::from_pref(settings.doh_provider)
             .map(|provider| DohResolver::new(provider, &settings.default_user_agent))
             .transpose()?;
-        let transport = Arc::new(
+        let transport = if public_only {
+            Transport::public_only(TransportLimits::default(), cookies.provider(), doh)?
+        } else {
             Transport::with_doh(TransportLimits::default(), cookies.provider(), doh)?
-                .with_verbose_logging(settings.verbose_logging),
-        );
+        };
+        let transport = Arc::new(transport.with_verbose_logging(settings.verbose_logging));
         let default_user_agent = settings.default_user_agent.clone();
         let user_agent: UserAgentSource = Arc::new(move || default_user_agent.clone());
         let ua = user_agent.clone();
@@ -141,7 +156,8 @@ impl NetworkClient {
         let webview = embedded
             .filter(|view| view.available())
             .unwrap_or_else(|| Arc::new(BrowserHost::new(opener, paths.cookies_import_file())));
-        Self::with_cookies_and_pages(prefs, cookies, webview, toaster, kuro_platform::hidden_pages::hidden_pages(paths))
+        // the desktop client carries every source's requests, and anyone may write a source: internet addresses only
+        Self::built(prefs, cookies, webview, toaster, kuro_platform::hidden_pages::hidden_pages(paths), true)
     }
 
     /// A copy of this client's chain, to add interceptors to. The original client is not changed.
