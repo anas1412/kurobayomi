@@ -26,7 +26,7 @@ Categories=AudioVideo;Video;Player;
 StartupNotify=true
 DBusActivatable=true
 StartupWMClass=io.github.anas1412.Kurobayomi
-MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;x-scheme-handler/aniyomi;x-scheme-handler/tachiyomi;
+MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;
 Actions=show-library;show-animelib;show-updates;show-history;show-browse;
 
 [Desktop Action show-library]
@@ -117,8 +117,12 @@ Exec=kurobayomi --action=show-browse
             assert!(run("xmllint", &["--noout", &data("io.github.anas1412.Kurobayomi.xml")]));
         }
         let mime_types = DESKTOP.lines().find_map(|l| l.strip_prefix("MimeType=")).unwrap_or_default();
-        for t in ["application/x-tachibk", "x-scheme-handler/kurobayomi", "x-scheme-handler/aniyomi", "x-scheme-handler/tachiyomi"] {
+        for t in ["application/x-tachibk", "x-scheme-handler/kurobayomi"] {
             assert!(mime_types.split(';').any(|m| m == t), "{t}");
+        }
+        // Aniyomi's and Tachiyomi's links name repositories of Android extensions, which Kurobayomi cannot use
+        for t in ["x-scheme-handler/aniyomi", "x-scheme-handler/tachiyomi"] {
+            assert!(!mime_types.split(';').any(|m| m == t), "{t} is not claimed");
         }
     }
 

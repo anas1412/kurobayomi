@@ -43,8 +43,8 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
   they show in Updates. Downloads for offline use.
 - **Tracking with AniList and MyAnimeList** (optional): log in from Settings, then follow a title's status, progress,
   score and dates from its Tracking page. Progress moves on by itself as you read and watch.
-- **Aniyomi and Tachiyomi backups** (`.tachibk`) restore into Kurobayomi, and `aniyomi://` / `tachiyomi://` repository
-  links open it.
+- **Aniyomi and Tachiyomi backups** (`.tachibk`) restore into Kurobayomi. Their extension repositories do not work here:
+  those extensions are Android apps.
 - **Keeps itself up to date.** The AppImage downloads a newer version in the background and runs it after a restart
   (not on a metered connection); About shows the progress.
 - **Fits any window size**, from a full screen down to a phone-sized 360 px: the sidebar turns into a bar at the bottom.
@@ -81,8 +81,8 @@ link to an `index.min.json` file that lists sources; anyone can publish one.
 
 - Add its link with **Add a source repository** on the welcome screen, or later in **Settings → Sources and tracking →
   Repositories → Add**. A `kurobayomi://add-repo?url=…` link (an "Add to Kurobayomi" button on a repository's site)
-  opens the same dialog with the link filled in, and so do `aniyomi://` and `tachiyomi://` add-repo links. You always
-  confirm.
+  opens the same dialog with the link filled in. You always confirm. Aniyomi and Tachiyomi repositories, and their
+  "Add to Aniyomi" or "Add to Tachiyomi" buttons, do not work: their extensions are Android apps.
 - Its sources start off: pick the ones you want in the list that opens, or later from the repository's **Sources**
   button. A source that is off is not downloaded at all.
 - The app checks every repository at each start: fixes and new sources arrive by themselves, and a notice names new

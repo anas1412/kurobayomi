@@ -6,6 +6,12 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+### Removed
+
+- Kurobayomi no longer opens `aniyomi://` and `tachiyomi://` links, the "Add to Aniyomi" and "Add to Tachiyomi" buttons
+  of extension sites: those repositories hold Android extensions, which Kurobayomi cannot use. An "Add to Kurobayomi"
+  button (`kurobayomi://add-repo`) still opens the add dialog with its link.
+
 ## [0.1.8] - 2026-10-23
 
 ### Fixed

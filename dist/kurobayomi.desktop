@@ -9,7 +9,7 @@ Terminal=false
 Categories=AudioVideo;Video;Player;
 StartupNotify=true
 StartupWMClass=io.github.anas1412.Kurobayomi
-MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;x-scheme-handler/aniyomi;x-scheme-handler/tachiyomi;
+MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;
 Actions=Updates;show-library;show-animelib;show-history;show-browse;
 
 [Desktop Action Updates]

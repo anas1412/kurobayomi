@@ -210,7 +210,7 @@ fn restore(path: &Path) -> Vec<NavAction> {
 #[cfg(test)]
 fn open_uri(link: &str) -> Routed {
     match uri::parse_uri(link) {
-        Ok(UriRoute::MangaRepos { url } | UriRoute::AnimeStores { url }) => Routed::to(store(url)),
+        Ok(UriRoute::Repos { url }) => Routed::to(store(url)),
         // the tracker lane takes its own sign-in callbacks
         Ok(UriRoute::TrackerAuth { .. }) => Routed::to(vec![]),
         // a repository link without an address does nothing (behaviour 4.4)
@@ -342,19 +342,18 @@ mod tests {
 
     #[test]
     fn repo_links_push_the_one_repo_list_and_a_missing_address_does_nothing() {
-        // one repository list for both kinds: the tachiyomi and aniyomi add-repo links and the extension-store link all
-        // open it with their address
-        let manga = launch_of(LaunchRequest::OpenUri("tachiyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json".into()));
-        assert_eq!(
-            manga.actions,
-            vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { url: "https://a.test/i.json".into() })]
-        );
         // the app's own link, which a repository's website offers as its "Add to Kurobayomi" button
         let own = launch_of(LaunchRequest::OpenUri("kurobayomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json".into()));
-        assert_eq!(own.actions, manga.actions);
-        let anime = launch_of(LaunchRequest::OpenUri("aniyomi://extension-store?url=u".into()));
-        assert!(matches!(&anime.actions[1], NavAction::Push(Screen::ExtensionStores { url }) if url == "u"));
-        let missing = launch_of(LaunchRequest::OpenUri("aniyomi://add-repo".into()));
+        assert_eq!(
+            own.actions,
+            vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { url: "https://a.test/i.json".into() })]
+        );
+        // Aniyomi's and Tachiyomi's links name repositories of Android extensions: refused, never the add dialog
+        for link in ["aniyomi://add-repo?url=u", "tachiyomi://add-repo?url=u", "aniyomi://extension-store?url=u"] {
+            let refused = launch_of(LaunchRequest::OpenUri(link.into()));
+            assert!(refused.actions.is_empty() && refused.error.is_some(), "{link}");
+        }
+        let missing = launch_of(LaunchRequest::OpenUri("kurobayomi://add-repo".into()));
         assert!(missing.actions.is_empty() && missing.ready && missing.error.is_none());
     }
 

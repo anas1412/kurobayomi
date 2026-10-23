@@ -180,7 +180,7 @@ pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &Lau
 /// The address a repository or store route carries.
 fn repo_address(route: &UriRoute) -> Option<String> {
     match route {
-        UriRoute::MangaRepos { url } | UriRoute::AnimeStores { url } => Some(url.clone()),
+        UriRoute::Repos { url } => Some(url.clone()),
         UriRoute::TrackerAuth { .. } => None,
     }
 }
@@ -286,10 +286,10 @@ mod tests {
 
     #[test]
     fn repo_links_route_and_bad_links_are_errors_with_a_toast_message() {
-        let link = "aniyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json";
+        let link = "kurobayomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json";
         assert_eq!(
             target_of(&LaunchRequest::OpenUri(link.into())),
-            Ok(Target::Repo(UriRoute::AnimeStores { url: "https://a.test/i.json".into() }))
+            Ok(Target::Repo(UriRoute::Repos { url: "https://a.test/i.json".into() }))
         );
         let unknown = target_of(&LaunchRequest::OpenUri("kurobayomi://unknown-host".into()));
         assert_eq!(unknown, Err(RouteError::Uri(uri::UriError::UnknownHost("unknown-host".into()))));
@@ -312,7 +312,7 @@ mod tests {
             request_for_open(None, "https://example.test/anime/1"),
             Some(LaunchRequest::Search { query: "https://example.test/anime/1".into(), kind: Kind::Anime })
         );
-        assert_eq!(request_for_open(None, "aniyomi://add-repo?url=x"), Some(LaunchRequest::OpenUri("aniyomi://add-repo?url=x".into())));
+        assert_eq!(request_for_open(None, "kurobayomi://add-repo?url=x"), Some(LaunchRequest::OpenUri("kurobayomi://add-repo?url=x".into())));
         assert_eq!(request_for_open(None, "plain"), None);
     }
 
@@ -343,7 +343,7 @@ mod tests {
             crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
             let (_nav, win) = crate::testing::nav();
             let app = win.application().expect("the test window has an application");
-            for link in ["aniyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json", "tachiyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json"] {
+            for link in ["kurobayomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json"] {
                 apply(&app, &win, &LaunchRequest::OpenUri(link.into()));
                 assert_eq!(uri::take_repo_url(), None, "{link}: the page that opened took the parked address");
                 // the page may still be loading its list, which queues the dialog: wait for it to appear

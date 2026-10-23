@@ -10,7 +10,7 @@
 //!   names another; its login comes back to a loopback listener (`http://localhost:8765/myanimelist-auth`).
 //! - The enhanced trackers see no installed-source directory yet (they are built over an empty one), so they cannot
 //!   start a sync; this screen only needs their names and accepted source identities.
-//! - The shell hands `kurobayomi://` and `aniyomi://` login links to [`on_redirect`]. A login is pending in this process
+//! - The shell hands `kurobayomi://` login links to [`on_redirect`]. A login is pending in this process
 //!   only: a link that arrives in a process that did not start the login has no attempt to finish and is dropped.
 use std::cell::RefCell;
 use std::collections::HashMap;

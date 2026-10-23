@@ -29,8 +29,9 @@ you can change that later in Settings.
 
 Kurobayomi downloads the repository's sources. This takes a few seconds.
 
-> **Tip:** if a website shows an **Add to Aniyomi** or **Add to Tachiyomi** button for a repository, clicking it in your
-> browser opens Kurobayomi with the link already filled in.
+> **Tip:** if a repository's website has an **Add to Kurobayomi** button, clicking it in your browser opens Kurobayomi
+> with the link already filled in. Aniyomi and Tachiyomi repositories (and their **Add to Aniyomi** or **Add to
+> Tachiyomi** buttons) do not work in Kurobayomi: their extensions are Android apps.
 
 ## 3. Your sources
 

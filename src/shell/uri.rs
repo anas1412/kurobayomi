@@ -1,6 +1,7 @@
-//! The link routes of the `kurobayomi://`, `aniyomi://` and `tachiyomi://` schemes (T-53a-004) and the URL decoding the
-//! launch parsing shares (T-53a-010). The route table is the one of `p1-data-and-config.md` section 4.2. Pure: the window
-//! maps a [`UriRoute`] to a screen and an error to a toast.
+//! The link routes of the `kurobayomi://` scheme (T-53a-004) and the URL decoding the launch parsing shares (T-53a-010).
+//! The route table is the one of `p1-data-and-config.md` section 4.2, without Aniyomi's and Tachiyomi's own schemes: their
+//! repository links name repositories of Android extensions, which Kurobayomi cannot use (user, 2026-10-24). Pure: the
+//! window maps a [`UriRoute`] to a screen and an error to a toast.
 
 use kuro_i18n::{MsgKey, tr};
 use std::cell::RefCell;
@@ -8,10 +9,8 @@ use std::cell::RefCell;
 /// Where a link goes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UriRoute {
-    /// The manga extension repos page with the repository address `url` (already decoded).
-    MangaRepos { url: String },
-    /// The anime extension stores page with the store address `url` (already decoded).
-    AnimeStores { url: String },
+    /// The one repository list with the repository address `url` (already decoded): `kurobayomi://add-repo?url=`.
+    Repos { url: String },
     /// A tracker sign-in callback. `host` is the `*-auth` host and `uri` the whole link, which the tracker lane parses.
     TrackerAuth { host: String, uri: String },
 }
@@ -22,11 +21,11 @@ pub const TRACKER_AUTH_HOSTS: [&str; 5] = ["anilist-auth", "myanimelist-auth", "
 /// A link the route table refuses. Each one becomes a toast.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UriError {
-    /// A scheme other than the three above (EC-17).
+    /// A scheme other than `kurobayomi` (EC-17), Aniyomi's and Tachiyomi's included.
     UnsupportedScheme(String),
     /// A host that is no route (EC-18).
     UnknownHost(String),
-    /// `add-repo` or `extension-store` without `url=` (EC-16).
+    /// `add-repo` without `url=` (EC-16).
     MissingRepositoryAddress,
 }
 
@@ -40,24 +39,22 @@ impl std::fmt::Display for UriError {
     }
 }
 
-/// The routes of a link, by its scheme and host. `add-repo` follows the scheme (`aniyomi` is the anime catalogue, the
-/// others are manga); `extension-store` is always the anime catalogue.
+/// The route of a link, by its host: `add-repo` (a repository to add) or a tracker's `*-auth` sign-in callback.
 pub fn parse_uri(uri: &str) -> Result<UriRoute, UriError> {
     let (scheme, rest) = uri.split_once("://").unwrap_or((uri, ""));
     let scheme = scheme.to_ascii_lowercase();
-    if !matches!(scheme.as_str(), "kurobayomi" | "aniyomi" | "tachiyomi") {
+    if scheme != "kurobayomi" {
         return Err(UriError::UnsupportedScheme(scheme));
     }
     let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let host = rest[..host_end].to_ascii_lowercase();
-    let anime = match host.as_str() {
-        "add-repo" => scheme == "aniyomi",
-        "extension-store" => true,
+    match host.as_str() {
+        "add-repo" => {}
         h if h.ends_with("-auth") => return Ok(UriRoute::TrackerAuth { host, uri: uri.to_string() }),
         _ => return Err(UriError::UnknownHost(host)),
-    };
+    }
     let url = query_value(rest[host_end..].split('#').next().unwrap_or(""), "url").filter(|u| !u.is_empty()).ok_or(UriError::MissingRepositoryAddress)?;
-    Ok(if anime { UriRoute::AnimeStores { url } } else { UriRoute::MangaRepos { url } })
+    Ok(UriRoute::Repos { url })
 }
 
 /// The decoded value of query parameter `name`, the first one when it repeats.
@@ -96,7 +93,7 @@ fn hex(b: u8) -> Option<u8> {
 /// The settings screen a route opens.
 pub fn screen_of(route: &UriRoute) -> Option<&'static str> {
     match route {
-        UriRoute::MangaRepos { .. } | UriRoute::AnimeStores { .. } => Some("settings_extension_repos"),
+        UriRoute::Repos { .. } => Some("settings_extension_repos"),
         UriRoute::TrackerAuth { .. } => None,
     }
 }
@@ -126,15 +123,16 @@ mod tests {
     }
 
     #[test]
-    fn ec12_and_ec13_add_repo_of_the_manga_schemes_opens_the_manga_repos() {
-        assert_eq!(parse_uri(&format!("kurobayomi://add-repo?url={REPO}")), Ok(UriRoute::MangaRepos { url: repo_url() }));
-        assert_eq!(parse_uri(&format!("tachiyomi://add-repo?url={REPO}")), Ok(UriRoute::MangaRepos { url: repo_url() }));
+    fn ec12_an_add_repo_link_opens_the_repository_list() {
+        assert_eq!(parse_uri(&format!("kurobayomi://add-repo?url={REPO}")), Ok(UriRoute::Repos { url: repo_url() }));
     }
 
     #[test]
-    fn ec14_and_ec15_the_anime_store_links_open_the_anime_stores() {
-        assert_eq!(parse_uri(&format!("aniyomi://extension-store?url={REPO}")), Ok(UriRoute::AnimeStores { url: repo_url() }));
-        assert_eq!(parse_uri(&format!("aniyomi://add-repo?url={REPO}")), Ok(UriRoute::AnimeStores { url: repo_url() }));
+    fn aniyomi_and_tachiyomi_links_are_refused_as_their_repositories_hold_android_extensions() {
+        for link in [format!("aniyomi://add-repo?url={REPO}"), format!("tachiyomi://add-repo?url={REPO}"), format!("aniyomi://extension-store?url={REPO}")] {
+            assert!(matches!(parse_uri(&link), Err(UriError::UnsupportedScheme(_))), "{link}");
+        }
+        assert_eq!(parse_uri(&format!("kurobayomi://extension-store?url={REPO}")), Err(UriError::UnknownHost("extension-store".into())));
     }
 
     #[test]
@@ -160,8 +158,8 @@ mod tests {
 
     #[test]
     fn the_host_is_matched_in_any_case_and_a_fragment_does_not_hide_the_address() {
-        assert_eq!(parse_uri("KuroBayomi://ADD-REPO?url=a%20b#frag"), Ok(UriRoute::MangaRepos { url: "a b".into() }));
-        assert_eq!(parse_uri("aniyomi://add-repo/?x=1&url=u"), Ok(UriRoute::AnimeStores { url: "u".into() }));
+        assert_eq!(parse_uri("KuroBayomi://ADD-REPO?url=a%20b#frag"), Ok(UriRoute::Repos { url: "a b".into() }));
+        assert_eq!(parse_uri("kurobayomi://add-repo/?x=1&url=u"), Ok(UriRoute::Repos { url: "u".into() }));
     }
 
     #[test]
@@ -197,10 +195,7 @@ mod tests {
 
     #[test]
     fn routes_name_their_screen_and_a_parked_address_is_taken_once() {
-        let manga = UriRoute::MangaRepos { url: "u".into() };
-        let anime = UriRoute::AnimeStores { url: "u".into() };
-        assert_eq!(screen_of(&manga), Some("settings_extension_repos"));
-        assert_eq!(screen_of(&anime), Some("settings_extension_repos"));
+        assert_eq!(screen_of(&UriRoute::Repos { url: "u".into() }), Some("settings_extension_repos"));
         park_repo_url("u".into());
         assert_eq!(take_repo_url().as_deref(), Some("u"));
         assert_eq!(take_repo_url(), None);

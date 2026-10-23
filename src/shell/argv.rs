@@ -330,8 +330,8 @@ mod tests {
 
     #[test]
     fn files_and_uris_are_positional_in_order() {
-        let got = parse_argv(&argv(&["/tmp/backup.tachibk", "aniyomi://add-repo?url=x"])).unwrap();
-        assert_eq!(got, vec![LaunchRequest::OpenFile(PathBuf::from("/tmp/backup.tachibk")), LaunchRequest::OpenUri("aniyomi://add-repo?url=x".into())]);
+        let got = parse_argv(&argv(&["/tmp/backup.tachibk", "kurobayomi://add-repo?url=x"])).unwrap();
+        assert_eq!(got, vec![LaunchRequest::OpenFile(PathBuf::from("/tmp/backup.tachibk")), LaunchRequest::OpenUri("kurobayomi://add-repo?url=x".into())]);
     }
 
     #[test]
