@@ -6,13 +6,15 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
-### Security
+## [0.1.7] - 2026-10-23
 
-- Sources can no longer reach this computer or your home network. Anyone may publish a source, so every request a
+### Fixed
+
+- Security: sources can no longer reach this computer or your home network. Anyone may publish a source, so every request a
   source makes (plug-ins, recipes, the covers and downloads it names) goes only to internet addresses: an address of
   this computer (127.0.0.1, localhost), of a home or private network (192.168.x, 10.x, ...) or a link-local one is
   refused, whether it is written in the link, a site's name points to it or a redirect leads to it.
-- The player takes only internet video, audio and subtitle links from an online source: a link of another kind (a
+- Security: the player takes only internet video, audio and subtitle links from an online source: a link of another kind (a
   local file, a special player address) or to a local address is refused with a message, and the HLS relay fetches
   from the internet only. The local source still plays the files of your own folders.
 
