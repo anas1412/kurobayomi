@@ -162,9 +162,16 @@ impl Transport {
         builder = match &req.body {
             Body::Empty => builder,
             Body::Form(pairs) => builder.form(pairs),
-            Body::Bytes { content_type, data } => builder
-                .header(http::header::CONTENT_TYPE, content_type.as_str())
-                .body(data.clone()),
+            // a Content-Type the caller already set wins: a second one (a plug-in sends its own) is refused as a bad
+            // request by some servers, Senkuro's GraphQL API among them
+            Body::Bytes { content_type, data } => {
+                let builder = if req.headers.contains_key(http::header::CONTENT_TYPE) {
+                    builder
+                } else {
+                    builder.header(http::header::CONTENT_TYPE, content_type.as_str())
+                };
+                builder.body(data.clone())
+            }
         };
         if let Some(timeout) = req.opts.timeout {
             builder = builder.timeout(timeout);
@@ -290,6 +297,33 @@ mod tests {
     }
 
     /// A request queued behind the per-host limit does not start its call timeout while it waits.
+    #[tokio::test]
+    async fn a_body_sends_one_content_type_even_when_the_caller_set_one() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let store = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store::CookieStore::new()));
+        let transport = Transport::new(TransportLimits::default(), store).unwrap();
+        let url = format!("{}/graphql", server.uri());
+        for with_header in [true, false] {
+            let mut headers = http::HeaderMap::new();
+            if with_header {
+                headers.insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/json"));
+            }
+            let body = Body::Bytes { content_type: "application/json".into(), data: bytes::Bytes::from_static(b"{}") };
+            let req = crate::request::post(&url, body).unwrap().headers(headers);
+            transport.send(req).await.unwrap();
+        }
+        let received = server.received_requests().await.unwrap();
+        for request in &received {
+            let types: Vec<_> = request.headers.get_all(http::header::CONTENT_TYPE).iter().collect();
+            assert_eq!(types, ["application/json"], "exactly one Content-Type");
+        }
+        assert_eq!(received.len(), 2);
+    }
+
     #[tokio::test]
     async fn a_queued_request_is_not_timed_out_while_it_waits_for_a_host_slot() {
         let server = wiremock::MockServer::start().await;

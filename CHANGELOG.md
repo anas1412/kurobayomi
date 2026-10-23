@@ -6,6 +6,11 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+### Fixed
+
+- Senkuro (and any source that sends its own Content-Type) failed with "isn't working right now": the request went out
+  with the header twice, and Senkuro's server answers that with HTTP 400. A request now carries one Content-Type.
+
 ### Removed
 
 - Kurobayomi no longer opens `aniyomi://` and `tachiyomi://` links, the "Add to Aniyomi" and "Add to Tachiyomi" buttons
