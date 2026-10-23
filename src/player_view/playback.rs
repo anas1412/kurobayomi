@@ -48,8 +48,12 @@ impl Playback {
     /// fails is logged and the others still load.
     /// Adds the side tracks off the GTK thread: each one is fetched over the network, so a source with a dozen
     /// languages froze the window for seconds when they ran here.
-    pub fn add_tracks(&self, commands: &[Vec<String>]) {
-        self.mpv.run_commands_in_background(commands.to_vec());
+    /// `prepare` rewrites each command on that thread first (the subtitle cache, `sub_cache`).
+    pub fn add_tracks(&self, commands: &[Vec<String>], prepare: Option<super::sub_cache::Prepare>) {
+        match prepare {
+            Some(prepare) => self.mpv.run_commands_in_background_with(commands.to_vec(), prepare),
+            None => self.mpv.run_commands_in_background(commands.to_vec()),
+        }
     }
 
     fn run(&self, command: &[String]) -> Result<(), MpvError> {

@@ -637,8 +637,13 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
     }
     let images = Arc::clone(paths);
     let image_client = client.clone();
+    let image_budget = crate::cache_limit::mb_to_bytes(kuro_prefs::backup::StoragePrefs::new(store.clone()).cache_size_mb.get());
     tokio::spawn(async move {
-        match ImageService::new(image_client, Arc::new(RecipeImageHeaders), images).await {
+        let service = match ImageService::new(image_client, Arc::new(RecipeImageHeaders), images).await {
+            Ok(service) => service.with_disk_budget(image_budget).await,
+            Err(error) => Err(error),
+        };
+        match service {
             Ok(service) => crate::entry_core::cover_view::install_images(Arc::new(service)),
             Err(error) => tracing::warn!("the image service does not start, covers show their placeholder: {error}"),
         }

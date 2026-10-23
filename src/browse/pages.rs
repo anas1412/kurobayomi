@@ -413,6 +413,23 @@ pub enum SearchState {
     Loading,
     Error(String),
     Results(Vec<ListItem>),
+    /// The saved results of the last same search (`results_cache`), shown while the source is asked again.
+    Refreshing(Vec<ListItem>),
+}
+
+impl SearchState {
+    /// The source has not answered this search yet.
+    pub fn waiting(&self) -> bool {
+        matches!(self, SearchState::Loading | SearchState::Refreshing(_))
+    }
+
+    /// The covers the row shows, saved or answered.
+    pub fn items(&self) -> Option<&[ListItem]> {
+        match self {
+            SearchState::Results(items) | SearchState::Refreshing(items) => Some(items),
+            SearchState::Loading | SearchState::Error(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -461,7 +478,7 @@ pub fn progress_visible(answered: usize, total: usize) -> bool {
 /// The rows the chips leave: Has results keeps rows whose search found something. A chip change filters what is already
 /// here and never runs the search again (D-UI-10).
 pub fn visible_rows(rows: &[SearchRow], chips: SearchChips) -> Vec<&SearchRow> {
-    rows.iter().filter(|row| !chips.only_has_results || matches!(&row.state, SearchState::Results(items) if !items.is_empty())).collect()
+    rows.iter().filter(|row| !chips.only_has_results || row.state.items().is_some_and(|items| !items.is_empty())).collect()
 }
 
 /// The title of a source header: the name, with a prefix on the origin source.
@@ -659,7 +676,7 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>
         SearchState::Results(items) if items.is_empty() => {
             section.append(&gtk::Label::builder().label(tr(MsgKey::no_results_found)).xalign(0.0).css_classes(["dim-label"]).build());
         }
-        SearchState::Results(items) => {
+        SearchState::Results(items) | SearchState::Refreshing(items) => {
             let covers = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).valign(gtk::Align::Start).vexpand(false).build();
             for item in items {
                 let cell = super::view::grid_cell_lines(

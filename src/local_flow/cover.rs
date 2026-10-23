@@ -1,6 +1,7 @@
 //! The cover of a local entry (area 34, behaviour 9.3): the `file://` thumbnail that `scan` stored, shown cropped to the
 //! card. A row without a thumbnail, or a file that is gone, gives an empty picture and the card keeps its placeholder
-//! look. Decoding goes through GTK's picture widget (ponytail: not the kuro-images cache yet).
+//! look. The app draws local covers through the kuro-images service (`library::layout::cover_kind`); this GTK picture
+//! is only the fallback before that service exists.
 
 use gtk::gio;
 

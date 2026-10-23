@@ -61,6 +61,8 @@ pub struct ListingDeps {
 /// What a loader reports. The page tag is the pager's generation of the request.
 struct Loaded {
     ask_generation: u64,
+    /// The page number asked; the first page of a listing is saved for the next visit.
+    page: u32,
     result: Result<ListedPage, String>,
 }
 
@@ -324,6 +326,7 @@ impl ListingView {
         inner.list.connect_activate(move |_, position| open(position));
 
         inner.apply_display();
+        inner.prefill();
         inner.render();
         inner.pump();
     }
@@ -335,8 +338,25 @@ impl Inner {
         self.listing.borrow_mut().restart_with(query, filters);
         self.store.remove_all();
         self.toast_dismissed.set(false);
+        self.prefill();
         self.render();
         self.pump();
+    }
+
+    /// The saved results of the last visit, shown while the site is asked again (`results_cache`). A stub or a local
+    /// source has none.
+    fn prefill(&self) {
+        if self.deps.stub || self.deps.is_local {
+            return;
+        }
+        let saved = {
+            let listing = self.listing.borrow();
+            super::results_cache::read(self.deps.source_id, listing.query(), listing.filters())
+        };
+        let Some(saved) = saved else { return };
+        self.listing.borrow_mut().prefill(saved);
+        let slots: Vec<glib::BoxedAnyObject> = self.listing.borrow().slots().iter().map(|slot| glib::BoxedAnyObject::new(slot.clone())).collect();
+        self.store.extend_from_slice(&slots);
     }
 
     /// The loaded item at a store position.
@@ -383,7 +403,7 @@ impl Inner {
         self.tasks.borrow_mut().spawn(async move {
             // whatever the loader does (fail, hang, panic) the spinner ends with a sentence and the Retry button
             let result = super::errors::settle(super::errors::BACKSTOP, &name, load).await;
-            let _ = tx.send(Tagged { generation, event: Loaded { ask_generation: ask.generation, result } }).await;
+            let _ = tx.send(Tagged { generation, event: Loaded { ask_generation: ask.generation, page: ask.page, result } }).await;
         });
         self.render();
     }
@@ -400,11 +420,22 @@ impl Inner {
     fn arrived(self: &Rc<Self>, loaded: Loaded) {
         match loaded.result {
             Ok(page) => {
-                let first_new = self.listing.borrow().slots().len();
+                let saved = (loaded.page == 1 && !self.deps.is_local).then(|| page.items.clone());
+                let replacing = self.listing.borrow().is_provisional();
+                let first_new = if replacing { 0 } else { self.listing.borrow().slots().len() };
                 let delivered = self.listing.borrow_mut().deliver(loaded.ask_generation, page);
+                // the site's first page replaces the saved results in place
+                let replaced = replacing && !self.listing.borrow().is_provisional();
+                if replaced {
+                    self.store.remove_all();
+                }
+                if let (Some(items), Some(_)) = (saved, delivered) {
+                    let listing = self.listing.borrow();
+                    super::results_cache::write(self.deps.source_id, listing.query(), listing.filters(), &items);
+                }
                 match delivered {
                     // an empty page was recorded as an error
-                    Some(0) => self.toast_dismissed.set(false),
+                    Some(0) if !replaced => self.toast_dismissed.set(false),
                     Some(_) => {
                         let listing = self.listing.borrow();
                         let added: Vec<glib::BoxedAnyObject> =

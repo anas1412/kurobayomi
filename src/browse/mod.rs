@@ -65,6 +65,7 @@ pub mod pending;
 pub mod prefs;
 pub mod primitives;
 pub mod repo_store;
+pub mod results_cache;
 pub mod route;
 pub mod search_runner;
 pub mod search_screen;

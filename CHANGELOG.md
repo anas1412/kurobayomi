@@ -13,8 +13,20 @@ reads it), so the section must exist and have notes before its tag is pushed (se
   sources, a notice says so and opens the list.
 - Check now (a source's right-click menu in Browse) downloads the source again and loads its first page from your own
   connection, then shows its status dot from that result: green works, orange blocked, red broken.
+- Browse and search remember their last results for about a day: opening a source again, going back to it or repeating
+  a search (global search too) shows them at once while the site is asked again, and the list updates in place.
+- Subtitle files of streamed episodes are kept in the cache, so reopening an episode does not download them again.
+- A chapter's or episode's right-click menu has Reload, which fetches its pages or subtitle files from the site again.
+- One cache size limit in Settings › Data and storage covers chapter pages, covers, subtitle files and browse results;
+  when it is full the least recently used files go first. Library covers and downloads are never removed.
 
 ### Changed
+
+- Opening a title shows its saved episode or chapter list at once and always asks the site again in the background;
+  new episodes and chapters appear when it answers.
+- Covers are checked again every few days with a conditional request and downloaded again only when they changed.
+- Local titles' covers load through the app's image cache instead of being decoded by the toolkit each time.
+- Clear cache (Data and storage) empties every cache, not only chapter pages.
 
 - A source that is off is not on your computer: it is not downloaded or updated, and Browse, global search and the library
   update leave it out. Its titles stay in the library and their downloads still open; anything that needs the site says

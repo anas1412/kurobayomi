@@ -284,6 +284,7 @@ define_prefs! {
     "pref_player_default_quality", Normal, Int, 1080, "player", "default_quality";
     "enabled_sources", Normal, Set, &[], "sources", "enabled_sources";
     "__APP_STATE_source_keys", AppState, Set, &[], "sources", "source_keys";
+    "cache_size_mb", Normal, Int, 500, "storage", "cache_size_mb";
 }
 
 /// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
@@ -683,8 +684,8 @@ mod tests {
         // `last_kind` (the Anime | Manga choice every page shares), `appimage_menu_removed` (the user took the AppImage
         // out of the applications menu), `auto_hide_bars` (the reader's and the player's bars hide by themselves) and
         // `pref_player_default_quality` (the height an episode starts at), `enabled_sources` (the sources that are on) and
-        // `source_keys` (which repository entry each source id came from)
-        assert_eq!(REGISTRY.len(), rows.len() + 9);
+        // `source_keys` (which repository entry each source id came from), `cache_size_mb` (the one cache size limit)
+        assert_eq!(REGISTRY.len(), rows.len() + 10);
         assert_eq!(REGISTRY[rows.len()].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 1].key, "muted_notification_channels");
         assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
@@ -694,6 +695,7 @@ mod tests {
         assert_eq!(REGISTRY[rows.len() + 6].key, "pref_player_default_quality");
         assert_eq!(REGISTRY[rows.len() + 7].key, "enabled_sources");
         assert_eq!(REGISTRY[rows.len() + 8].key, "__APP_STATE_source_keys");
+        assert_eq!(REGISTRY[rows.len() + 9].key, "cache_size_mb");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

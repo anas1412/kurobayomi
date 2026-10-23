@@ -1,7 +1,7 @@
 //! Page-list and image disk cache (`ChapterCache.kt`, `DiskUtil.kt`). T-43a-016.
 //!
-//! Keys are md5 hex: a page list is `md5(mangaId + url)`, an image is `md5(imageUrl)`. The cache holds at most
-//! [`CACHE_LIMIT_BYTES`] (100 MiB) and evicts the least recently used file first. Recency is the file mtime, which
+//! Keys are md5 hex: a page list is `md5(mangaId + url)`, an image is `md5(imageUrl)`. The app opens it with the one
+//! cache size limit of Settings (`crate::cache_limit`) and it evicts the least recently used file first. Recency is the file mtime, which
 //! every read refreshes. A file is written under a temp name and renamed into place, so a crash never leaves a
 //! partial image marked as cached.
 //!
@@ -119,6 +119,18 @@ impl DiskCache {
         Ok(removed)
     }
 
+    /// Forgets one chapter (its Reload action): the page list of `chapter_url` and every image it names, so the next
+    /// open asks the site again. Returns how many files were removed.
+    pub fn forget_chapter(&self, manga_id: i64, chapter_url: &str) -> usize {
+        let mut gone = 0;
+        for page in self.get_page_list(manga_id, chapter_url).unwrap_or_default() {
+            for url in [Some(page.url.as_str()), page.image_url.as_deref()].into_iter().flatten() {
+                gone += usize::from(fs::remove_file(self.image_path(url)).is_ok());
+            }
+        }
+        gone + usize::from(fs::remove_file(self.page_list_path(manga_id, chapter_url)).is_ok())
+    }
+
     fn entries(&self) -> io::Result<Vec<Entry>> {
         let mut out = Vec::new();
         for item in fs::read_dir(&self.root)? {
@@ -141,7 +153,7 @@ struct Entry {
 }
 
 /// Writes `bytes` to a sibling temp file and renames it over `path`.
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let tmp = path.with_extension(format!("tmp-{nanos}"));
     let result = (|| {
@@ -209,6 +221,18 @@ mod tests {
             e.as_ref().unwrap().file_name().to_string_lossy().contains("tmp")
         });
         assert_eq!(leftovers.count(), 0);
+    }
+
+    #[test]
+    fn forgetting_a_chapter_removes_its_page_list_and_its_images_only() {
+        let cache = DiskCache::open(scratch("forget"), CACHE_LIMIT_BYTES).unwrap();
+        let pages = vec![PageEntry { url: "p0".into(), image_url: Some("http://i/0.jpg".into()) }];
+        cache.put_page_list(1, "/c", &pages).unwrap();
+        cache.put_image("http://i/0.jpg", b"a").unwrap();
+        cache.put_image("http://i/other.jpg", b"b").unwrap();
+        assert_eq!(cache.forget_chapter(1, "/c"), 2);
+        assert!(cache.get_page_list(1, "/c").is_none() && !cache.has_image("http://i/0.jpg"));
+        assert!(cache.has_image("http://i/other.jpg"));
     }
 
     #[test]

@@ -51,7 +51,7 @@ pub fn menu_effect(action: RowAction, episode: &Item) -> Option<MenuEffect> {
             let on = !episode.bookmark;
             Some(MenuEffect::Mark { ids: bulk_mark_targets(std::slice::from_ref(episode), Mark::Bookmark, on), mark: Mark::Bookmark, on })
         }
-        RowAction::MarkPrevious | RowAction::Download | RowAction::Select => None,
+        RowAction::MarkPrevious | RowAction::Download | RowAction::Select | RowAction::Reload => None,
     }
 }
 

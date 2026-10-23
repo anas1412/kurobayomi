@@ -25,6 +25,7 @@ pub mod names;
 pub mod notify;
 pub mod options;
 pub mod platform;
+pub mod recheck;
 pub mod resource;
 pub mod sample;
 pub mod save;
