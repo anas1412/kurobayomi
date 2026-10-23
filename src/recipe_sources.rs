@@ -614,8 +614,26 @@ impl SourceHttp for RecipeImageHeaders {
         Box::pin(async move {
             let source = anime_sources().into_iter().find(|source| source.id() == source_id)?;
             let anime = SAnime { url: anime_url.to_owned(), ..SAnime::default() };
-            source.cover_url(&anime).await.ok().flatten()
+            let poster = source.cover_url(&anime).await.ok().flatten()?;
+            if let Some(db) = crate::data::shared_db() {
+                let (url, found) = (anime_url.to_owned(), poster.clone());
+                tokio::task::spawn_blocking(move || remember_poster(&db, source_id, &url, &found));
+            }
+            Some(poster)
         })
+    }
+}
+
+/// A poster the source found replaces the marker the anime's row stores, so the entry page and the library show the
+/// real address (and its cached picture) from then on.
+fn remember_poster(db: &Arc<kuro_db::handle::Db>, source_id: i64, anime_url: &str, poster: &str) {
+    use kuro_data::entry::{EntryRepo, EntryUpdate};
+    let repo = EntryRepo::new(Arc::clone(db));
+    let Ok(Some(row)) = repo.by_url_and_source(Kind::Anime, anime_url, source_id) else { return };
+    if row.thumbnail_url.as_deref().is_some_and(|url| url.starts_with(kuro_source::anime::COVER_MARKER)) {
+        if let Err(error) = repo.update(&EntryUpdate { thumbnail_url: Some(poster.to_owned()), ..EntryUpdate::new(row.id) }) {
+            tracing::warn!(%error, "the found poster was not stored");
+        }
     }
 }
 
@@ -660,6 +678,12 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
     reload();
     let links: Vec<String> = prefs.manga_extension_repos.get().into_iter().collect();
     check_on_start(links);
+}
+
+#[cfg(test)]
+#[test]
+fn the_marker_is_one_text_in_both_crates() {
+    assert_eq!(kuro_images::fetch::COVER_MARKER, kuro_source::anime::COVER_MARKER);
 }
 
 #[cfg(test)]

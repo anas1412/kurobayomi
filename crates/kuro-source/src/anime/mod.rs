@@ -2,6 +2,10 @@
 //! API, as `ARCHITECTURE.md` and `CRATE-MAP.md` place it. No GTK and no HTTP here: the HTTP adapter lands in
 //! `kuro-source-http`, the same as for manga.
 
+/// The thumbnail a listing gives for an anime whose poster it does not know yet: `kb-cover:<anime url>`. The image
+/// service asks the source's `cover_url` when the picture is needed (`kuro_images::fetch::COVER_MARKER` is the same text).
+pub const COVER_MARKER: &str = "kb-cover:";
+
 pub mod codec;
 pub mod hoster;
 pub mod loader;
