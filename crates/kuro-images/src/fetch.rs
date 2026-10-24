@@ -626,22 +626,19 @@ mod tests {
         let svc = service(tmp.path(), Arc::new(NoSources)).await;
         let opts = LoadOptions::default();
         let cancel = CancellationToken::new();
+        // absolute paths of this system (`/srv` is not absolute on Windows)
+        let (a, b) = (std::env::temp_dir().join("srv").join("a.jpg"), std::env::temp_dir().join("srv").join("b.jpg"));
+        let link = url::Url::from_file_path(&a).unwrap().to_string();
         let stripped = svc
-            .fetch(&cover(Some("file:///srv/a.jpg"), false, 1), &opts, &cancel)
+            .fetch(&cover(Some(&link), false, 1), &opts, &cancel)
             .await
             .unwrap();
-        assert_eq!(
-            stripped,
-            Fetched::file(DataSource::Disk, PathBuf::from("/srv/a.jpg"))
-        );
+        assert_eq!(stripped, Fetched::file(DataSource::Disk, a));
         let absolute = svc
-            .fetch(&cover(Some("/srv/b.jpg"), false, 1), &opts, &cancel)
+            .fetch(&cover(Some(b.to_str().unwrap()), false, 1), &opts, &cancel)
             .await
             .unwrap();
-        assert_eq!(
-            absolute,
-            Fetched::file(DataSource::Disk, PathBuf::from("/srv/b.jpg"))
-        );
+        assert_eq!(absolute, Fetched::file(DataSource::Disk, b));
     }
 
     #[tokio::test]

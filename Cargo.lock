@@ -3584,6 +3584,7 @@ dependencies = [
  "kuro-archive",
  "kuro-core",
  "kuro-domain",
+ "kuro-platform",
  "kuro-prefs",
  "kuro-source",
  "quick-xml",

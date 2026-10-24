@@ -146,10 +146,11 @@ mod tests {
     async fn latest_keeps_recent_folders_newest_first_and_ignores_the_query() -> io::Result<()> {
         let dir = make_folders(&["old", "new", "newer"])?;
         let eight_days = SystemTime::now() - Duration::from_secs(8 * 24 * 60 * 60);
-        fs::File::open(dir.path().join("old"))?.set_modified(eight_days)?;
+        let set_modified = kuro_platform::storage::set_modified;
+        set_modified(&dir.path().join("old"), eight_days)?;
         let base = SystemTime::now() - Duration::from_secs(60);
-        fs::File::open(dir.path().join("new"))?.set_modified(base)?;
-        fs::File::open(dir.path().join("newer"))?.set_modified(SystemTime::now())?;
+        set_modified(&dir.path().join("new"), base)?;
+        set_modified(&dir.path().join("newer"), SystemTime::now())?;
         let got = browse(
             Some(dir.path().to_path_buf()),
             "zzz".into(),

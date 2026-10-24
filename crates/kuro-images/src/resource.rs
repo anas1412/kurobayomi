@@ -60,9 +60,11 @@ mod tests {
     }
 
     #[test]
-    fn slash_and_file_scheme_are_files() {
-        assert_eq!(classify(Some("/home/a/cover.jpg")), Some(Resource::File));
+    fn an_absolute_path_and_the_file_scheme_are_files() {
+        let cover = std::env::temp_dir().join("a").join("cover.jpg");
+        assert_eq!(classify(cover.to_str()), Some(Resource::File));
         assert_eq!(classify(Some("file:///home/a.jpg")), Some(Resource::File));
+        assert_eq!(classify(Some("a/cover.jpg")), None, "a relative path is not a file");
     }
 
     #[test]
