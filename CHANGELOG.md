@@ -12,6 +12,14 @@ reads it), so the section must exist and have notes before its tag is pushed (se
   them away. The page's search finds a source by name, language, kind or description. The Sources button is gone.
 - The list of a repository's sources that opens after adding it has a search field; typing anywhere in it searches.
 - Two filters on the Repositories page narrow the sources to anime or manga, and to one language.
+- Browse has a Repositories button before Refresh, and no more menu: its Global search did what the search button does.
+- The Library's Categories is a button before Refresh instead of a menu item.
+
+### Fixed
+
+- Open the Local folder (and every other local file or folder the app opens) failed with "The application launch
+  failed" on KDE: it opens in the folder's default program now.
+- The Repositories button and the folded chevron showed the missing-icon picture; both are bundled now.
 
 ## [0.1.9] - 2026-10-24
 
