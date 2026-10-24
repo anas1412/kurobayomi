@@ -215,6 +215,8 @@ mod tests {
     use std::cell::RefCell;
     use std::path::Path;
 
+    use crate::testing::abs;
+
     #[derive(Default)]
     struct Fake(RefCell<Vec<String>>);
 
@@ -265,7 +267,7 @@ mod tests {
             self.log(format!("unavailable {what}"));
         }
         fn reveal_roots(&self) -> Vec<PathBuf> {
-            vec!["/data".into(), "/downloads".into()]
+            vec![abs("/data").into(), abs("/downloads").into()]
         }
     }
 
@@ -374,8 +376,8 @@ mod tests {
     #[test]
     fn a_reveal_stays_inside_the_allowed_folders() {
         // T-35a-092
-        let reveal = |p: &str| run(AppAction::RevealFile { path: p.into() });
-        assert_eq!(reveal("/downloads/App.AppImage"), ["reveal /downloads/App.AppImage"]);
+        let reveal = |p: &str| run(AppAction::RevealFile { path: abs(p).into() });
+        assert_eq!(reveal("/downloads/App.AppImage"), [format!("reveal {}", Path::new(&abs("/downloads/App.AppImage")).display())]);
         assert_eq!(reveal("/data/x").len(), 1);
         assert!(reveal("/etc/passwd").is_empty());
         assert!(reveal("/downloads/../etc/passwd").is_empty());

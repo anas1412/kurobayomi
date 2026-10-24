@@ -34,9 +34,10 @@ mod tests {
     #[test]
     fn a_path_outside_the_allowed_roots_is_refused_when_revealed() {
         // T-35a-023: the reveal is checked against the allowed roots (design 6.1).
-        let roots = vec![PathBuf::from("/home/u/downloads")];
-        assert!(reveal_path_ok(Path::new("/home/u/downloads/manga/page.png"), &roots));
-        assert!(!reveal_path_ok(Path::new("/home/u/.ssh/page.png"), &roots));
+        use crate::testing::abs;
+        let roots = vec![PathBuf::from(abs("/home/u/downloads"))];
+        assert!(reveal_path_ok(Path::new(&abs("/home/u/downloads/manga/page.png")), &roots));
+        assert!(!reveal_path_ok(Path::new(&abs("/home/u/.ssh/page.png")), &roots));
     }
 
     #[test]

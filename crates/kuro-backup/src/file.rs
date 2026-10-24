@@ -245,6 +245,8 @@ mod tests {
 
     /// The name uses the local hour. `TZ` is process-wide, so the check runs in a child process with
     /// `TZ=Europe/Berlin` (CEST, UTC+2 on 2026-10-08).
+    // the TZ variable picks the local zone on Unix only
+    #[cfg(unix)]
     #[test]
     fn name_format_local_time() {
         if std::env::var_os("KURO_TZ_CHILD").is_some() {

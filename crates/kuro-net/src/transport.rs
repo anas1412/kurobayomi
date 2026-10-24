@@ -262,7 +262,9 @@ mod tests {
         let port = server.local_addr().unwrap().port();
         tokio::spawn(async move {
             while let Ok((mut stream, _)) = server.accept().await {
-                use tokio::io::AsyncWriteExt;
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                // read the request first: closing a socket with unread data resets the connection on Windows
+                let _ = stream.read(&mut [0; 1024]).await;
                 let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await;
             }
         });

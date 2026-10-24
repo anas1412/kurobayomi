@@ -22,7 +22,7 @@ pub fn classify(value: Option<&str>) -> Option<Resource> {
         );
         return Some(Resource::Http);
     }
-    if value.starts_with('/') || value.starts_with("file://") {
+    if std::path::Path::new(value).is_absolute() || value.starts_with("file://") {
         return Some(Resource::File);
     }
     if value.starts_with("content") {

@@ -539,9 +539,11 @@ mod tests {
     #[test]
     fn startup_defaults_match_golden() {
         let got = pairs(&startup_settings(&prefs()));
+        // the config folder is joined by the system (`/data\mpv` on Windows)
+        let config_dir = path_text(&Path::new("/data").join("mpv"));
         let want: Vec<(&str, String)> = golden_defaults()
             .into_iter()
-            .map(|(n, v)| (n, v.to_owned()))
+            .map(|(n, v)| (n, if n == "config-dir" { config_dir.clone() } else { v.to_owned() }))
             .collect();
         assert_eq!(got, want);
     }

@@ -613,6 +613,8 @@ mod tests {
         (base, index)
     }
 
+    // the fixture holds folders that differ only in case, which a Windows checkout merges
+    #[cfg(unix)]
     #[test]
     fn scan_builds_source_entry_and_unit_names_for_both_kinds() {
         for kind in Kind::ALL {
@@ -655,6 +657,8 @@ mod tests {
         }
     }
 
+    // the fixture holds folders that differ only in case, which a Windows checkout merges
+    #[cfg(unix)]
     #[test]
     fn queries_and_mutations_update_the_tree_without_a_rescan() {
         for kind in Kind::ALL {

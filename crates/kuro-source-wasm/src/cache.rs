@@ -67,12 +67,11 @@ fn compile_in(dir: Option<&Path>, engine: &Engine, bytes: &[u8]) -> Result<Compo
     let Some(dir) = dir else { return fresh(engine, bytes) };
     let path = dir.join(cache_key(engine, bytes));
     if path.exists() {
+        // before loading: the loaded component maps the file, and Windows refuses to open a mapped file for writing
+        touch(&path);
         // SAFETY: only this app writes these files (atomically, below), and a file from another wasmtime is refused by the check inside.
         match unsafe { Component::deserialize_file(engine, &path) } {
-            Ok(component) => {
-                touch(&path);
-                return Ok(component);
-            }
+            Ok(component) => return Ok(component),
             Err(error) => {
                 tracing::warn!(%error, file = %path.display(), "the compile cache file is not usable; rebuilding it");
                 let _ = std::fs::remove_file(&path);

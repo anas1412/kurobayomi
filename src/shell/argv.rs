@@ -155,10 +155,8 @@ pub fn is_web_address(text: &str) -> bool {
 pub fn backup_path(arg: &str) -> Option<PathBuf> {
     let path = match arg.split_once("://") {
         None => PathBuf::from(arg),
-        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("file") => {
-            let path = &rest[rest.find('/')?..];
-            PathBuf::from(super::uri::percent_decode(path.split(['?', '#']).next().unwrap_or(""), false))
-        }
+        // the url crate decodes the link for this system (`file:///C:/x` is `C:\x` on Windows), without its query
+        Some((scheme, _)) if scheme.eq_ignore_ascii_case("file") => url::Url::parse(arg).ok()?.to_file_path().ok()?,
         Some(_) => return None,
     };
     path.extension().is_some_and(|e| e == "tachibk").then_some(path)
@@ -295,16 +293,18 @@ mod tests {
         assert_eq!(p("/home/u/Downloads/backup.tachibk.part"), None);
         assert_eq!(p("/home/u/Descargas/Copia de seguridad.tachibk"), Some(PathBuf::from("/home/u/Descargas/Copia de seguridad.tachibk")));
         assert_eq!(p("/home/u/100%25.tachibk"), Some(PathBuf::from("/home/u/100%25.tachibk")), "a plain path is never decoded");
-        assert_eq!(p("file:///x/a%20b.tachibk"), Some(PathBuf::from("/x/a b.tachibk")));
-        assert_eq!(p("file:///x/a.tachibk?x=1"), Some(PathBuf::from("/x/a.tachibk")));
-        assert_eq!(p("file:///x/a.tachibk.part"), None);
+        use crate::testing::{abs, file_link};
+        assert_eq!(p(&file_link("/x/a%20b.tachibk")), Some(PathBuf::from(abs("/x/a b.tachibk"))));
+        assert_eq!(p(&file_link("/x/a.tachibk?x=1")), Some(PathBuf::from(abs("/x/a.tachibk"))));
+        assert_eq!(p(&file_link("/x/a.tachibk.part")), None);
         assert_eq!(p("kurobayomi://restore?file=/a/b.tachibk"), None, "a query that ends in the suffix is not a backup");
         assert_eq!(p("file://"), None);
     }
 
     #[test]
     fn a_backup_link_is_a_file_and_a_part_file_is_unrecognised_not_an_error() {
-        assert_eq!(parse_argv(&argv(&["file:///x/a%20b.tachibk"])), Ok(vec![LaunchRequest::OpenFile(PathBuf::from("/x/a b.tachibk"))]));
+        let link = crate::testing::file_link("/x/a%20b.tachibk");
+        assert_eq!(parse_argv(&argv(&[link.as_str()])), Ok(vec![LaunchRequest::OpenFile(PathBuf::from(crate::testing::abs("/x/a b.tachibk")))]));
         assert_eq!(
             parse_argv(&argv(&["backup.tachibk.part"])),
             Ok(vec![LaunchRequest::Invalid(RouteError::Unrecognised("backup.tachibk.part".into()))])

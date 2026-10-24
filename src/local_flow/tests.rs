@@ -70,8 +70,9 @@ pub(super) fn linked(db: &Arc<Db>, kind: Kind, folder: &Path, files: &[&str]) ->
         }
     }
     titles::link(db, &PrefStore::in_memory(), kind, folder, 1_000).expect("link");
+    let folder_url = kuro_local::fs::absolute_url(folder).expect("an absolute folder");
     let entry_id = EntryRepo::new(Arc::clone(db))
-        .by_url_and_source(kind, &folder.to_string_lossy(), LOCAL_SOURCE_ID)
+        .by_url_and_source(kind, &folder_url, LOCAL_SOURCE_ID)
         .expect("lookup")
         .expect("the linked folder is stored")
         .id;
@@ -80,7 +81,7 @@ pub(super) fn linked(db: &Arc<Db>, kind: Kind, folder: &Path, files: &[&str]) ->
         .zip(0..)
         .map(|(file, order)| Item {
             entry_id,
-            url: format!("{}/{file}", folder.display()),
+            url: format!("{folder_url}/{file}"),
             name: Path::new(file).file_stem().expect("name").to_string_lossy().into_owned(),
             source_order: order,
             ..Item::create(kind)
@@ -95,7 +96,7 @@ fn the_reader_loads_the_pages_of_a_folder_and_an_archive() {
     let root = tempfile::tempdir().expect("temp dir");
     let series = series(root.path());
     for chapter in ["Ch 1", "Ch 2.cbz"] {
-        let url = series.join(chapter).to_string_lossy().into_owned();
+        let url = kuro_local::fs::absolute_url(&series.join(chapter)).expect("an absolute path");
         assert!(local_format(&url).is_some(), "{url} is a local chapter");
         let mut row = Item::create(Kind::Manga);
         row.url = url;
@@ -143,7 +144,7 @@ fn a_local_folder_joins_the_library_with_the_library_defaults_of_its_kind() {
     let prefs = PrefStore::in_memory();
     kuro_domain::entries::defaults::set_item_settings_default(&prefs, Kind::Manga, defaults);
     titles::link(&db, &prefs, Kind::Manga, &series, 1_000).expect("link");
-    let row = EntryRepo::new(Arc::clone(&db)).by_url_and_source(Kind::Manga, &series.to_string_lossy(), LOCAL_SOURCE_ID).expect("lookup").expect("row");
+    let row = EntryRepo::new(Arc::clone(&db)).by_url_and_source(Kind::Manga, &kuro_local::fs::absolute_url(&series).expect("an absolute path"), LOCAL_SOURCE_ID).expect("lookup").expect("row");
     assert!(row.favorite);
     assert_eq!(row.item_flags, defaults, "a link writes the defaults");
 }

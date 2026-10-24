@@ -111,6 +111,8 @@ async fn t_14_browse_cover_requires_image() -> io::Result<()> {
     Ok(())
 }
 
+// Windows folders ignore case, so names that differ only in case are one entry there
+#[cfg(unix)]
 #[tokio::test]
 async fn t_14_browse_distinct_names() -> io::Result<()> {
     let (_root, source) = root_with(&["Same", "same"])?;

@@ -78,8 +78,8 @@ pub fn link(db: &Arc<Db>, prefs: &PrefStore, kind: Kind, folder: &Path, now_ms: 
         vec![picked]
     };
     for entry in &series {
-        match entry.path.to_str() {
-            Some(url) => store_folder(db, prefs, kind, entry, url.to_owned(), Rejoin::Yes, now_ms, &mut report),
+        match kuro_local::fs::absolute_url(&entry.path) {
+            Some(url) => store_folder(db, prefs, kind, entry, url, Rejoin::Yes, now_ms, &mut report),
             None => report.skipped.push((entry.name.clone(), "the folder's path is not valid text".to_owned())),
         }
     }
@@ -195,7 +195,7 @@ mod tests {
         let shelf = tree(&["Berserk/Vol 1.cbz", "Series/A/A - 01.mkv", "Series/B/B - 01.mkv", "One/One - 01.mkv"]);
         let manga = link(&db, &prefs, Kind::Manga, &shelf.path().join("Berserk"), 1).expect("link");
         assert_eq!(manga.added, ["Berserk"]);
-        let url = shelf.path().join("Berserk").to_string_lossy().into_owned();
+        let url = kuro_local::fs::absolute_url(&shelf.path().join("Berserk")).expect("an absolute path");
         assert_eq!(favorites(&db, Kind::Manga), [("Berserk".into(), url)]);
         let series = link(&db, &prefs, Kind::Anime, &shelf.path().join("Series"), 1).expect("link");
         assert_eq!(series.added, ["A", "B"], "a folder of series adds each one");

@@ -106,6 +106,8 @@ fn t_14_path_rejects_nul() {
     assert_eq!(safe_join(Path::new("/root"), "a\0b"), None);
 }
 
+// a backslash is a path separator on Windows, not part of a name
+#[cfg(unix)]
 #[test]
 fn t_14_path_backslash_name_listed_not_addressable() {
     let d = dir();

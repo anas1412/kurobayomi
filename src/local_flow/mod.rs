@@ -4,7 +4,7 @@
 //! the linked folders to the library, `open` finds the local entry or episode a screen asks for, `reader` opens a local
 //! chapter, `cover` draws a local cover and `ui` holds the library menu's actions.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use kuro_data::DataResult;
@@ -47,7 +47,8 @@ pub fn local_root(kind: Kind) -> Option<PathBuf> {
 /// url, a linked folder for an absolute one. The app's one way from a local url to a path (kuro-local's `resolve`, the
 /// same rule the local source follows). `None` for an unsafe url, or a relative one while there is no Local folder.
 pub fn path_of(kind: Kind, url: &str) -> Option<PathBuf> {
-    let root = if url.starts_with('/') { PathBuf::from("/") } else { local_root(kind)? };
+    // an absolute url (a linked folder) carries its own root
+    let root = if Path::new(url).is_absolute() { PathBuf::new() } else { local_root(kind)? };
     kuro_local::fs::resolve(&root, url)
 }
 
