@@ -233,6 +233,7 @@ mod tests {
 
     use std::fs;
 
+    #[cfg(unix)]
     fn script(dir: &Path, name: &str, body: &str) -> Tool {
         let path = dir.join(name);
         fs::write(&path, body).unwrap();
@@ -240,11 +241,13 @@ mod tests {
     }
 
     /// A fake ffprobe that prints `duration`.
+    #[cfg(unix)]
     fn probe_printing(dir: &Path, duration: &str) -> Tool {
         script(dir, "ffprobe.sh", &format!("echo '{duration}'\n"))
     }
 
     /// A fake ffmpeg: records its arguments, one per line, in `args.txt`, then runs `then`. The output file is `$9`.
+    #[cfg(unix)]
     fn ffmpeg_doing(dir: &Path, then: &str) -> Tool {
         let args = dir.join("args.txt");
         script(
@@ -254,6 +257,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     fn extractor(probe: Tool, ffmpeg: Tool, temp: &Path) -> FrameExtractor {
         FrameExtractor::new(Some(probe), Some(ffmpeg), temp)
     }
@@ -269,6 +273,7 @@ mod tests {
         assert_eq!(frame_position(7.0), 3);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_frame_is_the_middle_second_and_the_temp_file_is_removed() -> io::Result<()> {
         let tools = tempfile::tempdir()?;
@@ -287,6 +292,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn t_14_media_zero_duration_frame_zero() -> io::Result<()> {
         let tools = tempfile::tempdir()?;
@@ -297,6 +303,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn t_14_media_path_with_quotes_and_spaces() -> io::Result<()> {
         let tools = tempfile::tempdir()?;
@@ -308,6 +315,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn t_14_media_bad_duration() -> io::Result<()> {
         let tools = tempfile::tempdir()?;
@@ -319,6 +327,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn t_14_media_empty_output_no_image() -> io::Result<()> {
         let tools = tempfile::tempdir()?;
@@ -340,6 +349,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn t_14_media_timeout_kills_child() -> io::Result<()> {
         let tools = tempfile::tempdir()?;
@@ -374,6 +384,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn t_14_media_serialized() -> io::Result<()> {
         let tools = tempfile::tempdir()?;

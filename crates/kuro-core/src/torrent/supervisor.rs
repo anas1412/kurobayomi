@@ -209,6 +209,7 @@ mod tests {
     use wiremock::matchers::path;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    #[cfg(unix)]
     fn config(port: u16, script: &str) -> SupervisorConfig {
         let mut c = SupervisorConfig::new("sh", std::env::temp_dir(), port);
         // the supervisor's own `--port N --path D` arguments land in $1.. and are ignored
@@ -229,6 +230,7 @@ mod tests {
         s
     }
 
+    #[cfg(unix)]
     fn alive(pid: &str) -> bool {
         std::path::Path::new(&format!("/proc/{}", pid.trim())).exists()
     }
@@ -242,6 +244,7 @@ mod tests {
         assert_eq!(sup.status(), ServerStatus::Running { port });
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn concurrent_calls_start_one_child_and_share_the_port() {
         let s = echo_server(false).await;
@@ -264,6 +267,7 @@ mod tests {
         sup.stop().await.unwrap();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_child_that_exits_early_gives_failed() {
         let s = echo_server(false).await;
@@ -273,6 +277,7 @@ mod tests {
         assert!(matches!(sup.status(), ServerStatus::Failed(r) if r.contains("exited")));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn readiness_gives_up_after_11_polls_with_server_timeout() {
         let s = echo_server(false).await;
@@ -283,6 +288,7 @@ mod tests {
         assert!(matches!(sup.status(), ServerStatus::Failed(_)));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn port_zero_hands_the_child_a_real_port() {
         let dir = tempfile::tempdir().unwrap();
@@ -294,6 +300,7 @@ mod tests {
         assert!(given > 0);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn stop_kills_the_child_and_a_stopped_supervisor_stops_cleanly() {
         let s = echo_server(false).await;
@@ -318,6 +325,7 @@ mod tests {
         sup.stop().await.unwrap();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn proxy_and_trackers_come_from_the_provider_at_each_start() {
         let s = echo_server(false).await;

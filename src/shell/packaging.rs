@@ -65,11 +65,13 @@ Exec=kurobayomi --action=show-browse
     }
 
     /// Runs a checker. A missing tool is a failure: CI installs desktop-file-utils and libxml2-utils (EF-01, EF-05).
+    #[cfg(unix)]
     fn run(tool: &str, args: &[&str]) -> bool {
         Command::new(tool).args(args).output().unwrap_or_else(|e| panic!("{tool} is required for this test: {e}")).status.success()
     }
 
     /// xmllint is required on CI (`CI` set); elsewhere a missing tool skips the check with a note.
+    #[cfg(unix)]
     fn xmllint_available() -> bool {
         if Command::new("xmllint").arg("--version").output().is_ok() {
             return true;
@@ -87,6 +89,7 @@ Exec=kurobayomi --action=show-browse
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn desktop_file_validate_exits_zero() {
         assert!(run("desktop-file-validate", &[&data("io.github.anas1412.Kurobayomi.desktop")]));
@@ -110,6 +113,7 @@ Exec=kurobayomi --action=show-browse
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn tc_53_37_the_mime_file_declares_the_backup_type_and_the_entry_lists_it() {
         assert_eq!(MIME, MIME_GOLDEN);

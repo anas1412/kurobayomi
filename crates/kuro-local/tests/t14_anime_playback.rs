@@ -47,6 +47,7 @@ fn episode(url: &str) -> SEpisode {
 }
 
 /// Fake `ffprobe` and `ffmpeg` scripts. The probe prints `seconds`, and ffmpeg writes `frame` to its output argument.
+#[cfg(unix)]
 fn fake_tools(seconds: &str, frame: &str) -> io::Result<(tempfile::TempDir, FrameExtractor, tempfile::TempDir)> {
     let tools = tempfile::tempdir()?;
     let probe = tools.path().join("ffprobe.sh");
@@ -204,6 +205,7 @@ async fn t_14_anime_details_bad_json_fails_update() -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn t_14_anime_cover_from_lowest_episode() -> io::Result<()> {
     let (tools, frames, temp) = fake_tools("10", "jpeg-of-ep")?;
@@ -216,6 +218,7 @@ async fn t_14_anime_cover_from_lowest_episode() -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn t_14_anime_cover_fallback_when_file_missing() -> io::Result<()> {
     let (_tools, frames, _temp) = fake_tools("10", "frame")?;
@@ -359,6 +362,7 @@ fn t_14_media_missing_tool_skips() {
     assert_eq!(extractor.frame(&dir.path().join("x.mp4")).unwrap(), None);
 }
 
+#[cfg(unix)]
 #[test]
 fn t_14_media_bad_duration() {
     let dir = tempfile::tempdir().unwrap();
@@ -374,6 +378,7 @@ fn t_14_media_zero_duration_frame_zero() {
     assert_eq!(frame_position(0.0), 0);
 }
 
+#[cfg(unix)]
 #[test]
 fn t_14_media_empty_output_no_image() {
     let dir = tempfile::tempdir().unwrap();
@@ -389,6 +394,7 @@ fn t_14_media_empty_output_no_image() {
     assert_eq!(extractor.frame(&dir.path().join("x.mp4")).unwrap(), None, "an empty output is no image");
 }
 
+#[cfg(unix)]
 #[test]
 fn t_14_media_timeout_kills_child() {
     let dir = tempfile::tempdir().unwrap();
@@ -402,6 +408,7 @@ fn t_14_media_timeout_kills_child() {
     assert!(started.elapsed() < std::time::Duration::from_secs(10), "the child is killed at the timeout");
 }
 
+#[cfg(unix)]
 #[test]
 fn t_14_media_path_with_quotes_and_spaces() {
     let dir = tempfile::tempdir().unwrap();
@@ -413,6 +420,7 @@ fn t_14_media_path_with_quotes_and_spaces() {
     assert_eq!(extractor.probe_duration(&tool, &input).unwrap(), 8.0);
 }
 
+#[cfg(unix)]
 #[test]
 fn t_14_media_serialized() {
     let dir = tempfile::tempdir().unwrap();
@@ -438,6 +446,7 @@ fn t_14_media_serialized() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn t_14_media_drop_cleans_temp() {
     let dir = tempfile::tempdir().unwrap();

@@ -189,6 +189,7 @@ mod tests {
         assert!(!entry.lines().any(|l| l == "Exec=evil"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_real_locale_files_render_an_entry_that_the_validator_accepts() {
         let dir = format!("{}/crates/kuro-i18n/locales", env!("CARGO_MANIFEST_DIR"));

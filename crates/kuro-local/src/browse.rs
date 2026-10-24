@@ -106,6 +106,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn t_14_browse_entry_removed_mid_scan_skipped() -> io::Result<()> {
         // A child that vanishes between the listing and its metadata read has no metadata: a link whose target was

@@ -4,6 +4,7 @@
 mod fixtures_gen;
 
 use std::cell::Cell;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -145,6 +146,7 @@ fn x102_second_run_of_the_same_file_adds_no_entries() {
     assert_eq!(dbs.db.total_changes() - changes_before, 0, "no write on the second run");
 }
 
+#[cfg(unix)]
 #[test]
 fn x07_path_with_spaces_and_invalid_utf8_restores() {
     let dir = tempfile::tempdir().unwrap();

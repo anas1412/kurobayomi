@@ -397,6 +397,7 @@ pub fn startup_notice(path_var: &OsStr) -> Option<FfmpegNotice> {
 mod tests {
     use super::*;
     use crate::anime::model::VideoStatus;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     fn os(args: &[&str]) -> Vec<OsString> {
@@ -558,6 +559,7 @@ mod tests {
     }
 
     /// Writes an executable shell script into `dir` and returns its path.
+    #[cfg(unix)]
     fn script(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -565,6 +567,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn fake_ffmpeg_reports_progress_and_gets_the_argv_in_order() {
         let _guard = spawn_guard().await;
@@ -587,6 +590,7 @@ mod tests {
         assert!(written.ends_with("-y\n"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_failing_ffmpeg_is_an_error_and_removes_the_partial_output() {
         let _guard = spawn_guard().await;
@@ -602,6 +606,7 @@ mod tests {
         assert!(!out.exists());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn cancel_kills_the_child_and_reports_cancelled() {
         let _guard = spawn_guard().await;
@@ -632,6 +637,7 @@ mod tests {
         assert!(matches!(err, DownloadError::FfmpegMissing));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn ffprobe_failure_carries_the_first_stderr_line() {
         let _guard = spawn_guard().await;
@@ -649,6 +655,7 @@ mod tests {
         assert_eq!(out, ["-extension_picky", "0", "-i", "https://a/v.m3u8", "-i", "https://a/sub.vtt", "-extension_picky", "0", "-i", "https://a/audio.m3u8?t=1", "out.mkv"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn only_a_playlist_gets_the_lenient_segment_option_and_only_from_an_ffprobe_that_knows_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -660,6 +667,7 @@ mod tests {
         assert!(hls_input_options(old.as_os_str(), "https://cdn/x/master.m3u8").is_empty(), "older ffmpeg has no such option");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn ffprobe_na_is_duration_zero() {
         let _guard = spawn_guard().await;
@@ -700,6 +708,7 @@ mod tests {
         assert_eq!(find_on_path(FFMPEG, &path), Some(other.path().join(FFMPEG)));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn an_empty_output_after_exit_zero_is_an_ffmpeg_error() {
         let _guard = spawn_guard().await;
@@ -714,6 +723,7 @@ mod tests {
         assert!(!out.exists(), "the empty partial file is removed");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_run_cancelled_before_the_spawn_starts_no_ffmpeg_and_keeps_the_partial() {
         let _guard = spawn_guard().await;

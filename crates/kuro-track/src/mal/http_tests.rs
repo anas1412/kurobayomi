@@ -964,6 +964,7 @@ async fn bind_anime_found_watching() {
     assert_eq!(track.status, 11);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn config_file_is_private_and_holds_no_token() {
     use std::os::unix::fs::PermissionsExt;
