@@ -140,12 +140,50 @@ fn load_into(
 pub fn install(display: &gdk::Display, settings: ThemeSettings) -> bool {
     // before the first write, so System can restore what the desktop had
     dark::startup_prefer_dark();
+    drop_unreadable_theme(display);
     let applied = set_settings(display, settings);
     let base = CssProvider::new();
     connect_parse_log(&base);
     base.load_from_string(style::BASE_CSS);
     gtk::style_context_add_provider_for_display(display, &base, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     applied
+}
+
+/// More parse errors than this means the GTK theme was written for a newer GTK. adw-gtk3 6 (CSS variables) gives about
+/// 2900 on GTK 4.14; Tokyonight, which mostly works there, gives 36.
+// ponytail: a count, not a check of what the theme paints; replace with a newer bundled GTK once the AppImage moves past 4.14
+const UNREADABLE_THEME_ERRORS: u32 = 500;
+
+/// The built-in theme that stands in for an unreadable one, keeping a `-dark` name dark (`dark::gtk_fallback_dark`).
+pub fn builtin_theme_for(name: &str) -> &'static str {
+    if name.to_ascii_lowercase().ends_with("-dark") {
+        "Adwaita-dark"
+    } else {
+        "Adwaita"
+    }
+}
+
+/// A theme written for GTK 4.16 or newer (CSS variables, as in adw-gtk3 6) barely parses on an older GTK such as the
+/// AppImage's 4.14: every background is lost and the window is see-through (issue #5). Such a theme is swapped for the
+/// built-in one for this run.
+fn drop_unreadable_theme(display: &gdk::Display) {
+    if gtk::minor_version() >= 16 {
+        return;
+    }
+    let settings = gtk::Settings::for_display(display);
+    let Some(name) = settings.gtk_theme_name() else {
+        return;
+    };
+    let errors = Rc::new(Cell::new(0u32));
+    let probe = CssProvider::new();
+    let count = errors.clone();
+    probe.connect_parsing_error(move |_, _, _| count.set(count.get() + 1));
+    probe.load_named(&name, None);
+    if errors.get() > UNREADABLE_THEME_ERRORS {
+        let builtin = builtin_theme_for(&name);
+        tracing::warn!(theme = %name, errors = errors.get(), gtk = gtk::minor_version(), builtin, "GTK theme needs a newer GTK; using the built-in theme");
+        settings.set_gtk_theme_name(Some(builtin));
+    }
 }
 
 /// Logs each parse error of a stylesheet with its location (T-49ba-045).
@@ -264,6 +302,13 @@ mod tests {
     use super::*;
     use crate::theme::style::BASE_CSS;
     use kuro_prefs::ui::ThemeMode;
+
+    #[test]
+    fn an_unreadable_dark_theme_falls_back_to_the_dark_builtin() {
+        assert_eq!(builtin_theme_for("adw-gtk3-dark"), "Adwaita-dark");
+        assert_eq!(builtin_theme_for("Adw-Gtk3-Dark"), "Adwaita-dark");
+        assert_eq!(builtin_theme_for("adw-gtk3"), "Adwaita");
+    }
 
     // T-01a-021: Light and Dark force the GTK preference, System puts back the startup value.
     #[test]
