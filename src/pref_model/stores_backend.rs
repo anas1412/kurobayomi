@@ -54,8 +54,9 @@ pub trait Ops<T>: Send + Sync + 'static {
     }
     /// Opens the source switches of item `key` as a dialog. Runs on the GTK thread.
     fn open_sources(&self, _key: &str) {}
-    /// The source switches of item `key` as a list, filtered by `query`, shown under its card. Runs on the GTK thread.
-    fn sources_list(&self, _key: &str, _query: std::rc::Rc<std::cell::RefCell<String>>) -> Option<gtk::ListBox> {
+    /// The source switches of item `key` as a list, filtered by `filter`, shown under its card, with the language codes
+    /// of its sources. Runs on the GTK thread.
+    fn sources_list(&self, _key: &str, _filter: std::rc::Rc<std::cell::RefCell<crate::source_switch::SourceFilter>>) -> Option<(gtk::ListBox, Vec<String>)> {
         None
     }
 }
@@ -118,8 +119,8 @@ impl Ops<RepoLink> for RepoOps {
         crate::source_switch::open_picker(key);
     }
 
-    fn sources_list(&self, key: &str, query: std::rc::Rc<std::cell::RefCell<String>>) -> Option<gtk::ListBox> {
-        crate::source_switch::sources_list(key, query)
+    fn sources_list(&self, key: &str, filter: std::rc::Rc<std::cell::RefCell<crate::source_switch::SourceFilter>>) -> Option<(gtk::ListBox, Vec<String>)> {
+        crate::source_switch::sources_list(key, filter)
     }
 
     fn card(&self, repo: &RepoLink) -> Card {

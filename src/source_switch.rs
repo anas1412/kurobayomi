@@ -315,29 +315,50 @@ pub fn offer_turn_on(source_id: i64, after: impl Fn() + 'static) -> bool {
     true
 }
 
-/// A repository's sources, a row with a switch each, filtered by `query` (empty shows every row): the Repositories page
-/// shows it under the repository's card, and the picker dialog on its own. `None` when the repository has no saved index.
-pub fn sources_list(link: &str, query: Rc<std::cell::RefCell<String>>) -> Option<gtk::ListBox> {
+/// What the source lists show: the rows that match the search text, the kind and the language. Empty shows every row.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceFilter {
+    pub query: String,
+    /// Anime or manga only; `None` is both.
+    pub kind: Option<Kind>,
+    /// One language code only ("ru"); `None` is every language.
+    pub lang: Option<String>,
+}
+
+impl SourceFilter {
+    /// Whether a source of `kind` and `lang`, found by `text` ([`search_text`]), shows.
+    pub fn shows(&self, text: &str, kind: Kind, lang: &str) -> bool {
+        self.kind.is_none_or(|k| k == kind) && self.lang.as_deref().is_none_or(|l| l == lang) && crate::ui::title_matches(text, &self.query)
+    }
+}
+
+/// A repository's sources, a row with a switch each, filtered by `filter`: the Repositories page shows it under the
+/// repository's card, and the picker dialog on its own. With it come the language codes its sources use, for a language
+/// filter. `None` when the repository has no saved index.
+pub fn sources_list(link: &str, filter: Rc<std::cell::RefCell<SourceFilter>>) -> Option<(gtk::ListBox, Vec<String>)> {
     let index = crate::recipe_sources::saved_index(link)?;
     let prefs = live()?;
     let list = crate::ui::boxed_list();
     let mut entries: Vec<&Entry> = index.sources.iter().collect();
     entries.sort_by(|a, b| (a.kind != Kind::Anime, &a.lang, a.name.to_lowercase()).cmp(&(b.kind != Kind::Anime, &b.lang, b.name.to_lowercase())));
-    // what each row is found by, in row order: rows are never removed, so a row's index names its text
-    let texts: Vec<String> = entries.iter().map(|entry| search_text(entry)).collect();
+    let languages: Vec<String> = entries.iter().map(|entry| entry.lang.clone()).collect::<BTreeSet<_>>().into_iter().collect();
+    // what each row is found by, in row order: rows are never removed, so a row's index names its source
+    let rows: Vec<(String, Kind, String)> = entries.iter().map(|entry| (search_text(entry), entry.kind, entry.lang.clone())).collect();
     for entry in entries {
         list.append(&picker_row(&prefs, link, entry));
     }
-    list.set_filter_func(move |row| usize::try_from(row.index()).ok().and_then(|i| texts.get(i)).is_none_or(|text| crate::ui::title_matches(text, &query.borrow())));
-    Some(list)
+    list.set_filter_func(move |row| {
+        usize::try_from(row.index()).ok().and_then(|i| rows.get(i)).is_none_or(|(text, kind, lang)| filter.borrow().shows(text, *kind, lang))
+    });
+    Some((list, languages))
 }
 
 /// The list of a repository's sources with a switch each, as a dialog: shown right after the repository is added and
 /// from the "new sources" notice.
 pub fn open_picker(link: &str) {
     let Some(index) = crate::recipe_sources::saved_index(link) else { return };
-    let query = Rc::new(std::cell::RefCell::new(String::new()));
-    let Some(list) = sources_list(link, Rc::clone(&query)) else { return };
+    let filter = Rc::new(std::cell::RefCell::new(SourceFilter::default()));
+    let Some((list, _)) = sources_list(link, Rc::clone(&filter)) else { return };
     let repo = index.name.clone().filter(|name| !name.trim().is_empty()).unwrap_or_else(|| link.to_owned());
     let col = gtk::Box::new(gtk::Orientation::Vertical, 12);
     col.append(&crate::ui::message(&tr(MsgKey::source_switch_picker_intro)));
@@ -345,7 +366,7 @@ pub fn open_picker(link: &str) {
     col.append(&search);
     let weak = list.downgrade();
     search.connect_search_changed(move |entry| {
-        *query.borrow_mut() = entry.text().to_string();
+        filter.borrow_mut().query = entry.text().to_string();
         if let Some(list) = weak.upgrade() {
             list.invalidate_filter();
         }
@@ -547,6 +568,18 @@ mod tests {
         assert_eq!(keys(&prefs).len(), 3, "a did not load this time and stays known");
         set_on(&prefs, "b", true);
         assert_eq!(off_ids_of(&prefs), HashSet::from([11, 12]));
+    }
+
+    #[test]
+    fn the_filter_shows_a_source_only_when_its_text_kind_and_language_all_match() {
+        let everything = SourceFilter::default();
+        assert!(everything.shows("Senkuro", Kind::Manga, "ru"));
+        let manga = SourceFilter { kind: Some(Kind::Manga), ..SourceFilter::default() };
+        assert!(manga.shows("Senkuro", Kind::Manga, "ru") && !manga.shows("AnimeGG", Kind::Anime, "en"));
+        let russian = SourceFilter { lang: Some("ru".into()), ..SourceFilter::default() };
+        assert!(russian.shows("Senkuro", Kind::Manga, "ru") && !russian.shows("MangaDex", Kind::Manga, "en"));
+        let both = SourceFilter { query: "ink".into(), kind: Some(Kind::Manga), lang: Some("ru".into()) };
+        assert!(both.shows("InkStory", Kind::Manga, "ru") && !both.shows("Senkuro", Kind::Manga, "ru"));
     }
 
     #[test]

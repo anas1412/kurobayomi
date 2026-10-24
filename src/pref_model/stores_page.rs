@@ -14,6 +14,7 @@ use kuro_i18n::{Arg, MsgKey, tr, trf};
 
 use super::stores::{self, Dialog, Effect, Entry, Event, Keyed, Page};
 use super::stores_backend::{AddOutcome, Card, Ops};
+use crate::source_switch::SourceFilter;
 use super::strings;
 use super::widgets::dialog as dialog_widget;
 use crate::screens::Built;
@@ -164,10 +165,13 @@ struct Inner<T: Keyed + Send + 'static> {
     fab_label: gtk::Label,
     refresh: gtk::Button,
     dialog: RefCell<Option<DialogUi>>,
-    /// The text of the page's search, which filters the sources under every card.
-    query: Rc<RefCell<String>>,
-    /// The source lists under the cards, filtered again each time the search changes.
+    /// The page's search text, kind and language, which filter the sources under every card.
+    filter: Rc<RefCell<SourceFilter>>,
+    /// The source lists under the cards, filtered again each time the filter changes.
     sections: RefCell<Vec<gtk::ListBox>>,
+    /// The language filter and the language codes it offers after "All languages", in order.
+    languages: Option<gtk::DropDown>,
+    language_codes: RefCell<Vec<String>>,
 }
 
 /// A built page. Dropping it does not close the page; the widget owns the state.
@@ -198,6 +202,18 @@ pub fn build<T: Keyed + Send + 'static>(
     stack.add_named(&crate::ui::status("dialog-information-symbolic", &texts.empty), Some("empty"));
     let list = crate::ui::boxed_list();
     let column = crate::ui::column();
+    // a page of repositories filters their sources by kind and language, with the search
+    let kinds = ops.has_sources().then(|| gtk::DropDown::from_strings(&[&tr(MsgKey::label_all), &tr(MsgKey::label_anime), &tr(MsgKey::label_manga)]));
+    let languages = ops.has_sources().then(|| gtk::DropDown::from_strings(&[&tr(MsgKey::source_switch_all_languages)]));
+    if let (Some(kinds), Some(languages)) = (&kinds, &languages) {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        for (drop, tip) in [(kinds, tr(MsgKey::r#type)), (languages, tr(MsgKey::ext_info_language))] {
+            drop.set_tooltip_text(Some(&tip));
+            drop.update_property(&[gtk::accessible::Property::Label(&tip)]);
+            bar.append(drop);
+        }
+        column.append(&bar);
+    }
     column.append(&list);
     let scrolled = crate::ui::scrolled(&column);
     stack.add_named(&scrolled, Some("list"));
@@ -226,15 +242,37 @@ pub fn build<T: Keyed + Send + 'static>(
         fab_label,
         refresh: refresh.clone(),
         dialog: RefCell::new(None),
-        query: Rc::default(),
+        filter: Rc::default(),
         sections: RefCell::default(),
+        languages: languages.clone(),
+        language_codes: RefCell::default(),
     });
     if let Some(search) = &search {
         let weak = Rc::downgrade(&inner);
         search.connect_search_changed(move |entry| {
             if let Some(page) = weak.upgrade() {
-                *page.query.borrow_mut() = entry.text().to_string();
-                page.sections.borrow().iter().for_each(|list| list.invalidate_filter());
+                page.filter.borrow_mut().query = entry.text().to_string();
+                page.refilter();
+            }
+        });
+    }
+    if let Some(kinds) = &kinds {
+        let weak = Rc::downgrade(&inner);
+        kinds.connect_selected_notify(move |drop| {
+            if let Some(page) = weak.upgrade() {
+                page.filter.borrow_mut().kind = [None, Some(Kind::Anime), Some(Kind::Manga)].get(drop.selected() as usize).copied().flatten();
+                page.refilter();
+            }
+        });
+    }
+    if let Some(languages) = &languages {
+        let weak = Rc::downgrade(&inner);
+        languages.connect_selected_notify(move |drop| {
+            if let Some(page) = weak.upgrade() {
+                // the first entry is "All languages"; the others follow `language_codes`
+                let code = (drop.selected() as usize).checked_sub(1).and_then(|i| page.language_codes.borrow().get(i).cloned());
+                page.filter.borrow_mut().lang = code;
+                page.refilter();
             }
         });
     }
@@ -439,10 +477,15 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             self.list.remove(&row);
         }
         self.sections.borrow_mut().clear();
+        let mut codes = std::collections::BTreeSet::new();
         for card in &cards {
             // a repository's sources sit under its card, in the same frame, shown until its chevron folds them
             // ponytail: a rebuild opens every card again; keep the folded keys if a page ever rebuilds while folded
-            let section = if self.ops.has_sources() { self.ops.sources_list(&card.key, Rc::clone(&self.query)) } else { None };
+            let section = if self.ops.has_sources() { self.ops.sources_list(&card.key, Rc::clone(&self.filter)) } else { None };
+            let section = section.map(|(list, languages)| {
+                codes.extend(languages);
+                list
+            });
             let revealer = section.as_ref().map(|list| gtk::Revealer::builder().reveal_child(true).child(list).build());
             self.list.append(&self.card_row(card, revealer.as_ref()));
             if let Some(revealer) = revealer {
@@ -453,7 +496,31 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                 self.sections.borrow_mut().push(list);
             }
         }
+        self.offer_languages(codes.into_iter().collect());
         self.sync_dialog();
+    }
+
+    /// Filters the sources under every card again, after the search text, the kind or the language changed.
+    fn refilter(&self) {
+        self.sections.borrow().iter().for_each(|list| list.invalidate_filter());
+    }
+
+    /// Offers `codes` (the languages the repositories' sources use) in the language filter, keeping the chosen one when
+    /// it is still there; when it is gone the filter goes back to every language.
+    fn offer_languages(&self, codes: Vec<String>) {
+        let Some(drop) = &self.languages else { return };
+        if *self.language_codes.borrow() == codes {
+            return;
+        }
+        let chosen = self.filter.borrow().lang.clone();
+        let mut names = vec![tr(MsgKey::source_switch_all_languages)];
+        names.extend(codes.iter().map(|code| crate::browse::names::localized_display_name(code)));
+        let at = chosen.and_then(|c| codes.iter().position(|code| *code == c)).map_or(0, |i| i + 1);
+        *self.language_codes.borrow_mut() = codes;
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        drop.set_model(Some(&gtk::StringList::new(&names)));
+        // the model change picks the first entry and notifies; the chosen language is picked again here
+        drop.set_selected(at as u32);
     }
 
     fn card_row(self: &Rc<Self>, card: &Card, sources: Option<&gtk::Revealer>) -> gtk::ListBoxRow {
@@ -779,13 +846,17 @@ mod tests {
         fn has_sources(&self) -> bool {
             true
         }
-        fn sources_list(&self, _key: &str, query: Rc<RefCell<String>>) -> Option<gtk::ListBox> {
+        fn sources_list(&self, _key: &str, filter: Rc<RefCell<SourceFilter>>) -> Option<(gtk::ListBox, Vec<String>)> {
+            const SOURCES: [(&str, Kind, &str); 2] = [("Alpha", Kind::Anime, "en"), ("Beta", Kind::Manga, "ru")];
             let list = crate::ui::boxed_list();
-            for name in ["Alpha", "Beta"] {
+            for (name, _, _) in SOURCES {
                 list.append(&crate::ui::row(name, None, None));
             }
-            list.set_filter_func(move |row| crate::ui::title_matches(["Alpha", "Beta"][row.index() as usize], &query.borrow()));
-            Some(list)
+            list.set_filter_func(move |row| {
+                let (name, kind, lang) = SOURCES[row.index() as usize];
+                filter.borrow().shows(name, kind, lang)
+            });
+            Some((list, vec!["en".into(), "ru".into()]))
         }
     }
 
@@ -808,12 +879,23 @@ mod tests {
             fold.set_active(false);
             assert!(!revealer.reveals_child(), "the chevron folds them");
             assert_eq!(fold.icon_name().as_deref(), Some("pan-end-symbolic"));
+            let list = inner.sections.borrow()[0].clone();
+            let shown = || -> Vec<bool> { (0..2).map(|i| list.row_at_index(i).unwrap().is_child_visible()).collect() };
             let search = built.end.first().and_then(|w| w.downcast_ref::<gtk::SearchEntry>()).expect("the page's search leads its header widgets").clone();
             search.set_text("bet");
-            pump_until(|| inner.query.borrow().as_str() == "bet");
-            let list = inner.sections.borrow()[0].clone();
-            let shown: Vec<bool> = (0..2).map(|i| list.row_at_index(i).unwrap().is_child_visible()).collect();
-            assert_eq!(shown, [false, true], "only Beta matches");
+            pump_until(|| inner.filter.borrow().query == "bet");
+            assert_eq!(shown(), [false, true], "only Beta matches");
+            search.set_text("");
+            pump_until(|| inner.filter.borrow().query.is_empty());
+            // the language filter offers the languages the sources use, after "All languages"
+            let languages = inner.languages.clone().expect("a language filter");
+            assert_eq!(languages.model().map(|m| m.n_items()), Some(3));
+            languages.set_selected(1);
+            assert_eq!(inner.filter.borrow().lang.as_deref(), Some("en"));
+            assert_eq!(shown(), [true, false], "English only");
+            languages.set_selected(0);
+            assert_eq!(inner.filter.borrow().lang, None, "back to every language");
+            assert_eq!(shown(), [true, true]);
         });
     }
 

@@ -5109,6 +5109,9 @@ source_switch_choose = Choose
 source_switch_sources = Sources
 
 # source: kurobayomi
+source_switch_all_languages = All languages
+
+# source: kurobayomi
 source_switch_check_now = Check now
 
 # source: kurobayomi
