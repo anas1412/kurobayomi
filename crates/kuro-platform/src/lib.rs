@@ -1,5 +1,6 @@
 //! OS-specific integration. This is the only crate allowed to contain
-//! `cfg(target_os`, `xdg-open`, `libsecret`, `zbus` or `XDG_` strings, and the only one that names its per-OS modules.
+//! `cfg(target_os`, `xdg-open`, `libsecret`, `zbus`, `XDG_` or `libc::` strings, and the only one that names its per-OS
+//! modules.
 //! `scripts/check-platform-boundary.sh` fails the build when they appear anywhere else.
 //! kuro-core and kuro-platform must not depend on gtk4; UI-side replacements live in the GTK crate.
 //!
@@ -71,7 +72,7 @@
 //!
 //! Traits: [`paths::Paths`] (directories) and [`secrets::SecretStore`] (credentials).
 //! Their system implementations: [`system_paths::SystemPaths`] and [`secrets::open`] (the system keyring, with the
-//! encrypted file as fallback). OS-specific engines live in per-OS modules (`linux`); every other module is shared and
+//! encrypted file as fallback). OS-specific engines live in per-OS modules (`linux`, `windows`); every other module is shared and
 //! picks the engine of the OS it is built for, with a fallback where an OS has none yet (see `hidden_pages`).
 
 pub mod channel;
@@ -79,6 +80,7 @@ pub mod deep_link;
 pub mod device;
 pub mod dropped;
 pub mod external_player;
+pub mod gl;
 pub mod idle;
 pub mod incognito;
 #[cfg(feature = "keyring")]
@@ -87,6 +89,7 @@ pub mod kind;
 pub mod launcher;
 pub mod lifecycle;
 pub mod links;
+pub mod locale;
 pub mod media;
 pub mod notifications;
 pub mod notifier;
@@ -108,3 +111,5 @@ pub mod webview;
 
 #[cfg(all(target_os = "linux", feature = "platform-linux"))]
 pub mod linux;
+#[cfg(all(target_os = "windows", feature = "platform-windows"))]
+pub mod windows;

@@ -3639,6 +3639,7 @@ dependencies = [
  "gio",
  "gtk4",
  "keyring",
+ "libc",
  "regex",
  "rustix 1.1.5",
  "serde",
@@ -3651,6 +3652,7 @@ dependencies = [
  "tracing",
  "url",
  "webkit6",
+ "windows-sys 0.61.2",
  "zbus 5.13.2",
 ]
 
@@ -3857,7 +3859,6 @@ dependencies = [
  "kuro-source-scrape",
  "kuro-testkit",
  "kuro-track",
- "libc",
  "proptest",
  "regex",
  "reqwest",

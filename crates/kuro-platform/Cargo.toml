@@ -19,6 +19,7 @@ chacha20poly1305 = "0.10.1"
 directories = { workspace = true }
 # the system keyring: the Secret Service on Linux, the Credential Manager on Windows
 keyring = { workspace = true, optional = true }
+libc = "0.2.189"
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0.151"
@@ -37,6 +38,9 @@ zbus = "5.13.2"
 webkit6 = "0.6"
 # webkit6 needs GTK's 4.10+ API switched on; the app does that too (v4_14), this keeps the crate building on its own
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_OpenGL", "Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time", "net", "io-util"] }

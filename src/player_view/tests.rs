@@ -40,7 +40,7 @@ fn headless(data_dir: &Path) -> Playback {
         name: "ao",
         value: "null".to_owned(),
     });
-    super::playback::use_c_numeric_locale();
+    kuro_platform::locale::use_c_numeric_locale();
     let mpv = MpvHandle::create(&settings).expect("libmpv must initialise headless");
     mpv.set_property_str("vo", "null").expect("vo=null");
     Playback::new(mpv)

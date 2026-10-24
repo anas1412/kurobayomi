@@ -37,24 +37,9 @@ fn gl_max_texture_size() -> Option<i32> {
     let context = display.create_gl_context().ok()?;
     context.realize().ok()?;
     context.make_current();
-    let size = read_gl_integer(GL_MAX_TEXTURE_SIZE);
+    let size = kuro_platform::gl::get_integer(GL_MAX_TEXTURE_SIZE);
     gtk::gdk::GLContext::clear_current();
     size.filter(|s| *s > 0)
-}
-
-/// `glGetIntegerv(pname)` through libepoxy, which GDK has loaded: each GL entry point is a function-pointer variable
-/// named `epoxy_<name>`. Only valid while a GL context is current.
-fn read_gl_integer(pname: u32) -> Option<i32> {
-    type GetIntegerv = unsafe extern "C" fn(u32, *mut i32);
-    // SAFETY: the symbol is the address of epoxy's `epoxy_glGetIntegerv` pointer variable; it is read once, and the
-    // function it points to is called with a valid out pointer while the probe context is current.
-    unsafe {
-        let var = libc::dlsym(libc::RTLD_DEFAULT, c"epoxy_glGetIntegerv".as_ptr()) as *const Option<GetIntegerv>;
-        let function = (*var.as_ref()?)?;
-        let mut value = 0;
-        function(pname, &mut value);
-        Some(value)
-    }
 }
 
 /// Runs `work` on a worker thread while the main loop keeps turning. When it is still running after `delay`,
@@ -193,6 +178,18 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+
+    #[test]
+    fn the_texture_probe_reads_the_limit_whenever_a_gl_context_realizes() {
+        crate::testing::with_display(|| {
+            let Some(display) = gtk::gdk::Display::default() else { return };
+            let Ok(context) = display.create_gl_context() else { return };
+            if context.realize().is_err() {
+                return; // no GL on this display
+            }
+            assert!(gl_max_texture_size().is_some_and(|size| size >= 1024), "glGetIntegerv was not resolved");
+        });
+    }
 
     /// Runs `body` on a private main context that the test thread owns, and pumps it until `done` holds.
     fn on_context<R>(body: impl FnOnce() -> R, done: impl Fn(&R) -> bool, extra: Duration) -> R {

@@ -13,7 +13,7 @@
 //! | T-01a-046 | Picture-in-Picture capability flag | Not ported. [`crate::device::device_has_pip`] is constant `false`. The always-on-top mini player replaces PiP (area 46). |
 //!
 //! | T-req-platform-006 | tracker login through `WebViewHost::oauth_login` | Not ported for AniList, Simkl, Shikimori and Bangumi. Their client ids are registered with the redirects `aniyomi://` and `kurobayomi://`, and a loopback address would be refused by those providers. MyAnimeList already logs in through its loopback redirect. `oauth_login` stays for a provider that accepts a loopback redirect. |
-//! | T-req-platform-007 | second-launch forwarding through `SingleInstance` | The app uses GApplication forwarding (`is_unique` picks the flags), which also carries the command line and files over D-Bus and works in a sandbox. `SocketInstance` stays as the fallback for a build without GApplication. |
+//! | T-req-platform-007 | second-launch forwarding through `SingleInstance` | The app uses GApplication forwarding (`is_unique` picks the flags), which also carries the command line and files over D-Bus and works in a sandbox. The Unix-socket `SocketInstance` was removed: every build has GApplication, and std's Unix sockets do not build on Windows. |
 //! | T-req-platform-007 | external player through `ExternalPlayer` | `kuro_player::external` keeps its own argument builder: it adds title, start position, subtitle and IPC socket, which `CommandPlayer` does not carry, and it returns the child so mpv can be watched. |
 //!
 //! The Linux notifier (T-req-platform-004) is the app's `misc::notify`, behind [`crate::notifier::Notifier`]. Channel groups, the `POST_NOTIFICATIONS`

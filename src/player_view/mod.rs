@@ -8,7 +8,6 @@ use kuro_i18n::{MsgKey, tr};
 mod after_seen;
 mod auto_hide;
 mod controls;
-mod gl;
 mod hls_proxy;
 mod menu;
 mod neighbours;
@@ -122,7 +121,7 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
     prefs.sub.lang = stored_text("pref_subtitle_lang");
     prefs.audio.lang = stored_text("pref_audio_lang");
     prepare_mpv_dir(&prefs);
-    playback::use_c_numeric_locale();
+    kuro_platform::locale::use_c_numeric_locale();
     let mpv = match MpvHandle::create(&startup_settings(&prefs)) {
         Ok(mpv) => mpv,
         Err(e) => {
@@ -540,6 +539,15 @@ fn watch_fullscreen(page: &gtk::Box, header: &gtk::HeaderBar) {
     });
 }
 
+/// `GL_FRAMEBUFFER_BINDING`.
+const GL_FRAMEBUFFER_BINDING: u32 = 0x8CA6;
+
+/// The framebuffer the GL area draws into this frame. GTK binds its own framebuffer, so this is not 0.
+/// Falls back to 0 when `glGetIntegerv` cannot be resolved.
+fn current_framebuffer() -> i32 {
+    kuro_platform::gl::get_integer(GL_FRAMEBUFFER_BINDING).unwrap_or(0)
+}
+
 /// Connects the GL area: the render context is made on realize, frames are drawn on render, and the context is
 /// freed on unrealize while the GL context is still current. An unrealize closes the player (the page was popped, its
 /// window closed, the app quit): progress is saved and playback stops.
@@ -570,7 +578,7 @@ fn wire_gl(area: &gtk::GLArea, shared: &Shared, start: i64) {
         area.connect_render(move |area, _| {
             let scale = area.scale_factor();
             let player = shared.borrow();
-            if let Err(e) = player.playback.mpv().render(gl::current_framebuffer(), area.width() * scale, area.height() * scale) {
+            if let Err(e) = player.playback.mpv().render(current_framebuffer(), area.width() * scale, area.height() * scale) {
                 tracing::debug!(error = %e, "player: frame not drawn");
             }
             glib::Propagation::Stop
@@ -595,7 +603,7 @@ fn realize(area: &gtk::GLArea, shared: &Shared, start: i64, loaded: &Cell<bool>)
         }
     });
     let mut player = shared.borrow_mut();
-    if let Err(e) = player.playback.mpv_mut().create_render_context(gl::get_proc_address) {
+    if let Err(e) = player.playback.mpv_mut().create_render_context(kuro_platform::gl::proc_address) {
         return tracing::error!(error = %e, "player: render context failed");
     }
     if let Err(e) = player.playback.mpv_mut().set_render_update_callback(move || {
