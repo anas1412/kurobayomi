@@ -462,21 +462,35 @@ pub fn open_link(url: &str, parent: Option<&gtk::Window>) {
 /// [`open_link`] that runs `on_failed` with the error text instead of the toast.
 pub fn open_link_or(url: &str, parent: Option<&gtk::Window>, on_failed: impl FnOnce(String) + 'static) {
     let link = url.to_owned();
-    // a local file or folder opens in its default program through GIO itself: GTK's launcher hands it to the desktop's
-    // portal, which refused folders on KDE ("The application launch failed", the Local folder)
-    if url.starts_with("file://") {
-        let context = parent.map(gtk::prelude::WidgetExt::display).or_else(gtk::gdk::Display::default).map(|display| display.app_launch_context());
-        gtk::gio::AppInfo::launch_default_for_uri_async(url, context.as_ref(), gtk::gio::Cancellable::NONE, move |result| {
-            if let Err(error) = result {
-                tracing::warn!(%error, link = %link, "could not open a local file or folder");
-                on_failed(error.to_string());
-            }
-        });
+    // links come from sources too (a title's page, a description): only web and mail links open, never a file or folder
+    // of this computer (`file://`) or another program's scheme. The app's own folders open with `open_local`.
+    if !web_link(url) {
+        tracing::warn!(link = %link, "a link that is not a web link was not opened");
         return;
     }
     gtk::UriLauncher::new(url).launch(parent, gtk::gio::Cancellable::NONE, move |result| {
         if let Err(error) = result {
             tracing::warn!(%error, link = %link, "could not open a link");
+            on_failed(error.to_string());
+        }
+    });
+}
+
+/// Whether `url` is a link `open_link` may open: http, https or mailto.
+pub fn web_link(url: &str) -> bool {
+    url.split_once(':').is_some_and(|(scheme, _)| ["http", "https", "mailto"].iter().any(|s| scheme.eq_ignore_ascii_case(s)))
+}
+
+/// Opens a folder or file of the app's own (the Local folder) in its default program, through GIO: GTK's launcher hands
+/// a link to the desktop's portal, which refused folders on KDE ("The application launch failed"). `on_failed` gets the
+/// error text. Never for a path a source gave.
+pub fn open_local(path: &std::path::Path, on_failed: impl FnOnce(String) + 'static) {
+    let uri = gtk::gio::File::for_path(path).uri();
+    let context = gtk::gdk::Display::default().map(|display| display.app_launch_context());
+    let shown = path.display().to_string();
+    gtk::gio::AppInfo::launch_default_for_uri_async(&uri, context.as_ref(), gtk::gio::Cancellable::NONE, move |result| {
+        if let Err(error) = result {
+            tracing::warn!(%error, path = %shown, "could not open a local folder");
             on_failed(error.to_string());
         }
     });
@@ -1311,6 +1325,17 @@ pub fn generic(s: &Screen) -> GBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A link a source hands over opens only when it is a web or mail link, never a file or folder of this computer.
+    #[test]
+    fn only_web_and_mail_links_open() {
+        for ok in ["https://site.test/a", "http://site.test", "HTTPS://Site.test", "mailto:a@b.test"] {
+            assert!(web_link(ok), "{ok}");
+        }
+        for refused in ["file:///home/u/.ssh/id_rsa", "FILE:///etc", "smb://host/share", "javascript:alert(1)", "kurobayomi://add-repo?url=x", "/home/u", ""] {
+            assert!(!web_link(refused), "{refused}");
+        }
+    }
 
     #[test]
     fn over_root_replaces_the_pages_with_one_push_or_pops_when_nothing_is_pushed() {

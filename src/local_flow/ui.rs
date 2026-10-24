@@ -56,8 +56,8 @@ pub fn link_folder(kind: Kind) {
 
 /// Opens the Local folder of `kind` in the file manager: what is put in it joins the library at the next refresh.
 pub fn open_local_folder(kind: Kind) {
-    match super::local_root(kind).and_then(|root| kuro_local::fs::file_url(&root)) {
-        Some(url) => crate::ui::open_link(&url, None),
+    match super::local_root(kind) {
+        Some(root) => crate::ui::open_local(&root, |error| crate::toast::notify(error)),
         None => crate::toast::notify(tr(MsgKey::local_folder_unavailable)),
     }
 }

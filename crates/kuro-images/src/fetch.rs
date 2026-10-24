@@ -544,14 +544,17 @@ mod tests {
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(b"NEW".to_vec()).insert_header("etag", "\"v2\"")).mount(&server).await;
         recheck::write(&root, &url, &recheck::Check { checked_ms: 0, etag: Some("\"v1\"".into()), last_modified: None });
         svc.fetch(&art, &opts, &CancellationToken::new()).await.unwrap();
+        // the new file is written first and its check record right after: wait for both, or a fast runner reads the
+        // record before it is there
+        let v2 = || recheck::read(&root, &url).and_then(|check| check.etag).as_deref() == Some("\"v2\"");
         for _ in 0..100 {
-            if std::fs::read(&file).unwrap() == b"NEW" {
+            if std::fs::read(&file).unwrap() == b"NEW" && v2() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert_eq!(std::fs::read(&file).unwrap(), b"NEW", "changed: downloaded again");
-        assert_eq!(recheck::read(&root, &url).unwrap().etag.as_deref(), Some("\"v2\""));
+        assert!(v2(), "the record keeps the new ETag");
     }
 
     #[test]

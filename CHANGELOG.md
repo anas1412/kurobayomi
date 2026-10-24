@@ -19,8 +19,10 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ### Fixed
 
-- Open the Local folder (and every other local file or folder the app opens) failed with "The application launch
-  failed" on KDE: it opens in the folder's default program now.
+- Open the Local folder failed with "The application launch failed" on KDE: it opens in the folder's default program
+  now.
+- A link from a source (a title's page, a description) opens only when it is a web or mail link: a link to a file or
+  folder of this computer, or another program's scheme, is never opened.
 - The Repositories button and the folded chevron showed the missing-icon picture; both are bundled now.
 
 ## [0.1.9] - 2026-10-24
