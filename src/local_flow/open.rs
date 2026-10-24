@@ -128,7 +128,8 @@ mod tests {
         episodes.update(&ItemUpdate { progress: Some(90), ..ItemUpdate::new(first.id) }).expect("position");
 
         let opening = opening_of(&db, "Show", "Show - 1").expect("lookup").expect("opening");
-        let path = root.path().join("Show").join("Show - 1.mkv").to_string_lossy().into_owned();
+        let show = kuro_local::fs::absolute_url(&root.path().join("Show")).expect("an absolute path");
+        let path = format!("{show}/Show - 1.mkv");
         assert_eq!(opening, Opening { path, episode_id: first.id, start_ms: 90_000 });
         assert_eq!(opening_of(&db, "Show", "Show - 9").expect("lookup"), None, "an unknown episode name");
         assert_eq!(opening_of(&db, "Berserk", "Show - 1").expect("lookup"), None, "a title with no local entry");

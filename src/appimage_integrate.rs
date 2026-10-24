@@ -254,6 +254,8 @@ mod tests {
 
     /// The whole job on folders: the launcher, the icons and the file types land in the data folder, a second run
     /// changes nothing, and another tool's launcher for the same AppImage makes ours go away.
+    // AppImages and desktop files are Linux packaging
+    #[cfg(unix)]
     #[test]
     fn the_appimage_puts_itself_in_the_menu_once_and_steps_back_for_another_tools_launcher() {
         let dir = tempfile::tempdir().unwrap();

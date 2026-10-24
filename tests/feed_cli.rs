@@ -46,10 +46,13 @@ impl Env {
 
     /// stdout with the temp directory and the checkout replaced by fixed names, so goldens are machine independent.
     fn stdout(&self, out: &Output) -> String {
+        // JSON writes a Windows path's `\` as `\\`; the goldens use `/`
+        let slashed = |path: &str| path.replace('\\', "/");
         String::from_utf8(out.stdout.clone())
             .unwrap()
-            .replace(self.home.path().to_str().unwrap(), "$TMP")
-            .replace(env!("CARGO_MANIFEST_DIR"), "$ROOT")
+            .replace("\\\\", "/")
+            .replace(&slashed(self.home.path().to_str().unwrap()), "$TMP")
+            .replace(&slashed(env!("CARGO_MANIFEST_DIR")), "$ROOT")
     }
 }
 

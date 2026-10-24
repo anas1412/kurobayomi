@@ -421,23 +421,9 @@ impl ImageService {
 /// The path of a `file://` link with its percent escapes decoded (a local cover's link escapes spaces), or the path
 /// itself.
 fn file_path(url: &str) -> PathBuf {
-    let Some(rest) = url.strip_prefix("file://") else { return PathBuf::from(url) };
-    let (bytes, mut out) = (rest.as_bytes(), Vec::with_capacity(rest.len()));
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
-        match (bytes[i], hex) {
-            (b'%', Some(byte)) => {
-                out.push(byte);
-                i += 3;
-            }
-            (byte, _) => {
-                out.push(byte);
-                i += 1;
-            }
-        }
-    }
-    PathBuf::from(String::from_utf8_lossy(&out).into_owned())
+    // the url crate decodes it for this system: `file:///C:/x` is `C:\x` on Windows, and non-UTF-8 names survive
+    let decoded = url.starts_with("file://").then(|| url::Url::parse(url).ok()?.to_file_path().ok()).flatten();
+    decoded.unwrap_or_else(|| PathBuf::from(url))
 }
 
 fn file_name(path: &Path) -> String {
@@ -559,9 +545,13 @@ mod tests {
 
     #[test]
     fn a_file_link_is_decoded_to_its_path() {
-        assert_eq!(file_path("file:///home/a/Ch%201/001.png"), PathBuf::from("/home/a/Ch 1/001.png"));
-        assert_eq!(file_path("file:///x/100%"), PathBuf::from("/x/100%"));
-        assert_eq!(file_path("/plain/p.jpg"), PathBuf::from("/plain/p.jpg"));
+        let page = std::env::temp_dir().join("a").join("Ch 1").join("001.png");
+        let link = url::Url::from_file_path(&page).unwrap().to_string();
+        assert!(link.ends_with("/a/Ch%201/001.png"), "{link}");
+        assert_eq!(file_path(&link), page);
+        assert_eq!(file_path(page.to_str().unwrap()), page, "a plain path is itself");
+        let odd = std::env::temp_dir().join("100%");
+        assert_eq!(file_path(url::Url::from_file_path(&odd).unwrap().as_str()), odd);
     }
 
     #[tokio::test]

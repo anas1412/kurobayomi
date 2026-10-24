@@ -102,7 +102,8 @@ mod tests {
         walk(&root().join("src"), &mut files);
         let mut out = Vec::new();
         for file in files.into_iter().filter(|f| f.extension().is_some_and(|e| e == "rs")) {
-            let rel = file.strip_prefix(root()).unwrap().to_string_lossy().into_owned();
+            // `/`-separated on every system, as the names below are written
+            let rel = file.strip_prefix(root()).unwrap().to_string_lossy().replace('\\', "/");
             if rel.starts_with("src/dropped/") {
                 continue;
             }

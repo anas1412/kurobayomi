@@ -137,6 +137,8 @@ async fn t_14_episodes_number_uses_anime_title() -> io::Result<()> {
     Ok(())
 }
 
+// Windows folders ignore case, so names that differ only in case are one entry there
+#[cfg(unix)]
 #[tokio::test]
 async fn t_14_episodes_uppercase_accepted() -> io::Result<()> {
     let (_root, source) = library(&[("Show", &["EP01.MKV", "ep01.mkv"])])?;

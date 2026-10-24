@@ -366,6 +366,8 @@ mod tests {
         Ok(())
     }
 
+    // checks the child process through /proc
+    #[cfg(unix)]
     #[test]
     fn t_14_media_drop_cleans_temp() -> io::Result<()> {
         // dropping the child guard of an in-flight extraction kills and reaps the process

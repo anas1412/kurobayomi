@@ -71,10 +71,15 @@ mod tests {
         }
     }
 
+    /// An absolute backup path on this system (`/d` would not be absolute on Windows).
+    fn backup() -> PathBuf {
+        std::env::temp_dir().join("d").join("x.tachibk")
+    }
+
     #[test]
     fn uri_is_file_scheme_with_percent_encoding() {
-        let uri = file_uri(Path::new("/home/u/my backups/a b.tachibk")).unwrap();
-        assert_eq!(uri, "file:///home/u/my%20backups/a%20b.tachibk");
+        let uri = file_uri(&std::env::temp_dir().join("my backups").join("a b.tachibk")).unwrap();
+        assert!(uri.starts_with("file:///") && uri.ends_with("/my%20backups/a%20b.tachibk"), "{uri}");
         assert_eq!(file_uri(Path::new("relative.tachibk")), None);
     }
 
@@ -86,7 +91,7 @@ mod tests {
             *opened.borrow_mut() = Some(p.to_path_buf());
             Ok(())
         };
-        let out = show_in_folder(Path::new("/d/x.tachibk"), &bus, &open);
+        let out = show_in_folder(&backup(), &bus, &open);
         assert_eq!(out, Reveal::Shown);
         assert_eq!(bus.asked.borrow().len(), 1);
         assert!(opened.borrow().is_none());
@@ -100,16 +105,16 @@ mod tests {
             *opened.borrow_mut() = Some(p.to_path_buf());
             Ok(())
         };
-        let out = show_in_folder(Path::new("/d/x.tachibk"), &bus, &open);
+        let out = show_in_folder(&backup(), &bus, &open);
         assert_eq!(out, Reveal::OpenedFolder);
-        assert_eq!(opened.borrow().as_deref(), Some(Path::new("/d")));
+        assert_eq!(opened.borrow().as_deref(), backup().parent());
     }
 
     #[test]
     fn both_paths_failing_reports_failure() {
         let bus = Bus { answer: Err("no service".into()), asked: RefCell::new(Vec::new()) };
         let open = |_: &Path| Err(io::Error::other("no opener"));
-        assert!(matches!(show_in_folder(Path::new("/d/x.tachibk"), &bus, &open), Reveal::Failed(_)));
+        assert!(matches!(show_in_folder(&backup(), &bus, &open), Reveal::Failed(_)));
         assert!(matches!(show_in_folder(Path::new("x.tachibk"), &bus, &open), Reveal::Failed(_)));
     }
 
@@ -122,10 +127,10 @@ mod tests {
 
     #[test]
     fn worker_thread_sends_the_result_through_the_channel() {
-        let rx = spawn_show_in_folder(PathBuf::from("/d/x.tachibk"), Box::new(Instant(Err("no".into()))), Box::new(|_| Ok(())));
+        let rx = spawn_show_in_folder(backup(), Box::new(Instant(Err("no".into()))), Box::new(|_| Ok(())));
         assert_eq!(rx.recv_blocking().unwrap(), Reveal::OpenedFolder);
         assert!(rx.recv_blocking().is_err(), "the channel closes after one result");
-        let rx = spawn_show_in_folder(PathBuf::from("/d/x.tachibk"), Box::new(Instant(Ok(()))), Box::new(|_| Ok(())));
+        let rx = spawn_show_in_folder(backup(), Box::new(Instant(Ok(()))), Box::new(|_| Ok(())));
         assert_eq!(rx.recv_blocking().unwrap(), Reveal::Shown);
     }
 }

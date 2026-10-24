@@ -23,17 +23,10 @@ pub fn pick_playable(names: &[String]) -> Option<&String> {
     sorted.into_iter().min_by_key(|n| extension_rank(n).unwrap_or(usize::MAX))
 }
 
-/// A `file://` URI for a local path. Bytes outside the unreserved set and `/` are percent-encoded.
+/// A `file://` URI for an absolute local path, percent-encoded by the `url` crate for this system (`file:///C:/…` on
+/// Windows), as `kuro_local::fs::file_url`. Empty for a relative path.
 pub fn file_url(path: &Path) -> String {
-    let mut out = String::from("file://");
-    for byte in path.to_string_lossy().bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
+    url::Url::from_file_path(path).map(String::from).unwrap_or_default()
 }
 
 /// The video for offline playback (`buildVideo`). `episode_dir` is what `AnimeLayout::find_episode_dir` returned.
@@ -86,8 +79,10 @@ mod tests {
 
     #[test]
     fn file_urls_encode_spaces_and_reserved_bytes() {
-        assert_eq!(file_url(Path::new("/d/Show (EN)/a b#1.mkv")), "file:///d/Show%20%28EN%29/a%20b%231.mkv");
-        assert_eq!(file_url(Path::new("/d/ok-1.mkv")), "file:///d/ok-1.mkv");
+        let dir = std::env::temp_dir().join("d");
+        let url = file_url(&dir.join("Show (EN)").join("a b#1.mkv"));
+        assert!(url.starts_with("file:///") && url.ends_with("/d/Show%20(EN)/a%20b%231.mkv"), "{url}");
+        assert!(file_url(&dir.join("ok-1.mkv")).ends_with("/d/ok-1.mkv"));
     }
 
     #[test]

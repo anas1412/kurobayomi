@@ -2,7 +2,7 @@
 
 use std::fs::{self, Metadata};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// One entry of a folder. `is_dir` and `is_file` follow symlinks, as Java `File` does. A dangling link is neither.
@@ -44,11 +44,13 @@ pub fn modified_ms(meta: &Metadata) -> i64 {
 }
 
 /// `base` joined with a `/`-separated relative path. Each segment must be a plain name: no empty segment, no `.`,
-/// no `..`, no NUL, no backslash. An absolute path has an empty first segment, so it is refused too.
+/// no `..`, no NUL, no backslash, no drive (`C:x` would replace `base` on Windows). An absolute path has an empty first
+/// segment, so it is refused too.
 pub fn safe_join(base: &Path, rel: &str) -> Option<PathBuf> {
     let mut out = base.to_path_buf();
     for part in rel.split('/') {
-        if part.is_empty() || part == "." || part == ".." || part.contains(['\0', '\\']) {
+        let drive = Path::new(part).components().any(|c| matches!(c, Component::Prefix(_)));
+        if part.is_empty() || part == "." || part == ".." || part.contains(['\0', '\\']) || drive {
             return None;
         }
         out.push(part);
@@ -57,13 +59,49 @@ pub fn safe_join(base: &Path, rel: &str) -> Option<PathBuf> {
 }
 
 /// The path a local url names. A relative url is a title (or a file of one) inside the Local folder `root`; an absolute
-/// url is a linked folder outside it (or a file of one), checked the same way: no `.`, `..`, empty part, NUL or
-/// backslash. The one place a local url becomes a path, for the source and the app alike.
+/// url is a linked folder outside it (or a file of one): the system's root (`/`, or a drive such as `C:/`), then parts
+/// checked the same way: no `.`, `..`, empty part, NUL or backslash. The one place a local url becomes a path, for the
+/// source and the app alike.
 pub fn resolve(root: &Path, url: &str) -> Option<PathBuf> {
-    match url.strip_prefix('/') {
-        Some(absolute) => safe_join(Path::new("/"), absolute),
-        None => safe_join(root, url),
+    if !Path::new(url).is_absolute() {
+        return safe_join(root, url);
     }
+    let (mut base, mut skip) = (PathBuf::new(), 0);
+    for part in Path::new(url).components() {
+        match part {
+            Component::Prefix(drive) => skip += drive.as_os_str().len(),
+            Component::RootDir => skip += 1,
+            _ => break,
+        }
+        base.push(part);
+    }
+    safe_join(&base, url.get(skip..)?)
+}
+
+/// The local url of an absolute path (a linked folder): its parts joined with `/`, as every local url is, so
+/// `C:\Manga\Berserk` is `C:/Manga/Berserk`. `None` for a relative path, a `.` or `..` part, or a name that is not
+/// valid text.
+// ponytail: a drive letter or `/` root only; a network share (`\\server\share`) is refused, add it when asked for
+// (no root text to skip in `resolve`)
+pub fn absolute_url(path: &Path) -> Option<String> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut url = String::new();
+    for part in path.components() {
+        match part {
+            Component::Prefix(drive) if matches!(drive.kind(), std::path::Prefix::Disk(_)) => url.push_str(drive.as_os_str().to_str()?),
+            Component::RootDir => url.push('/'),
+            Component::Normal(name) => {
+                if !url.ends_with('/') {
+                    url.push('/');
+                }
+                url.push_str(name.to_str()?);
+            }
+            _ => return None,
+        }
+    }
+    Some(url)
 }
 
 /// Kotlin `findFile(name)` on a folder, for a nested `a/b` path or a linked folder's absolute path ([`resolve`]). `None`
@@ -144,8 +182,8 @@ mod tests {
         let linked = tempfile::tempdir()?;
         fs::create_dir(linked.path().join("Show"))?;
         let show = linked.path().join("Show");
-        let url = show.to_str().expect("utf-8 temp path");
-        assert_eq!(find_child(local.path(), url), Some(show.clone()), "an absolute url is the linked folder itself");
+        let url = absolute_url(&show).expect("utf-8 temp path");
+        assert_eq!(find_child(local.path(), &url), Some(show.clone()), "an absolute url is the linked folder itself");
         assert_eq!(find_child(local.path(), &format!("{url}/missing.mkv")), None);
         assert_eq!(resolve(local.path(), "Title/ep.mkv"), Some(local.path().join("Title/ep.mkv")), "a relative url stays under Local");
         assert_eq!(resolve(local.path(), "/tmp/../etc"), None, "traversal is refused in both forms");
@@ -183,10 +221,21 @@ mod tests {
 
     #[test]
     fn file_urls_need_an_absolute_path() {
-        assert_eq!(
-            file_url(Path::new("/srv/local/a b/cover.jpg")).as_deref(),
-            Some("file:///srv/local/a%20b/cover.jpg")
-        );
+        let url = file_url(&std::env::temp_dir().join("local/a b/cover.jpg")).expect("the temp folder is absolute");
+        assert!(url.starts_with("file:///") && url.ends_with("/local/a%20b/cover.jpg"), "{url}");
         assert_eq!(file_url(Path::new("relative/cover.jpg")), None);
+    }
+
+    #[test]
+    fn an_absolute_path_and_its_url_round_trip_with_slashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let show = dir.path().join("Shelf").join("A Show");
+        let url = absolute_url(&show).expect("an absolute path");
+        assert!(!url.contains('\\') && url.ends_with("/Shelf/A Show"), "{url}");
+        assert_eq!(resolve(Path::new("unused"), &url), Some(show.clone()));
+        assert_eq!(resolve(Path::new("unused"), &format!("{url}/Ep 1.mkv")), Some(show.join("Ep 1.mkv")));
+        assert_eq!(absolute_url(Path::new("relative/A Show")), None);
+        // on Windows a drive part would replace the base; elsewhere `C:x` is a plain name
+        assert_eq!(safe_join(dir.path(), "C:x").is_none(), cfg!(windows));
     }
 }

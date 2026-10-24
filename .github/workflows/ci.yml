@@ -102,9 +102,11 @@ jobs:
             toolchain:p rust:p pkgconf:p cmake:p nasm:p
             gtk4:p mpv:p dav1d:p libarchive:p
 
-      # the build folder between runs (MSYS2's Rust uses the same cargo home and target folder)
+      # the build folder between runs; saved after a failed run too, since test failures leave a good build behind
       - name: Cache the build
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Tests
         # as on Linux: no debug symbols or incremental data, which would fill the runner disk

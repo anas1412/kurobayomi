@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use crate::shell::argv;
 #[cfg(test)]
-use crate::shell::uri::percent_decode;
 
 #[cfg(test)]
 /// What a share or save does for one item.
@@ -47,9 +46,15 @@ pub fn plan(item: &str) -> Plan {
     if argv::is_web_address(item) {
         return Plan::CopyLink(item.to_string());
     }
-    let path = match item.strip_prefix("file://") {
-        Some(rest) => PathBuf::from(percent_decode(rest.split(['?', '#']).next().unwrap_or(""), false)),
-        None => PathBuf::from(item),
+    // the url crate decodes a `file://` link for this system (`file:///C:/x` is `C:\x` on Windows) and drops its
+    // query and fragment
+    let path = if item.starts_with("file://") {
+        match url::Url::parse(item).ok().and_then(|link| link.to_file_path().ok()) {
+            Some(path) => path,
+            None => return Plan::Nothing,
+        }
+    } else {
+        PathBuf::from(item)
     };
     if !path.is_absolute() {
         return Plan::Nothing;
@@ -64,6 +69,7 @@ pub fn plan(item: &str) -> Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{abs, file_link};
 
     #[test]
     fn a_web_address_is_copied_as_it_was_shared() {
@@ -74,16 +80,16 @@ mod tests {
     #[test]
     fn a_file_link_is_saved_under_its_own_name_with_the_path_decoded() {
         assert_eq!(
-            plan("file:///home/u/Pictures/page%201.png?x=1"),
-            Plan::SaveFile { source: PathBuf::from("/home/u/Pictures/page 1.png"), name: "page 1.png".into() }
+            plan(&file_link("/home/u/Pictures/page%201.png?x=1")),
+            Plan::SaveFile { source: PathBuf::from(abs("/home/u/Pictures/page 1.png")), name: "page 1.png".into() }
         );
     }
 
     #[test]
     fn an_absolute_path_is_saved_and_a_relative_one_is_not() {
         assert_eq!(
-            plan("/home/u/backup.tachibk"),
-            Plan::SaveFile { source: PathBuf::from("/home/u/backup.tachibk"), name: "backup.tachibk".into() }
+            plan(&abs("/home/u/backup.tachibk")),
+            Plan::SaveFile { source: PathBuf::from(abs("/home/u/backup.tachibk")), name: "backup.tachibk".into() }
         );
         assert_eq!(plan("notes/backup.tachibk"), Plan::Nothing);
     }
@@ -97,7 +103,8 @@ mod tests {
 
     #[test]
     fn a_file_on_disk_is_revealed_not_shared() {
-        assert_eq!(show_in_folder(Path::new("/home/u/Downloads/page.png")), Plan::ShowInFolder("/home/u/Downloads/page.png".into()));
+        let page = abs("/home/u/Downloads/page.png");
+        assert_eq!(show_in_folder(Path::new(&page)), Plan::ShowInFolder(page.into()));
         assert_eq!(show_in_folder(Path::new("page.png")), Plan::Nothing);
     }
 }

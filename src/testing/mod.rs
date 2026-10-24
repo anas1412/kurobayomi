@@ -177,3 +177,15 @@ mod tests {
         assert_eq!(on_gtk(|| 7), Some(7), "the thread still runs bodies");
     }
 }
+
+/// An absolute path on this system from a Unix-style one: `/x` stays `/x`, and is `C:/x` on Windows, where a path
+/// without a drive is not absolute.
+pub fn abs(unix: &str) -> String {
+    if cfg!(windows) { format!("C:{unix}") } else { unix.to_owned() }
+}
+
+/// The `file://` link of [`abs`]`(unix)`, with `unix` kept as written (escapes included): `file:///x`, or
+/// `file:///C:/x` on Windows.
+pub fn file_link(unix: &str) -> String {
+    if cfg!(windows) { format!("file:///C:{unix}") } else { format!("file://{unix}") }
+}
