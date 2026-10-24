@@ -96,6 +96,7 @@ mod tests {
     use crate::index::{DownloadIndex, IndexRoots};
     use crate::unit::{EntryRef, fixtures};
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -105,6 +106,7 @@ mod tests {
 
     static SPAWN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    #[cfg(unix)]
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -121,6 +123,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn engine(root: &Path, video: Option<Video>) -> EpisodeEngine {
         let ffprobe = script(root, "ffprobe", "echo 30.0");
         // The fake ffmpeg writes the partial file (the argument before the trailing `-y`), then ends.
@@ -134,10 +137,12 @@ mod tests {
             .with_programs(ffmpeg.as_os_str(), ffprobe.as_os_str())
     }
 
+    #[cfg(unix)]
     fn video() -> Video {
         Video { url: "/local/source.mkv".into(), title: "v".into(), ..Default::default() }
     }
 
+    #[cfg(unix)]
     fn job() -> UnitJob {
         let q = fixtures::queued(Kind::Anime, 1, 5, 10);
         UnitJob {
@@ -147,6 +152,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn run_ctx(root: &Path, cancel: CancellationToken) -> RunCtx {
         let cache = tempfile::tempdir().unwrap();
         let roots = IndexRoots { manga: cache.path().join("manga"), anime: root.to_path_buf() };
@@ -160,10 +166,12 @@ mod tests {
         ctx
     }
 
+    #[cfg(unix)]
     fn folder(root: &Path) -> PathBuf {
         root.join("Src (EN)").join("Show")
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn the_episode_lands_in_its_folder_and_the_folder_name_is_reported() {
         let _guard = SPAWN_LOCK.lock().await;
@@ -175,6 +183,7 @@ mod tests {
         assert!(!folder(root.path()).join("Episode 1_tmp").exists());
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn the_finished_episode_replaces_an_existing_one() {
         let _guard = SPAWN_LOCK.lock().await;
@@ -188,6 +197,7 @@ mod tests {
         assert!(!folder(root.path()).join("Episode 1").join("old.mkv").exists());
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn a_failing_episode_reports_the_error() {
         let _guard = SPAWN_LOCK.lock().await;
@@ -197,6 +207,7 @@ mod tests {
         assert!(matches!(result, Err(DownloadError::NoVideo)), "{:?}", result.err());
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn a_cancelled_episode_is_cancelled() {
         let _guard = SPAWN_LOCK.lock().await;
@@ -208,6 +219,7 @@ mod tests {
         assert!(matches!(result, Err(DownloadError::Cancelled)), "{:?}", result.err());
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn an_episode_already_on_disk_is_not_downloaded_again() {
         let _guard = SPAWN_LOCK.lock().await;
@@ -223,6 +235,7 @@ mod tests {
         assert_eq!(done.dir_name, "Episode 1");
     }
 
+    #[cfg(unix)]
     #[test]
     fn staging_names_cover_the_current_and_the_legacy_name_and_only_live_sources_run() {
         let root = tempfile::tempdir().unwrap();

@@ -95,6 +95,7 @@ mod tests {
         assert_eq!(find_or_make(dir.path(), None, &none), Some(dir.path().join("Cover.PNG")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn without_a_cover_the_lowest_episode_frame_becomes_cover_jpg() {
         let tools = tempfile::tempdir().expect("tools");

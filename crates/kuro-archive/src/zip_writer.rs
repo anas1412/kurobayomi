@@ -185,6 +185,7 @@ mod tests {
         assert_eq!(got, body);
     }
 
+    #[cfg(unix)]
     #[test]
     fn mode_is_copied_and_old_mtime_is_clamped_to_1980() {
         let dir = tempfile::tempdir().unwrap();

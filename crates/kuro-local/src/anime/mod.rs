@@ -334,6 +334,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn t_14_thumbnail_temp_removed() -> io::Result<()> {
         use crate::media::Tool;

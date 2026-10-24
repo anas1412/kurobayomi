@@ -260,12 +260,14 @@ mod tests {
     use crate::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
     use crate::model::DownloadState;
     use async_trait::async_trait;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     static SPAWN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    #[cfg(unix)]
     async fn spawn_guard() -> tokio::sync::MutexGuard<'static, ()> {
         SPAWN_LOCK.lock().await
     }
@@ -277,6 +279,7 @@ mod tests {
         engine.download(&item, &anime_dir, &cancel).await.map(|_| ())
     }
 
+    #[cfg(unix)]
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -351,6 +354,7 @@ mod tests {
 
     /// A fake ffprobe that prints a duration, and a fake ffmpeg that logs each run and writes the partial file.
     /// `exit_code` is the ffmpeg exit status.
+    #[cfg(unix)]
     fn programs(dir: &Path, exit_code: i32, partial: &Path) -> (PathBuf, PathBuf, PathBuf) {
         let log = dir.join("ffmpeg.log");
         let ffprobe = script(dir, "ffprobe", "echo 30.0");
@@ -363,6 +367,7 @@ mod tests {
         (ffmpeg, ffprobe, log)
     }
 
+    #[cfg(unix)]
     fn runs(log: &Path) -> usize {
         fs::read_to_string(log).map(|s| s.lines().count()).unwrap_or(0)
     }
@@ -375,6 +380,7 @@ mod tests {
     }
 
     /// The anime folder that the engine uses for `download(…, "Show")` under the fake source.
+    #[cfg(unix)]
     fn anime_folder(root: &Path) -> PathBuf {
         root.join("Src (EN)").join("Show")
     }
@@ -444,6 +450,7 @@ mod tests {
         assert_eq!(removed, 1);
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn a_download_is_remuxed_then_finalised_with_nomedia() {
         let _guard = spawn_guard().await;
@@ -466,6 +473,7 @@ mod tests {
         assert_eq!(item.status(), DownloadState::Queue, "the engine does not set the queue status itself");
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn a_failing_ffmpeg_is_tried_four_times_and_keeps_no_partial() {
         let _guard = spawn_guard().await;
@@ -483,6 +491,7 @@ mod tests {
         assert!(!partial.exists(), "the partial file is removed");
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn a_finished_remux_from_an_earlier_run_is_resumed_without_ffmpeg() {
         let _guard = spawn_guard().await;
@@ -500,6 +509,7 @@ mod tests {
         assert!(folder.join("Episode 1").join("Episode 1.mkv").is_file());
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn an_existing_non_empty_episode_folder_is_replaced_by_the_finished_one() {
         let _guard = spawn_guard().await;
@@ -530,6 +540,7 @@ mod tests {
         assert!(!staging.exists(), "the staging folder was moved into place");
     }
 
+    #[cfg(unix)]
     #[tokio::test(start_paused = true)]
     async fn the_file_component_is_cut_to_200_bytes_and_the_folder_keeps_its_name() {
         let _guard = spawn_guard().await;
@@ -568,6 +579,7 @@ mod tests {
 
     /// A pause during the probe kills ffprobe: ffmpeg never starts, and the partial file that a newer run has started
     /// meanwhile is left alone (T-24a-058).
+    #[cfg(unix)]
     #[tokio::test]
     async fn cancel_during_the_probe_starts_no_ffmpeg_and_leaves_a_newer_partial() {
         let _guard = spawn_guard().await;

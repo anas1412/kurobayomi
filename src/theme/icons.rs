@@ -616,6 +616,7 @@ mod name_gate {
     use std::collections::BTreeSet;
     use std::path::Path;
 
+    #[cfg(unix)]
     fn svg_names(dir: &Path, out: &mut BTreeSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
@@ -631,6 +632,7 @@ mod name_gate {
     }
 
     /// Every `"<name>-symbolic"` literal in the Rust sources and the spec files under `dir`.
+    #[cfg(unix)]
     fn symbolic_names(dir: &Path, out: &mut BTreeSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
@@ -655,6 +657,7 @@ mod name_gate {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn every_symbolic_icon_name_the_app_asks_for_is_in_adwaita_or_bundled() {
         let adwaita = Path::new("/usr/share/icons/Adwaita");

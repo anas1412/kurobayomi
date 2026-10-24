@@ -80,29 +80,13 @@ jobs:
         if: always()
         run: df -h / | cat
 
-  # The Windows port (plans/addenda/requirements-cross-platform.md, rule 7): the crates that already build for Windows
-  # stay building. The others wait for the GTK, mpv and dav1d libraries (an MSYS2 toolchain); add a crate here once it
-  # builds.
-  windows-check:
+  # The Windows port (plans/addenda/requirements-cross-platform.md, rule 7): the whole app built and tested on Windows
+  # with the MSYS2 UCRT64 toolchain whose GTK, mpv, dav1d and libarchive the installer bundles. Tests that need a Unix
+  # shell, Unix file modes or Linux desktop tools are #[cfg(unix)].
+  windows:
     runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Update Rust
-        run: rustup update stable
-
-      - name: Cache the build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check
-        run: cargo check --locked --all-targets -p kuro-platform -p kuro-i18n -p kuro-prefs -p kuro-db -p kuro-data
-
-  # The whole app built on Windows with the MSYS2 UCRT64 toolchain whose GTK, mpv, dav1d and libarchive the installer
-  # bundles. Not required yet (continue-on-error): it shows what still breaks. Once it passes, it becomes required and
-  # windows-check above is removed.
-  windows-build:
-    runs-on: windows-latest
-    continue-on-error: true
+    # a GTK test that waits for a window event that never comes would otherwise hold the runner for 6 hours
+    timeout-minutes: 60
     defaults:
       run:
         shell: msys2 {0}
@@ -118,5 +102,14 @@ jobs:
             toolchain:p rust:p pkgconf:p cmake:p nasm:p
             gtk4:p mpv:p dav1d:p libarchive:p
 
-      - name: Build
-        run: cargo build --locked
+      # the build folder between runs (MSYS2's Rust uses the same cargo home and target folder)
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        # as on Linux: no debug symbols or incremental data, which would fill the runner disk
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+        run: cargo test --locked --workspace --no-fail-fast
