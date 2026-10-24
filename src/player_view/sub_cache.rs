@@ -62,7 +62,7 @@ pub fn localize(dir: &Path, mut command: Vec<String>, fresh: bool, fetch: &dyn F
 /// The rewrite of the track commands of `episode_id`, which fetches with the stream's own request headers through the
 /// app's client. `None` before the app's client and runtime exist (the commands then run as they are).
 pub fn preparer(episode_id: i64, headers: &[(String, String)]) -> Option<Prepare> {
-    let dir = kuro_platform::linux::LinuxPaths::system().ok()?.subtitle_cache_dir();
+    let dir = kuro_platform::system_paths::SystemPaths::system().ok()?.subtitle_cache_dir();
     let runtime = tokio::runtime::Handle::try_current().ok()?;
     let client = crate::recipe_sources::client()?;
     let fresh = take_fresh(episode_id);

@@ -16,7 +16,7 @@ use kuro_player::aniskip::{self, TrackerRef};
 use kuro_player::chapters::{self, Segment};
 use kuro_player::mpv::MpvHandle;
 use kuro_player::skip::{Label, SkipConfig, SkipIntro, Tap};
-use kuro_platform::linux::LinuxPaths;
+use kuro_platform::system_paths::SystemPaths;
 use kuro_prefs::network::NetworkPrefs;
 use kuro_track::model::TrackerId;
 
@@ -214,7 +214,7 @@ fn start_aniskip(shared: &Shared, request: Request) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    let Ok(paths) = LinuxPaths::system() else {
+    let Ok(paths) = SystemPaths::system() else {
         return;
     };
     let prefs = NetworkPrefs::new(crate::data::app().base.store().clone());

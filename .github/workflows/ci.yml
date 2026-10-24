@@ -79,3 +79,20 @@ jobs:
       - name: Disk space left
         if: always()
         run: df -h / | cat
+
+  # The Windows port (plans/addenda/requirements-cross-platform.md, rule 7): the crates that already build for Windows
+  # stay building. The others wait for the GTK, mpv and dav1d libraries (an MSYS2 toolchain); add a crate here once it
+  # builds.
+  windows-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Update Rust
+        run: rustup update stable
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check --locked --all-targets -p kuro-platform -p kuro-i18n -p kuro-prefs -p kuro-db -p kuro-data

@@ -188,7 +188,7 @@ fn show_current(since: Option<Build>) {
 /// At start: remember this build, and after an update show its notes once.
 pub fn startup() {
     let Some(current) = Build::current() else { return };
-    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
+    let Ok(paths) = kuro_platform::system_paths::SystemPaths::system() else { return };
     let file = paths.last_build_file();
     let last = std::fs::read_to_string(&file).ok().and_then(|line| Build::parse(&line));
     if let Some(parent) = file.parent() {

@@ -11,7 +11,7 @@ use kuro_domain::category::backup::startup_cleanup;
 use kuro_domain::category::repo::CategoryRepo;
 use kuro_domain::category::service::CategoryService;
 use kuro_platform::kind::Kind;
-use kuro_platform::linux::LinuxPaths;
+use kuro_platform::system_paths::SystemPaths;
 use kuro_platform::paths::Paths as _;
 use kuro_prefs::base::BasePrefs;
 use kuro_prefs::library::LibraryPrefs;
@@ -51,7 +51,7 @@ pub struct Opened {
 /// Opens the preference store and the database, running the raw-key and schema migrations. This is the slow part of
 /// startup, so it runs off the GTK thread while the splash timer ticks (T-01a-043).
 pub fn open_blocking() -> Result<Opened, String> {
-    let paths = LinuxPaths::system().map_err(|e| e.to_string())?;
+    let paths = SystemPaths::system().map_err(|e| e.to_string())?;
     let prefs_store = kuro_prefs::settings_load::open(&paths).map_err(|e| e.to_string())?;
     // the catalogue language is fixed here, before the first `tr`: the app_language preference, then the system list
     let system: Vec<String> = gtk::glib::language_names().iter().map(|n| n.to_string()).collect();

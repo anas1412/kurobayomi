@@ -44,7 +44,7 @@ impl DiskImageCache {
     /// Opens the cache with the budget of the disk that holds `root`.
     pub async fn open(root: PathBuf) -> io::Result<Self> {
         tokio::fs::create_dir_all(&root).await?;
-        let max = budget_for(kuro_platform::linux::storage::free_bytes(&root));
+        let max = budget_for(kuro_platform::storage::free_bytes(&root));
         Self::open_with_budget(root, max).await
     }
 

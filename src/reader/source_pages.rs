@@ -232,7 +232,7 @@ impl Prefetch {
 pub fn online(source_id: i64, manga_id: i64) -> Option<Arc<Prefetch>> {
     let source = crate::browse::directory::current(crate::browse::route::BrowseKind::Manga).catalogue(source_id)?.manga()?;
     let runtime = Handle::try_current().ok()?;
-    let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
+    let paths = kuro_platform::system_paths::SystemPaths::system().ok()?;
     let cache = DiskCache::open(paths.chapter_cache_dir(), crate::cache_limit::bytes()).map_err(|e| tracing::warn!(error = %e, "no chapter cache")).ok()?;
     let pages = SourcePages::new(source, crate::recipe_sources::client()?, crate::recipe_sources::image_headers(source_id), runtime);
     Some(Prefetch::new(Arc::new(pages), Arc::new(cache), manga_id))

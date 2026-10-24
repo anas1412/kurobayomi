@@ -6,21 +6,10 @@ use std::collections::HashMap;
 use zbus::zvariant::Value;
 use zbus::Connection;
 
+use crate::launcher::Badge;
+
 const INTERFACE: &str = "com.canonical.Unity.LauncherEntry";
 const SIGNAL: &str = "Update";
-
-/// The badge at one moment: the unread count and whether the badge shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Badge {
-    pub count: i64,
-    pub visible: bool,
-}
-
-/// The badge for `unread` updates in the 3-month window. The badge is hidden when the count is 0 (cleared) and
-/// while the app lock is on, as the locked widget state does.
-pub fn badge(unread: i64) -> Badge {
-    Badge { count: unread.max(0), visible: unread > 0 }
-}
 
 /// The `application://` URI of a desktop file name (`kurobayomi.desktop`).
 pub fn app_uri(desktop_file: &str) -> String {
@@ -50,13 +39,6 @@ pub async fn publish(desktop_file: &str, badge: Badge) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_badge_is_cleared_at_zero_and_hidden_while_locked() {
-        assert_eq!(badge(0), Badge { count: 0, visible: false });
-        assert_eq!(badge(4), Badge { count: 4, visible: true });
-        assert_eq!(badge(-2), Badge { count: 0, visible: false });
-    }
 
     #[test]
     fn the_uri_and_the_properties_carry_the_count() {

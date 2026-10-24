@@ -114,7 +114,7 @@ fn main() -> glib::ExitCode {
         eprintln!("kurobayomi: {e}");
         return glib::ExitCode::from(kuro_platform::deep_link::USAGE_EXIT_CODE as u8);
     }
-    let paths = kuro_platform::linux::LinuxPaths::system().expect("resolve app directories");
+    let paths = kuro_platform::system_paths::SystemPaths::system().expect("resolve app directories");
     // the hook goes in first so a panic during the rest of startup is reported too
     kuro_core::crash::install(paths.crash_dir());
     let _log = match kuro_core::logging::init(cfg!(debug_assertions), &paths.log_dir()) {
@@ -335,7 +335,7 @@ fn build_window(app: &gtk::Application) {
     schedule_crash_test();
     startup::publish_launcher_badge(&app.application_id().unwrap_or_default());
     // background work that waits for the window: the chapter cache clear and the opt-in release check
-    if let Ok(paths) = kuro_platform::linux::LinuxPaths::system() {
+    if let Ok(paths) = kuro_platform::system_paths::SystemPaths::system() {
         startup::clear_chapter_cache_on_launch(crate::misc::diet_defaults::LIBRARY_AUTO_CLEAR_CHAPTER_CACHE, kuro_images::platform::chapter_cache_dir(&paths));
         cache_limit::start(&kuro_prefs::backup::StoragePrefs::new(data::app().base.store().clone()), cache_limit::dirs(&paths));
     }

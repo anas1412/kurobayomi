@@ -167,8 +167,8 @@ pub fn ensure() {
 }
 
 fn open_store() -> Result<(Arc<kuro_platform::secrets::FallbackSecrets>, std::path::PathBuf), String> {
-    let paths = kuro_platform::linux::LinuxPaths::system().map_err(|err| err.to_string())?;
-    Ok((Arc::new(kuro_platform::linux::secrets::open(&paths)), paths.config_dir()))
+    let paths = kuro_platform::system_paths::SystemPaths::system().map_err(|err| err.to_string())?;
+    Ok((Arc::new(kuro_platform::secrets::open(&paths)), paths.config_dir()))
 }
 
 /// No installed-source directory: the enhanced trackers are built over an empty one.

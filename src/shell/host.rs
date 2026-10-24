@@ -96,7 +96,7 @@ impl Shell {
             return;
         }
         let _entered = self.runtime.enter();
-        let paths = match kuro_platform::linux::LinuxPaths::system() {
+        let paths = match kuro_platform::system_paths::SystemPaths::system() {
             Ok(paths) => paths,
             Err(e) => {
                 tracing::error!("the download service did not start: {e}");

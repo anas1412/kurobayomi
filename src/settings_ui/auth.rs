@@ -63,9 +63,9 @@ fn store() -> Arc<dyn SecretStore> {
 
 #[cfg(not(test))]
 fn open() -> Arc<dyn SecretStore> {
-    use kuro_platform::linux::LinuxPaths;
-    match LinuxPaths::system() {
-        Ok(paths) => Arc::new(kuro_platform::linux::secrets::open(&paths)),
+    use kuro_platform::system_paths::SystemPaths;
+    match SystemPaths::system() {
+        Ok(paths) => Arc::new(kuro_platform::secrets::open(&paths)),
         Err(_) => Arc::new(kuro_prefs::memory::MemorySecrets::default()),
     }
 }

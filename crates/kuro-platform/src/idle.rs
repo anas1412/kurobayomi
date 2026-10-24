@@ -9,6 +9,14 @@ pub trait IdleInhibitor: Send + Sync {
     fn inhibit(&self, reason: &str) -> io::Result<IdleGuard>;
 }
 
+/// The inhibitor of this platform, or `None` where it has none (the screen may then blank during playback).
+#[allow(unreachable_code)]
+pub fn system() -> Option<&'static dyn IdleInhibitor> {
+    #[cfg(all(target_os = "linux", feature = "platform-linux"))]
+    return Some(&crate::linux::ScreenSaver);
+    None
+}
+
 /// An active inhibit. Dropping it runs the release once.
 pub struct IdleGuard {
     release: Option<Box<dyn FnOnce() + Send>>,

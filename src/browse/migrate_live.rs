@@ -14,7 +14,7 @@ use kuro_db::tables::{EntryPatch, ItemPatch, TrackRow, categories, entries, item
 use kuro_db::{Db, DbError, Transaction};
 use kuro_downloads::service::Downloads;
 use kuro_images::cover_paths::{Family, custom_file};
-use kuro_platform::linux::LinuxPaths;
+use kuro_platform::system_paths::SystemPaths;
 use kuro_prefs::store::PrefStore;
 use kuro_source::anime::model::FetchType;
 use tokio::runtime::Handle;
@@ -201,12 +201,12 @@ impl MigrateSteps for LiveSteps {
     }
 
     fn has_custom(&self, image: CustomImage, old: &Entry) -> bool {
-        self.family(image).is_some_and(|family| LinuxPaths::system().is_ok_and(|paths| custom_file(&paths, family, old.id).is_file()))
+        self.family(image).is_some_and(|family| SystemPaths::system().is_ok_and(|paths| custom_file(&paths, family, old.id).is_file()))
     }
 
     fn copy_custom(&self, image: CustomImage, old: &Entry, new: &Entry) -> Result<(), String> {
         let Some(family) = self.family(image) else { return Ok(()) };
-        let paths = LinuxPaths::system().map_err(text)?;
+        let paths = SystemPaths::system().map_err(text)?;
         if kuro_images::cover_file::copy_custom(&paths, family, old.id, new.id) { Ok(()) } else { Err(format!("the custom {image:?} could not be copied")) }
     }
 }

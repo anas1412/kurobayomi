@@ -129,7 +129,7 @@ struct Ctx {
 /// The library and preferences a run reads and writes.
 fn library() -> Library {
     let app = crate::data::app();
-    let paths = kuro_platform::linux::LinuxPaths::system().expect("the app directories resolve");
+    let paths = kuro_platform::system_paths::SystemPaths::system().expect("the app directories resolve");
     Library { prefs: app.base.store().clone(), db: app.db.clone(), extensions_dir: paths.extensions_dir() }
 }
 
@@ -198,7 +198,7 @@ fn restore_on_worker(
     stop: &StopFlag,
     tx: &async_channel::Sender<Msg>,
 ) -> Result<RestoreEnd, String> {
-    let paths = kuro_platform::linux::LinuxPaths::system().map_err(|e| e.to_string())?;
+    let paths = kuro_platform::system_paths::SystemPaths::system().map_err(|e| e.to_string())?;
     let http = BlockingHttp::shared();
     let legacy = LegacyImport { links: SourcePrefs::new(library.prefs.clone()).manga_extension_repos, repo_http: &*http };
     run_restore(library, &paths.data_dir(), &paths.log_dir(), backup, options, stop, &mut |e| drop(tx.send_blocking(Msg::Progress(e))), Some(legacy))

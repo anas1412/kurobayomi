@@ -68,7 +68,7 @@ pub fn accept_choice(path: &Path) -> Result<(), String> {
 /// backups, local folders). Nothing stored means the default storage folder. The download managers and indexes resolve
 /// their folders once at startup, so a new location applies to downloads after a restart.
 pub fn manager(store: &PrefStore) -> Option<StorageManager> {
-    let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
+    let paths = kuro_platform::system_paths::SystemPaths::system().ok()?;
     Some(StorageManager::open(store, paths.default_storage_dir()))
 }
 
@@ -120,7 +120,7 @@ fn stored(prefs: &Prefs) -> Option<(String, bool)> {
 
 /// The default storage folder, `None` when no home folder exists.
 fn default_storage() -> Option<PathBuf> {
-    kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.default_storage_dir())
+    kuro_platform::system_paths::SystemPaths::system().ok().map(|paths| paths.default_storage_dir())
 }
 
 /// The banner row for a chosen base folder that is gone, to put above the page (E-SY-05).

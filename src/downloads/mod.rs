@@ -42,7 +42,7 @@ use self::platform::NetworkFeed;
 
 /// The platform free-space query the queue uses for the low-storage check.
 pub fn free_space(path: &Path) -> Option<u64> {
-    kuro_platform::linux::storage::free_bytes(path)
+    kuro_platform::storage::free_bytes(path)
 }
 
 /// What [`start_service`] keeps alive: the service, the folder watch and the network feed.

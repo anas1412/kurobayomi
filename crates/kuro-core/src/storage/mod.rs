@@ -1,7 +1,6 @@
 //! Storage helpers (port of `DiskUtil.kt`, `OkioExtensions.kt` and `ContextExtensions.kt`).
 //!
-//! Free and total disk space are not here: they need statvfs, which lives in
-//! `kuro_platform::linux::storage`.
+//! Free disk space is not here: it needs the OS, so it lives in `kuro_platform::storage`.
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};

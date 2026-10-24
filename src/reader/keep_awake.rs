@@ -25,7 +25,8 @@ impl KeepAwake {
 
     /// Takes or releases the inhibit to match `want`; `reason` is what the desktop shows for it.
     pub fn sync_for(&self, want: bool, reason: &str) {
-        self.sync_with(&kuro_platform::linux::ScreenSaver, want, reason);
+        let Some(idle) = kuro_platform::idle::system() else { return };
+        self.sync_with(idle, want, reason);
     }
 
     fn sync_with(&self, idle: &dyn IdleInhibitor, want: bool, reason: &str) {

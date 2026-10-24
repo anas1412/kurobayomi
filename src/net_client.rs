@@ -50,7 +50,7 @@ pub fn flush_jars() {
 
 /// The jar of this desktop, for the settings code. It is the one the clients use, whichever is built first.
 pub fn app_jar() -> Option<CookieJar> {
-    kuro_platform::linux::LinuxPaths::system()
+    kuro_platform::system_paths::SystemPaths::system()
         .map(|paths| shared_jar(&paths))
         .map_err(|error| tracing::warn!(%error, "the cookie jar could not be located"))
         .ok()

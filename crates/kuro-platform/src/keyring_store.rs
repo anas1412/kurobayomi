@@ -1,25 +1,15 @@
-//! Secret Service (libsecret-compatible) credential store, through the `keyring` crate.
+//! The system keyring through the `keyring` crate: the Secret Service (libsecret-compatible) on Linux, the
+//! Credential Manager on Windows.
 
 use keyring::{Entry, Error as KeyringError, Result as KeyringResult};
 
-use super::secrets_file::EncryptedFileStore;
-use crate::paths::Paths;
-use crate::secrets::{FallbackSecrets, SecretError, SecretStore};
+use crate::secrets::{SecretError, SecretStore};
 
-/// The app's secret store: the Secret Service when reachable, otherwise the encrypted file in the
-/// config directory.
-pub fn open(paths: &dyn Paths) -> FallbackSecrets {
-    FallbackSecrets::open(
-        Box::new(SecretService),
-        Box::new(EncryptedFileStore::new(paths.config_dir())),
-    )
-}
-
-/// Secret Service backend. Each call opens an entry; the keyring crate keeps the connection.
+/// System keyring backend. Each call opens an entry; the keyring crate keeps the connection.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SecretService;
+pub struct KeyringStore;
 
-impl SecretStore for SecretService {
+impl SecretStore for KeyringStore {
     fn get(&self, service: &str, account: &str) -> Result<Option<String>, SecretError> {
         let entry = Entry::new(service, account)?;
         read_password(entry.get_password())

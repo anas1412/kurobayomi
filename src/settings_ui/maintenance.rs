@@ -137,7 +137,7 @@ fn share_crash_logs(row: &gtk::Widget, subtitle: &gtk::Label) {
     row.set_sensitive(false);
     let debug = dump_debug_info();
     let (manga, anime): (Vec<kuro_core::crash_dump::ExtensionStatus>, Vec<kuro_core::crash_dump::ExtensionStatus>) = (Vec::new(), Vec::new());
-    let dirs = kuro_platform::linux::LinuxPaths::system().map(|p| (kuro_platform::paths::Paths::cache_dir(&p), kuro_platform::paths::Paths::log_dir(&p)));
+    let dirs = kuro_platform::system_paths::SystemPaths::system().map(|p| (kuro_platform::paths::Paths::cache_dir(&p), kuro_platform::paths::Paths::log_dir(&p)));
     let (row, subtitle) = (row.clone(), subtitle.clone());
     gtk::glib::spawn_future_local(async move {
         let done = match dirs {

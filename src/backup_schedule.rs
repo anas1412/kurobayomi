@@ -62,7 +62,7 @@ fn reschedule(tx: &watch::Sender<AutoConfig>, host: &CliHost, seen: &Cell<u32>, 
 /// Starts the loop over the open databases and follows `backup_interval` from now on. Call once, on the GTK thread,
 /// inside the runtime.
 pub fn start(app: &gtk::Application) {
-    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
+    let Ok(paths) = kuro_platform::system_paths::SystemPaths::system() else { return };
     let state = crate::data::app();
     let store = state.base.store().clone();
     let backup = BackupPrefs::new(store.clone());

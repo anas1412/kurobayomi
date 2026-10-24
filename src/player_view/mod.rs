@@ -39,7 +39,7 @@ use gtk::glib::translate::IntoGlib;
 use gtk::{gdk, glib};
 use kuro_data::entry::EntryRepo;
 use kuro_data::item::ItemRepo;
-use kuro_platform::linux::LinuxPaths;
+use kuro_platform::system_paths::SystemPaths;
 use kuro_platform::paths::Paths as _;
 use kuro_player::keys::Modifiers;
 use kuro_player::mpv::MpvHandle;
@@ -101,7 +101,7 @@ fn open_media(media: Media, episode_id: i64, start_ms: i64) {
     if is_open() {
         return;
     }
-    match LinuxPaths::system() {
+    match SystemPaths::system() {
         Ok(paths) => {
             if open_in(paths.data_dir(), media, episode_id, start_ms).is_none() {
                 crate::toast::notify(tr(MsgKey::player_hoster_failed));

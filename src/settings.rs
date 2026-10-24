@@ -156,7 +156,7 @@ fn sorted_by_name(mut sources: Vec<(i64, String, i64)>) -> Vec<(i64, String, i64
 fn after_clear(_kind: Kind, removed: usize) {
     use crate::ui::{DialogButton, Role};
     use kuro_platform::paths::Paths as _;
-    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
+    let Ok(paths) = kuro_platform::system_paths::SystemPaths::system() else { return };
     let path = kuro_db::schema_unified::db_path(&paths.data_dir());
     let after = match kuro_db::schema_unified::open_file(&path).and_then(|c| kuro_db::maintenance::after_chapter_delete(&c, removed)) {
         Ok(after) => after,
@@ -188,7 +188,7 @@ fn clear_webview_message(result: &std::io::Result<()>) -> String {
 
 /// Deletes the WebKit data and cache directories and shows the outcome. The failure is logged by `clear_data`.
 pub fn clear_webview_data() {
-    let result = kuro_platform::linux::LinuxPaths::system()
+    let result = kuro_platform::system_paths::SystemPaths::system()
         .map_err(|e| {
             tracing::error!(error = %e, "Error occurred while clearing WebView data");
             std::io::Error::other(e)

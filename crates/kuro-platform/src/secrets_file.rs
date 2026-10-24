@@ -1,14 +1,13 @@
-//! Encrypted-file fallback for [`SecretStore`], used when no Secret Service is reachable.
+//! Encrypted-file fallback for [`SecretStore`], used when the system keyring is not reachable.
 //!
 //! Two files sit in the config directory. `secrets.key` holds a random 32-byte ChaCha20-Poly1305
-//! key and is created with mode 0600. `secrets.bin` holds a random 12-byte nonce followed by the
+//! key and is created with mode 0600 on Unix. `secrets.bin` holds a random 12-byte nonce followed by the
 //! ciphertext of a JSON object `{service: {account: secret}}`. Writes replace `secrets.bin` through
 //! a temp file and a rename, so a crash leaves the old file or the new one, never a partial file.
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, ErrorKind, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -152,11 +151,14 @@ fn create_key(path: &Path) -> io::Result<Key> {
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
     let _ = fs::remove_file(&tmp);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&tmp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
@@ -173,8 +175,6 @@ fn corrupt() -> SecretError {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use super::*;
 
     const SECRET: &[u8] = b"plaintext-secret-7f3a";
@@ -248,8 +248,11 @@ mod tests {
         assert!(!config.join(KEY_FILE).exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn key_and_secrets_files_are_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
         let tmp = tempfile::tempdir().unwrap();
         let config = tmp.path().join("config");
         let s = store(&tmp);

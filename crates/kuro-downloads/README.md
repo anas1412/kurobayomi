@@ -152,4 +152,4 @@ notification delivery are injected by the GUI crate.
 - **Anime queue.** Shares `DownloadState`, `scheduler::pick_active` and the retry schedule with the manga side. The
   runner and the hoster resolver are traits, implemented by the engine and the player areas.
 - **Free space** is injected as a `fn(&Path) -> Option<u64>`. The GUI passes
-  `kuro_platform::linux::storage::free_bytes`.
+  `kuro_platform::storage::free_bytes`.

@@ -142,7 +142,7 @@ impl Host for ToastHost {
     }
 
     fn write_error_log(&self, kind: Kind, failures: &[Failure]) -> Option<PathBuf> {
-        let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
+        let paths = kuro_platform::system_paths::SystemPaths::system().ok()?;
         match error_log::write(&error_log::path(&paths), kind, failures, &|id| self.label(kind, id)) {
             Ok(file) => file,
             Err(error) => {
@@ -479,7 +479,7 @@ async fn headless_passes(runner: &Runner, inputs: &Inputs, trigger: Trigger) -> 
 /// library without GTK, then the exit status. An app that is open owns the library and its own schedule, so this exits
 /// 0 with "already running" (T-26a-020). A headless run has no notifier, so its notices are dropped.
 pub fn run_headless(trigger: Trigger) -> u8 {
-    let paths = match kuro_platform::linux::LinuxPaths::system() {
+    let paths = match kuro_platform::system_paths::SystemPaths::system() {
         Ok(paths) => paths,
         Err(error) => {
             eprintln!("kurobayomi: {error}");

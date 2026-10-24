@@ -18,7 +18,7 @@ pub const JPEG: &[u8] = &[
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00,
 ];
 
-/// Paths under one root, laid out like `LinuxPaths` (`data`, `cache`, ...).
+/// Paths under one root, laid out like `SystemPaths` (`data`, `cache`, ...).
 pub struct TestPaths {
     root: PathBuf,
 }

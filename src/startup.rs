@@ -12,7 +12,7 @@ use gtk::prelude::*;
 use kuro_platform::kind::Kind;
 use kuro_domain::updates::repo::UpdatesRepo;
 use kuro_domain::updates::window::three_months_ago;
-use kuro_platform::linux::launcher;
+use kuro_platform::launcher;
 use kuro_prefs::store::PrefStore;
 
 use crate::data;
@@ -95,7 +95,7 @@ pub fn run_with_splash<T, S>(
 /// Starts loading the sources from the app paths (call once on the GTK thread, inside the app's runtime). When the paths
 /// cannot be found no source loads, and the gate opens empty so no screen waits on it forever.
 pub fn start_sources(store: &PrefStore) {
-    match kuro_platform::linux::LinuxPaths::system() {
+    match kuro_platform::system_paths::SystemPaths::system() {
         Ok(paths) => {
             let shared: std::sync::Arc<dyn kuro_platform::paths::Paths + Send + Sync> = std::sync::Arc::new(paths);
             load_sources(store, &shared);

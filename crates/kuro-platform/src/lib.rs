@@ -1,5 +1,5 @@
 //! OS-specific integration. This is the only crate allowed to contain
-//! `cfg(target_os`, `xdg-open`, `libsecret`, `zbus` or `XDG_` strings.
+//! `cfg(target_os`, `xdg-open`, `libsecret`, `zbus` or `XDG_` strings, and the only one that names its per-OS modules.
 //! `scripts/check-platform-boundary.sh` fails the build when they appear anywhere else.
 //! kuro-core and kuro-platform must not depend on gtk4; UI-side replacements live in the GTK crate.
 //!
@@ -70,7 +70,9 @@
 //! | `Drawable`, `BitmapDrawable`, Coil `ScaleDrawable` (DrawableExtensions) | `gdk::Texture` | GTK layer |
 //!
 //! Traits: [`paths::Paths`] (directories) and [`secrets::SecretStore`] (credentials).
-//! Linux implementations: [`linux::LinuxPaths`] and [`linux::SecretService`].
+//! Their system implementations: [`system_paths::SystemPaths`] and [`secrets::open`] (the system keyring, with the
+//! encrypted file as fallback). OS-specific engines live in per-OS modules (`linux`); every other module is shared and
+//! picks the engine of the OS it is built for, with a fallback where an OS has none yet (see `hidden_pages`).
 
 pub mod channel;
 pub mod deep_link;
@@ -79,7 +81,10 @@ pub mod dropped;
 pub mod external_player;
 pub mod idle;
 pub mod incognito;
+#[cfg(feature = "keyring")]
+mod keyring_store;
 pub mod kind;
+pub mod launcher;
 pub mod lifecycle;
 pub mod links;
 pub mod media;
@@ -91,11 +96,13 @@ pub mod power_network;
 pub mod process;
 pub mod self_update;
 pub mod secrets;
-#[cfg(unix)]
+mod secrets_file;
 pub mod hidden_pages;
 pub mod single_instance;
 pub mod sort;
+pub mod storage;
 pub mod system;
+pub mod system_paths;
 pub mod toast;
 pub mod webview;
 

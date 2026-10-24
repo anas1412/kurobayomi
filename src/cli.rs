@@ -114,7 +114,7 @@ pub fn run_with(args: &[String], paths: Result<&dyn Paths, String>, now_ms: i64,
 
 /// Entry point called from `main` before GTK exists.
 pub fn run(args: &[String]) -> u8 {
-    let system = kuro_platform::linux::LinuxPaths::system().map_err(|e| format!("cannot resolve the app directories: {e}"));
+    let system = kuro_platform::system_paths::SystemPaths::system().map_err(|e| format!("cannot resolve the app directories: {e}"));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
     run_with(args, system.as_ref().map(|p| p as &dyn Paths).map_err(Clone::clone), now, &mut std::io::stdout(), &mut std::io::stderr())
 }

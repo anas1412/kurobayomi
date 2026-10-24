@@ -1,7 +1,10 @@
 //! Single instance: a second launch forwards its `--open` command to the running app over a Unix socket and
-//! exits. The socket lives under the state directory; a socket file left by a crashed run is replaced.
+//! exits. The socket lives under the state directory; a socket file left by a crashed run is replaced. The socket half
+//! is Unix-only; [`is_unique`] is shared.
 
+#[cfg(unix)]
 use std::io::{self, BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
@@ -29,6 +32,7 @@ pub fn is_unique(lookup: impl Fn(&str) -> bool) -> bool {
 }
 
 /// Result of [`acquire`].
+#[cfg(unix)]
 pub enum Acquired {
     /// This process is the running instance. Commands from later launches arrive on `commands`.
     Primary(Listener),
@@ -37,11 +41,13 @@ pub enum Acquired {
 }
 
 /// The running instance's end of the socket. Dropping it removes the socket file.
+#[cfg(unix)]
 pub struct Listener {
     pub commands: async_channel::Receiver<String>,
     socket: PathBuf,
 }
 
+#[cfg(unix)]
 impl Drop for Listener {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket);
@@ -50,6 +56,7 @@ impl Drop for Listener {
 
 /// Connects to a running instance and sends `command` (one line; empty means "just show the window"). If nothing
 /// answers, binds the socket and becomes the primary instance.
+#[cfg(unix)]
 pub fn acquire(socket: &Path, command: &str) -> io::Result<Acquired> {
     if let Ok(mut stream) = UnixStream::connect(socket) {
         writeln!(stream, "{command}")?;
@@ -76,23 +83,27 @@ pub fn acquire(socket: &Path, command: &str) -> io::Result<Acquired> {
 }
 
 /// Decides whether this launch runs the app or forwards its command to the running instance (T-req-platform-007).
+#[cfg(unix)]
 pub trait SingleInstance {
     /// Forwards `command` to a running instance, or becomes the primary instance when none answers.
     fn acquire(&self, command: &str) -> io::Result<Acquired>;
 }
 
 /// The Unix-socket implementation of [`SingleInstance`], with its socket under the state directory.
+#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocketInstance {
     socket: PathBuf,
 }
 
+#[cfg(unix)]
 impl SocketInstance {
     pub fn in_state_dir(state_dir: &Path) -> Self {
         Self { socket: socket_path(state_dir) }
     }
 }
 
+#[cfg(unix)]
 impl SingleInstance for SocketInstance {
     fn acquire(&self, command: &str) -> io::Result<Acquired> {
         acquire(&self.socket, command)
@@ -103,6 +114,7 @@ impl SingleInstance for SocketInstance {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn second_launch_forwards_its_command_to_the_first() {
         let dir = tempfile::tempdir().unwrap();
@@ -115,6 +127,7 @@ mod tests {
         assert_eq!(first.commands.recv_blocking().unwrap(), "updates");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_stale_socket_file_is_replaced() {
         let dir = tempfile::tempdir().unwrap();
@@ -123,6 +136,7 @@ mod tests {
         assert!(matches!(acquire(&socket, "").unwrap(), Acquired::Primary(_)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn dropping_the_primary_removes_the_socket() {
         let dir = tempfile::tempdir().unwrap();
@@ -136,6 +150,7 @@ mod tests {
         assert!(!socket.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_trait_forwards_through_the_same_socket() {
         let dir = tempfile::tempdir().unwrap();

@@ -1095,7 +1095,7 @@ fn share_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
     let (title, chapter) = screen.core.page_names(page);
     let base = page_save::page_file_base(&title, &chapter, page.number() as usize);
     let message = strings::share_page_info(&title, &chapter, page.number() as i32);
-    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return warn_unknown(screen) };
+    let Ok(paths) = kuro_platform::system_paths::SystemPaths::system() else { return warn_unknown(screen) };
     let staging = kuro_images::share::staging_dir(&paths);
     let toaster = screen.toaster.clone();
     page_save::in_background(move || page_save::stage_for_share(&source, &base, &staging), move |result| {
@@ -1135,7 +1135,7 @@ fn set_cover(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
             });
             return;
         }
-        let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return warn_unknown(&s) };
+        let Ok(paths) = kuro_platform::system_paths::SystemPaths::system() else { return warn_unknown(&s) };
         let cover = kuro_images::cover_paths::custom_file(&paths, kuro_images::cover_paths::Family::MangaCover, s.core.deps.manga_id);
         page_save::in_background(move || page_save::write_cover_file(&source, &cover), move |written| {
             let Some(s) = weak.upgrade() else { return };

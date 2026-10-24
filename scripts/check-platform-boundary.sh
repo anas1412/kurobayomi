@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Fails when OS-specific code appears outside crates/kuro-platform.
-# Patterns: cfg(target_os) and cfg!(target_os), xdg-open, libsecret, zbus, XDG_.
+# Patterns: cfg(target_os) and cfg!(target_os), xdg-open, libsecret, zbus, XDG_, and any reach into a per-OS module
+# (kuro_platform::linux): other crates use the shared modules, which pick the engine of the OS they are built for.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-pattern='cfg!?\(target_os|xdg-open|libsecret|zbus|XDG_'
+pattern='cfg!?\(target_os|xdg-open|libsecret|zbus|XDG_|kuro_platform::linux'
 status=0
 matches=$(rg --line-number --no-heading --color never --hidden \
     --glob '!.git/**' \
     --glob '!crates/kuro-platform/**' \
     --glob '!target/**' \
     --glob '!plans/**' \
+    --glob '!docs/audit/**' \
     --glob '!shots/**' \
     --glob '!Cargo.lock' \
     --glob '!scripts/check-platform-boundary.sh' \

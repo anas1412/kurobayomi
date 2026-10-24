@@ -194,7 +194,7 @@ pub fn exit_status(outcome: &OnceOutcome) -> u8 {
 
 /// `kurobayomi --run-backup`: at most one automatic run, then the exit status (T-21a-041).
 pub fn run_backup_cli() -> u8 {
-    let paths = match kuro_platform::linux::LinuxPaths::system() {
+    let paths = match kuro_platform::system_paths::SystemPaths::system() {
         Ok(paths) => paths,
         Err(e) => {
             eprintln!("kurobayomi: {e}");

@@ -39,10 +39,10 @@ fn remove_if_present(dir: &std::path::Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::linux::paths::{LinuxPaths, Roots};
+    use crate::system_paths::{Roots, SystemPaths};
 
-    fn paths_under(base: &std::path::Path) -> LinuxPaths {
-        LinuxPaths::new(Roots {
+    fn paths_under(base: &std::path::Path) -> SystemPaths {
+        SystemPaths::new(Roots {
             data: base.join("data"),
             config: base.join("config"),
             cache: base.join("cache"),

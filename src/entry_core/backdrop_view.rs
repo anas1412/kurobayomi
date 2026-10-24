@@ -75,7 +75,7 @@ fn load(art: ArtRef, picture: &gtk::Picture) {
         return;
     }
     let (Some(service), Ok(runtime)) = (cover_view::service(), tokio::runtime::Handle::try_current()) else { return };
-    let custom = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| kuro_images::cover_paths::custom_file_for(&paths, &art)).unwrap_or_default();
+    let custom = kuro_platform::system_paths::SystemPaths::system().ok().map(|paths| kuro_images::cover_paths::custom_file_for(&paths, &art)).unwrap_or_default();
     let rx = offload(&runtime, move || async move {
         let bytes = cover_bytes(&service, &art, &custom).await?;
         prepare(&bytes)

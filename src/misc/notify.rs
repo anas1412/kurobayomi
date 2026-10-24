@@ -497,7 +497,7 @@ impl ActionHost for GtkHost {
 
     fn reveal_roots(&self) -> Vec<std::path::PathBuf> {
         use kuro_platform::paths::Paths as _;
-        kuro_platform::linux::LinuxPaths::system()
+        kuro_platform::system_paths::SystemPaths::system()
             .map(|p| {
                 let mut roots = vec![p.data_dir(), p.user_downloads_dir(), p.default_storage_dir(), p.cache_dir()];
                 roots.extend(crate::misc::reveal::announced_folders());

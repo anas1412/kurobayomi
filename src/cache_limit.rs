@@ -39,7 +39,7 @@ pub fn dirs(paths: &dyn Paths) -> Vec<PathBuf> {
 
 /// The cache folders of this desktop.
 pub fn app_dirs() -> Vec<PathBuf> {
-    kuro_platform::linux::LinuxPaths::system().map(|paths| dirs(&paths)).unwrap_or_default()
+    kuro_platform::system_paths::SystemPaths::system().map(|paths| dirs(&paths)).unwrap_or_default()
 }
 
 /// A file that belongs to a write in progress or to a cache's own bookkeeping, which neither the trim nor a clear touches.
@@ -140,7 +140,7 @@ pub fn forget_item(kind: kuro_platform::kind::Kind, item_id: i64) {
         return crate::player_view::sub_cache::fetch_again(item_id);
     }
     let item = kuro_data::item::ItemRepo::new(std::sync::Arc::clone(&crate::data::app().db)).by_id(item_id);
-    let (Ok(Some(item)), Ok(paths)) = (item, kuro_platform::linux::LinuxPaths::system()) else { return };
+    let (Ok(Some(item)), Ok(paths)) = (item, kuro_platform::system_paths::SystemPaths::system()) else { return };
     match crate::reader::cache::DiskCache::open(paths.chapter_cache_dir(), bytes()) {
         Ok(cache) => {
             cache.forget_chapter(item.entry_id, &item.url);
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn the_limit_covers_the_cache_folders_only() {
-        let paths = kuro_platform::linux::LinuxPaths::system().unwrap();
+        let paths = kuro_platform::system_paths::SystemPaths::system().unwrap();
         let dirs = dirs(&paths);
         assert!(dirs.iter().all(|dir| dir.starts_with(paths.cache_dir())), "library covers and downloads are elsewhere");
         assert!(!dirs.contains(&paths.covers_dir()));

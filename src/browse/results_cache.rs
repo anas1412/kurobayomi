@@ -21,7 +21,7 @@ fn app_dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
     }
-    kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.browse_cache_dir())
+    kuro_platform::system_paths::SystemPaths::system().ok().map(|paths| paths.browse_cache_dir())
 }
 
 fn file(dir: &Path, source_id: i64, query: &BrowseQuery, filters: &FilterList) -> PathBuf {

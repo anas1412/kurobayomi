@@ -166,7 +166,7 @@ pub fn si_size(bytes: u64) -> String {
 /// Every storage root with its usage, from the live mount table and the data directory of this app.
 pub fn live_rows() -> Vec<(PathBuf, Usage)> {
     let table = std::fs::read_to_string(MOUNT_INFO).unwrap_or_default();
-    let data_dir = kuro_platform::linux::LinuxPaths::system().map(|p| kuro_platform::paths::Paths::data_dir(&p)).unwrap_or_default();
+    let data_dir = kuro_platform::system_paths::SystemPaths::system().map(|p| kuro_platform::paths::Paths::data_dir(&p)).unwrap_or_default();
     storage_roots(&table, &data_dir)
         .into_iter()
         .map(|root| {

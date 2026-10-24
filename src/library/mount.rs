@@ -24,7 +24,7 @@ use kuro_i18n::{MsgKey, tr};
 use kuro_images::art::{ArtKind, ArtRef};
 use kuro_images::cover_file::delete_from_cache;
 use kuro_images::invalidate::remove_covers;
-use kuro_platform::linux::LinuxPaths;
+use kuro_platform::system_paths::SystemPaths;
 use kuro_platform::paths::Paths;
 use kuro_prefs::library::LibraryPrefs;
 
@@ -173,7 +173,7 @@ pub fn clear_cached(db: &Arc<Db>, id: i64, art: ArtKind) -> usize {
     if kuro_local::ids::is_local_source(entry.source) || (art == ArtKind::Background && !entry.kind.is_anime()) {
         return 0;
     }
-    let Ok(paths) = LinuxPaths::system() else { return 0 };
+    let Ok(paths) = SystemPaths::system() else { return 0 };
     let image = ArtRef {
         owner: entry.kind,
         entry_id: id,
@@ -232,7 +232,7 @@ fn nav(kind: Kind, db: Arc<Db>) -> Nav {
             let offered = !flags.iter().any(|(_, local)| *local);
             crate::library::delete_dialog::show(kind, offered, move |choice| {
                 let plan = delete_plan(&flags, choice);
-                let Ok(paths) = LinuxPaths::system() else {
+                let Ok(paths) = SystemPaths::system() else {
                     tracing::error!("no data paths; the selected entries stay in the library");
                     return;
                 };
@@ -282,8 +282,8 @@ fn nav(kind: Kind, db: Arc<Db>) -> Nav {
 
 /// The app's secret store, opened on the worker thread of [`Logins`]. Without data paths nobody is logged in.
 fn open_secrets() -> Arc<dyn kuro_platform::secrets::SecretStore> {
-    match LinuxPaths::system() {
-        Ok(paths) => Arc::new(kuro_platform::linux::secrets::open(&paths)),
+    match SystemPaths::system() {
+        Ok(paths) => Arc::new(kuro_platform::secrets::open(&paths)),
         Err(_) => Arc::new(kuro_prefs::memory::MemorySecrets::default()),
     }
 }

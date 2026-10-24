@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::paths::Paths;
+use crate::secrets_file::EncryptedFileStore;
+
 /// Failure from a [`SecretStore`] call. Callers match `Unavailable` to fall back to another store.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SecretError {
@@ -39,10 +42,20 @@ static FALLBACK_NOTICE: AtomicBool = AtomicBool::new(false);
 /// Which backend a [`FallbackSecrets`] uses for the whole process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretsMode {
-    /// The primary store (Secret Service) is reachable.
+    /// The primary store (the system keyring) is reachable.
     Primary,
     /// The primary store reported `Unavailable`; secrets live in the encrypted file.
     EncryptedFile,
+}
+
+/// The app's secret store: the system keyring when reachable, otherwise the encrypted file in the config directory.
+/// A build without a keyring uses the file.
+#[allow(unreachable_code)]
+pub fn open(paths: &dyn Paths) -> FallbackSecrets {
+    let file = Box::new(EncryptedFileStore::new(paths.config_dir()));
+    #[cfg(feature = "keyring")]
+    return FallbackSecrets::open(Box::new(crate::keyring_store::KeyringStore), file);
+    FallbackSecrets { mode: SecretsMode::EncryptedFile, store: file }
 }
 
 /// Uses the primary store when it is reachable and the fallback otherwise.

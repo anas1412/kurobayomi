@@ -29,7 +29,7 @@ pub fn icon_cache_file(root: &Path, url: &str) -> PathBuf {
 
 /// The image cache folder, resolved from the platform data directory. `None` when there is no home to put it in.
 pub fn icon_cache_root() -> Option<PathBuf> {
-    let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
+    let paths = kuro_platform::system_paths::SystemPaths::system().ok()?;
     Some(kuro_images::platform::image_cache_dir(&paths))
 }
 

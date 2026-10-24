@@ -1,4 +1,4 @@
-//! Linux-specific integration: XDG directories, the Secret Service, MPRIS, the screen-saver inhibit, disk space and the launcher badge.
+//! Linux-specific integration: MPRIS, the screen-saver inhibit, disk space, the launcher badge and the hidden web pages.
 
 pub mod appearance;
 pub mod device;
@@ -6,14 +6,8 @@ pub mod hidden_pages;
 pub mod idle;
 pub mod launcher;
 pub mod media;
-pub mod paths;
 pub mod power_network;
-pub mod secrets;
-pub mod secrets_file;
 pub mod storage;
 
 pub use idle::ScreenSaver;
 pub use media::Mpris;
-pub use paths::LinuxPaths;
-pub use secrets::SecretService;
-pub use secrets_file::EncryptedFileStore;

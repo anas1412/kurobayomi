@@ -159,7 +159,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let app = crate::data::app();
     let store = app.base.store().clone();
     let db = app.db.clone();
-    let data_dir = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.data_dir());
+    let data_dir = kuro_platform::system_paths::SystemPaths::system().ok().map(|paths| paths.data_dir());
     let shell = crate::shell::host::Shell::get();
     let service = shell.as_ref().and_then(|shell| shell.download_service());
     let index = service.as_ref().map(|service| service.index().clone());
