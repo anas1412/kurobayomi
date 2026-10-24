@@ -22,4 +22,6 @@ tracing.workspace = true
 url = { workspace = true }
 
 [dev-dependencies]
+# set_modified: tests age folders, which needs a flag on Windows
+kuro-platform = { path = "../kuro-platform" }
 kuro-prefs = { path = "../kuro-prefs" }

@@ -35,8 +35,7 @@ fn titles(page: &kuro_source::model::MangasPage) -> Vec<String> {
 
 /// Sets a folder's modification time to `age` before now.
 fn age(dir: &std::path::Path, age: Duration) -> io::Result<()> {
-    let when = SystemTime::now() - age;
-    fs::File::open(dir)?.set_modified(when)
+    kuro_platform::storage::set_modified(dir, SystemTime::now() - age)
 }
 
 #[tokio::test]
