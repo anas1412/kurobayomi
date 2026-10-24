@@ -395,12 +395,23 @@ pub fn build(kind: Kind) -> Option<Built> {
     }
     // the view options button carries its own dot while a filter is on (T-37a-056)
     let (search, refresh, options) = view.controls();
-    let end = crate::ui::HeaderActions { search: Some(search), refresh: Some(refresh.upcast()), options: Some(options), menu: menu_sections(kind, &view), ..Default::default() }.widgets();
+    let mut end = crate::ui::HeaderActions { search: Some(search), refresh: Some(refresh.clone().upcast()), options: Some(options), menu: menu_sections(kind, &view), ..Default::default() }.widgets();
+    // Categories sits just before Refresh (user, 2026-10-24)
+    let at = end.iter().position(|w| *w == refresh.clone().upcast::<gtk::Widget>()).unwrap_or(end.len());
+    end.insert(at, categories_button().upcast());
     Some(Built { content: view.widget(), end })
 }
 
+/// The Categories button, before Refresh: opens the categories page.
+fn categories_button() -> gtk::Button {
+    let button = crate::ui::icon_button("tag-symbolic", &tr(MsgKey::categories));
+    button.connect_clicked(|_| crate::ui::open("categories"));
+    button
+}
+
 /// The header menu's sections: the category update (only with more than one category; the refresh button updates the whole
-/// library, local titles included), the local folders (link one, open the Local folder), the categories. How the covers are filtered, sorted and shown is the view options button's.
+/// library, local titles included) and the local folders (link one, open the Local folder). Categories is a button
+/// ([`categories_button`]). How the covers are filtered, sorted and shown is the view options button's.
 fn menu_sections(kind: Kind, view: &LibraryView) -> Vec<Vec<crate::ui::MenuEntry>> {
     use crate::ui::MenuEntry;
     let (link, open) = local_folder_actions(kind);
@@ -412,7 +423,6 @@ fn menu_sections(kind: Kind, view: &LibraryView) -> Vec<Vec<crate::ui::MenuEntry
             MenuEntry::new(format!("{}…", tr(if kind == Kind::Anime { MsgKey::ui_add_local_anime_folder } else { MsgKey::ui_add_local_manga_folder })), link),
             MenuEntry::new(tr(MsgKey::ui_open_local_folder), open),
         ],
-        vec![MenuEntry::new(tr(MsgKey::categories), || crate::ui::open("categories"))],
     ]
 }
 
@@ -557,7 +567,7 @@ mod tests {
     }
 
     /// The header menu: the category update (hidden with one category, because the refresh button updates the whole
-    /// library), the local folders and the categories, and the folder items reach the local flow.
+    /// library) and the local folders, whose items reach the local flow. Categories is a button, not a menu item.
     #[test]
     fn the_header_menu_holds_the_library_actions_once_each_and_reaches_the_local_flow() {
         crate::testing::with_display(|| {
@@ -566,7 +576,7 @@ mod tests {
                 let menu = crate::ui::menu_button(menu_sections(kind, &view)).expect("the library has a menu");
                 let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("a menu"));
                 let article = if kind == Kind::Anime { "an" } else { "a" };
-                assert_eq!(labels, [tr(MsgKey::action_update_category), format!("Link {article} {word} folder…"), "Open the Local folder".to_owned(), tr(MsgKey::categories)]);
+                assert_eq!(labels, [tr(MsgKey::action_update_category), format!("Link {article} {word} folder…"), "Open the Local folder".to_owned()]);
                 assert!(!labels.iter().any(|l| l.contains("Update library")), "the refresh button is the only library update");
                 LOCAL_CALLS.with(|c| *c.borrow_mut() = Some(Vec::new()));
                 menu.activate_action("more.e1", None).expect("the link item");
@@ -574,6 +584,9 @@ mod tests {
                 let calls = LOCAL_CALLS.with(|c| c.borrow_mut().take()).unwrap_or_default();
                 assert_eq!(calls, [format!("{word} link"), format!("{word} open")]);
             }
+            let button = categories_button();
+            assert_eq!(button.tooltip_text().as_deref(), Some(tr(MsgKey::categories).as_str()));
+            assert_eq!(button.icon_name().as_deref(), Some("tag-symbolic"));
         });
     }
 }

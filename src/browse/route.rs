@@ -73,11 +73,6 @@ impl BrowseRoute {
     }
 }
 
-/// Re-selecting the Browse tab opens global search for the visible kind (D-UI-1), with an empty query.
-pub fn reselect_route(visible: BrowsePage) -> BrowseRoute {
-    BrowseRoute::GlobalSearch { kind: visible.kind(), source_id: None, query: String::new() }
-}
-
 /// A blank search still goes out as `""` (B-EC-09); a search is always a new listing (B-EC-08).
 pub fn search_listing(query: &str) -> BrowseQuery {
     BrowseQuery::Search(query.to_owned())
@@ -127,18 +122,6 @@ mod tests {
     fn every_tab_has_its_own_title() {
         let titles: std::collections::BTreeSet<String> = BrowsePage::ALL.iter().map(|p| p.title()).collect();
         assert_eq!(titles.len(), 4);
-    }
-
-    #[test]
-    fn reselect_opens_global_search_for_the_visible_kind() {
-        assert_eq!(
-            reselect_route(BrowsePage::MangaSources),
-            BrowseRoute::GlobalSearch { kind: Kind::Manga, source_id: None, query: String::new() }
-        );
-        assert_eq!(
-            reselect_route(BrowsePage::AnimeMigrate),
-            BrowseRoute::GlobalSearch { kind: Kind::Anime, source_id: None, query: String::new() }
-        );
     }
 
     #[test]

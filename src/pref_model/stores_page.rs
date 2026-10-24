@@ -530,7 +530,7 @@ impl<T: Keyed + Send + 'static> Inner<T> {
         h.set_margin_end(crate::ui::ROW_PAD_H);
         h.set_margin_top(crate::ui::ROW_PAD_V);
         h.set_margin_bottom(crate::ui::ROW_PAD_V);
-        let tag = gtk::Image::from_icon_name("tag-symbolic");
+        let tag = gtk::Image::from_icon_name("package-x-generic-symbolic");
         h.append(&tag);
         let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
         text.set_valign(gtk::Align::Center);

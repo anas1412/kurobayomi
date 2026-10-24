@@ -14,7 +14,7 @@ use kuro_i18n::{MsgKey, tr};
 use super::glue::keep_alive;
 use crate::widgets::view_options::{Item, Pick, Section, ViewOptions};
 use super::keys::{BrowseShortcut, EscapeStep, browse_shortcut, escape_step};
-use super::route::{BrowsePage, BrowseRoute, reselect_route};
+use super::route::{BrowsePage, BrowseRoute};
 use kuro_platform::kind::Kind;
 
 /// What the tab needs from the app.
@@ -86,15 +86,18 @@ impl BrowseShell {
         let on_refresh = Rc::clone(&inner.deps.on_refresh);
         let refresh = crate::ui::refresh_button(&tr(MsgKey::browse_check_sources));
         refresh.connect_clicked(move |button| on_refresh(button));
-        let end = crate::ui::HeaderActions {
+        let mut end = crate::ui::HeaderActions {
             search: Some(inner.search.clone()),
-            refresh: Some(refresh.upcast()),
+            refresh: Some(refresh.clone().upcast()),
             extra: vec![gtk::StackSwitcher::builder().stack(&inner.stack).build().upcast()],
             options: Some(options),
             menu,
             ..Default::default()
         }
         .widgets();
+        // Repositories sits just before Refresh (user, 2026-10-24)
+        let at = end.iter().position(|w| *w == refresh.clone().upcast::<gtk::Widget>()).unwrap_or(end.len());
+        end.insert(at, inner.repos_button().upcast());
         let root = crate::ui::page("", &inner.stack, end, false);
         keep_alive(&root, &inner);
 
@@ -223,20 +226,20 @@ impl Inner {
         });
         self.options.widget.add_controller(opening);
 
-        let (global, repos) = (Rc::downgrade(self), Rc::downgrade(self));
-        let entries = vec![
-            crate::ui::MenuEntry::new(tr(MsgKey::action_global_search), move || {
-                if let Some(inner) = global.upgrade() {
-                    (inner.deps.on_route)(reselect_route(inner.visible()));
-                }
-            }),
-            crate::ui::MenuEntry::new(tr(MsgKey::label_extension_repos), move || {
-                if let Some(inner) = repos.upgrade() {
-                    (inner.deps.on_repos)(inner.visible().kind());
-                }
-            }),
-        ];
-        (self.options.widget.clone().upcast(), vec![entries])
+        // no "more" menu: the search button is the global search, and Repositories is a button of its own
+        (self.options.widget.clone().upcast(), Vec::new())
+    }
+
+    /// The Repositories button, before Refresh: opens the repository list for the visible kind.
+    fn repos_button(self: &Rc<Self>) -> gtk::Button {
+        let button = crate::ui::icon_button("package-x-generic-symbolic", &tr(MsgKey::label_extension_repos));
+        let weak = Rc::downgrade(self);
+        button.connect_clicked(move |_| {
+            if let Some(inner) = weak.upgrade() {
+                (inner.deps.on_repos)(inner.visible().kind());
+            }
+        });
+        button
     }
 }
 
@@ -349,29 +352,26 @@ pub(crate) mod tests {
         assert_eq!(*log.left.borrow(), 1, "the second Escape leaves");
     }
 
-    /// The header menu has two entries: global search, and the repository entry of the visible kind.
-    fn the_header_menu_routes_by_its_label() {
+    /// No "more" menu (the search button is the global search), and the Repositories button just before Refresh opens
+    /// the repositories of the visible kind.
+    fn the_repositories_button_sits_before_refresh_and_follows_the_visible_kind() {
         let (shell, log) = shell();
         let mut all = Vec::new();
         walk(shell.root.upcast_ref(), &mut all);
-        let menu = all
+        let menus = all.iter().filter_map(|w| w.downcast_ref::<gtk::MenuButton>()).filter(|b| b.tooltip_text().as_deref() != Some(tr(MsgKey::action_display_mode).as_str())).count();
+        assert_eq!(menus, 0, "no more menu");
+        let repos = all
             .iter()
-            .filter_map(|w| w.downcast_ref::<gtk::MenuButton>().cloned())
-            .find(|b| b.tooltip_text().as_deref() != Some(tr(MsgKey::action_display_mode).as_str()))
-            .expect("the header menu");
-        let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("the menu"));
-        let press = |key: MsgKey| {
-            let label = tr(key);
-            let item = labels.iter().position(|l| *l == label).unwrap_or_else(|| panic!("no menu entry {label}"));
-            menu.activate_action(&format!("more.e{item}"), None).expect("the entry's action");
-        };
+            .filter_map(|w| w.downcast_ref::<gtk::Button>().cloned())
+            .find(|b| b.tooltip_text().as_deref() == Some(tr(MsgKey::label_extension_repos).as_str()))
+            .expect("the Repositories button");
+        let refresh = repos.next_sibling().and_downcast::<gtk::Button>().expect("Refresh follows it");
+        assert_eq!(refresh.tooltip_text().as_deref(), Some(tr(MsgKey::browse_check_sources).as_str()));
         shell.inner.select(BrowsePage::MangaSources);
-        press(MsgKey::action_global_search);
-        assert_eq!(log.routes.borrow().last(), Some(&BrowseRoute::GlobalSearch { kind: Kind::Manga, source_id: None, query: String::new() }));
-        press(MsgKey::label_extension_repos);
+        repos.emit_clicked();
         shell.inner.select(BrowsePage::AnimeSources);
-        press(MsgKey::label_extension_repos);
-        assert_eq!(*log.repos.borrow(), [Kind::Manga, Kind::Anime], "the repository entry follows the visible kind");
+        repos.emit_clicked();
+        assert_eq!(*log.repos.borrow(), [Kind::Manga, Kind::Anime], "the button follows the visible kind");
     }
 
     fn the_view_options_list_the_languages_and_a_pick_switches_one() {
@@ -395,6 +395,6 @@ pub(crate) mod tests {
         enter_runs_a_global_search_of_the_visible_kind();
         the_switch_follows_the_page_and_ctrl_digits_pick_only_the_two_pages();
         escape_closes_the_search_then_leaves();
-        the_header_menu_routes_by_its_label();
+        the_repositories_button_sits_before_refresh_and_follows_the_visible_kind();
     }
 }

@@ -386,6 +386,42 @@ mod tests {
         }
     }
 
+    /// Every "<name>-symbolic" the code names has its file in the bundle: the app's icon theme answers only from it, so
+    /// a name it lacks shows GTK's missing-icon picture on every desktop (the Repositories button did). Add the name to
+    /// `src/theme/gen/material_icons.py` and run it.
+    #[test]
+    fn every_symbolic_name_in_the_code_is_bundled() {
+        fn sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    sources(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        sources(&root.join("src"), &mut files);
+        let mut missing = std::collections::BTreeSet::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            for (at, _) in text.match_indices("-symbolic\"") {
+                let start = text[..at].rfind('"').map_or(at, |q| q + 1);
+                let name = &text[start..at];
+                if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+                    continue;
+                }
+                let found = ["actions", "apps"].iter().any(|dir| root.join(format!("src/theme/icons/scalable/{dir}/{name}-symbolic.svg")).is_file());
+                if !found {
+                    missing.insert(format!("{name}-symbolic"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "not in the icon bundle: {missing:?}");
+    }
+
     #[test]
     fn every_kb_name_is_bundled() {
         for icon in Icon::ALL {
