@@ -6,6 +6,8 @@ reads it), so the section must exist and have notes before its tag is pushed (se
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-10-24
+
 ### Changed
 
 - The Repositories page lists each repository's sources under its card, with their switches; the card's chevron folds
