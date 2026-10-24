@@ -38,7 +38,8 @@ GTK4 (gtk4-rs), tokio, rusqlite, reqwest, serde, the `image` crates and libmpv a
 
 - **Embedding mpv:** use the libmpv render API drawing into a `GtkGLArea` on every platform (never an X11/Wayland window id embedding), so the same player widget works on Windows.
 - **Web view:** WebView2 cannot be embedded inside a GTK4 widget tree as simply as WebKitGTK. Cloudflare and login flows must therefore work through the `WebViewHost` trait with the browser-fallback path implemented from day one on Linux too.
-- **Packaging:** GTK4 on Windows is distributed with the GTK runtime bundled (gvsbuild/MSYS2 builds, then an installer or MSIX). This is a packaging task for the Windows milestone and has no impact on the Rust code if rules 1-7 are followed.
+- **Packaging (decided 2026-10-24):** Windows ships one way only: an Inno Setup installer with the GTK runtime bundled from an MSYS2 UCRT64 build. It installs per user, adds a Start menu entry and an uninstaller, and registers the `kurobayomi://` scheme. There is no zip, MSIX or Store package. The app updates itself by downloading and running the new installer, because Windows cannot replace a running exe. This is a packaging task for the Windows milestone and has no impact on the Rust code if rules 1-7 are followed.
+- **Nightly first:** the Windows nightly installer joins the existing `nightly` release before the first stable Windows release, because it is how Windows gets tested. It has the nightly identity and installs side by side with stable. Stable has priority: only the stable installer registers `kurobayomi://` and `.tachibk`, and the nightly installer registers neither. This matches Linux, where the nightly AppImage drops `MimeType=`.
 - **Case-insensitive file systems:** local-source scanning, download folder names and the download cache index must treat paths case-insensitively when the platform requires it.
 
 ## Tasks

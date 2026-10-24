@@ -96,3 +96,27 @@ jobs:
 
       - name: Check
         run: cargo check --locked --all-targets -p kuro-platform -p kuro-i18n -p kuro-prefs -p kuro-db -p kuro-data
+
+  # The whole app built on Windows with the MSYS2 UCRT64 toolchain whose GTK, mpv, dav1d and libarchive the installer
+  # bundles. Not required yet (continue-on-error): it shows what still breaks. Once it passes, it becomes required and
+  # windows-check above is removed.
+  windows-build:
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+
+      # MSYS2's own Rust (not rustup), so the compiler, the linker and the libraries all come from UCRT64
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          pacboy: >-
+            toolchain:p rust:p pkgconf:p cmake:p nasm:p
+            gtk4:p mpv:p dav1d:p libarchive:p
+
+      - name: Build
+        run: cargo build --locked

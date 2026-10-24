@@ -98,4 +98,4 @@
 - Acceptance:
   - a Windows implementation of every `kuro-platform` trait exists
   - the app starts, plays a local video through the libmpv render API in a GtkGLArea, reads a local manga, and passes the smoke run
-  - a GTK-bundled installer or MSIX is produced
+  - a GTK-bundled Inno Setup installer is produced (the only Windows package)
