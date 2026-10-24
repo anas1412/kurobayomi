@@ -77,6 +77,10 @@ jobs:
 
       - name: Cache the build
         uses: Swatinem/rust-cache@v2
+        with:
+          # restore only: a cache saved under a tag can be used by no later run (each tag is its own scope), so saving
+          # it just takes about 1 GB of the repository's 10 GB cache space
+          save-if: false
 
       - name: Build
         # the stable build has no KB_CHANNEL (it is not a nightly); the release checker of the About page is on and reads

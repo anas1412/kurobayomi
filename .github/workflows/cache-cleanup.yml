@@ -1,0 +1,49 @@
+name: Cache cleanup
+
+# GitHub keeps every Actions cache until it has been unused for 7 days, and when the repository passes 10 GB it evicts
+# the least recently used, which can be main's current build cache. This deletes the caches no later run can use: older
+# copies of a job's cache (a new one is saved whenever Cargo.lock changes), caches made by a tag (each tag is its own
+# scope) and caches of deleted branches. Pull request caches are left to GitHub's 7 days.
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete caches no later run can use
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branches=$(gh api --paginate "repos/$GH_REPO/branches" --jq '.[].name')
+          seen=" "
+          # most recently used first, so the first cache of each job and branch is the one kept
+          gh cache list --limit 1000 --sort last_accessed_at --order desc --json id,key,ref --jq '.[] | [.id, .ref, .key] | @tsv' |
+          while IFS=$'\t' read -r id ref key; do
+            # the job's part of the key: rust-cache and actions/cache end it with hashes of the toolchain and the lock file
+            job=$(sed -E 's/(-[0-9a-f]{8,})+$//' <<<"$key")
+            case "$ref" in
+              *refs/tags/*) why="made by a tag" ;;
+              refs/heads/*)
+                if ! grep -qxF "${ref#refs/heads/}" <<<"$branches"; then
+                  why="its branch is gone"
+                elif [[ "$seen" == *" $ref|$job "* ]]; then
+                  why="a newer copy replaces it"
+                else
+                  seen+="$ref|$job "
+                  continue
+                fi
+                ;;
+              *) continue ;;
+            esac
+            echo "delete $key ($ref): $why"
+            gh cache delete "$id"
+          done
