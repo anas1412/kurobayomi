@@ -1,0 +1,35 @@
+# Text files keep LF on every OS: golden files, recipes and fixtures are compared byte for byte, and Git for Windows
+# checks text out with CRLF unless told otherwise.
+* text=auto eol=lf
+
+# stored with CRLF on purpose (raw HTTP answers, a CRLF changelog fixture, the task table): never converted
+*.http -text
+tests/fixtures/update/changelog_05.md -text
+plans/TASKS.csv -text
+
+# binary: Git's guess is wrong for some small files
+*.png binary
+*.jpg binary
+*.JPG binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.jxl binary
+*.bmp binary
+*.ico binary
+*.ttf binary
+*.epub binary
+*.cbz binary
+*.cbr binary
+*.zip binary
+*.7z binary
+*.tar binary
+*.gz binary
+*.mkv binary
+*.torrent binary
+*.bin binary
+*.db binary
+*.pyc binary
+*.tachibk binary
+*.wasm binary

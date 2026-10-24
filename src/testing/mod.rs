@@ -27,7 +27,9 @@ fn harness() -> &'static Harness {
         std::thread::Builder::new()
             .name("gtk-test-thread".into())
             .spawn(move || {
-                let display = gtk::init().is_ok();
+                // ponytail: GTK tests run on Unix only; on the Windows runner some wait forever for a window event and,
+                // holding the one GTK thread, stall the rest. Port them in their own step, then drop the `cfg!`.
+                let display = cfg!(unix) && gtk::init().is_ok();
                 ready_tx.send(display).expect("the first caller waits for the answer");
                 if display {
                     for job in queue {
